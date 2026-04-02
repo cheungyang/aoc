@@ -11,6 +11,12 @@ from langgraph.prebuilt import create_react_agent
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain_core.messages import AIMessage
+import sys
+
+# Inject dynamic library path for custom sessions manager deployment
+sys.path.append(os.path.join(os.path.dirname(__file__), "skills", "sessions", "scripts"))
+import session_manager
 
 # Load environment variables
 load_dotenv()
@@ -52,9 +58,41 @@ async def on_message(message):
     print(f"Received message from {message.author}: {message.content}")
 
     try:
-        # Prepare inputs for LangGraph
-        # For a basic chatbot, we just pass the incoming message
-        inputs = {"messages": [HumanMessage(content=message.content)]}
+        # Resolve Session ID locator
+        platform = "discord"
+        channel_name = message.channel.name if hasattr(message.channel, "name") else str(message.channel.id)
+        thread_id = ""
+        if isinstance(message.channel, discord.Thread):
+            thread_id = str(message.channel.id)
+            if message.channel.parent:
+                channel_name = message.channel.parent.name
+        
+        session_id = f"{platform}:{channel_name}"
+        if thread_id:
+            session_id += f":{thread_id}"
+
+        # Clear session shortcut
+        if message.content.strip() == "/new":
+            archive_status = session_manager.archive_session(session_id)
+            await message.channel.send(f"Session context cleared. {archive_status}")
+            return
+
+        # Append incoming message to session
+        session_manager.append_message(session_id, "human", message.content)
+
+        # Load history
+        history = session_manager.load_history(session_id)
+        
+        # Convert history entries to LangChain base messages
+        history_messages = []
+        for entry in history:
+             if entry["from"] == "human":
+                  history_messages.append(HumanMessage(content=entry["message"]))
+             elif entry["from"] == "agent":
+                  history_messages.append(AIMessage(content=entry["message"]))
+        
+        # Prepare inputs with full memory context
+        inputs = {"messages": history_messages}
         
         # Invoke LangGraph asynchronously
         result = await bot.graph.ainvoke(inputs)
@@ -73,6 +111,9 @@ async def on_message(message):
                     texts.append(part)
             reply_text = "".join(texts)
         
+        # Append agent reply to session
+        session_manager.append_message(session_id, "agent", reply_text)
+
         # Send reply back to Discord
         await message.channel.send(reply_text)
         
