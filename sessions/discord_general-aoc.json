@@ -1,0 +1,122 @@
+[
+  {
+    "ts": 1775166526,
+    "from": "human",
+    "message": "hi"
+  },
+  {
+    "ts": 1775166526,
+    "from": "agent",
+    "message": "Hello! I am a Git assistant. I can help you with Git operations. What would you like to do?"
+  },
+  {
+    "ts": 1775166534,
+    "from": "human",
+    "message": "what tools do you have"
+  },
+  {
+    "ts": 1775166535,
+    "from": "agent",
+    "message": "I have a `git_command` tool that allows me to execute Git commands. I can also manage sessions to remember our conversation history."
+  },
+  {
+    "ts": 1775166543,
+    "from": "human",
+    "message": "what skills do  you have"
+  },
+  {
+    "ts": 1775166544,
+    "from": "agent",
+    "message": "I have two main skills:\n\n1.  **Git:** I can execute Git commands in a specified directory. This includes operations like checking status, viewing logs, diffs, listing branches, pulling, committing, and pushing code.\n2.  **Sessions:** I can manage session history, which means I can remember our conversation and load past interactions."
+  },
+  {
+    "ts": 1775166976,
+    "from": "human",
+    "message": "hi again"
+  },
+  {
+    "ts": 1775166977,
+    "from": "agent",
+    "message": "Hello again! How can I help you today?"
+  },
+  {
+    "ts": 1775167185,
+    "from": "human",
+    "message": "hi 2"
+  },
+  {
+    "ts": 1775167186,
+    "from": "agent",
+    "message": "Hello! Is there anything specific you'd like to do or know?"
+  },
+  {
+    "ts": 1775167231,
+    "from": "human",
+    "message": "hi4"
+  },
+  {
+    "ts": 1775167232,
+    "from": "agent",
+    "message": "Hello! How can I assist you today with Git operations or anything else?"
+  },
+  {
+    "ts": 1775167468,
+    "from": "human",
+    "message": "hi6"
+  },
+  {
+    "ts": 1775167470,
+    "from": "agent",
+    "message": "Hello there! It seems you're saying hi in a new way each time. How can I help you today with Git or any other tasks?"
+  },
+  {
+    "ts": 1775167533,
+    "from": "human",
+    "message": "what was the first thing i say in this thread?"
+  },
+  {
+    "ts": 1775167535,
+    "from": "agent",
+    "message": "I'm sorry, I cannot recall the exact first thing you said in this thread. My memory is reset with each interaction, and I don't have a tool to access past messages in our current conversation."
+  },
+  {
+    "ts": 1775168456,
+    "from": "human",
+    "message": "hello again"
+  },
+  {
+    "ts": 1775168457,
+    "from": "agent",
+    "message": "Hello again! How can I help you today?"
+  },
+  {
+    "ts": 1775168466,
+    "from": "human",
+    "message": "what is the first thing I say in this thread"
+  },
+  {
+    "ts": 1775168467,
+    "from": "agent",
+    "message": "I apologize, but I don't have a memory of our previous interactions within this specific thread. Each time you send a message, it's a new interaction for me. Therefore, I cannot tell you the first thing you said."
+  },
+  {
+    "ts": 1775168487,
+    "from": "human",
+    "message": "you have been provided a context history, what was the first thing i said"
+  },
+  {
+    "ts": 1775168488,
+    "from": "agent",
+    "message": "The first thing you said in this thread was \"hi\"."
+  },
+  {
+    "ts": 1775168509,
+    "from": "human",
+    "message": "what is the first thing I say"
+  },
+  {
+    "ts": 1775168510,
+    "from": "agent",
+    "message": "The first thing you said in this thread was \"hi\"."
+  }
+]

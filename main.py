@@ -182,7 +182,7 @@ async def run_bot():
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
             
             skills_instructions = load_skills()
-            system_prompt = f"You are a helpful assistant with access to tools and skills.\n\nFollowing are instructions for available skills:\n{skills_instructions}"
+            system_prompt = f"You are a helpful assistant with access to tools and skills.\n\nYou are provided with the past history trace messages of this workspace session in the messages array. Use them to understand context and provide coherent replies.\n\nFollowing are instructions for available skills:\n{skills_instructions}"
             
             bot.graph = create_react_agent(llm, tools, prompt=system_prompt)
             
