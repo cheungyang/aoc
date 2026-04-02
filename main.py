@@ -77,11 +77,30 @@ async def on_message(message):
             await message.channel.send(f"Session context cleared. {archive_status}")
             return
 
-        # Append incoming message to session
-        session_manager.append_message(session_id, "human", message.content)
-
-        # Load history
+        # Check active history presence
         history = session_manager.load_history(session_id)
+
+        if not history:
+             # First time seeing this session! Resolve thread context if applicable
+             if isinstance(message.channel, discord.Thread):
+                  try:
+                       starter_msg = await message.channel.parent.fetch_message(message.channel.id)
+                       if starter_msg and starter_msg.content:
+                            from_role = "agent" if starter_msg.author.id == bot.user.id else "human"
+                            session_manager.append_message(session_id, from_role, starter_msg.content)
+                  except Exception as e:
+                       print(f"Failed to resolve starter message block: {e}")
+
+        # Block API corruption crashes logging empty contents
+        if message.content.strip():
+             session_manager.append_message(session_id, "human", message.content)
+
+        # Refresh state memory logs
+        history = session_manager.load_history(session_id)
+        
+        # Abort graph invocations if current trigger sequence was completely void
+        if not message.content.strip():
+             return
         
         # Convert history entries to LangChain base messages
         history_messages = []
