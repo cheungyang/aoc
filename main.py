@@ -80,6 +80,22 @@ async def on_message(message):
         print(f"Error processing message: {e}")
         await message.channel.send("Sorry, I encountered an error processing your request.")
 
+def load_skills():
+    skills_dir = "skills"
+    skills_text = ""
+    if os.path.isdir(skills_dir):
+        for skill_name in os.listdir(skills_dir):
+            skill_path = os.path.join(skills_dir, skill_name, "SKILL.md")
+            if os.path.isfile(skill_path):
+                with open(skill_path, "r") as f:
+                    content = f.read()
+                parts = content.split("---")
+                if len(parts) >= 3:
+                     # parts[1] is frontmatter, parts[2] is body
+                     body = parts[2].strip()
+                     skills_text += f"### Skill: {skill_name}\n{body}\n\n"
+    return skills_text
+
 async def run_bot():
     server_params = StdioServerParameters(
         command="python",
@@ -102,9 +118,13 @@ async def run_bot():
             tools = await load_mcp_tools(session)
             print(f"Loaded {len(tools)} tools.")
             
-            print("Building agent with tools...")
+            print("Building agent with tools and skills...")
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-            bot.graph = create_react_agent(llm, tools)
+            
+            skills_instructions = load_skills()
+            system_prompt = f"You are a helpful assistant with access to tools and skills.\n\nFollowing are instructions for available skills:\n{skills_instructions}"
+            
+            bot.graph = create_react_agent(llm, tools, prompt=system_prompt)
             
             print("Starting Discord bot...")
             async with bot:
