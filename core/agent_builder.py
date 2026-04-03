@@ -5,7 +5,6 @@ from core.skills_loader import SkillsLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from core.agent import Agent
 
-
 class AgentBuilder:
     def __init__(self, tools):
         self.tools = tools

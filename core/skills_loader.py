@@ -6,6 +6,7 @@ class SkillsLoader:
 
     def load_skills(self):
         skills_text = ""
+        skills_count = 0
         if os.path.isdir(self.skills_dir):
             for skill_name in os.listdir(self.skills_dir):
                 skill_path = os.path.join(self.skills_dir, skill_name, "SKILL.md")
@@ -17,4 +18,6 @@ class SkillsLoader:
                          # parts[1] is frontmatter, parts[2] is body
                          body = parts[2].strip()
                          skills_text += f"### Skill: {skill_name}\n{body}\n\n"
+                         skills_count += 1
+        print(f"Loaded {skills_count} skills.")
         return skills_text

@@ -19,7 +19,7 @@ async def hook_pre_message(message, bot):
     if message.content.strip() == "[new]":
         archive_status = manager.archive_session(session_id)
         await message.channel.send(f"Session context cleared. {archive_status}")
-        return None # Abort loop runner
+        return None
 
 async def hook_post_message(message, bot, reply_text):
     from core.util import get_session_id
