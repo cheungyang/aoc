@@ -31,7 +31,14 @@ class FlatFileSessionStore:
         data.append(log_entry)
         
         with open(file_path, "w") as f:
-            json.dump(data, f, indent=2)
+            f.write("[\n")
+            for i, entry in enumerate(data):
+                line = json.dumps(entry)
+                f.write(f"  {line}")
+                if i < len(data) - 1:
+                    f.write(",")
+                f.write("\n")
+            f.write("]\n")
             
         return f"Appended message to {session_id}"
 

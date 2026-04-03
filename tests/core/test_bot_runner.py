@@ -55,6 +55,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
     async def test_on_message_delegates(self, mock_bot_class, mock_agent_builder_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
+        mock_bot.mcp_tools = ["tool1", "tool2"]
         mock_bot_class.return_value = mock_bot
         
         runner = BotRunner("test_token")
@@ -63,20 +64,26 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.author = "User#9999"
         mock_message.content = "Hello bot"
         
-        # Mock AgentBuilder and dynamic Agent context
+        # Mock AgentBuilder and dynamic Agent
         mock_builder = MagicMock()
         mock_agent_builder_class.return_value = mock_builder
         mock_agent = MagicMock()
         mock_agent.process_message = AsyncMock()
-        mock_builder.build_agent.return_value.__aenter__.return_value = mock_agent
+        mock_builder.build_agent.return_value = mock_agent
         
         await runner.on_message(mock_message)
 
+        mock_agent_builder_class.assert_called_once_with(["tool1", "tool2"])
         mock_agent.process_message.assert_called_once_with(mock_message, runner.bot)
 
+    @patch('core.bot_runner.load_mcp_tools')
+    @patch('core.mcp_manager.MCPClientManager.get_session')
     @patch('core.bot_runner.commands.Bot')
-    async def test_run_bot_success(self, mock_bot_class):
+    async def test_run_bot_success(self, mock_bot_class, mock_get_session, mock_load_tools):
         # Setup mocks
+        mock_session = MagicMock()
+        mock_get_session.return_value.__aenter__.return_value = mock_session
+        mock_load_tools.return_value = ["tool1", "tool2"]
         
         # Bot mock
         mock_bot = AsyncMock()
@@ -88,6 +95,9 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.run_bot()
 
         # Assertions
+        mock_get_session.assert_called_once()
+        mock_load_tools.assert_called_once_with(mock_session)
+        self.assertEqual(runner.bot.mcp_tools, ["tool1", "tool2"])
         mock_bot.start.assert_called_once_with("test_token")
 
 if __name__ == "__main__":

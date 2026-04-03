@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from langchain_mcp_adapters.tools import load_mcp_tools
 
 class BotRunner:
     def __init__(self, discord_token):
@@ -32,11 +33,20 @@ class BotRunner:
             return
 
         from core.agent_builder import AgentBuilder
-        builder = AgentBuilder()
-        async with builder.build_agent() as agent:
-            await agent.process_message(message, self.bot)
+        builder = AgentBuilder(self.bot.mcp_tools)
+        agent = builder.build_agent()
+        await agent.process_message(message, self.bot)
 
     async def run_bot(self):
-        print("Starting Discord bot...")
-        async with self.bot:
-            await self.bot.start(self.discord_token)
+        from core.mcp_manager import MCPClientManager
+        mcp_client = MCPClientManager()
+        async with mcp_client.get_session() as mcp_session:
+             print("Loading tools...")
+             mcp_tools = await load_mcp_tools(mcp_session)
+             print(f"Loaded {len(mcp_tools)} tools.")
+             
+             self.bot.mcp_tools = mcp_tools
+             
+             print("Starting Discord bot...")
+             async with self.bot:
+                 await self.bot.start(self.discord_token)

@@ -83,4 +83,45 @@ class TestFlatFileCheckpointer(unittest.TestCase):
          self.checkpointer.delete_thread("thread1")
          self.assertFalse(os.path.exists(path))
 
-# TestMessageStore moved to tests/core/memory/test_flat_file_session_store.py
+    def test_aput_and_aget_tuple(self):
+        import asyncio
+        config = {"configurable": {"thread_id": "thread2"}}
+        checkpoint = {"id": "cp2"}
+        metadata = {"step": 2}
+        new_versions = {}
+
+        async def run_test():
+            return_config = await self.checkpointer.aput(config, checkpoint, metadata, new_versions)
+            self.assertEqual(return_config["configurable"]["checkpoint_id"], "cp2")
+            cp_tuple = await self.checkpointer.aget_tuple(config)
+            self.assertIsNotNone(cp_tuple)
+            self.assertEqual(cp_tuple.checkpoint["id"], "cp2")
+        
+        asyncio.run(run_test())
+
+    def test_aput_writes(self):
+        import asyncio
+        config = {"configurable": {"thread_id": "thread3", "checkpoint_id": "cp3"}}
+        writes = [("channel1", "value1")]
+        
+        async def run_test():
+            await self.checkpointer.aput_writes(config, writes, "task1")
+        
+        asyncio.run(run_test())
+
+    def test_alist(self):
+        import asyncio
+        config = {"configurable": {"thread_id": "thread4"}}
+        
+        async def run_test():
+            await self.checkpointer.aput(config, {"id": "cp1"}, {"step": 1}, {})
+            await self.checkpointer.aput(config, {"id": "cp2"}, {"step": 2}, {})
+            
+            cps = []
+            async for cp in self.checkpointer.alist(config):
+                cps.append(cp)
+            
+            self.assertEqual(len(cps), 2)
+            self.assertEqual(cps[0].checkpoint["id"], "cp2")
+            
+        asyncio.run(run_test())

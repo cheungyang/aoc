@@ -45,5 +45,53 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_post_hook.assert_called_once_with(mock_message, mock_bot, "Reply text")
         mock_message.channel.send.assert_called_once_with("Reply text")
 
+    @patch('core.agent.HookLoader')
+    @patch('core.debug_handler.DebugLogHandler')
+    @patch('core.util.get_session_id')
+    async def test_process_message_invoke_failure(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):
+        # Setup mocks
+        mock_hook_loader = MagicMock()
+        mock_hook_loader.pre_message_hooks = []
+        mock_hook_loader_class.return_value = mock_hook_loader
+        
+        mock_message = MagicMock()
+        mock_message.channel.send = AsyncMock()
+        mock_bot = MagicMock()
+        
+        # Graph invoke throws exception
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(side_effect=Exception("Invoke failed"))
+
+        agent = Agent(mock_graph)
+        
+        # Run
+        await agent.process_message(mock_message, mock_bot)
+        
+        # Assertions
+        mock_message.channel.send.assert_called_once_with("Sorry, I encountered an error processing your request.")
+
+    @patch('core.agent.HookLoader')
+    @patch('core.debug_handler.DebugLogHandler')
+    @patch('core.util.get_session_id')
+    async def test_process_message_parsing_failure(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):
+        # Setup mocks
+        mock_hook_loader = MagicMock()
+        mock_hook_loader.pre_message_hooks = []
+        mock_hook_loader_class.return_value = mock_hook_loader
+        
+        mock_message = MagicMock()
+        mock_message.channel.send = AsyncMock()
+        mock_bot = MagicMock()
+        
+        # Graph invoke succeeds but returns empty messages list (causing IndexError)
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": []})
+
+        agent = Agent(mock_graph)
+        
+        # Run and Expect IndexError (not caught by Agent's loop)
+        with self.assertRaises(IndexError):
+            await agent.process_message(mock_message, mock_bot)
+
 if __name__ == "__main__":
     unittest.main()
