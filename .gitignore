@@ -4,3 +4,4 @@
 .pytest_cache
 **/__pycache__/
 **/__init__.py
+sessions/

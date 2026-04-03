@@ -50,13 +50,15 @@ def archive_session(session_id):
         return f"Session {session_id} archived to archive/{archive_name}"
     return "No active session file found to archive."
 
-def load_history(session_id):
+def load_history(session_id, limit=50):
     file_path = get_file_path(session_id)
     if os.path.exists(file_path):
         try:
             with open(file_path, "r") as f:
                 data = json.load(f)
-                return data[-50:] # Cap to 50 latest segments
+                if limit and limit > 0:
+                     return data[-limit:]
+                return data
         except json.JSONDecodeError:
             return []
     return []
