@@ -33,19 +33,16 @@ class BotRunner:
             return
 
         from core.agent_builder import AgentBuilder
-        builder = AgentBuilder(self.bot.mcp_tools)
-        agent = builder.build_agent()
+        builder = AgentBuilder(self.bot.mcp_session)
+        agent = await builder.build_agent()
         await agent.process_message(message, self.bot)
 
     async def run_bot(self):
         from core.mcp_manager import MCPClientManager
         mcp_client = MCPClientManager()
         async with mcp_client.get_session() as mcp_session:
-             print("Loading tools...")
-             mcp_tools = await load_mcp_tools(mcp_session)
-             print(f"Loaded {len(mcp_tools)} tools.")
-             
-             self.bot.mcp_tools = mcp_tools
+             # Save session for AgentBuilder to use
+             self.bot.mcp_session = mcp_session
              
              print("Starting Discord bot...")
              async with self.bot:

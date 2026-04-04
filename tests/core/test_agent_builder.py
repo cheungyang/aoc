@@ -9,35 +9,102 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.agent_builder import AgentBuilder
 from core.agent import Agent
 
-class TestAgentBuilder(unittest.TestCase):
+class TestAgentBuilder(unittest.IsolatedAsyncioTestCase):
+ 
+     def setUp(self):
+         from core.hook_loader import HookLoader
+         HookLoader._instance = None
+ 
+     @patch('core.agent_builder.load_mcp_tools')
+     @patch('core.agent_builder.ChatGoogleGenerativeAI')
+     @patch('core.agent_builder.create_react_agent')
+     @patch('core.agent_builder.FlatFileCheckpointer')
+     async def test_build_agent_success(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_load_tools):
+         # Setup mocks
+         mock_llm_class.return_value = MagicMock()
+         mock_create_react.return_value = "MockGraph"
+         
+         mock_tool1 = MagicMock()
+         mock_tool1.name = "tool1"
+         mock_load_tools.return_value = [mock_tool1]
+         
+         mock_session = AsyncMock()
+         
+         builder = AgentBuilder(mock_session)
+         
+         # Run
+         agent = await builder.build_agent()
+         
+         # Assertions
+         self.assertIsInstance(agent, Agent)
+         self.assertEqual(agent.graph, "MockGraph")
+         
+         mock_session.call_tool.assert_called_once_with("configure_session", arguments={"allowed_tools": unittest.mock.ANY})
+         mock_create_react.assert_called_once_with(mock_llm_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
+ 
+     @patch('core.agent_builder.ChatGoogleGenerativeAI')
+     @patch('core.agent_builder.create_react_agent')
+     @patch('core.agent_builder.FlatFileCheckpointer')
+     @patch('os.listdir')
+     @patch('os.path.isdir')
+     @patch('os.path.exists')
+     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"name": "TestAgent", "emoji": "🧪", "description": "Test Agent Desc", "model": "test-model", "tools": ["tool1"], "skills": ["skill1"]}')
+     def test_list_agents(self, mock_open, mock_exists, mock_isdir, mock_listdir, mock_ff_checkpointer, mock_create_react, mock_llm_class):
+         # Setup mocks
+         mock_listdir.return_value = ["test_agent"]
+         mock_isdir.return_value = True
+         mock_exists.return_value = True
+ 
+         builder = AgentBuilder(MagicMock())
+         agents = builder.list_agents()
+ 
+         self.assertEqual(len(agents), 1)
+         self.assertEqual(agents[0]["name"], "TestAgent")
+         self.assertEqual(agents[0]["emoji"], "🧪")
+         self.assertEqual(agents[0]["description"], "Test Agent Desc")
+         self.assertEqual(agents[0]["id"], "test_agent")
+ 
+     @patch('core.agent_builder.load_mcp_tools')
+     @patch('core.agent_builder.ChatGoogleGenerativeAI')
+     @patch('core.agent_builder.create_react_agent')
+     @patch('core.agent_builder.FlatFileCheckpointer')
+     @patch('os.listdir')
+     @patch('os.path.isdir')
+     @patch('os.path.exists')
+     async def test_build_agent_filtering(self, mock_exists, mock_isdir, mock_listdir, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_load_tools):
+         # Setup mocks
+         mock_isdir.return_value = True
+         mock_exists.return_value = True
+         mock_listdir.return_value = ["SOUL.md", "IDENTITY.md"]
+ 
+         config_json = '{"name": "TestAgent", "tools": ["tool1"], "skills": ["skill1"]}'
+         
+         mock_open = unittest.mock.mock_open()
+         mock_open.side_effect = [
+             unittest.mock.mock_open(read_data=config_json).return_value,
+             unittest.mock.mock_open(read_data="# SOUL").return_value,
+             unittest.mock.mock_open(read_data="# IDENTITY").return_value
+         ]
+ 
+         with patch('builtins.open', mock_open):
+             mock_tool1 = MagicMock()
+             mock_tool1.name = "tool1"
+             mock_load_tools.return_value = [mock_tool1]
+             
+             mock_session = AsyncMock()
+             builder = AgentBuilder(mock_session)
+ 
+             agent = await builder.build_agent("test_agent")
+ 
+             mock_session.call_tool.assert_called_once_with("configure_session", arguments={"allowed_tools": ["tool1"]})
+             mock_create_react.assert_called_once_with(
+                 unittest.mock.ANY, 
+                 [mock_tool1],
+                 prompt=unittest.mock.ANY, 
+                 checkpointer=unittest.mock.ANY
+             )
 
-    @patch('core.agent_builder.ChatGoogleGenerativeAI')
-    @patch('core.agent_builder.create_react_agent')
-    @patch('core.agent_builder.SkillsLoader')
-    @patch('core.agent_builder.FlatFileCheckpointer')
-    def test_build_agent_success(self, mock_ff_checkpointer, mock_skills_loader_class, mock_create_react, mock_llm_class):
-        # Setup mocks
-        
-        mock_skills_loader = MagicMock()
-        mock_skills_loader.load_skills.return_value = "Skill instructions"
-        mock_skills_loader_class.return_value = mock_skills_loader
-        
-        mock_llm_class.return_value = MagicMock()
-        mock_create_react.return_value = "MockGraph"
-        
-        mock_tools = ["tool1", "tool2"]
-        builder = AgentBuilder(mock_tools)
-        
-        # Run
-        agent = builder.build_agent()
-        
-        # Assertions
-        self.assertIsInstance(agent, Agent)
-        self.assertEqual(agent.graph, "MockGraph")
-        
-        mock_skills_loader.load_skills.assert_called_once()
-        mock_create_react.assert_called_once_with(mock_llm_class.return_value, mock_tools, prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
-
+            
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,12 @@
+{
+  "name": "Concierge",
+  "emoji": "🛎️",
+  "description": "General purpose helper",
+  "model": "gemini-3-flash-preview",
+  "tools": [
+    "git_command"
+  ],
+  "skills": [
+    "calendar"
+  ]
+}

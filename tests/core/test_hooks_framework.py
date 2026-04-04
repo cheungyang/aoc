@@ -11,12 +11,13 @@ from core.hook_loader import HookLoader
 class TestHooksFramework(unittest.TestCase):
 
     def setUp(self):
+        HookLoader._instance = None
         self.loader = HookLoader()
         
         # Create temporary dummy hook in core
         self.dummy_dir = "core/dummy_test_hook"
         os.makedirs(self.dummy_dir, exist_ok=True)
-        self.hooks_file = os.path.join(self.dummy_dir, "hooks.py")
+        self.hooks_file = os.path.join(self.dummy_dir, "dummy_hook.py")
         
         with open(self.hooks_file, "w") as f:
              f.write("""
@@ -40,7 +41,7 @@ def register_hooks():
 
     def test_load_hooks_detects_real_plugin_mounts(self):
         # Invoke scanner
-        self.loader.load_hooks()
+        self.loader._load_hooks()
 
         # Assertions without executing execution executions
         self.assertTrue(len(self.loader.pre_message_hooks) >= 1)

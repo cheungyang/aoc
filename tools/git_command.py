@@ -1,7 +1,9 @@
 import os
 import subprocess
 import shlex
+from fastmcp.tools import tool
 
+@tool()
 def git_command(args: str, path: str = ".") -> str:
     """
     Executes a git command with args in the specified folder path.

@@ -1,11 +1,21 @@
 import os
 
 class SkillsLoader:
-    def __init__(self, skills_dir="skills"):
-        self.skills_dir = skills_dir
+    _instance = None
 
-    def load_skills(self):
-        skills_text = ""
+    def __new__(cls, skills_dir="skills"):
+        if cls._instance is None:
+            cls._instance = super(SkillsLoader, cls).__new__(cls)
+            cls._instance.skills_dir = skills_dir
+            cls._instance.skills_cache = {}
+        return cls._instance
+
+    def __init__(self, skills_dir="skills"):
+        pass
+
+    def _load_skills(self):
+        if self.skills_cache:
+            return
         skills_count = 0
         if os.path.isdir(self.skills_dir):
             for skill_name in os.listdir(self.skills_dir):
@@ -15,9 +25,19 @@ class SkillsLoader:
                         content = f.read()
                     parts = content.split("---")
                     if len(parts) >= 3:
-                         # parts[1] is frontmatter, parts[2] is body
                          body = parts[2].strip()
-                         skills_text += f"### Skill: {skill_name}\n{body}\n\n"
+                         self.skills_cache[skill_name] = body
                          skills_count += 1
-        print(f"Loaded {skills_count} skills.")
+        print(f"Cached {skills_count} skills.")
+
+    def get_skill_prompt(self, allowed_skills=None):
+        self._load_skills()
+        skills_text = ""
+        skills_count = 0
+        for skill_name, body in self.skills_cache.items():
+            if allowed_skills is not None and skill_name not in allowed_skills:
+                continue
+            skills_text += f"### Skill: {skill_name}\n{body}\n\n"
+            skills_count += 1
+        print(f"Loaded {skills_count} skills from cache.")
         return skills_text

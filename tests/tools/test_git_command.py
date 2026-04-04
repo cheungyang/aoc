@@ -3,14 +3,14 @@ from unittest.mock import patch, MagicMock
 import os
 import sys
 
-# Inject root (3 levels deep)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+# Inject root (2 levels deep)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-import tools.git.git_command as git_tool
+import tools.git_command as git_tool
 
 class TestGitCommandTool(unittest.TestCase):
 
-    @patch('tools.git.git_command.subprocess.run')
+    @patch('tools.git_command.subprocess.run')
     def test_git_command_invokes_direct_git(self, mock_run):
         # 1. Mock execution loops outputs
         mock_result = MagicMock()

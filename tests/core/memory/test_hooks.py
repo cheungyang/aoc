@@ -6,12 +6,12 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-import core.memory.hooks as hooks
+import core.memory.session_message_hook as hooks
 
 class TestHooks(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.util.get_session_id')
-    @patch('core.memory.hooks.manager')
+    @patch('core.memory.session_message_hook.manager')
     async def test_hook_pre_message_new(self, mock_manager, mock_get_session_id):
         mock_get_session_id.return_value = "session1"
         mock_manager.archive_session.return_value = "Archived"
@@ -42,7 +42,7 @@ class TestHooks(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
 
     @patch('core.util.get_session_id')
-    @patch('core.memory.hooks.manager')
+    @patch('core.memory.session_message_hook.manager')
     async def test_hook_post_message(self, mock_manager, mock_get_session_id):
         mock_get_session_id.return_value = "session1"
         
