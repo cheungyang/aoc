@@ -22,16 +22,43 @@ class BotRunner:
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
 
     async def on_message(self, message):
-        from core.util import get_session_id
-        
-        # Ignore messages from the bot itself
-        if message.author == self.bot.user:
+        # Ignore messages from all bots
+        if message.author.bot:
             return
 
         # Skip commands (if any)
         if message.content.startswith("!"):
             await self.bot.process_commands(message)
             return
+
+        # Read channel_hosts from agent.json
+        from core.agents_loader import AgentsLoader
+        loader = AgentsLoader()
+        config = loader.get_agent_config(self.agent_id)
+        channel_hosts = config.get("channel_hosts", [])
+
+        channel_id = str(message.channel.id)
+        channel_name = message.channel.name if hasattr(message.channel, "name") else ""
+        
+        is_host = (channel_name in channel_hosts) or (channel_id in channel_hosts)
+        
+        # Check mentions
+        tagged_bots = [user for user in message.mentions if user.bot]
+        is_self_tagged = self.bot.user in message.mentions
+        
+        # Routing logic
+        if is_host:
+            if tagged_bots and not is_self_tagged:
+                # Another agent is tagged, let them respond
+                print(f"Agent {self.agent_id} (host) yielding to tagged agent(s).")
+                return
+            # Otherwise, respond as host
+        else:
+            # Not host
+            if not is_self_tagged:
+                # Ignore if not tagged
+                return
+            # Respond if tagged
 
         from core.agent_builder import AgentBuilder
         builder = AgentBuilder(self.bot.mcp_session)

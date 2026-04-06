@@ -1,16 +1,32 @@
 {
   "id": "agent-designer",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
+  "channel_hosts": [
+    "agent-management-aoc"
+  ],
   "name": "Aki",
   "emoji": "🤖",
   "description": "Agent designer",
   "model": "gemini-3-flash-preview",
-  "tools": [
-    "git_command",
-    "obsidian_command"
-  ],
+  "tools": {
+    "git_command": {},
+    "obsidian_command": {},
+    "filesystem": {
+      "agents/": [
+        "read",
+        "write",
+        "overwrite"
+      ],
+      "pkm-oc/": [
+        "read",
+        "write",
+        "overwrite"
+      ]
+    }
+  },
   "skills": [
     "obsidian",
+    "agent_creation",
     "git"
   ]
 }

@@ -25,7 +25,7 @@ class AgentBuilder:
         agent_path = os.path.join(agents_dir, agent_id)
 
         model_name = config.get("model", "gemini-3-flash-preview")
-        allowed_tools = config.get("tools", [])
+        allowed_tools = list(config.get("tools", {}).keys())
         allowed_skills = config.get("skills", [])
 
         # Configure session visibility on the server

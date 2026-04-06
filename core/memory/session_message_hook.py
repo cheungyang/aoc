@@ -14,6 +14,7 @@ manager = FlatFileSessionStore()
 async def hook_pre_message(message, bot):
     from core.util import get_session_id
     session_id = get_session_id(message)
+    manager.append_message(session_id, "human", message.content)
 
     # Clear session shortcut
     if message.content.strip() == "[new]":

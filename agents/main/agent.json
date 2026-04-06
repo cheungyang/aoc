@@ -1,14 +1,18 @@
 {
   "agent_id": "main",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
+  "channel_hosts": [
+    "general-aoc"
+  ],
   "name": "Concierge",
   "emoji": "🛎️",
   "description": "General purpose helper",
   "model": "gemini-3-flash-preview",
-  "tools": [
-    "git_command",
-    "obsidian_command"
-  ],
+  "tools": {
+    "git_command": {},
+    "obsidian_command": {},
+    "filesystem": {}
+  },
   "skills": [
     "obsidian",
     "git"
