@@ -6,12 +6,12 @@
   ],
   "name": "Concierge",
   "emoji": "🛎️",
-  "description": "General purpose helper",
+  "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "model": "gemini-3-flash-preview",
   "tools": {
     "git_command": {},
     "obsidian_command": {},
-    "filesystem": {}
+    "agent_list": {}
   },
   "skills": [
     "obsidian",
