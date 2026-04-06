@@ -7,18 +7,19 @@ from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 class BotRunner:
-    def __init__(self, discord_token):
+    def __init__(self, discord_token, agent_id):
         intents = discord.Intents.default()
         intents.message_content = True # Required to read message content
         self.bot = commands.Bot(command_prefix="!", intents=intents)
         self.discord_token = discord_token
+        self.agent_id = agent_id
         
         # Register events
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
 
     async def on_ready(self):
-        print(f'Logged in as Discord bot: {self.bot.user}')
+        print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
 
     async def on_message(self, message):
         from core.util import get_session_id
@@ -34,7 +35,7 @@ class BotRunner:
 
         from core.agent_builder import AgentBuilder
         builder = AgentBuilder(self.bot.mcp_session)
-        agent = await builder.build_agent()
+        agent = await builder.build_agent(self.agent_id)
         await agent.process_message(message, self.bot)
 
     async def run_bot(self):
@@ -44,6 +45,6 @@ class BotRunner:
              # Save session for AgentBuilder to use
              self.bot.mcp_session = mcp_session
              
-             print("Starting Discord bot...")
+             print(f"Starting Discord bot for agent {self.agent_id}...")
              async with self.bot:
-                 await self.bot.start(self.discord_token)
+                  await self.bot.start(self.discord_token)

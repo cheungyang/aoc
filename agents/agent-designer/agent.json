@@ -1,0 +1,16 @@
+{
+  "id": "agent-designer",
+  "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
+  "name": "Aki",
+  "emoji": "🤖",
+  "description": "Agent designer",
+  "model": "gemini-3-flash-preview",
+  "tools": [
+    "git_command",
+    "obsidian_command"
+  ],
+  "skills": [
+    "obsidian",
+    "git"
+  ]
+}

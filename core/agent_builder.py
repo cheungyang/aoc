@@ -7,46 +7,22 @@ from core.hook_loader import HookLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from core.agent import Agent
 from langchain_mcp_adapters.tools import load_mcp_tools
+from core.agents_loader import AgentsLoader
 
 class AgentBuilder:
     def __init__(self, mcp_session):
         self.mcp_session = mcp_session
 
-    def list_agents(self):
+    async def build_agent(self, agent_id="main"):
+        loader = AgentsLoader()
+        config = loader.get_agent_config(agent_id)
+        
+        if not config:
+            raise ValueError(f"Agent configuration not found for: {agent_id}")
+
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
-        agents_list = []
-        if not os.path.exists(agents_dir):
-            return agents_list
-        for agent_name in os.listdir(agents_dir):
-            agent_path = os.path.join(agents_dir, agent_name)
-            if os.path.isdir(agent_path):
-                config_path = os.path.join(agent_path, "agent.json")
-                if os.path.exists(config_path):
-                    try:
-                        with open(config_path, "r") as f:
-                            config = json.load(f)
-                        agents_list.append({
-                            "name": config.get("name", agent_name),
-                            "emoji": config.get("emoji", ""),
-                            "description": config.get("description", ""),
-                            "id": agent_name
-                        })
-                    except Exception as e:
-                        print(f"Error loading config for {agent_name}: {e}")
-        return agents_list
-
-    async def build_agent(self, agent_name="concierge"):
-        agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
-        agent_path = os.path.join(agents_dir, agent_name)
-        if not os.path.isdir(agent_path):
-            raise ValueError(f"Agent folder not found: {agent_name}")
-
-        config_path = os.path.join(agent_path, "agent.json")
-        if not os.path.exists(config_path):
-             raise ValueError(f"agent.json not found for: {agent_name}")
-
-        with open(config_path, "r") as f:
-            config = json.load(f)
+        # Assume folder name matches agent_id
+        agent_path = os.path.join(agents_dir, agent_id)
 
         model_name = config.get("model", "gemini-3-flash-preview")
         allowed_tools = config.get("tools", [])
@@ -54,7 +30,7 @@ class AgentBuilder:
 
         # Configure session visibility on the server
         try:
-            print(f"Configuring session for agent {agent_name} with tools: {allowed_tools}")
+            print(f"Configuring session for agent {agent_id} with tools: {allowed_tools}")
             await self.mcp_session.call_tool("configure_session", arguments={"allowed_tools": allowed_tools})
         except Exception as e:
             print(f"Failed to configure session visibility: {e}")
@@ -73,4 +49,3 @@ class AgentBuilder:
         checkpointer = FlatFileCheckpointer()
         graph = create_react_agent(llm, tools, prompt=system_prompt, checkpointer=checkpointer)
         return Agent(graph)
-
