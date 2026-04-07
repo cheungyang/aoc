@@ -10,6 +10,7 @@ def agent_prompt_hook(current_prompt, **kwargs):
         if file_name.endswith(".md"):
             with open(os.path.join(agent_path, file_name), "r") as f:
                 content = f.read()
+            print(f"Loaded {file_name}")
             prompt_parts.append(f"## {file_name}\n{content}")
 
     md_prompt = "\n\n".join(prompt_parts)
