@@ -47,7 +47,8 @@ class Agent:
         
         # Execute pre_message hooks
         for hook in self.hook_loader.pre_message_hooks:
-             await hook(message, bot)
+             if await hook(message, bot) == "STOP":
+                 return
 
         session_id = get_session_id(message)
         

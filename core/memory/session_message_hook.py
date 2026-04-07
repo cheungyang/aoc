@@ -16,11 +16,10 @@ async def hook_pre_message(message, bot):
     session_id = get_session_id(message)
     manager.append_message(session_id, "human", message.content)
 
-    # Clear session shortcut
     if message.content.strip() == "[new]":
         archive_status = manager.archive_session(session_id)
         await message.channel.send(f"Session context cleared. {archive_status}")
-        return None
+        return "STOP"
 
 async def hook_post_message(message, bot, reply_text):
     from core.util import get_session_id

@@ -13,25 +13,16 @@ class FlatFileSessionStore:
 
     def get_file_path(self, session_id):
         safe_id = session_id.replace(":", "_").replace("/", "_")
-        return os.path.join(self.sessions_dir, f"{safe_id}.json")
+        return os.path.join(self.sessions_dir, f"{safe_id}.jsonl")
 
     def append_message(self, session_id, from_user, message):
         os.makedirs(self.sessions_dir, exist_ok=True)
         file_path = self.get_file_path(session_id)
         
         log_entry = {"from": from_user, "message": message, "ts": int(time.time())}
-        data = []
-        if os.path.exists(file_path):
-            try:
-                with open(file_path, "r") as f:
-                    data = json.load(f)
-            except json.JSONDecodeError:
-                pass
-                
-        data.append(log_entry)
         
-        with open(file_path, "w") as f:
-            json.dump(data, f)
+        with open(file_path, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
             
         return f"Appended message to {session_id}"
 
@@ -42,7 +33,7 @@ class FlatFileSessionStore:
         if os.path.exists(file_path):
             os.makedirs(self.archive_dir, exist_ok=True)
             safe_id = session_id.replace(":", "_").replace("/", "_")
-            archive_name = f"{safe_id}_{int(time.time())}.json"
+            archive_name = f"{safe_id}_{int(time.time())}.jsonl"
             archive_path = os.path.join(self.archive_dir, archive_name)
             shutil.move(file_path, archive_path)
             
@@ -56,12 +47,15 @@ class FlatFileSessionStore:
     def load_history(self, session_id, limit=50):
         file_path = self.get_file_path(session_id)
         if os.path.exists(file_path):
+            data = []
             try:
                 with open(file_path, "r") as f:
-                    data = json.load(f)
-                    if limit and limit > 0:
-                         return data[-limit:]
-                    return data
+                    for line in f:
+                        if line.strip():
+                            data.append(json.loads(line))
+                if limit and limit > 0:
+                     return data[-limit:]
+                return data
             except json.JSONDecodeError:
                 return []
         return []

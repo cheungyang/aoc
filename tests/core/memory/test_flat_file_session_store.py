@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from unittest.mock import patch, MagicMock
 import sys
+import json
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -29,6 +30,15 @@ class TestFlatFileSessionStore(unittest.TestCase):
         self.assertEqual(history[0]["message"], "hello")
         self.assertEqual(history[1]["from"], "bot")
         self.assertEqual(history[1]["message"], "hi")
+
+        # Verify file content is JSONL
+        file_path = self.store.get_file_path(session_id)
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+            self.assertEqual(len(lines), 2)
+            for line in lines:
+                parsed = json.loads(line)
+                self.assertIn("from", parsed)
 
     @patch('core.memory.flat_file_checkpointer.FlatFileCheckpointer')
     def test_archive_session(self, mock_saver_class):
