@@ -64,10 +64,8 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         mock_builder.build_agent = AsyncMock(return_value=mock_agent)
 
         loader = AgentsLoader()
-        mock_session = MagicMock()
-        
-        agent1 = await loader.get_agent("test-agent", mock_session)
-        agent2 = await loader.get_agent("test-agent", mock_session)
+        agent1 = await loader.get_agent("test-agent")
+        agent2 = await loader.get_agent("test-agent")
         
         self.assertIs(agent1, agent2)
         mock_builder.build_agent.assert_called_once()
@@ -96,14 +94,12 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         
         mock_getmtime.return_value = current_time
         
-        mock_session = MagicMock()
-        
-        agent1 = await loader.get_agent("test-agent", mock_session)
+        agent1 = await loader.get_agent("test-agent")
         
         # Force reload by making files newer
         mock_getmtime.return_value = current_time + 10
         
-        agent2 = await loader.get_agent("test-agent", mock_session)
+        agent2 = await loader.get_agent("test-agent")
         
         self.assertIsNot(agent1, agent2)
         self.assertEqual(mock_builder.build_agent.call_count, 2)

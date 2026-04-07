@@ -28,7 +28,7 @@ class TestObsidianTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = obsidian(action="read", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
+            result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
             self.assertEqual(result, "note content")
 
     @patch('tools.obsidian.AgentsLoader')
@@ -50,7 +50,7 @@ class TestObsidianTool(unittest.TestCase):
             mock_abspath.side_effect = abspath_side_effect
             
             # Call with path="" and args="note.md"
-            result = obsidian(action="read", vault_id="pkm-oc", agent_id="test_agent", path="", args="note.md")
+            result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="note.md")
             self.assertEqual(result, "note content")
 
 if __name__ == '__main__':

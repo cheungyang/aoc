@@ -60,16 +60,10 @@ class BotRunner:
                 return
             # Respond if tagged
 
-        agent = await loader.get_agent(self.agent_id, self.bot.mcp_session)
+        agent = await loader.get_agent(self.agent_id)
         await agent.process_message(message, self.bot)
 
     async def run_bot(self):
-        from core.mcp_manager import MCPClientManager
-        mcp_client = MCPClientManager()
-        async with mcp_client.get_session() as mcp_session:
-             # Save session for AgentBuilder to use
-             self.bot.mcp_session = mcp_session
-             
-             print(f"Starting Discord bot for agent {self.agent_id}...")
-             async with self.bot:
-                  await self.bot.start(self.discord_token)
+        print(f"Starting Discord bot for agent {self.agent_id}...")
+        async with self.bot:
+            await self.bot.start(self.discord_token)

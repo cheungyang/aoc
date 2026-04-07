@@ -77,15 +77,11 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner.on_message(mock_message)
 
-        mock_loader.get_agent.assert_called_once_with("main", runner.bot.mcp_session)
+        mock_loader.get_agent.assert_called_once_with("main")
         mock_agent.process_message.assert_called_once_with(mock_message, runner.bot)
 
-    @patch('core.mcp_manager.MCPClientManager.get_session')
     @patch('core.bot_runner.commands.Bot')
-    async def test_run_bot_success(self, mock_bot_class, mock_get_session):
-        # Setup mocks
-        mock_session = MagicMock()
-        mock_get_session.return_value.__aenter__.return_value = mock_session
+    async def test_run_bot_success(self, mock_bot_class):
         
         # Bot mock
         mock_bot = AsyncMock()
@@ -97,7 +93,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.run_bot()
         
         # Assertions
-        mock_get_session.assert_called_once()
+
         mock_bot.start.assert_called_once_with("test_token")
 
 if __name__ == "__main__":

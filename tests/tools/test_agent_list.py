@@ -21,7 +21,7 @@ class TestAgentListTool(unittest.TestCase):
             {"id": "designer", "name": "Aki", "emoji": "🤖", "description": "Designer"}
         ]
         
-        result = agent_list()
+        result = agent_list.func()
         
         self.assertEqual(len(result), 2)
         

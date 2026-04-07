@@ -1,7 +1,7 @@
 import os
 import sys
 import importlib
-from mcp import StdioServerParameters
+
 
 class ToolLoader:
     _instance = None
@@ -40,32 +40,16 @@ class ToolLoader:
         self._discovered_tools = discovered
         return discovered
 
-    def get_server_params(self):
-        """Returns a dictionary mapping tool names to StdioServerParameters."""
-        if self.tools_cache is not None:
-            return self.tools_cache
-        
-        discovered = self._discover_tools()
-        params_dict = {}
-        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        main_py = os.path.join(workspace_root, "main.py")
-        
-        default_params = StdioServerParameters(
-            command=sys.executable,
-            args=[main_py, "--mcp"],
-        )
-        
-        for tool_name in discovered:
-            params_dict[tool_name] = default_params
-                            
-        self.tools_cache = params_dict
-        return params_dict
-
-    def load_tools(self):
+    def get_tools(self, allowed_tool_names=None):
         """Loads and returns all tool functions."""
         discovered = self._discover_tools()
         tools = []
+        loaded_names = []
         for tool_name, folder in discovered.items():
+            # Filter tools based on allowed_tools
+            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+                continue
+
             if folder:
                 module_path = f"tools.{folder}.{tool_name}"
             else:
@@ -75,6 +59,11 @@ class ToolLoader:
                 if hasattr(mod, tool_name):
                     func = getattr(mod, tool_name)
                     tools.append(func)
+                    loaded_names.append(tool_name)
             except Exception as e:
                 print(f"Failed to load tool {tool_name} from {module_path}: {e}", file=sys.stderr)
-        return tools
+        
+        print(f"Loaded {len(tools)} tools: {loaded_names}")
+        return tools    
+        
+

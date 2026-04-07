@@ -30,7 +30,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="read", path="allowed_folder/file.txt", agent_id="test_agent")
+            result = filesystem.func(action="read", path="allowed_folder/file.txt", agent_id="test_agent")
             self.assertEqual(result, "file content")
 
     @patch('tools.filesystem.AgentsLoader')
@@ -52,7 +52,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="read", path="secret/file.txt", agent_id="test_agent")
+            result = filesystem.func(action="read", path="secret/file.txt", agent_id="test_agent")
             self.assertIn("Error: Agent test_agent does not have permission to access path", result)
 
     @patch('tools.filesystem.AgentsLoader')
@@ -72,7 +72,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="write", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
+            result = filesystem.func(action="write", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
             self.assertIn("Error: Agent test_agent does not have permission to perform 'write'", result)
 
     @patch('tools.filesystem.AgentsLoader')
@@ -96,7 +96,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="write", path="allowed_folder/new_dir/file.txt", content="data", agent_id="test_agent")
+            result = filesystem.func(action="write", path="allowed_folder/new_dir/file.txt", content="data", agent_id="test_agent")
             self.assertEqual(result, "Successfully wrote to allowed_folder/new_dir/file.txt")
             mock_makedirs.assert_called_once()
 
@@ -119,7 +119,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="write", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
+            result = filesystem.func(action="write", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
             self.assertIn("Error: File already exists", result)
 
     @patch('tools.filesystem.AgentsLoader')
@@ -143,7 +143,7 @@ class TestFilesystemTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = filesystem(action="overwrite", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
+            result = filesystem.func(action="overwrite", path="allowed_folder/file.txt", content="data", agent_id="test_agent")
             self.assertEqual(result, "Successfully overwrote allowed_folder/file.txt")
             mock_file.assert_called_once_with("/workspace/allowed_folder/file.txt", "w")
 

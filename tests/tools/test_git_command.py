@@ -19,7 +19,7 @@ class TestGitCommandTool(unittest.TestCase):
         mock_run.return_value = mock_result
 
         # 2. Invoke isolated tool logic
-        result = git_tool.git_command(args="log -n 5", path="./agents")
+        result = git_tool.git_command.func(git_args="log -n 5", path="./agents")
 
         # 3. Assertions
         self.assertTrue(mock_run.called)
@@ -37,7 +37,7 @@ class TestGitCommandTool(unittest.TestCase):
 
     def test_git_command_prevents_path_traversal(self):
         # Escape attempts sequence
-        result = git_tool.git_command(args="status", path="../../etc")
+        result = git_tool.git_command.func(git_args="status", path="../../etc")
         self.assertIn("Error: Path traversal access denied.", result)
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 import os
-from fastmcp.tools import tool
+from langchain_core.tools import tool
 from core.agent.agents_loader import AgentsLoader
 
-@tool()
-def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", args: str = "") -> str:
+@tool
+def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", obsidian_args: str = "") -> str:
     """
     Perform specific operations on Obsidian vaults with scoped permissions.
     Actions: search, read, write, overwrite, append.
@@ -12,8 +12,8 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
         return "Error: agent_id is required to verify permissions."
 
     # Fallback: if path is empty but args is provided, use args as path
-    if not path and args:
-        path = args
+    if not path and obsidian_args:
+        path = obsidian_args
 
     # Load agent config
     loader = AgentsLoader()
@@ -96,7 +96,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
                 return f"Error: Search directory not found: {search_dir}"
                 
             results = []
-            search_term = args.lower() if args else ""
+            search_term = obsidian_args.lower() if obsidian_args else ""
             
             for root, dirs, files in os.walk(search_dir):
                 for file in files:

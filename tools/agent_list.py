@@ -1,7 +1,7 @@
 from core.agent.agents_loader import AgentsLoader
-from fastmcp.tools import tool
+from langchain_core.tools import tool
 
-@tool()
+@tool
 def agent_list() -> list[dict]:
     """
     Returns a list of all agents with an allowlist of attributes: agent_id, name, emoji, description.

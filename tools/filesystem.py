@@ -1,8 +1,8 @@
 import os
-from fastmcp.tools import tool
+from langchain_core.tools import tool
 from core.agent.agents_loader import AgentsLoader
 
-@tool()
+@tool
 def filesystem(action: str, path: str, content: str = "", agent_id: str = "") -> str:
     """
     Perform file operations (read, write, overwrite) with scoped permissions.

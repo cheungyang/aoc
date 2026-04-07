@@ -16,14 +16,8 @@ class TestSubagentManager(unittest.IsolatedAsyncioTestCase):
         SubagentManager._instance = None
         self.manager = SubagentManager()
 
-    @patch('core.agent.subagent_manager.MCPClientManager')
     @patch('core.agent.subagent_manager.AgentsLoader')
-    async def test_launch_task(self, mock_agents_loader_class, mock_mcp_client_class):
-        # Mock MCP Client and Session
-        mock_mcp_client = MagicMock()
-        mock_mcp_client_class.return_value = mock_mcp_client
-        mock_session = MagicMock()
-        mock_mcp_client.get_session.return_value.__aenter__.return_value = mock_session
+    async def test_launch_task(self, mock_agents_loader_class):
         
         # Mock AgentsLoader and Agent
         mock_loader = MagicMock()

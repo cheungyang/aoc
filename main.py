@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from core.mcp_manager import MCPServerManager
+
 from core.bot_runner import BotRunner
 from core.agent.agents_loader import AgentsLoader
 import asyncio
@@ -38,8 +38,4 @@ async def run_bots():
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
-        server_manager = MCPServerManager()
-        server_manager.run_server()
-    else:
-        asyncio.run(run_bots())
+    asyncio.run(run_bots())

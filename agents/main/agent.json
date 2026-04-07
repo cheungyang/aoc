@@ -11,10 +11,7 @@
   "tools": {
     "obsidian": { "pkm-oc": ["read", "agent-scoped"] },
     "agent_list": {},
-    "launch_subagent": {},
-    "check_subagent": {},
-    "update_subagent": {},
-    "cancel_subagent": {}
+    "agent_call": {}
   },
   "skills": [
     "obsidian"

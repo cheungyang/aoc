@@ -7,7 +7,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from .agents_loader import AgentsLoader
-from core.mcp_manager import MCPClientManager
+
 
 class SubagentManager:
     _instance = None
@@ -34,16 +34,14 @@ class SubagentManager:
 
     async def _run_subagent(self, job_id, agent_id, prompt, session_id):
         try:
-            mcp_client = MCPClientManager()
-            async with mcp_client.get_session() as mcp_session:
-                loader = AgentsLoader()
-                agent = await loader.get_agent(agent_id, mcp_session)
-                
-                # Execute graph
-                response = await agent.execute(prompt, job_id)
-                
-                self.tasks[job_id]["status"] = "success"
-                self.tasks[job_id]["result"] = response
+            loader = AgentsLoader()
+            agent = await loader.get_agent(agent_id)
+            
+            # Execute graph
+            response = await agent.execute(prompt, job_id)
+            
+            self.tasks[job_id]["status"] = "success"
+            self.tasks[job_id]["result"] = response
                 
         except asyncio.CancelledError:
             self.tasks[job_id]["status"] = "cancelled"

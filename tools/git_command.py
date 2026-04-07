@@ -1,14 +1,14 @@
 import os
 import subprocess
 import shlex
-from fastmcp.tools import tool
+from langchain_core.tools import tool
 
-@tool()
-def git_command(args: str, path: str = ".") -> str:
+@tool
+def git_command(git_args: str, path: str = ".") -> str:
     """
     Executes a git command with args in the specified folder path.
     The path should be relative to the agent's workspace root.
-    Example: args="log -n 5", path="./agents/concierge"
+    Example: git_args="log -n 5", path="./agents/concierge"
     """
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     target_dir = os.path.abspath(os.path.join(workspace_root, path))
@@ -18,7 +18,7 @@ def git_command(args: str, path: str = ".") -> str:
 
     try:
         # Assemble execution command
-        cmd = ["git"] + shlex.split(args)
+        cmd = ["git"] + shlex.split(git_args)
         
         result = subprocess.run(
             cmd,

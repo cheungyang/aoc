@@ -47,7 +47,7 @@ class AgentsLoader:
                 return config
         return None
 
-    async def get_agent(self, agent_id, mcp_session):
+    async def get_agent(self, agent_id):
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         
         # Find max mod time
@@ -76,7 +76,7 @@ class AgentsLoader:
         if not config:
             raise ValueError(f"Agent configuration not found for: {agent_id}")
             
-        builder = AgentBuilder(mcp_session)
+        builder = AgentBuilder()
         agent = await builder.build_agent(agent_id, config)
         self._agents_cache[agent_id] = agent
         return agent
