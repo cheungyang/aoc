@@ -2,6 +2,4 @@ langgraph
 langchain-google-genai
 discord.py
 python-dotenv
-fastmcp
-langchain-mcp-adapters
 pytest
