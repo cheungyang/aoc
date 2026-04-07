@@ -11,20 +11,11 @@ from core.memory.flat_file_session_store import FlatFileSessionStore
 # Instantiate store helper
 manager = FlatFileSessionStore()
 
-async def hook_pre_message(message, bot):
-    from core.util import get_session_id
-    session_id = get_session_id(message)
-    manager.append_message(session_id, "human", message.content)
+async def hook_pre_message(thread_id, content):
+    manager.append_message(thread_id, "human", content)
 
-    if message.content.strip() == "[new]":
-        archive_status = manager.archive_session(session_id)
-        await message.channel.send(f"Session context cleared. {archive_status}")
-        return "STOP"
-
-async def hook_post_message(message, bot, reply_text):
-    from core.util import get_session_id
-    session_id = get_session_id(message)
-    manager.append_message(session_id, "agent", reply_text)
+async def hook_post_message(thread_id, reply_text):
+    manager.append_message(thread_id, "agent", reply_text)
 
 def register_hooks():
     return {

@@ -19,7 +19,8 @@ class SubagentManager:
         return cls._instance
 
     def launch_task(self, agent_id, prompt, session_id):
-        job_id = str(uuid.uuid4())
+        random_str = uuid.uuid4().hex[:6]
+        job_id = f"{session_id}:{agent_id}:{random_str}"
         self.tasks[job_id] = {
             "status": "running",
             "result": None,

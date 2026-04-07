@@ -40,9 +40,9 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         await agent.process_message(mock_message, mock_bot)
         
         # Assertions
-        mock_pre_hook.assert_called_once_with(mock_message, mock_bot)
+        mock_pre_hook.assert_called_once_with("session1", mock_message.content)
         mock_graph.ainvoke.assert_called_once()
-        mock_post_hook.assert_called_once_with(mock_message, mock_bot, "Reply text")
+        mock_post_hook.assert_called_once_with("session1", "Reply text")
         mock_message.channel.send.assert_called_once_with("Reply text")
 
     @patch('core.agent.agent.HookLoader')
@@ -51,7 +51,11 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
     async def test_process_message_pre_hook_stop(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):
         # Setup mocks
         mock_hook_loader = MagicMock()
-        mock_pre_hook = AsyncMock(return_value="STOP")
+        mock_pre_hook_called = False
+        async def mock_pre_hook(session_id, content):
+            nonlocal mock_pre_hook_called
+            mock_pre_hook_called = True
+            return "STOP"
         mock_post_hook = AsyncMock()
         mock_hook_loader.pre_message_hooks = [mock_pre_hook]
         mock_hook_loader.post_message_hooks = [mock_post_hook]
@@ -72,7 +76,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         await agent.process_message(mock_message, mock_bot)
         
-        mock_pre_hook.assert_called_once_with(mock_message, mock_bot)
+        self.assertTrue(mock_pre_hook_called)
         mock_graph.ainvoke.assert_not_called()
         mock_post_hook.assert_not_called()
         mock_message.channel.send.assert_not_called()

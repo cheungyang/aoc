@@ -8,6 +8,10 @@ class Agent:
 
     async def execute(self, content: str, session_id: str) -> str:
         """Invokes the graph directly without Discord dependencies."""
+        # Execute pre_message hooks (e.g. Session logging)
+        for hook in self.hook_loader.pre_message_hooks:
+            await hook(session_id, content)
+
         debug_handler = DebugLogHandler()
         config = {
             "configurable": {
@@ -39,24 +43,26 @@ class Agent:
                     texts.append(part)
             reply_text = "".join(texts)
             
+        # Execute post_message hooks (e.g. Session logging)
+        for hook in self.hook_loader.post_message_hooks:
+             await hook(session_id, reply_text)
+             
         return reply_text
 
     async def process_message(self, message, bot):
         """Handles Discord messages and routes them through execute."""
         from core.util import get_session_id
         
-        # Execute pre_message hooks
-        for hook in self.hook_loader.pre_message_hooks:
-             if await hook(message, bot) == "STOP":
-                 return
-
         session_id = get_session_id(message)
         
+        # Handle [new] command to clear session context
+        if message.content.strip() == "[new]":
+            from core.memory.session_message_hook import manager
+            archive_status = manager.archive_session(session_id)
+            await message.channel.send(f"Session context cleared. {archive_status}")
+            return
+            
         reply_text = await self.execute(message.content, session_id)
-        
-        # Execute post_message hooks (e.g. Session logging)
-        for hook in self.hook_loader.post_message_hooks:
-             await hook(message, bot, reply_text)
-
-        # Send reply back to Discord
-        await message.channel.send(reply_text)
+        if reply_text is not None:
+            # Send reply back to Discord
+            await message.channel.send(reply_text)
