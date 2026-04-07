@@ -4,9 +4,9 @@ import sys
 import os
 
 # Ensure we can import from core
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.agent_builder import AgentBuilder
+from .agents_loader import AgentsLoader
 from core.mcp_manager import MCPClientManager
 
 class SubagentManager:
@@ -36,8 +36,8 @@ class SubagentManager:
         try:
             mcp_client = MCPClientManager()
             async with mcp_client.get_session() as mcp_session:
-                builder = AgentBuilder(mcp_session)
-                agent = await builder.build_agent(agent_id)
+                loader = AgentsLoader()
+                agent = await loader.get_agent(agent_id, mcp_session)
                 
                 # Execute graph
                 response = await agent.execute(prompt, job_id)

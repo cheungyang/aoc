@@ -34,8 +34,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.on_ready()
 
     @patch('core.bot_runner.commands.Bot')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_ignores_self(self, mock_agent_builder_class, mock_bot_class):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_ignores_self(self, mock_agents_loader_class, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
         mock_bot_class.return_value = mock_bot
@@ -49,32 +49,35 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.on_message(mock_message)
         
         # Should return immediately without doing anything
-        mock_agent_builder_class.assert_not_called()
+        mock_agents_loader_class.assert_not_called()
 
-    @patch('core.agent_builder.AgentBuilder')
+    @patch('core.agent.agents_loader.AgentsLoader')
     @patch('core.bot_runner.commands.Bot')
-    async def test_on_message_delegates(self, mock_bot_class, mock_agent_builder_class):
+    async def test_on_message_delegates(self, mock_bot_class, mock_agents_loader_class):
         mock_bot = MagicMock()
-        mock_bot.user = "TestBot#1234"
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
         mock_bot.mcp_tools = ["tool1", "tool2"]
         mock_bot_class.return_value = mock_bot
         
         runner = BotRunner("test_token", "main")
         
         mock_message = MagicMock()
-        mock_message.author = "User#9999"
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
         mock_message.content = "Hello bot"
+        mock_message.mentions = [runner.bot.user]
         
-        # Mock AgentBuilder and dynamic Agent
-        mock_builder = MagicMock()
-        mock_agent_builder_class.return_value = mock_builder
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.process_message = AsyncMock()
-        mock_builder.build_agent.return_value = mock_agent
+        mock_loader.get_agent = AsyncMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
 
-        mock_agent_builder_class.assert_called_once_with(["tool1", "tool2"])
+        mock_loader.get_agent.assert_called_once_with("main", runner.bot.mcp_session)
         mock_agent.process_message.assert_called_once_with(mock_message, runner.bot)
 
     @patch('core.mcp_manager.MCPClientManager.get_session')

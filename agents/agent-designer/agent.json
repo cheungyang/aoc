@@ -1,12 +1,12 @@
 {
-  "id": "agent-designer",
+  "agent_id": "agent-designer",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
   "channel_hosts": [
     "agent-management-aoc"
   ],
   "name": "Aki",
   "emoji": "🤖",
-  "description": "Agent designer",
+  "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "model": "gemini-3-flash-preview",
   "tools": {
     "git_command": {},

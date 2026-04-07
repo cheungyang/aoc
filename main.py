@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from core.mcp_manager import MCPServerManager
 from core.bot_runner import BotRunner
-from core.agents_loader import AgentsLoader
+from core.agent.agents_loader import AgentsLoader
 import asyncio
 
 # Load environment variables

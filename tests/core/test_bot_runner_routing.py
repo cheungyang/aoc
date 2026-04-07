@@ -15,19 +15,17 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         self.runner.bot = MagicMock()
         self.runner.bot.user = MagicMock() # Mock the bot user
 
-    @patch('core.agents_loader.AgentsLoader')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_ignores_bots(self, mock_agent_builder, mock_agents_loader):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_ignores_bots(self, mock_agents_loader):
         mock_message = MagicMock()
         mock_message.author.bot = True
         
         await self.runner.on_message(mock_message)
         
-        mock_agent_builder.assert_not_called()
+        mock_agents_loader.assert_not_called()
 
-    @patch('core.agents_loader.AgentsLoader')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_host_responds_without_tag(self, mock_agent_builder, mock_agents_loader):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_host_responds_without_tag(self, mock_agents_loader):
         # Mock Loader
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -43,15 +41,14 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         # Mock Agent
         mock_agent = MagicMock()
         mock_agent.process_message = AsyncMock()
-        mock_agent_builder.return_value.build_agent = AsyncMock(return_value=mock_agent)
+        mock_loader.get_agent = AsyncMock(return_value=mock_agent)
 
         await self.runner.on_message(mock_message)
         
         mock_agent.process_message.assert_called_once()
 
-    @patch('core.agents_loader.AgentsLoader')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_host_yields_to_tagged(self, mock_agent_builder, mock_agents_loader):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_host_yields_to_tagged(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent_config.return_value = {"channel_hosts": ["agent-lab"]}
@@ -65,14 +62,15 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = [mock_other_bot]
         mock_message.content = "hello"
         
+        mock_loader.get_agent = AsyncMock()
+        
         await self.runner.on_message(mock_message)
         
-        # Should yield, so process_message not called
-        mock_agent_builder.return_value.build_agent.assert_not_called()
+        # Should yield, so get_agent not called
+        mock_loader.get_agent.assert_not_called()
 
-    @patch('core.agents_loader.AgentsLoader')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_non_host_ignores_untagged(self, mock_agent_builder, mock_agents_loader):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_non_host_ignores_untagged(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent_config.return_value = {"channel_hosts": ["other-channel"]}
@@ -83,13 +81,14 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = []
         mock_message.content = "hello"
         
+        mock_loader.get_agent = AsyncMock()
+        
         await self.runner.on_message(mock_message)
         
-        mock_agent_builder.assert_not_called()
+        mock_loader.get_agent.assert_not_called()
 
-    @patch('core.agents_loader.AgentsLoader')
-    @patch('core.agent_builder.AgentBuilder')
-    async def test_on_message_non_host_responds_when_tagged(self, mock_agent_builder, mock_agents_loader):
+    @patch('core.agent.agents_loader.AgentsLoader')
+    async def test_on_message_non_host_responds_when_tagged(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent_config.return_value = {"channel_hosts": ["other-channel"]}
@@ -102,7 +101,7 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         
         mock_agent = MagicMock()
         mock_agent.process_message = AsyncMock()
-        mock_agent_builder.return_value.build_agent = AsyncMock(return_value=mock_agent)
+        mock_loader.get_agent = AsyncMock(return_value=mock_agent)
 
         await self.runner.on_message(mock_message)
         

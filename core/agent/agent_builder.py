@@ -5,22 +5,18 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from core.hook_loader import HookLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
-from core.agent import Agent
+from .agent import Agent
 from langchain_mcp_adapters.tools import load_mcp_tools
-from core.agents_loader import AgentsLoader
 
 class AgentBuilder:
     def __init__(self, mcp_session):
         self.mcp_session = mcp_session
 
-    async def build_agent(self, agent_id="main"):
-        loader = AgentsLoader()
-        config = loader.get_agent_config(agent_id)
-        
-        if not config:
+    async def build_agent(self, agent_id, config):
+        if config is None:
             raise ValueError(f"Agent configuration not found for: {agent_id}")
 
-        agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
+        agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         # Assume folder name matches agent_id
         agent_path = os.path.join(agents_dir, agent_id)
 
@@ -37,7 +33,7 @@ class AgentBuilder:
 
         # Load tools from session (now filtered by server)
         tools = await load_mcp_tools(self.mcp_session)
-        print(f"Loaded tools for agent: {[getattr(t, 'name', None) for t in tools]}")
+        print(f"Loaded tools for agent {agent_id}: {[getattr(t, 'name', None) for t in tools]}")
 
         system_prompt = ""
 
@@ -48,4 +44,6 @@ class AgentBuilder:
         llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = FlatFileCheckpointer()
         graph = create_react_agent(llm, tools, prompt=system_prompt, checkpointer=checkpointer)
-        return Agent(graph)
+        agent = Agent(graph)
+        print(f"New Agent {agent_id} built")
+        return agent

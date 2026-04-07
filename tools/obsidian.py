@@ -1,15 +1,19 @@
 import os
 from fastmcp.tools import tool
-from core.agents_loader import AgentsLoader
+from core.agent.agents_loader import AgentsLoader
 
 @tool()
-def obsidian(action: str, vault_id: str, path: str, agent_id: str, content: str = "", args: str = "") -> str:
+def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", args: str = "") -> str:
     """
     Perform specific operations on Obsidian vaults with scoped permissions.
     Actions: search, read, write, overwrite, append.
     """
     if not agent_id:
         return "Error: agent_id is required to verify permissions."
+
+    # Fallback: if path is empty but args is provided, use args as path
+    if not path and args:
+        path = args
 
     # Load agent config
     loader = AgentsLoader()

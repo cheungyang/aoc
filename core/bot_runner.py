@@ -32,7 +32,7 @@ class BotRunner:
             return
 
         # Read channel_hosts from agent.json
-        from core.agents_loader import AgentsLoader
+        from core.agent.agents_loader import AgentsLoader
         loader = AgentsLoader()
         config = loader.get_agent_config(self.agent_id)
         channel_hosts = config.get("channel_hosts", [])
@@ -60,9 +60,7 @@ class BotRunner:
                 return
             # Respond if tagged
 
-        from core.agent_builder import AgentBuilder
-        builder = AgentBuilder(self.bot.mcp_session)
-        agent = await builder.build_agent(self.agent_id)
+        agent = await loader.get_agent(self.agent_id, self.bot.mcp_session)
         await agent.process_message(message, self.bot)
 
     async def run_bot(self):

@@ -4,13 +4,13 @@ import sys
 from unittest.mock import patch, MagicMock, AsyncMock
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.agent import Agent
+from core.agent.agent import Agent
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
 
-    @patch('core.agent.HookLoader')
+    @patch('core.agent.agent.HookLoader')
     @patch('core.debug_handler.DebugLogHandler')
     @patch('core.util.get_session_id')
     async def test_process_message_success(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):
@@ -45,7 +45,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_post_hook.assert_called_once_with(mock_message, mock_bot, "Reply text")
         mock_message.channel.send.assert_called_once_with("Reply text")
 
-    @patch('core.agent.HookLoader')
+    @patch('core.agent.agent.HookLoader')
     @patch('core.debug_handler.DebugLogHandler')
     @patch('core.util.get_session_id')
     async def test_process_message_invoke_failure(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):
@@ -70,7 +70,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         # Assertions
         mock_message.channel.send.assert_called_once_with("Sorry, I encountered an error processing the request.")
 
-    @patch('core.agent.HookLoader')
+    @patch('core.agent.agent.HookLoader')
     @patch('core.debug_handler.DebugLogHandler')
     @patch('core.util.get_session_id')
     async def test_process_message_parsing_failure(self, mock_get_session_id, mock_debug_handler_class, mock_hook_loader_class):

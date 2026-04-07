@@ -1,4 +1,4 @@
-from core.agents_loader import AgentsLoader
+from core.agent.agents_loader import AgentsLoader
 from fastmcp.tools import tool
 
 @tool()

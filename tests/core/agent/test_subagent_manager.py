@@ -5,9 +5,9 @@ import sys
 import asyncio
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.subagent_manager import SubagentManager
+from core.agent.subagent_manager import SubagentManager
 
 class TestSubagentManager(unittest.IsolatedAsyncioTestCase):
 
@@ -16,21 +16,21 @@ class TestSubagentManager(unittest.IsolatedAsyncioTestCase):
         SubagentManager._instance = None
         self.manager = SubagentManager()
 
-    @patch('core.subagent_manager.MCPClientManager')
-    @patch('core.subagent_manager.AgentBuilder')
-    async def test_launch_task(self, mock_agent_builder_class, mock_mcp_client_class):
+    @patch('core.agent.subagent_manager.MCPClientManager')
+    @patch('core.agent.subagent_manager.AgentsLoader')
+    async def test_launch_task(self, mock_agents_loader_class, mock_mcp_client_class):
         # Mock MCP Client and Session
         mock_mcp_client = MagicMock()
         mock_mcp_client_class.return_value = mock_mcp_client
         mock_session = MagicMock()
         mock_mcp_client.get_session.return_value.__aenter__.return_value = mock_session
         
-        # Mock AgentBuilder and Agent
-        mock_builder = MagicMock()
-        mock_agent_builder_class.return_value = mock_builder
+        # Mock AgentsLoader and Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.execute = AsyncMock(return_value="subagent response")
-        mock_builder.build_agent = AsyncMock(return_value=mock_agent)
+        mock_loader.get_agent = AsyncMock(return_value=mock_agent)
 
         job_id = self.manager.launch_task("agent-designer", "prompt", "session_id")
         
