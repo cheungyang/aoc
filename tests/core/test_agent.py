@@ -68,7 +68,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         await agent.process_message(mock_message, mock_bot)
         
         # Assertions
-        mock_message.channel.send.assert_called_once_with("Sorry, I encountered an error processing your request.")
+        mock_message.channel.send.assert_called_once_with("Sorry, I encountered an error processing the request.")
 
     @patch('core.agent.HookLoader')
     @patch('core.debug_handler.DebugLogHandler')

@@ -10,7 +10,11 @@
   "model": "gemini-3-flash-preview",
   "tools": {
     "git_command": {},
-    "obsidian_command": {},
+    "obsidian": {
+      "pkm-oc": [
+        "agent-scoped"
+      ]
+    },
     "filesystem": {
       "agents/": [
         "read",

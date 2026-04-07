@@ -15,7 +15,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot = MagicMock()
         mock_bot_class.return_value = mock_bot
         
-        runner = BotRunner("test_token")
+        runner = BotRunner("test_token", "main")
         
         # Verify event registration
         self.assertEqual(mock_bot.event.call_count, 2)
@@ -28,7 +28,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.user = "TestBot#1234"
         mock_bot_class.return_value = mock_bot
         
-        runner = BotRunner("test_token")
+        runner = BotRunner("test_token", "main")
         
         # Verify it runs without error
         await runner.on_ready()
@@ -40,10 +40,11 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.user = "TestBot#1234"
         mock_bot_class.return_value = mock_bot
         
-        runner = BotRunner("test_token")
+        runner = BotRunner("test_token", "main")
         
         mock_message = MagicMock()
-        mock_message.author = "TestBot#1234" # Self
+        mock_message.author = MagicMock()
+        mock_message.author.bot = True
         
         await runner.on_message(mock_message)
         
@@ -58,7 +59,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.mcp_tools = ["tool1", "tool2"]
         mock_bot_class.return_value = mock_bot
         
-        runner = BotRunner("test_token")
+        runner = BotRunner("test_token", "main")
         
         mock_message = MagicMock()
         mock_message.author = "User#9999"
@@ -76,28 +77,24 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_agent_builder_class.assert_called_once_with(["tool1", "tool2"])
         mock_agent.process_message.assert_called_once_with(mock_message, runner.bot)
 
-    @patch('core.bot_runner.load_mcp_tools')
     @patch('core.mcp_manager.MCPClientManager.get_session')
     @patch('core.bot_runner.commands.Bot')
-    async def test_run_bot_success(self, mock_bot_class, mock_get_session, mock_load_tools):
+    async def test_run_bot_success(self, mock_bot_class, mock_get_session):
         # Setup mocks
         mock_session = MagicMock()
         mock_get_session.return_value.__aenter__.return_value = mock_session
-        mock_load_tools.return_value = ["tool1", "tool2"]
         
         # Bot mock
         mock_bot = AsyncMock()
         mock_bot_class.return_value = mock_bot
         
-        runner = BotRunner("test_token")
-
+        runner = BotRunner("test_token", "main")
+        
         # Run
         await runner.run_bot()
-
+        
         # Assertions
         mock_get_session.assert_called_once()
-        mock_load_tools.assert_called_once_with(mock_session)
-        self.assertEqual(runner.bot.mcp_tools, ["tool1", "tool2"])
         mock_bot.start.assert_called_once_with("test_token")
 
 if __name__ == "__main__":

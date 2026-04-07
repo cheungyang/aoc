@@ -9,9 +9,12 @@
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "model": "gemini-3-flash-preview",
   "tools": {
-    "git_command": {},
-    "obsidian_command": {},
-    "agent_list": {}
+    "obsidian": { "pkm-oc": ["read", "agent-scoped"] },
+    "agent_list": {},
+    "launch_subagent": {},
+    "check_subagent": {},
+    "update_subagent": {},
+    "cancel_subagent": {}
   },
   "skills": [
     "obsidian",

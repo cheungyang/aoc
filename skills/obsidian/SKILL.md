@@ -1,28 +1,29 @@
 ---
 name: obsidian
-description: Skill for understanding how to use the pkm-oc vault with Obsidian commands.
+description: Skill for understanding how to use the pkm-oc vault with Obsidian operations.
 ---
 ## Overview
-This skill guides agents on how to use the `pkm-oc` vault to access memory and feedback.
+This skill guides agents on how to use the `pkm-oc` vault to access memory and feedback using the `obsidian` tool.
+The tool requires `vault_id` (always`"pkm-oc"` for agent memory and feedback) and `agent_id` for permission verification.
 
 ## Workflow
 
 ### 1. Read Consolidated Memory
-To read the consolidated memory for an agent, use the `obsidian_command` to read the file `agents/<agent_name>/memory.md`.
+To read the consolidated memory for an agent, read the file at `agents/<agent_name>/memory.md`.
 
 **Command:**
-`obsidian_command(args="read path='agents/<agent_name>/memory.md'")`
+`obsidian(action="read", vault_id="pkm-oc", path="agents/<agent_name>/memory.md", agent_id="<agent_id>")`
 
 ### 2. Read Daily Memory
-Daily memory files are located in the `agents/<agent_name>/memory` directory and are prefixed by the date (e.g., `YYYY-MM-DD`). However, the filenames may not be consistent beyond the prefix.
-Instead of exploring files, the agent should search for the file using the date.
+Daily memory files are located in the `agents/<agent_name>/memory` directory and are prefixed by the date (e.g., `YYYY-MM-DD`).
+Instead of exploring files, the agent should search for the file using the date as a filter.
 
 **Workflow:**
-1. Search for the file using:
-   `obsidian_command(args="search path='agents/<agent_name>/memory' query='<date>'")`
+1. List files and filter by date:
+   `obsidian(action="search", vault_id="pkm-oc", path="agents/<agent_name>/memory", args="<date>", agent_id="<agent_id>")`
 2. Locate the filename from the search results.
 3. Read the file using:
-   `obsidian_command(args="read path='agents/<agent_name>/memory/<filename>'")`
+   `obsidian(action="read", vault_id="pkm-oc", path="agents/<agent_name>/memory/<filename>", agent_id="<agent_id>")`
 
 ### 3. Read Feedback
 Feedback follows a similar pattern to memory.
@@ -31,12 +32,12 @@ Feedback follows a similar pattern to memory.
 Read consolidated feedback from human at `agents/<agent_name>/feedback.md`.
 
 **Command:**
-`obsidian_command(args="read path='agents/<agent_name>/feedback.md'")`
+`obsidian(action="read", vault_id="pkm-oc", path="agents/<agent_name>/feedback.md", agent_id="<agent_id>")`
 
 #### Daily Feedback
 Read daily feedback from the `agents/<agent_name>/feedback` directory.
-1. Search for the file using:
-   `obsidian_command(args="search path='agents/<agent_name>/feedback' query='<date>'")`
+1. Search/List files filtered by date:
+   `obsidian(action="search", vault_id="pkm-oc", path="agents/<agent_name>/feedback", args="<date>", agent_id="<agent_id>")`
 2. Locate the filename from the search results.
 3. Read the file using:
-   `obsidian_command(args="read path='agents/<agent_name>/feedback/<filename>'")`
+   `obsidian(action="read", vault_id="pkm-oc", path="agents/<agent_name>/feedback/<filename>", agent_id="<agent_id>")`

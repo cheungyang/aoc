@@ -14,36 +14,27 @@ class TestMCPServerManager(unittest.TestCase):
         self.manager = MCPServerManager()
 
     @patch('core.mcp_manager.FastMCP')
-    @patch('core.mcp_manager.os.path.isdir')
-    @patch('core.mcp_manager.os.listdir')
-    @patch('core.mcp_manager.importlib')
-    def test_run_server_success(self, mock_importlib, mock_listdir, mock_isdir, mock_fastmcp_class):
+    @patch('core.mcp_manager.ToolLoader')
+    def test_run_server_success(self, mock_tool_loader_class, mock_fastmcp_class):
         # Setup FastMCP mock behavior 
         mock_mcp = MagicMock()
         mock_fastmcp_class.return_value = mock_mcp
         
-        # Mock decorator behavior mcp.tool()(func)
-        mock_decorator = MagicMock()
-        mock_mcp.tool.return_value = mock_decorator
-
-        # Setup filesystem mocks
-        mock_isdir.side_effect = lambda path: path == "tools" or path == os.path.join("tools", "cat_a")
-        mock_listdir.side_effect = lambda path: ['cat_a'] if path == "tools" else ['tool_x.py']
+        # Setup ToolLoader mock
+        mock_loader = MagicMock()
+        mock_tool_loader_class.return_value = mock_loader
         
-        # Mock tool module
-        mock_tool_module = MagicMock()
         mock_tool_func = MagicMock()
-        setattr(mock_tool_module, "tool_x", mock_tool_func)
-        mock_importlib.import_module.return_value = mock_tool_module
+        mock_tool_func.__name__ = "test_tool"
+        mock_loader.load_tools.return_value = [mock_tool_func]
 
         # Run
         self.manager.run_server()
 
         # Assertions
         mock_fastmcp_class.assert_called_once_with("MCP Tool Server")
-        mock_importlib.import_module.assert_called_once_with("tools.cat_a.tool_x")
-        mock_mcp.tool.assert_called_once()
-        mock_decorator.assert_called_once_with(mock_tool_func)
+        mock_loader.load_tools.assert_called_once()
+        mock_mcp.add_tool.assert_called_once_with(mock_tool_func)
         mock_mcp.run.assert_called_once()
 
 if __name__ == "__main__":
