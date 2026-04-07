@@ -20,7 +20,6 @@ Create `agents/<agent_id>/agent.json`. Follow the patterns from `agents/main/age
 Create the following files under `agents/<agent_id>/`:
 - **SOUL.md**: Defines who the agent is (persona, tone, boundaries). It ensures the agent acts as a consistent partner rather than a generic bot.
 - **AGENTS.md**: Defines how the agent operates. It contains operating instructions, rules, and priorities for the session.
-- **IDENTITY.md**: A lightweight file storing the agent’s name, ID, and role label.
 - **USER.md**: Stores information about the human user and how the agent should address them.
 
 ### 4. Create Obsidian Vault Folders
