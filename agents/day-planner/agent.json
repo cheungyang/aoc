@@ -1,0 +1,27 @@
+{
+  "agent_id": "day-planner",
+  "name": "Daisy",
+  "emoji": "🌼",
+  "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
+  "model": "gemini-3-flash-preview",
+  "tools": {
+    "git": {
+      "pkm": [
+        "pull",
+        "log"
+      ]
+    },
+    "obsidian": {
+      "pkm-oc": [
+        "agent-scoped"
+      ],
+      "pkm": [
+        "read"
+      ]
+    }
+  },
+  "skills": [
+    "obsidian",
+    "git"
+  ]
+}

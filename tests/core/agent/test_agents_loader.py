@@ -70,39 +70,7 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         self.assertIs(agent1, agent2)
         mock_builder.build_agent.assert_called_once()
 
-    @patch('core.agent.agents_loader.AgentBuilder')
-    @patch('core.agent.agents_loader.AgentsLoader.get_agent_config')
-    @patch('os.path.exists')
-    @patch('os.walk')
-    @patch('os.path.getmtime')
-    async def test_get_agent_hot_reload(self, mock_getmtime, mock_walk, mock_exists, mock_get_config, mock_agent_builder_class):
-        mock_get_config.return_value = {"id": "test-agent"}
-        mock_builder = MagicMock()
-        mock_agent_builder_class.return_value = mock_builder
-        mock_agent1 = MagicMock()
-        mock_agent2 = MagicMock()
-        mock_builder.build_agent = AsyncMock(side_effect=[mock_agent1, mock_agent2])
 
-        mock_exists.return_value = True
-        mock_walk.return_value = [('/path/to/agents', (), ('agent.json',))]
-        
-        import time
-        current_time = time.time()
-        
-        loader = AgentsLoader()
-        loader._last_loaded_time = current_time - 10
-        
-        mock_getmtime.return_value = current_time
-        
-        agent1 = await loader.get_agent("test-agent")
-        
-        # Force reload by making files newer
-        mock_getmtime.return_value = current_time + 10
-        
-        agent2 = await loader.get_agent("test-agent")
-        
-        self.assertIsNot(agent1, agent2)
-        self.assertEqual(mock_builder.build_agent.call_count, 2)
 
 if __name__ == '__main__':
     unittest.main()

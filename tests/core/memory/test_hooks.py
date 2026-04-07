@@ -24,7 +24,7 @@ class TestHooks(unittest.IsolatedAsyncioTestCase):
 
         result = await hooks.hook_pre_message(mock_message, mock_bot)
 
-        self.assertIsNone(result)
+        self.assertEqual(result, "STOP")
         mock_manager.archive_session.assert_called_once_with("session1")
         mock_message.channel.send.assert_called_once_with("Session context cleared. Archived")
 

@@ -1,24 +1,23 @@
 ---
 name: git
-description: Perform advanced git operations (log, branch, status, revert, diff, commit, pull, push). Use when user asks for any git repository task.
+description: Perform git operations (pull, push, log) with scoped permissions. Use when user asks for any git repository task.
 ---
 ## Available scripts
-- **`scripts/git.py`** — Executes a git command in the specified directory safely.
+- **`tools/git.py`** — Executes git operations (pull, push, log) with scoped permissions.
+
+**Command:**
+`git(action="pull", path="pkm-oc", agent_id="<agent_id>")`
 
 ## Workflow
-To execute advanced git operations, use the `git_command` tool wrapper which executes the underlying bundled script.
+To execute git operations, use the `git` tool. Permissions are checked against the agent's allowlist in `agent.json`.
 
 Guidelines:
-1. **Target Path**: Always specify the `path` argument relative to the workspace root (e.g., `./agents/concierge` or `.`).
-2. **Command Args**: Pass the git command arguments (excluding the "git" binary) to the `args` parameter.
+1. **Action**: Choose from `pull`, `push`, `log`.
+2. **Path**: Specify the path where the operation should be performed.
+3. **Agent ID**: Pass your `agent_id` to verify permissions.
+4. **Message**: Required for `push` action (used as commit message).
 
-Common Usage Examples (passed to `git_command` tool):
-- **Check Status**: `git_command(args="status")`
-- **View Log**: `git_command(args="log -n 5")`
-- **View Diff**: `git_command(args="diff")`
-- **List Branches**: `git_command(args="branch -a")`
-- **Pull code**: `git_command(args="pull origin main")`
-- **Commit**: `git_command(args="commit -m 'your message'")`
-- **Push**: `git_command(args="push origin main")`
-
-Note: The underlying script handles shlex safe splitting.
+Common Usage Examples:
+- **Check Log**: `git(action="log", path="pkm-oc", agent_id="agent-designer")`
+- **Pull Code**: `git(action="pull", path="pkm-oc", agent_id="agent-designer")`
+- **Push Code**: `git(action="push", path="pkm-oc", agent_id="agent-designer", message="feat: add new feature")`

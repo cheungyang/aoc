@@ -9,7 +9,6 @@
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "model": "gemini-3.1-pro-preview",
   "tools": {
-    "git_command": {},
     "obsidian": {
       "pkm-oc": [
         "agent-scoped"
