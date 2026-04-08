@@ -6,7 +6,7 @@ def skill_prompt_hook(current_prompt, **kwargs):
     skills_loader = SkillsLoader()
     skills_instructions = skills_loader.get_skill_prompt(allowed_skills=allowed_skills)
     
-    updated_prompt = current_prompt + f"\n\nFollowing are instructions for available skills:\n{skills_instructions}"
+    updated_prompt = f"\nFollowing are instructions for available skills:\n{skills_instructions}\n\n" + current_prompt
     return updated_prompt
 
 def register_hooks():

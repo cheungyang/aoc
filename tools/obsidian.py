@@ -104,7 +104,20 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
                          full_p = os.path.join(root, file)
                          rel_p = os.path.relpath(full_p, vault_path)
                          results.append(rel_p)
-            return "\n".join(results)
+                         
+            total_results = len(results)
+            N = 50
+            
+            if not search_term and total_results > N:
+                return f"Error: Too many results ({total_results}). Please provide a search term to narrow down."
+                
+            if search_term:
+                truncated_results = results[:N]
+                output = "\n".join(truncated_results)
+                output += f"\nshow {len(truncated_results)} out of {total_results} results"
+                return output
+            else:
+                return "\n".join(results)
             
         else:
             return f"Error: Unknown action '{action}'"

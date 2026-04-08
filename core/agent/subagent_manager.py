@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+import datetime
 import sys
 import os
 
@@ -19,8 +20,8 @@ class SubagentManager:
         return cls._instance
 
     def launch_task(self, agent_id, prompt):
-        random_str = uuid.uuid4().hex[:6]
-        job_id = f"{agent_id}:{random_str}"
+        date_str = datetime.date.today().isoformat()
+        job_id = f"{agent_id}:{date_str}"
         self.tasks[job_id] = {
             "status": "running",
             "result": None,
