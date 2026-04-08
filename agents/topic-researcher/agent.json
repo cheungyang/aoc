@@ -1,0 +1,23 @@
+{
+  "agent_id": "topic-researcher",
+  "description": "Meticulous topic researcher focused on curating high-quality learning sources into Obsidian and NotebookLM.",
+  "emoji": "🔬",
+  "model": "gemini-3-flash-preview",
+  "name": "Ted",
+  "skills": [
+    "obsidian"
+  ],
+  "tools": {
+    "web_search": {},
+    "nlm": {},
+    "obsidian": {
+      "pkm-oc": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "agent-scoped"
+      ]
+    }
+  }
+}

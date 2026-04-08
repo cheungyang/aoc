@@ -11,9 +11,13 @@
   "tools": {
     "obsidian": { "pkm-oc": ["read", "agent-scoped"] },
     "agent_list": {},
-    "agent_call": {}
+    "agent_call": {},
+    "gog": {},
+    "nlm": {}
   },
   "skills": [
-    "obsidian"
+    "obsidian",
+    "google_calendar",
+    "notebooklm"
   ]
 }
