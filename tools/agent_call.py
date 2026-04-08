@@ -6,7 +6,6 @@ async def agent_call(
     action: str,
     agent_id: str = None,
     prompt: str = None,
-    session_id: str = None,
     job_id: str = None,
     user_input: str = None
 ) -> str:
@@ -14,7 +13,7 @@ async def agent_call(
     Consolidated tool for interacting with subagents.
     
     Supported actions:
-    - 'launch_subagent': Spawns a subagent asynchronously. Requires 'agent_id', 'prompt', 'session_id'.
+    - 'launch_subagent': Spawns a subagent asynchronously. Requires 'agent_id', 'prompt'.
     - 'check_subagent': Checks status and output of a subagent task. Requires 'job_id'.
     - 'update_subagent': Passes user input to a subagent waiting for it. Requires 'job_id', 'user_input'.
     - 'cancel_subagent': Terminates a running subagent task. Requires 'job_id'.
@@ -22,9 +21,9 @@ async def agent_call(
     manager = SubagentManager()
     
     if action == "launch_subagent":
-        if not all([agent_id, prompt, session_id]):
-            return "Error: 'launch_subagent' requires 'agent_id', 'prompt', and 'session_id'."
-        job_id = manager.launch_task(agent_id, prompt, session_id)
+        if not all([agent_id, prompt]):
+            return "Error: 'launch_subagent' requires 'agent_id' and 'prompt'."
+        job_id = manager.launch_task(agent_id, prompt)
         return f"Task launched with job_id: {job_id}"
         
     elif action == "check_subagent":

@@ -16,9 +16,9 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_subagent_manager.return_value = mock_manager
         mock_manager.launch_task.return_value = "job_123"
         
-        result = await agent_call.ainvoke({"action": "launch_subagent", "agent_id": "agent1", "prompt": "hello", "session_id": "sess1"})
+        result = await agent_call.ainvoke({"action": "launch_subagent", "agent_id": "agent1", "prompt": "hello"})
         
-        mock_manager.launch_task.assert_called_once_with("agent1", "hello", "sess1")
+        mock_manager.launch_task.assert_called_once_with("agent1", "hello")
         self.assertEqual(result, "Task launched with job_id: job_123")
 
     @patch('tools.agent_call.SubagentManager')

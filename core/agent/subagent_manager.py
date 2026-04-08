@@ -18,9 +18,9 @@ class SubagentManager:
             cls._instance.tasks = {} # job_id -> {status, result, question, task_obj}
         return cls._instance
 
-    def launch_task(self, agent_id, prompt, session_id):
+    def launch_task(self, agent_id, prompt):
         random_str = uuid.uuid4().hex[:6]
-        job_id = f"{session_id}:{agent_id}:{random_str}"
+        job_id = f"{agent_id}:{random_str}"
         self.tasks[job_id] = {
             "status": "running",
             "result": None,
@@ -29,11 +29,11 @@ class SubagentManager:
         }
         
         # Start background task
-        task = asyncio.create_task(self._run_subagent(job_id, agent_id, prompt, session_id))
+        task = asyncio.create_task(self._run_subagent(job_id, agent_id, prompt))
         self.tasks[job_id]["task_obj"] = task
         return job_id
 
-    async def _run_subagent(self, job_id, agent_id, prompt, session_id):
+    async def _run_subagent(self, job_id, agent_id, prompt):
         try:
             loader = AgentsLoader()
             agent = await loader.get_agent(agent_id)

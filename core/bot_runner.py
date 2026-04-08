@@ -30,6 +30,13 @@ class BotRunner:
         if message.content.startswith("!"):
             await self.bot.process_commands(message)
             return
+            
+        # Handle [new] command to clear session context
+        if message.content.strip() == "[new]":
+            from core.memory.session_message_hook import manager
+            archive_status = manager.archive_session(session_id)
+            await message.channel.send(f"Session context cleared. {archive_status}")
+            return
 
         # Read channel_hosts from agent.json
         from core.agent.agents_loader import AgentsLoader

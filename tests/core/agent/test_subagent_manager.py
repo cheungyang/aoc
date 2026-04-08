@@ -26,7 +26,7 @@ class TestSubagentManager(unittest.IsolatedAsyncioTestCase):
         mock_agent.execute = AsyncMock(return_value="subagent response")
         mock_loader.get_agent = AsyncMock(return_value=mock_agent)
 
-        job_id = self.manager.launch_task("agent-designer", "prompt", "session_id")
+        job_id = self.manager.launch_task("agent-designer", "prompt")
         
         self.assertIsNotNone(job_id)
         
