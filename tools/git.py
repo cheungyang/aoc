@@ -7,10 +7,10 @@ from core.loaders.agents_loader import AgentsLoader
 @tool
 def git(action: str, path: str, agent_id: str, message: str = "") -> str:
     """
-    Perform git operations (pull, push, log) with scoped permissions.
+    Perform git operations (pull, push, log-p) with scoped permissions.
     - pull: git pull -X theirs (merges and prefers remote on conflict)
     - push: git pull -X theirs, git commit -am '<message>', git push
-    - log: git log -n 5
+    - log-p: git log -p <filename>
     Permissions are checked against the agent's allowlist in agent.json.
     """
     if not agent_id:
@@ -82,8 +82,11 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
             
             return f"Push process result:\nPull:\n{pull_output}\nCommit:\n{commit_output}\nPush:\n{push_output}"
             
-        elif action == "log":
-            output, code = run_git_cmd(["log", "-n", "5"], target_path)
+        elif action == "log-p":
+            if os.path.isfile(target_path):
+                output, code = run_git_cmd(["log", "-p", os.path.basename(target_path)], os.path.dirname(target_path))
+            else:
+                output, code = run_git_cmd(["log", "-p"], target_path)
             return f"Log result:\n{output}"
             
         else:

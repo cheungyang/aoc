@@ -13,7 +13,7 @@ class TestGitTool(unittest.TestCase):
     @patch('tools.git.AgentsLoader')
     @patch('tools.git.subprocess.run')
     def test_missing_agent_id(self, mock_run, mock_agents_loader):
-        result = git.func(action="log", path=".", agent_id="")
+        result = git.func(action="log-p", path=".", agent_id="")
         self.assertIn("Error: agent_id is required", result)
 
     @patch('tools.git.AgentsLoader')
@@ -22,7 +22,7 @@ class TestGitTool(unittest.TestCase):
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value.config = None
         
-        result = git.func(action="log", path=".", agent_id="test_agent")
+        result = git.func(action="log-p", path=".", agent_id="test_agent")
         self.assertIn("Error: Configuration not found", result)
 
     @patch('tools.git.AgentsLoader')
@@ -31,7 +31,7 @@ class TestGitTool(unittest.TestCase):
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value.config = {
             "tools": {
-                "git": { "allowed_folder": ["log"] }
+                "git": { "allowed_folder": ["log-p"] }
             }
         }
         
@@ -46,7 +46,7 @@ class TestGitTool(unittest.TestCase):
                 return path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = git.func(action="log", path="/workspace/secret", agent_id="test_agent")
+            result = git.func(action="log-p", path="/workspace/secret", agent_id="test_agent")
             self.assertIn("Error: Agent test_agent does not have permission to access path", result)
 
     @patch('tools.git.AgentsLoader')
@@ -55,7 +55,7 @@ class TestGitTool(unittest.TestCase):
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value.config = {
             "tools": {
-                "git": { "allowed_folder": ["log"] }
+                "git": { "allowed_folder": ["log-p"] }
             }
         }
         
@@ -73,12 +73,12 @@ class TestGitTool(unittest.TestCase):
 
     @patch('tools.git.AgentsLoader')
     @patch('tools.git.subprocess.run')
-    def test_git_log_success(self, mock_run, mock_agents_loader):
+    def test_git_log_p_success(self, mock_run, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value.config = {
             "tools": {
-                "git": { "allowed_folder": ["log"] }
+                "git": { "allowed_folder": ["log-p"] }
             }
         }
         
@@ -97,11 +97,11 @@ class TestGitTool(unittest.TestCase):
                 return path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = git.func(action="log", path="/workspace/allowed_folder", agent_id="test_agent")
+            result = git.func(action="log-p", path="/workspace/allowed_folder", agent_id="test_agent")
             
             self.assertTrue(mock_run.called)
             called_cmd = mock_run.call_args[0][0]
-            self.assertEqual(called_cmd, ["git", "log", "-n", "5"])
+            self.assertEqual(called_cmd, ["git", "log", "-p"])
             self.assertIn("Log result:\nlog output", result)
 
     @patch('tools.git.AgentsLoader')
