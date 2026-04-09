@@ -68,5 +68,30 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
 
 
 
+    @patch('core.loaders.agents_loader.AgentsLoader._load_agents')
+    @patch('os.path.exists')
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_get_agent_prompt(self, mock_file, mock_isdir, mock_listdir, mock_exists, mock_load_agents):
+        mock_load_agents.return_value = None
+        
+        mock_exists.return_value = True
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ['ABOUT.md', 'SOUL.md']
+        
+        file_contents = [
+            "# About\nThis is about.",
+            "# Soul\nThis is soul."
+        ]
+        mocks = [mock_open(read_data=c).return_value for c in file_contents]
+        mock_file.side_effect = mocks
+        
+        loader = AgentsLoader()
+        prompt = loader.get_agent_prompt("test-agent")
+        
+        self.assertIn("<ABOUT>\n# About\nThis is about.\n</ABOUT>", prompt)
+        self.assertIn("<SOUL>\n# Soul\nThis is soul.\n</SOUL>", prompt)
+
 if __name__ == '__main__':
     unittest.main()

@@ -49,10 +49,10 @@ class TestVaultVectorStore(unittest.TestCase):
         self.store.index_vault()
         
         self.mock_embed_instance.embed_documents.assert_called_once()
-        self.mock_collection.add.assert_called_once()
+        self.mock_collection.upsert.assert_called_once()
         
         # Check that documents were split
-        call_args = self.mock_collection.add.call_args[1]
+        call_args = self.mock_collection.upsert.call_args[1]
         self.assertEqual(len(call_args['documents']), 2)
         self.assertEqual(call_args['documents'][0], "content paragraph1")
         self.assertEqual(call_args['documents'][1], "content paragraph2")
@@ -86,8 +86,8 @@ class TestVaultVectorStore(unittest.TestCase):
         
         self.store.index_vault()
         
-        self.mock_collection.add.assert_called_once()
-        call_args = self.mock_collection.add.call_args[1]
+        self.mock_collection.upsert.assert_called_once()
+        call_args = self.mock_collection.upsert.call_args[1]
         
         self.assertEqual(len(call_args['documents']), 3)
         

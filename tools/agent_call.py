@@ -24,15 +24,6 @@ async def agent_call(
         job_id = get_job_id(agent_id)
         response = await agent.execute(prompt, job_id)
         return response
-        
-    # elif action == "check_subagent":
-    #     return "Action 'check_subagent' is working in progress."
-        
-    # elif action == "update_subagent":
-    #     return "Action 'update_subagent' is working in progress."
-        
-    # elif action == "cancel_subagent":
-    #     return "Action 'cancel_subagent' is working in progress."
-        
+
     else:
         return f"Error: Unknown action '{action}'."

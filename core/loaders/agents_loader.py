@@ -50,3 +50,17 @@ class AgentsLoader:
         agent = Agent(agent_id, config)
         self._agents_cache[agent_id] = agent
         return agent
+
+    def get_agent_prompt(self, agent_id):
+        agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
+        agent_path = os.path.join(agents_dir, agent_id)
+
+        prompt_parts = []
+        if os.path.exists(agent_path) and os.path.isdir(agent_path):
+            for file_name in os.listdir(agent_path):
+                if file_name.endswith(".md"):
+                    with open(os.path.join(agent_path, file_name), "r") as f:
+                        content = f.read()
+                    prompt_parts.append(f"<{file_name.replace('.md', '')}>\n{content}\n</{file_name.replace('.md', '')}>")
+        
+        return "\n\n".join(prompt_parts) if prompt_parts else ""

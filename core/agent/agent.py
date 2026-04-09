@@ -42,7 +42,7 @@ class Agent:
         inputs = {"messages": [{"role": role, "content": content}]}
         
         try:
-            print(f"Invoking graph for {agent_id}")
+            print(f"Invoking graph for {self.agent_id}")
             result = await self.graph.ainvoke(inputs, config=config)
         except Exception as e:
             import traceback

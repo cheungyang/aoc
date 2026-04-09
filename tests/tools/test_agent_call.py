@@ -26,19 +26,6 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent.execute.assert_called_once_with("hello", "job_123")
         self.assertEqual(result, "agent response")
 
-    async def test_check_subagent(self):
-        result = await agent_call.ainvoke({"action": "check_subagent", "job_id": "job_123"})
-        self.assertEqual(result, "Action 'check_subagent' is working in progress.")
-
-    async def test_update_subagent(self):
-        result = await agent_call.ainvoke({"action": "update_subagent", "job_id": "job_123", "user_input": "hello"})
-        self.assertEqual(result, "Action 'update_subagent' is working in progress.")
-
-    async def test_cancel_subagent(self):
-        result = await agent_call.ainvoke({"action": "cancel_subagent", "job_id": "job_123"})
-        self.assertEqual(result, "Action 'cancel_subagent' is working in progress.")
-
-
     async def test_invalid_action(self):
         result = await agent_call.ainvoke({"action": "invalid_action"})
         self.assertEqual(result, "Error: Unknown action 'invalid_action'.")

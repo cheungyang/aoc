@@ -7,10 +7,34 @@ from core.loaders.hooks_loader import HooksLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.tools_loader import ToolsLoader
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from core.loaders.skills_loader import SkillsLoader
+from core.loaders.agents_loader import AgentsLoader
+from core.util import get_knowledge_prompt
 
 class GraphBuilder:
     def __init__(self):
         pass
+
+    def _get_prompt_template(self, agent_id):
+        # 1. Agent Prompt
+        agents_loader = AgentsLoader()
+        agent_prompt = agents_loader.get_agent_prompt(agent_id)
+
+        # 2. Skills Prompt
+        skills_loader = SkillsLoader()
+        skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
+
+        # 3. Knowledge Prompt
+        knowledge_str = get_knowledge_prompt()
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", agent_prompt),
+            ("system", skills_prompt),
+            ("system", knowledge_str),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+        return prompt
 
     async def build_graph(self, agent_id, config):
         if config is None:
@@ -22,15 +46,12 @@ class GraphBuilder:
         model_name = config.get("model", "gemini-3-flash-preview")
         
         loader = ToolsLoader()
-        allowed_tools = loader.get_tools(list(config.get("tools", {}).keys()))
+        allowed_tools = loader.get_tools(agent_id=agent_id)
 
-        system_prompt = ""
-        hook_loader = HooksLoader()
-        for hook in hook_loader.system_prompt_hooks:
-            system_prompt = hook(system_prompt, config=config, agent_path=agent_path)
+        prompt = self._get_prompt_template(agent_id)
 
         llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = FlatFileCheckpointer()
-        graph = create_react_agent(llm, allowed_tools, prompt=system_prompt, checkpointer=checkpointer)
+        graph = create_react_agent(llm, allowed_tools, prompt=prompt, checkpointer=checkpointer)
         print(f"New Graph for {agent_id} built")
         return graph

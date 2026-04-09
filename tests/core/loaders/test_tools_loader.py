@@ -13,13 +13,20 @@ class TestToolsLoader(unittest.TestCase):
     def setUp(self):
         ToolsLoader._instance = None # Reset singleton
 
-
-        
     @patch('importlib.import_module')
     @patch('os.listdir')
     @patch('os.path.isdir')
     @patch('os.path.isfile')
     def test_load_tools(self, mock_isfile, mock_isdir, mock_listdir, mock_import):
+        from core.loaders.agents_loader import AgentsLoader
+        
+        # Setup mock for AgentsLoader singleton instance
+        mock_loader = MagicMock()
+        AgentsLoader._instance = mock_loader
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {"tools": {"git": {}}}
+        
         def isdir_side_effect(path):
             if path.endswith("tools"):
                 return True
@@ -46,7 +53,7 @@ class TestToolsLoader(unittest.TestCase):
         
         loader = ToolsLoader()
         loader._discovered_tools = None # Force re-discovery
-        tools = loader.get_tools()
+        tools = loader.get_tools(agent_id="test_agent")
         
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].__name__, "git")

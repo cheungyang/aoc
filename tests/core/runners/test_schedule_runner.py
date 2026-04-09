@@ -81,7 +81,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         # Test _execute_schedule directly
         await runner._execute_schedule(runner.schedules[0])
             
-        expected_cron_id = f"cron:agent1:{datetime.date.today().isoformat()}"
+        expected_cron_id = f"agent1:cron:{datetime.date.today().isoformat()}"
         mock_agent.execute.assert_called_once_with("test prompt", expected_cron_id, channel=mock_channel, role="system")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
@@ -128,7 +128,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner._execute_schedule(runner.schedules[0])
             
-        expected_cron_id = f"cron:agent1:{datetime.date.today().isoformat()}"
+        expected_cron_id = f"agent1:cron:{datetime.date.today().isoformat()}"
         mock_agent.execute.assert_called_once_with("test prompt", expected_cron_id, channel=mock_channel, role="system")
 
 if __name__ == '__main__':

@@ -14,20 +14,30 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
           from core.loaders.hooks_loader import HooksLoader
           HooksLoader._instance = None
  
+     @patch('core.agent.graph_builder.AgentsLoader')
+     @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_success(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class):
+     async def test_build_graph_success(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_agents_loader_class):
          # Setup mocks
          mock_llm_class.return_value = MagicMock()
          mock_create_react.return_value = "MockGraph"
+         
+         mock_agents_loader = MagicMock()
+         mock_agents_loader_class.return_value = mock_agents_loader
+         mock_agents_loader.get_agent_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
          mock_loader = MagicMock()
          mock_tool_loader_class.return_value = mock_loader
          mock_loader.get_tools.return_value = [mock_tool1]
+         
+         mock_skills_loader = MagicMock()
+         mock_skills_loader_class.return_value = mock_skills_loader
+         mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
          
          agent = Agent("main", config={"tools": {"tool1": {}}})
          
@@ -38,45 +48,38 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          self.assertEqual(graph, "MockGraph")
          mock_create_react.assert_called_once_with(mock_llm_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
  
+     @patch('core.agent.graph_builder.AgentsLoader')
+     @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     @patch('os.listdir')
-     @patch('os.path.isdir')
-     @patch('os.path.exists')
-     async def test_build_graph_filtering(self, mock_exists, mock_isdir, mock_listdir, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class):
+     async def test_build_graph_filtering(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_agents_loader_class):
          # Setup mocks
-         mock_isdir.return_value = True
-         mock_exists.return_value = True
-         mock_listdir.return_value = ["SOUL.md", "IDENTITY.md"]
+         mock_loader = MagicMock()
+         mock_agents_loader_class.return_value = mock_loader
+         mock_loader.get_agent_prompt.return_value = "Mock Agent Prompt"
  
-         config_json = '{"name": "TestAgent", "tools": {"tool1": {}}, "skills": ["skill1"]}'
+         mock_tool1 = MagicMock()
+         mock_tool1.name = "tool1"
+         mock_tool_loader = MagicMock()
+         mock_tool_loader_class.return_value = mock_tool_loader
+         mock_tool_loader.get_tools.return_value = [mock_tool1]
          
-         mock_open = unittest.mock.mock_open()
-         mock_open.side_effect = [
-             unittest.mock.mock_open(read_data=config_json).return_value,
-             unittest.mock.mock_open(read_data="# SOUL").return_value,
-             unittest.mock.mock_open(read_data="# IDENTITY").return_value
-         ]
+         mock_skills_loader = MagicMock()
+         mock_skills_loader_class.return_value = mock_skills_loader
+         mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
+         
+         agent = Agent("test_agent", config={"tools": {"tool1": {}}, "skills": ["skill1"]})
  
-         with patch('builtins.open', mock_open):
-             mock_tool1 = MagicMock()
-             mock_tool1.name = "tool1"
-             mock_loader = MagicMock()
-             mock_tool_loader_class.return_value = mock_loader
-             mock_loader.get_tools.return_value = [mock_tool1]
-             
-             agent = Agent("test_agent", config={"tools": {"tool1": {}}, "skills": ["skill1"]})
+         graph = await agent._build_graph()
  
-             graph = await agent._build_graph()
- 
-             mock_create_react.assert_called_once_with(
-                 unittest.mock.ANY, 
-                 [mock_tool1],
-                 prompt=unittest.mock.ANY, 
-                 checkpointer=unittest.mock.ANY
-             )
+         mock_create_react.assert_called_once_with(
+             unittest.mock.ANY, 
+             [mock_tool1],
+             prompt=unittest.mock.ANY, 
+             checkpointer=unittest.mock.ANY
+         )
 
             
 

@@ -17,45 +17,87 @@ class TestSkillsLoader(unittest.TestCase):
     @patch('core.loaders.skills_loader.os.path.isdir')
     @patch('core.loaders.skills_loader.os.listdir')
     @patch('core.loaders.skills_loader.os.path.isfile')
-    def test_load_skills_success(self, mock_isfile, mock_listdir, mock_isdir):
-        # Setup mocks
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_skills_overview(self, mock_agents_loader, mock_isfile, mock_listdir, mock_isdir):
         mock_isdir.return_value = True
         mock_listdir.return_value = ['dummy_skill']
         mock_isfile.return_value = True
         
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["dummy_skill"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+        
         skill_content = """---
 name: Dummy
+description: This is a dummy skill.
 ---
 Body content of skill.
 """
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
-            result = self.loader.get_skill_prompt()
+            result = self.loader.get_skills_overview('agent_1')
 
-        self.assertIn("### Skill: dummy_skill", result)
-        self.assertIn("Body content of skill.", result)
+        self.assertIn("<skills_list>", result)
+        self.assertIn("- Dummy: This is a dummy skill.", result)
+        self.assertIn("</skills_list>", result)
 
     @patch('core.loaders.skills_loader.os.path.isdir')
     @patch('core.loaders.skills_loader.os.listdir')
     @patch('core.loaders.skills_loader.os.path.isfile')
-    def test_load_skills_filtered(self, mock_isfile, mock_listdir, mock_isdir):
-        # Setup mocks
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_skill_prompt(self, mock_agents_loader, mock_isfile, mock_listdir, mock_isdir):
         mock_isdir.return_value = True
-        mock_listdir.return_value = ['skill1', 'skill2']
+        mock_listdir.return_value = ['dummy_skill']
         mock_isfile.return_value = True
+        
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["dummy_skill"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
         
         skill_content = """---
 name: Dummy
+description: This is a dummy skill.
 ---
 Body content of skill.
 """
         
+        self.loader.skills_cache['dummy_skill'] = {
+            "name": "Dummy",
+            "description": "This is a dummy skill.",
+            "path": "skills/dummy_skill/SKILL.md"
+        }
+        
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
-            # Only allow skill1
-            result = self.loader.get_skill_prompt(allowed_skills=['skill1'])
+            result = self.loader.get_skill_prompt('agent_1', 'dummy_skill')
 
-        self.assertIn("### Skill: skill1", result)
-        self.assertNotIn("### Skill: skill2", result)
+        self.assertIn("<skill>", result)
+        self.assertIn("Body content of skill.", result)
+        self.assertIn("</skill>", result)
+
+    @patch('core.loaders.skills_loader.os.path.isdir')
+    @patch('core.loaders.skills_loader.os.listdir')
+    @patch('core.loaders.skills_loader.os.path.isfile')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_skills_overview_filtered(self, mock_agents_loader, mock_isfile, mock_listdir, mock_isdir):
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ['skill1', 'skill2']
+        mock_isfile.return_value = True
+        
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["skill1"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+        
+        skill_content = """---
+name: Dummy
+description: Desc
+---
+Body content.
+"""
+        
+        with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
+            result = self.loader.get_skills_overview('agent_1')
+
+        self.assertIn("- Dummy: Desc", result)
 
 if __name__ == "__main__":
     unittest.main()

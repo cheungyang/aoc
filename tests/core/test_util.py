@@ -37,5 +37,17 @@ class TestUtil(unittest.TestCase):
         chunks = split_message(None)
         self.assertEqual(chunks, [])
 
+    def test_get_knowledge_prompt(self):
+        from core.util import get_knowledge_prompt
+        import datetime
+        
+        prompt = get_knowledge_prompt()
+        self.assertIn("<common_knowledge>", prompt)
+        self.assertIn("Today's Date:", prompt)
+        
+        now = datetime.datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        self.assertIn(date_str, prompt)
+
 if __name__ == "__main__":
     unittest.main()

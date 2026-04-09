@@ -40,16 +40,25 @@ class ToolsLoader:
         self._discovered_tools = discovered
         return discovered
 
-    def get_tools(self, allowed_tool_names=None):
-        """Loads and returns all tool functions."""
+    def get_tools(self, agent_id: str):
+        """Loads and returns all tool functions for a specific agent."""
+        from core.loaders.agents_loader import AgentsLoader
+        agent = AgentsLoader().get_agent(agent_id)
+        config = agent.config
+        allowed_tool_names = list(config.get("tools", {}).keys())
+        
+        # Auto-include load_skill if agent has skills
+        if config.get("skills"):
+            if "load_skill" not in allowed_tool_names:
+                allowed_tool_names.append("load_skill")
+                
         discovered = self._discover_tools()
         tools = []
         loaded_names = []
         for tool_name, folder in discovered.items():
-            # Filter tools based on allowed_tools
-            if allowed_tool_names is not None and tool_name not in allowed_tool_names:
+            if tool_name not in allowed_tool_names:
                 continue
-
+ 
             if folder:
                 module_path = f"tools.{folder}.{tool_name}"
             else:
@@ -62,8 +71,8 @@ class ToolsLoader:
                     loaded_names.append(tool_name)
             except Exception as e:
                 print(f"Failed to load tool {tool_name} from {module_path}: {e}", file=sys.stderr)
-        
-        print(f"Loaded {len(tools)} tools: {loaded_names}")
+         
+        print(f"Loaded {len(tools)} tools for {agent_id}: {loaded_names}")
         return tools    
         
 
