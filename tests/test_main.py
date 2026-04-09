@@ -6,9 +6,15 @@ import main
 
 class TestMain(unittest.IsolatedAsyncioTestCase):
 
+    @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')
     @patch('main.BotsLoader')
-    async def test_run_bots(self, mock_bots_loader_class, mock_agents_loader):
+    async def test_run_bots(self, mock_bots_loader_class, mock_agents_loader, mock_schedule_runner_class):
+        # Mock ScheduleRunner
+        mock_schedule_runner = MagicMock()
+        mock_schedule_runner.start = AsyncMock()
+        mock_schedule_runner_class.return_value = mock_schedule_runner
+        
         # Mock AgentsLoader instance
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
@@ -34,9 +40,15 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         # Should call run_bot only for agent1
         mock_runner_instance.run_bot.assert_awaited_once()
 
+    @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')
     @patch('main.BotsLoader')
-    async def test_run_bots_no_agents(self, mock_bots_loader, mock_agents_loader):
+    async def test_run_bots_no_agents(self, mock_bots_loader, mock_agents_loader, mock_schedule_runner_class):
+        # Mock ScheduleRunner
+        mock_schedule_runner = MagicMock()
+        mock_schedule_runner.start = AsyncMock()
+        mock_schedule_runner_class.return_value = mock_schedule_runner
+        
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
         mock_loader_instance.list_agent_ids.return_value = []

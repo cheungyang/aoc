@@ -23,5 +23,12 @@
   "skills": [
     "obsidian",
     "git"
+  ],
+  "schedules": [
+    {
+      "cron": "* * * * *",
+      "prompt": "What is the current time?",
+      "channel": "general-aoc"
+    }
   ]
 }

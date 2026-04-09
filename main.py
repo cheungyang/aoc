@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from core.loaders.bots_loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
+from core.runners.schedule_runner import ScheduleRunner
 import asyncio
 
 # Load environment variables
@@ -23,6 +24,9 @@ async def run_bots():
         bot = bots_loader.get_bot(agent_id)
         if bot:
             tasks.append(bot.run_bot())
+            
+    schedule_runner = ScheduleRunner()
+    tasks.append(schedule_runner.start())
             
     if tasks:
         await asyncio.gather(*tasks)

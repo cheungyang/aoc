@@ -98,5 +98,43 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
         mock_bot.start.assert_called_once_with("test_token")
 
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_long_reply(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        
+        mock_message = MagicMock()
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
+        mock_message.content = "Hello bot"
+        mock_message.mentions = [runner.bot.user]
+        mock_message.channel.send = AsyncMock()
+        
+        # Mock channel.typing context manager
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+        
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": []}
+        long_response = "a" * 4500
+        mock_agent.execute = AsyncMock(return_value=long_response)
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+ 
+        self.assertEqual(mock_message.channel.send.call_count, 3)
+        total_len = sum(len(call.args[0]) for call in mock_message.channel.send.call_args_list)
+        self.assertEqual(total_len, 4500)
+
 if __name__ == "__main__":
     unittest.main()

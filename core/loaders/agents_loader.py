@@ -41,7 +41,6 @@ class AgentsLoader:
 
     def get_agent(self, agent_id):  
         if agent_id in self._agents_cache:
-            print(f"Serving cached agent: {agent_id}")
             return self._agents_cache[agent_id]
             
         config = self._agent_configs.get(agent_id)
