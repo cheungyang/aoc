@@ -75,5 +75,29 @@ class TestVaultVectorStore(unittest.TestCase):
         self.assertEqual(results[0]['content'], 'result content')
         self.assertEqual(results[0]['distance'], 0.1)
 
+    @patch('os.walk')
+    @patch('builtins.open', new_callable=mock_open, read_data="---\ntitle: Test File\n---\n#a/tag1 #p/tag2\n🔺 Priority High\n- [ ] Task 1\n- [ ] Task 2\n\nParagraph 1 after tasks.")
+    def test_index_vault_with_extraction(self, mock_file, mock_walk):
+        mock_walk.return_value = [
+            (self.vault_dir, [], ['file2.md'])
+        ]
+        
+        self.mock_embed_instance.embed_documents.return_value = [[0.1], [0.2], [0.3]]
+        
+        self.store.index_vault()
+        
+        self.mock_collection.add.assert_called_once()
+        call_args = self.mock_collection.add.call_args[1]
+        
+        self.assertEqual(len(call_args['documents']), 3)
+        
+        self.assertIn("File Summary for file2.md", call_args['documents'][0])
+        self.assertIn("Tags: a/tag1, p/tag2", call_args['documents'][0])
+        self.assertIn("Priorities: Highest", call_args['documents'][0])
+        self.assertIn("Tasks:\n- Task 1\n- Task 2", call_args['documents'][0])
+        
+        self.assertEqual(call_args['metadatas'][0]['tags'], "a/tag1,p/tag2")
+        self.assertEqual(call_args['metadatas'][0]['priority'], "Highest")
+
 if __name__ == '__main__':
     unittest.main()

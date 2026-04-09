@@ -24,6 +24,7 @@ class DebugLogHandler(BaseCallbackHandler):
     def on_tool_start(self, serialized, input_str, **kwargs):
         tool_name = serialized.get("name", "Unknown")
         self._log(f"--- TOOL START --- Tool: {tool_name} | Params: {input_str}")
+        print(f"Tool: {tool_name} | Params: {input_str}")
 
     def on_tool_end(self, output, **kwargs):
         self._log(f"--- TOOL END --- Tool Output (truncated 200 chars): {str(output)[:200]}")
