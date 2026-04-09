@@ -1,5 +1,6 @@
 from langchain_core.tools import tool
-from core.agent.subagent_manager import SubagentManager
+from core.loaders.agents_loader import AgentsLoader
+from core.util import get_job_id
 
 @tool
 async def agent_call(
@@ -18,40 +19,23 @@ async def agent_call(
     - 'update_subagent': Passes user input to a subagent waiting for it. Requires 'job_id', 'user_input'.
     - 'cancel_subagent': Terminates a running subagent task. Requires 'job_id'.
     """
-    manager = SubagentManager()
-    
     if action == "launch_subagent":
         if not all([agent_id, prompt]):
             return "Error: 'launch_subagent' requires 'agent_id' and 'prompt'."
-        job_id = manager.launch_task(agent_id, prompt)
-        return f"Task launched with job_id: {job_id}"
+        loader = AgentsLoader()
+        agent = loader.get_agent(agent_id)
+        job_id = get_job_id(agent_id)
+        response = await agent.execute(prompt, job_id)
+        return response
         
     elif action == "check_subagent":
-        if not job_id:
-            return "Error: 'check_subagent' requires 'job_id'."
-        result = manager.check_task(job_id)
-        status = result.get("status")
-        res = result.get("result")
-        question = result.get("question")
-        
-        output = f"Status: {status}"
-        if res:
-            output += f"\nResult: {res}"
-        if question:
-            output += f"\nQuestion for user: {question}"
-        return output
+        return "Action 'check_subagent' is working in progress."
         
     elif action == "update_subagent":
-        if not all([job_id, user_input]):
-            return "Error: 'update_subagent' requires 'job_id' and 'user_input'."
-        result = manager.update_task(job_id, user_input)
-        return f"Update status: {result}"
+        return "Action 'update_subagent' is working in progress."
         
     elif action == "cancel_subagent":
-        if not job_id:
-            return "Error: 'cancel_subagent' requires 'job_id'."
-        result = manager.cancel_task(job_id)
-        return f"Cancel status: {result}"
+        return "Action 'cancel_subagent' is working in progress."
         
     else:
         return f"Error: Unknown action '{action}'."

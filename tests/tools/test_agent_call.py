@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import os
 import sys
 
@@ -10,54 +10,34 @@ from tools.agent_call import agent_call
 
 class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
-    @patch('tools.agent_call.SubagentManager')
-    async def test_launch_subagent(self, mock_subagent_manager):
-        mock_manager = MagicMock()
-        mock_subagent_manager.return_value = mock_manager
-        mock_manager.launch_task.return_value = "job_123"
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('tools.agent_call.get_job_id')
+    async def test_launch_subagent(self, mock_get_job_id, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.execute = AsyncMock(return_value="agent response")
+        mock_get_job_id.return_value = "job_123"
         
         result = await agent_call.ainvoke({"action": "launch_subagent", "agent_id": "agent1", "prompt": "hello"})
         
-        mock_manager.launch_task.assert_called_once_with("agent1", "hello")
-        self.assertEqual(result, "Task launched with job_id: job_123")
+        mock_loader.get_agent.assert_called_once_with("agent1")
+        mock_agent.execute.assert_called_once_with("hello", "job_123")
+        self.assertEqual(result, "agent response")
 
-    @patch('tools.agent_call.SubagentManager')
-    async def test_check_subagent(self, mock_subagent_manager):
-        mock_manager = MagicMock()
-        mock_subagent_manager.return_value = mock_manager
-        mock_manager.check_task.return_value = {
-            "status": "completed",
-            "result": "success",
-            "question": None
-        }
-        
+    async def test_check_subagent(self):
         result = await agent_call.ainvoke({"action": "check_subagent", "job_id": "job_123"})
-        
-        mock_manager.check_task.assert_called_once_with("job_123")
-        self.assertIn("Status: completed", result)
-        self.assertIn("Result: success", result)
+        self.assertEqual(result, "Action 'check_subagent' is working in progress.")
 
-    @patch('tools.agent_call.SubagentManager')
-    async def test_update_subagent(self, mock_subagent_manager):
-        mock_manager = MagicMock()
-        mock_subagent_manager.return_value = mock_manager
-        mock_manager.update_task.return_value = "Updated"
-        
+    async def test_update_subagent(self):
         result = await agent_call.ainvoke({"action": "update_subagent", "job_id": "job_123", "user_input": "hello"})
-        
-        mock_manager.update_task.assert_called_once_with("job_123", "hello")
-        self.assertEqual(result, "Update status: Updated")
+        self.assertEqual(result, "Action 'update_subagent' is working in progress.")
 
-    @patch('tools.agent_call.SubagentManager')
-    async def test_cancel_subagent(self, mock_subagent_manager):
-        mock_manager = MagicMock()
-        mock_subagent_manager.return_value = mock_manager
-        mock_manager.cancel_task.return_value = "Cancelled"
-        
+    async def test_cancel_subagent(self):
         result = await agent_call.ainvoke({"action": "cancel_subagent", "job_id": "job_123"})
-        
-        mock_manager.cancel_task.assert_called_once_with("job_123")
-        self.assertEqual(result, "Cancel status: Cancelled")
+        self.assertEqual(result, "Action 'cancel_subagent' is working in progress.")
+
 
     async def test_invalid_action(self):
         result = await agent_call.ainvoke({"action": "invalid_action"})

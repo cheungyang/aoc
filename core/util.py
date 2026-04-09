@@ -1,4 +1,5 @@
 import discord
+import datetime
 
 def get_session_id(message):
     platform = "discord"
@@ -36,3 +37,9 @@ def split_message(text, limit=2000):
     if text:
         chunks.append(text)
     return chunks
+
+
+def get_job_id(agent_id):
+    date_str = datetime.date.today().isoformat()
+    return f"{agent_id}:{date_str}"
+
