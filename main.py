@@ -1,8 +1,7 @@
 import os
 from dotenv import load_dotenv
-
-from core.bot_runner import BotRunner
-from core.agent.agents_loader import AgentsLoader
+from core.loaders.bots_loader import BotsLoader
+from core.loaders.agents_loader import AgentsLoader
 import asyncio
 
 # Load environment variables
@@ -14,24 +13,16 @@ if not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
     print("Warning: GEMINI_API_KEY not set or using placeholder. Please set it in .env")
 
 async def run_bots():
-    loader = AgentsLoader()
-    agent_ids = loader.list_agent_ids()
+    agents_loader = AgentsLoader()
+    bots_loader = BotsLoader()
+    
+    agent_ids = agents_loader.list_agent_ids()
     
     tasks = []
     for agent_id in agent_ids:
-        agent = loader.get_agent(agent_id)
-        config = agent.config
-        token_key = config.get("discord_token_key")
-        if token_key:
-            token = os.getenv(token_key)
-            if token and token != "your_discord_bot_token_here":
-                print(f"Starting bot for agent {agent_id} with token from {token_key}")
-                runner = BotRunner(token, agent_id)
-                tasks.append(runner.run_bot())
-            else:
-                print(f"Skipping agent {agent_id}: Token key {token_key} not found or invalid in env.")
-        else:
-            print(f"Skipping agent {agent_id}: No discord_token_key defined.")
+        bot = bots_loader.get_bot(agent_id)
+        if bot:
+            tasks.append(bot.run_bot())
             
     if tasks:
         await asyncio.gather(*tasks)

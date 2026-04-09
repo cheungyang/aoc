@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from .agent import Agent
+from core.agent.agent import Agent
 
 class AgentsLoader:
     _instance = None

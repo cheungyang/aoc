@@ -16,9 +16,11 @@ class TestObsidianTool(unittest.TestCase):
     def test_read_with_path(self, mock_file, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_agent = MagicMock()
+        mock_agent.config = {
             "tools": { "obsidian": { "pkm-oc": ["read"] } }
         }
+        mock_loader.get_agent.return_value = mock_agent
         mock_exists.return_value = True # File exists
         
         with patch('os.path.abspath') as mock_abspath:
@@ -37,9 +39,11 @@ class TestObsidianTool(unittest.TestCase):
     def test_read_with_args_fallback(self, mock_file, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_agent = MagicMock()
+        mock_agent.config = {
             "tools": { "obsidian": { "pkm-oc": ["read"] } }
         }
+        mock_loader.get_agent.return_value = mock_agent
         mock_exists.return_value = True # File exists
         
         with patch('os.path.abspath') as mock_abspath:
@@ -60,9 +64,11 @@ class TestObsidianTool(unittest.TestCase):
     def test_search_no_term_too_many_results(self, mock_walk, mock_isdir, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_agent = MagicMock()
+        mock_agent.config = {
             "tools": { "obsidian": { "pkm-oc": ["read"] } }
         }
+        mock_loader.get_agent.return_value = mock_agent
         mock_exists.return_value = True
         mock_isdir.return_value = True
         
@@ -83,9 +89,11 @@ class TestObsidianTool(unittest.TestCase):
     def test_search_with_term_limit_results(self, mock_walk, mock_isdir, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_agent = MagicMock()
+        mock_agent.config = {
             "tools": { "obsidian": { "pkm-oc": ["read"] } }
         }
+        mock_loader.get_agent.return_value = mock_agent
         mock_exists.return_value = True
         mock_isdir.return_value = True
         

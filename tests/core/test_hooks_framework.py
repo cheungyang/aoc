@@ -6,13 +6,13 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.hook_loader import HookLoader
+from core.loaders.hooks_loader import HooksLoader
 
 class TestHooksFramework(unittest.TestCase):
 
     def setUp(self):
-        HookLoader._instance = None
-        self.loader = HookLoader()
+        HooksLoader._instance = None
+        self.loader = HooksLoader()
         
         # Create temporary dummy hook in core
         self.dummy_dir = "core/dummy_test_hook"

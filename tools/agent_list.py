@@ -1,4 +1,4 @@
-from core.agent.agents_loader import AgentsLoader
+from core.loaders.agents_loader import AgentsLoader
 from langchain_core.tools import tool
 
 @tool

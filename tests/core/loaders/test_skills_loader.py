@@ -4,9 +4,9 @@ import os
 import sys
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.skills_loader import SkillsLoader
+from core.loaders.skills_loader import SkillsLoader
 
 class TestSkillsLoader(unittest.TestCase):
 
@@ -14,9 +14,9 @@ class TestSkillsLoader(unittest.TestCase):
         SkillsLoader._instance = None
         self.loader = SkillsLoader()
 
-    @patch('core.skills_loader.os.path.isdir')
-    @patch('core.skills_loader.os.listdir')
-    @patch('core.skills_loader.os.path.isfile')
+    @patch('core.loaders.skills_loader.os.path.isdir')
+    @patch('core.loaders.skills_loader.os.listdir')
+    @patch('core.loaders.skills_loader.os.path.isfile')
     def test_load_skills_success(self, mock_isfile, mock_listdir, mock_isdir):
         # Setup mocks
         mock_isdir.return_value = True
@@ -29,15 +29,15 @@ name: Dummy
 Body content of skill.
 """
         
-        with patch('core.skills_loader.open', mock_open(read_data=skill_content)):
+        with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
             result = self.loader.get_skill_prompt()
 
         self.assertIn("### Skill: dummy_skill", result)
         self.assertIn("Body content of skill.", result)
 
-    @patch('core.skills_loader.os.path.isdir')
-    @patch('core.skills_loader.os.listdir')
-    @patch('core.skills_loader.os.path.isfile')
+    @patch('core.loaders.skills_loader.os.path.isdir')
+    @patch('core.loaders.skills_loader.os.listdir')
+    @patch('core.loaders.skills_loader.os.path.isfile')
     def test_load_skills_filtered(self, mock_isfile, mock_listdir, mock_isdir):
         # Setup mocks
         mock_isdir.return_value = True
@@ -50,7 +50,7 @@ name: Dummy
 Body content of skill.
 """
         
-        with patch('core.skills_loader.open', mock_open(read_data=skill_content)):
+        with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
             # Only allow skill1
             result = self.loader.get_skill_prompt(allowed_skills=['skill1'])
 

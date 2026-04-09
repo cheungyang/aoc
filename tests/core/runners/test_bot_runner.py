@@ -6,11 +6,11 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.bot_runner import BotRunner
+from core.runners.bot_runner import BotRunner
 
 class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
-    @patch('core.bot_runner.commands.Bot')
+    @patch('core.runners.bot_runner.commands.Bot')
     def test_init_registers_events(self, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot_class.return_value = mock_bot
@@ -22,7 +22,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
 
-    @patch('core.bot_runner.commands.Bot')
+    @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_ready(self, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
@@ -33,8 +33,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Verify it runs without error
         await runner.on_ready()
 
-    @patch('core.bot_runner.commands.Bot')
-    @patch('core.agent.agents_loader.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_on_message_ignores_self(self, mock_agents_loader_class, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
@@ -51,8 +51,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Should return immediately without doing anything
         mock_agents_loader_class.assert_not_called()
 
-    @patch('core.agent.agents_loader.AgentsLoader')
-    @patch('core.bot_runner.commands.Bot')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_message_delegates(self, mock_bot_class, mock_agents_loader_class):
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()
@@ -67,20 +67,22 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.author.bot = False
         mock_message.content = "Hello bot"
         mock_message.mentions = [runner.bot.user]
+        mock_message.channel.send = AsyncMock()
         
         # Mock AgentsLoader and dynamic Agent
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
-        mock_agent.process_message = AsyncMock()
-        mock_loader.get_agent = AsyncMock(return_value=mock_agent)
+        mock_agent.config = {"channel_hosts": []}
+        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
 
-        mock_loader.get_agent.assert_called_once_with("main")
-        mock_agent.process_message.assert_called_once_with(mock_message, runner.bot)
+        mock_loader.get_agent.assert_called_with("main")
+        mock_agent.execute.assert_called_once()
 
-    @patch('core.bot_runner.commands.Bot')
+    @patch('core.runners.bot_runner.commands.Bot')
     async def test_run_bot_success(self, mock_bot_class):
         
         # Bot mock

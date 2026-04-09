@@ -11,10 +11,10 @@ from core.agent.agent import Agent
 class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
  
      def setUp(self):
-          from core.hook_loader import HookLoader
-          HookLoader._instance = None
+          from core.loaders.hooks_loader import HooksLoader
+          HooksLoader._instance = None
  
-     @patch('core.agent.graph_builder.ToolLoader')
+     @patch('core.agent.graph_builder.ToolsLoader')
      @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
@@ -38,7 +38,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          self.assertEqual(graph, "MockGraph")
          mock_create_react.assert_called_once_with(mock_llm_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
  
-     @patch('core.agent.graph_builder.ToolLoader')
+     @patch('core.agent.graph_builder.ToolsLoader')
      @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')

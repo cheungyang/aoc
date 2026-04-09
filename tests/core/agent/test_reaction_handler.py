@@ -10,7 +10,7 @@ from core.agent.reaction_handler import ReactionCallbackHandler
 
 class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
-    @patch('core.agent.agents_loader.AgentsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_on_tool_start_delegation(self, mock_agents_loader_class):
         mock_agents_loader = MagicMock()
         mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
@@ -28,7 +28,7 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
         mock_message.add_reaction.assert_called_once_with("🤖")
 
-    @patch('core.agent.agents_loader.AgentsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_on_tool_start_single_quotes(self, mock_agents_loader_class):
         mock_agents_loader = MagicMock()
         mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
@@ -46,7 +46,7 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
         mock_message.add_reaction.assert_called_once_with("🤖")
 
-    @patch('core.agent.agents_loader.AgentsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_on_tool_start_other_action(self, mock_agents_loader_class):
         mock_message = MagicMock()
         mock_message.add_reaction = AsyncMock()

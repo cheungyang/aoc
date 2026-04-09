@@ -6,12 +6,12 @@ from unittest.mock import patch, MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.tool_loader import ToolLoader
+from core.loaders.tools_loader import ToolsLoader
 
 
-class TestToolLoader(unittest.TestCase):
+class TestToolsLoader(unittest.TestCase):
     def setUp(self):
-        ToolLoader._instance = None # Reset singleton
+        ToolsLoader._instance = None # Reset singleton
 
 
         
@@ -44,7 +44,7 @@ class TestToolLoader(unittest.TestCase):
         setattr(mock_module, "git", mock_func)
         mock_import.return_value = mock_module
         
-        loader = ToolLoader()
+        loader = ToolsLoader()
         loader._discovered_tools = None # Force re-discovery
         tools = loader.get_tools()
         

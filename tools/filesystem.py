@@ -1,6 +1,6 @@
 import os
 from langchain_core.tools import tool
-from core.agent.agents_loader import AgentsLoader
+from core.loaders.agents_loader import AgentsLoader
 
 @tool
 def filesystem(action: str, path: str, content: str = "", agent_id: str = "") -> str:

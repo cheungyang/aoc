@@ -3,10 +3,10 @@ import os
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
-from core.hook_loader import HookLoader
+from core.loaders.hooks_loader import HooksLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
-from core.tool_loader import ToolLoader
+from core.loaders.tools_loader import ToolsLoader
 
 class GraphBuilder:
     def __init__(self):
@@ -21,11 +21,11 @@ class GraphBuilder:
 
         model_name = config.get("model", "gemini-3-flash-preview")
         
-        loader = ToolLoader()
+        loader = ToolsLoader()
         allowed_tools = loader.get_tools(list(config.get("tools", {}).keys()))
 
         system_prompt = ""
-        hook_loader = HookLoader()
+        hook_loader = HooksLoader()
         for hook in hook_loader.system_prompt_hooks:
             system_prompt = hook(system_prompt, config=config, agent_path=agent_path)
 

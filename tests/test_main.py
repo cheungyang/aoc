@@ -7,9 +7,8 @@ import main
 class TestMain(unittest.IsolatedAsyncioTestCase):
 
     @patch('main.AgentsLoader')
-    @patch('main.BotRunner')
-    @patch('os.getenv')
-    async def test_run_bots(self, mock_getenv, mock_bot_runner, mock_agents_loader):
+    @patch('main.BotsLoader')
+    async def test_run_bots(self, mock_bots_loader_class, mock_agents_loader):
         # Mock AgentsLoader instance
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
@@ -17,41 +16,27 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         # Mock agent IDs
         mock_loader_instance.list_agent_ids.return_value = ["agent1", "agent2", "agent3"]
         
-        # Mock get_agent
-        def get_agent_mock(agent_id):
-            m = MagicMock()
-            if agent_id == "agent1":
-                m.config = {"discord_token_key": "TOKEN_1"}
-            elif agent_id == "agent2":
-                m.config = {"discord_token_key": "TOKEN_2"}
-            elif agent_id == "agent3":
-                m.config = {}
-            return m
-        mock_loader_instance.get_agent.side_effect = get_agent_mock
+        # Mock BotsLoader
+        mock_bots_loader = MagicMock()
+        mock_bots_loader_class.return_value = mock_bots_loader
         
-        # Mock getenv
-        def side_effect(key):
-            if key == "TOKEN_1":
-                return "valid_token_1"
-            if key == "TOKEN_2":
-                return None # Missing token
-            return None
-        mock_getenv.side_effect = side_effect
-        
-        # Mock BotRunner
         mock_runner_instance = MagicMock()
         mock_runner_instance.run_bot = AsyncMock()
-        mock_bot_runner.return_value = mock_runner_instance
+        
+        def get_bot_mock(agent_id):
+            if agent_id == "agent1":
+                return mock_runner_instance
+            return None
+        mock_bots_loader.get_bot.side_effect = get_bot_mock
 
         await main.run_bots()
 
-        # Should create BotRunner only for agent1
-        mock_bot_runner.assert_called_once_with("valid_token_1", "agent1")
+        # Should call run_bot only for agent1
         mock_runner_instance.run_bot.assert_awaited_once()
 
     @patch('main.AgentsLoader')
-    @patch('os.getenv')
-    async def test_run_bots_no_agents(self, mock_getenv, mock_agents_loader):
+    @patch('main.BotsLoader')
+    async def test_run_bots_no_agents(self, mock_bots_loader, mock_agents_loader):
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
         mock_loader_instance.list_agent_ids.return_value = []

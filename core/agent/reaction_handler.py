@@ -7,7 +7,7 @@ class ReactionCallbackHandler(AsyncCallbackHandler):
     def __init__(self, message):
         super().__init__()
         self.message = message
-        from core.agent.agents_loader import AgentsLoader
+        from core.loaders.agents_loader import AgentsLoader
         self.loader = AgentsLoader()
 
     async def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any:

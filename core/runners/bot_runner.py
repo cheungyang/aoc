@@ -32,7 +32,7 @@ class BotRunner:
             return
 
         # Read channel_hosts from agent.json
-        from core.agent.agents_loader import AgentsLoader
+        from core.loaders.agents_loader import AgentsLoader
         loader = AgentsLoader()
         config = loader.get_agent(self.agent_id).config
         channel_hosts = config.get("channel_hosts", [])
@@ -71,7 +71,24 @@ class BotRunner:
             return
             
         agent = loader.get_agent(self.agent_id)
-        await agent.process_message(message, self.bot)
+        
+        from core.util import get_session_id, split_message
+        from core.agent.reaction_handler import ReactionCallbackHandler
+        
+        session_id = get_session_id(message)
+            
+        reaction_handler = ReactionCallbackHandler(message)
+        try:
+            async with message.channel.typing():
+                reply_text = await agent.execute(message.content, session_id, callbacks=[reaction_handler])
+    
+            if reply_text is not None:
+                chunks = split_message(reply_text)
+                for chunk in chunks:
+                    await message.channel.send(chunk)
+        except Exception as e:
+            print(f"Error in BotRunner for agent {self.agent_id}: {e}")
+            await message.channel.send("Sorry, I encountered an error processing the request.")
 
     async def run_bot(self):
         print(f"Starting Discord bot for agent {self.agent_id}...")

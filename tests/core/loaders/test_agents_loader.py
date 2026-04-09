@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, mock_open, MagicMock, AsyncMock
 import os
 import json
-from core.agent.agents_loader import AgentsLoader
+from core.loaders.agents_loader import AgentsLoader
 
 class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
 

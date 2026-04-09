@@ -1,12 +1,12 @@
 import os
 import importlib
 
-class HookLoader:
+class HooksLoader:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(HookLoader, cls).__new__(cls)
+            cls._instance = super(HooksLoader, cls).__new__(cls)
             cls._instance.pre_message_hooks = []
             cls._instance.post_message_hooks = []
             cls._instance.system_prompt_hooks = []

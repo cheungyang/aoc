@@ -1,5 +1,5 @@
-from core.hook_loader import HookLoader
-from core.debug_handler import DebugLogHandler
+from core.loaders.hooks_loader import HooksLoader
+from core.agent.debug_handler import DebugLogHandler
 from langchain_core.callbacks import AsyncCallbackHandler
 from core.agent.reaction_handler import ReactionCallbackHandler
 import json
@@ -11,7 +11,7 @@ class Agent:
         self.agent_id = agent_id
         self.config = config
         self.graph = None
-        self.hook_loader = HookLoader() # Load dynamic plugin hooks
+        self.hook_loader = HooksLoader() # Load dynamic plugin hooks
 
     def get_config(self, key, default_value=None):
         return self.config.get(key, default_value)
@@ -67,20 +67,7 @@ class Agent:
              
         return reply_text
 
-    async def process_message(self, message, bot):
-        """Handles Discord messages and routes them through execute."""
-        from core.util import get_session_id, split_message
-        session_id = get_session_id(message)
-            
-        reaction_handler = ReactionCallbackHandler(message)
-        async with message.channel.typing():
-            reply_text = await self.execute(message.content, session_id, callbacks=[reaction_handler])
 
-        if reply_text is not None:
-            # Send reply back to Discord in chunks if necessary
-            chunks = split_message(reply_text)
-            for chunk in chunks:
-                await message.channel.send(chunk)
 
 
 

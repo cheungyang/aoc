@@ -2,7 +2,7 @@ import os
 import subprocess
 import shlex
 from langchain_core.tools import tool
-from core.agent.agents_loader import AgentsLoader
+from core.loaders.agents_loader import AgentsLoader
 
 @tool
 def git(action: str, path: str, agent_id: str, message: str = "") -> str:

@@ -3,12 +3,12 @@ import sys
 import importlib
 
 
-class ToolLoader:
+class ToolsLoader:
     _instance = None
 
     def __new__(cls, tools_dir="tools"):
         if cls._instance is None:
-            cls._instance = super(ToolLoader, cls).__new__(cls)
+            cls._instance = super(ToolsLoader, cls).__new__(cls)
             cls._instance.tools_dir = tools_dir
             cls._instance.tools_cache = None
         return cls._instance
@@ -22,7 +22,7 @@ class ToolLoader:
             return self._discovered_tools
             
         discovered = {}
-        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         tools_path = os.path.join(workspace_root, self.tools_dir)
         
         if os.path.isdir(tools_path):

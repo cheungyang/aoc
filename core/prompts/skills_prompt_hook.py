@@ -2,7 +2,7 @@ def skill_prompt_hook(current_prompt, **kwargs):
     config = kwargs.get("config", {})
     allowed_skills = config.get("skills", [])
     
-    from core.skills_loader import SkillsLoader
+    from core.loaders.skills_loader import SkillsLoader
     skills_loader = SkillsLoader()
     skills_instructions = skills_loader.get_skill_prompt(allowed_skills=allowed_skills)
     

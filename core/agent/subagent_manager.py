@@ -7,7 +7,7 @@ import os
 # Ensure we can import from core
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from .agents_loader import AgentsLoader
+from core.loaders.agents_loader import AgentsLoader
 
 
 class SubagentManager:

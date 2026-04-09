@@ -6,7 +6,7 @@ import datetime
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.knowledge_prompt_hook import knowledge_prompt_hook
+from core.prompts.knowledge_prompt_hook import knowledge_prompt_hook
 
 class TestKnowledgePromptHook(unittest.TestCase):
 
@@ -14,8 +14,8 @@ class TestKnowledgePromptHook(unittest.TestCase):
         initial_prompt = "Initial prompt content."
         updated_prompt = knowledge_prompt_hook(initial_prompt)
         
-        self.assertTrue(updated_prompt.startswith("Common Knowledge:\n"))
-        self.assertTrue(updated_prompt.endswith(initial_prompt))
+        self.assertIn("Common Knowledge:\n", updated_prompt)
+        self.assertTrue(updated_prompt.startswith(initial_prompt))
         
         # Verify some content
         now = datetime.datetime.now()

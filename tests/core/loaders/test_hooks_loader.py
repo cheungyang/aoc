@@ -4,20 +4,20 @@ import sys
 from unittest.mock import patch, MagicMock, mock_open
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.hook_loader import HookLoader
+from core.loaders.hooks_loader import HooksLoader
 
-class TestHookLoader(unittest.TestCase):
+class TestHooksLoader(unittest.TestCase):
 
     def setUp(self):
-        HookLoader._instance = None
-        self.loader = HookLoader()
+        HooksLoader._instance = None
+        self.loader = HooksLoader()
 
-    @patch('core.hook_loader.os.listdir')
-    @patch('core.hook_loader.os.path.isdir')
-    @patch('core.hook_loader.os.path.isfile')
-    @patch('core.hook_loader.importlib')
+    @patch('core.loaders.hooks_loader.os.listdir')
+    @patch('core.loaders.hooks_loader.os.path.isdir')
+    @patch('core.loaders.hooks_loader.os.path.isfile')
+    @patch('core.loaders.hooks_loader.importlib')
     def test_load_hooks_success(self, mock_importlib, mock_isfile, mock_isdir, mock_listdir):
         # Setup mocks
         def listdir_mock(path):

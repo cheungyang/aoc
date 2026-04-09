@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.debug_handler import DebugLogHandler
+from core.agent.debug_handler import DebugLogHandler
 
 class TestDebugLogHandler(unittest.TestCase):
     def setUp(self):
