@@ -16,7 +16,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_read_allowed(self, mock_file, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["read"] }
             }
@@ -37,7 +37,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_permission_denied_path(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["read"] }
             }
@@ -59,7 +59,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_permission_denied_action(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["read"] }
             }
@@ -82,7 +82,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_write_creates_dirs_if_not_exists(self, mock_file, mock_makedirs, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["write"] }
             }
@@ -105,7 +105,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_write_fails_if_exists(self, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["write"] }
             }
@@ -129,7 +129,7 @@ class TestFilesystemTool(unittest.TestCase):
     def test_overwrite_succeeds_if_exists(self, mock_file, mock_makedirs, mock_exists, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "filesystem": { "allowed_folder/": ["overwrite"] }
             }

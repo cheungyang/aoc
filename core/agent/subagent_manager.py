@@ -37,7 +37,7 @@ class SubagentManager:
     async def _run_subagent(self, job_id, agent_id, prompt):
         try:
             loader = AgentsLoader()
-            agent = await loader.get_agent(agent_id)
+            agent = loader.get_agent(agent_id)
             
             # Execute graph
             response = await agent.execute(prompt, job_id)

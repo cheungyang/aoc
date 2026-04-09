@@ -18,7 +18,7 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
 
     # Load agent config
     loader = AgentsLoader()
-    config = loader.get_agent_config(agent_id)
+    config = loader.get_agent(agent_id).config
     if not config:
         return f"Error: Configuration not found for agent {agent_id}"
 

@@ -1,17 +1,31 @@
 from core.hook_loader import HookLoader
 from core.debug_handler import DebugLogHandler
 from langchain_core.callbacks import AsyncCallbackHandler
+from core.agent.reaction_handler import ReactionCallbackHandler
 import json
 import ast
 from typing import Any, Dict
 
 class Agent:
-    def __init__(self, graph):
-        self.graph = graph
+    def __init__(self, agent_id, config):
+        self.agent_id = agent_id
+        self.config = config
+        self.graph = None
         self.hook_loader = HookLoader() # Load dynamic plugin hooks
 
+    def get_config(self, key, default_value=None):
+        return self.config.get(key, default_value)
+
+    async def _build_graph(self):
+        from .graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        return await builder.build_graph(self.agent_id, self.config)
+
     async def execute(self, content: str, session_id: str, callbacks: list = None) -> str:
-        """Invokes the graph directly without Discord dependencies."""
+        # Lazy load langgraph graph object
+        if self.graph is None:
+            self.graph = await self._build_graph()
+
         # Execute pre_message hooks (e.g. Session logging)
         for hook in self.hook_loader.pre_message_hooks:
             await hook(session_id, content)
@@ -69,36 +83,4 @@ class Agent:
                 await message.channel.send(chunk)
 
 
-class ReactionCallbackHandler(AsyncCallbackHandler):
-    def __init__(self, message):
-        super().__init__()
-        self.message = message
-        from core.agent.agents_loader import AgentsLoader
-        self.loader = AgentsLoader()
 
-    async def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs: Any) -> Any:
-        if serialized.get("name") == "agent_call":
-            try:
-                try:
-                    args = json.loads(input_str)
-                except json.JSONDecodeError:
-                    try:
-                        args = ast.literal_eval(input_str)
-                    except Exception:
-                        return
-                
-                if args.get("action") == "launch_subagent":
-                    agent_id = args.get("agent_id")
-                    if agent_id:
-                        try:
-                            config = self.loader.get_agent_config(agent_id)
-                            emoji = config.get("emoji", "🤖")
-                            await self.message.add_reaction(emoji)
-                        except Exception as e:
-                            print(f"Error adding reaction in callback: {e}")
-                            try:
-                                await self.message.add_reaction("🤖")
-                            except:
-                                pass
-            except Exception as e:
-                print(f"Error in on_tool_start callback: {e}")

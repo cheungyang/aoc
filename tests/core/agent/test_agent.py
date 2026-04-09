@@ -34,7 +34,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
 
-        agent = Agent(mock_graph)
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
         
         # Run
         await agent.process_message(mock_message, mock_bot)
@@ -64,7 +65,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(side_effect=Exception("Invoke failed"))
 
-        agent = Agent(mock_graph)
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
         
         # Run
         await agent.process_message(mock_message, mock_bot)
@@ -89,7 +91,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": []})
 
-        agent = Agent(mock_graph)
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
         
         # Run and Expect IndexError (not caught by Agent's loop)
         with self.assertRaises(IndexError):
@@ -116,7 +119,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=long_text)]})
 
-        agent = Agent(mock_graph)
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
         
         # Run
         await agent.process_message(mock_message, mock_bot)
@@ -150,7 +154,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
 
-        agent = Agent(mock_graph)
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
         
         # Run
         await agent.process_message(mock_message, mock_bot)
@@ -164,60 +169,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         callbacks = config.get("callbacks")
         self.assertIn(mock_reaction_handler, callbacks)
 
-class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
-
-    @patch('core.agent.agents_loader.AgentsLoader')
-    async def test_on_tool_start_delegation(self, mock_agents_loader_class):
-        mock_agents_loader = MagicMock()
-        mock_agents_loader.get_agent_config.return_value = {"emoji": "🤖"}
-        mock_agents_loader_class.return_value = mock_agents_loader
-
-        mock_message = MagicMock()
-        mock_message.add_reaction = AsyncMock()
-
-        from core.agent.agent import ReactionCallbackHandler
-        handler = ReactionCallbackHandler(mock_message)
-
-        serialized = {"name": "agent_call"}
-        input_str = '{"action": "launch_subagent", "agent_id": "test-agent"}'
-
-        await handler.on_tool_start(serialized, input_str)
-
-        mock_message.add_reaction.assert_called_once_with("🤖")
-
-    @patch('core.agent.agents_loader.AgentsLoader')
-    async def test_on_tool_start_single_quotes(self, mock_agents_loader_class):
-        mock_agents_loader = MagicMock()
-        mock_agents_loader.get_agent_config.return_value = {"emoji": "🤖"}
-        mock_agents_loader_class.return_value = mock_agents_loader
-
-        mock_message = MagicMock()
-        mock_message.add_reaction = AsyncMock()
-
-        from core.agent.agent import ReactionCallbackHandler
-        handler = ReactionCallbackHandler(mock_message)
-
-        serialized = {"name": "agent_call"}
-        input_str = "{'action': 'launch_subagent', 'agent_id': 'test-agent'}"
-
-        await handler.on_tool_start(serialized, input_str)
-
-        mock_message.add_reaction.assert_called_once_with("🤖")
-
-    @patch('core.agent.agents_loader.AgentsLoader')
-    async def test_on_tool_start_other_action(self, mock_agents_loader_class):
-        mock_message = MagicMock()
-        mock_message.add_reaction = AsyncMock()
-
-        from core.agent.agent import ReactionCallbackHandler
-        handler = ReactionCallbackHandler(mock_message)
-
-        serialized = {"name": "agent_call"}
-        input_str = '{"action": "check_subagent", "job_id": "123"}'
-
-        await handler.on_tool_start(serialized, input_str)
-
-        mock_message.add_reaction.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

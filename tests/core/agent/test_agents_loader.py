@@ -31,17 +31,20 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         mock_file.side_effect = mocks
 
         loader = AgentsLoader()
-        agents = loader.list_agents()
+        agents = loader.list_agent_ids()
 
         self.assertEqual(len(agents), 2)
         
-        # Verify Agent 1 (default ID from folder name)
-        self.assertEqual(agents[0]['id'], 'agent1')
-        self.assertEqual(agents[0]['name'], 'Agent 1')
+        # Verify IDs
+        self.assertIn('agent1', agents)
+        self.assertIn('custom-id', agents)
         
-        # Verify Agent 2 (custom ID from json)
-        self.assertEqual(agents[1]['id'], 'custom-id')
-        self.assertEqual(agents[1]['name'], 'Agent 2')
+        # Verify configs
+        config1 = loader.get_agent('agent1').config
+        self.assertEqual(config1['name'], 'Agent 1')
+        
+        config2 = loader.get_agent('custom-id').config
+        self.assertEqual(config2['name'], 'Agent 2')
 
     def test_singleton(self):
         loader1 = AgentsLoader()
@@ -52,23 +55,16 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
     def test_load_agents_no_dir(self, mock_exists):
         mock_exists.return_value = False
         loader = AgentsLoader()
-        self.assertEqual(loader.list_agents(), [])
+        self.assertEqual(loader.list_agent_ids(), [])
 
-    @patch('core.agent.agents_loader.AgentBuilder')
-    @patch('core.agent.agents_loader.AgentsLoader.get_agent_config')
-    async def test_get_agent_caching(self, mock_get_config, mock_agent_builder_class):
-        mock_get_config.return_value = {"id": "test-agent"}
-        mock_builder = MagicMock()
-        mock_agent_builder_class.return_value = mock_builder
-        mock_agent = MagicMock()
-        mock_builder.build_agent = AsyncMock(return_value=mock_agent)
-
+    async def test_get_agent_caching(self):
         loader = AgentsLoader()
-        agent1 = await loader.get_agent("test-agent")
-        agent2 = await loader.get_agent("test-agent")
+        loader._agent_configs = {"test-agent": {"id": "test-agent"}}
+
+        agent1 = loader.get_agent("test-agent")
+        agent2 = loader.get_agent("test-agent")
         
         self.assertIs(agent1, agent2)
-        mock_builder.build_agent.assert_called_once()
 
 
 

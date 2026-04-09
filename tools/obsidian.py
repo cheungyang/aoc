@@ -17,7 +17,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
 
     # Load agent config
     loader = AgentsLoader()
-    config = loader.get_agent_config(agent_id)
+    config = loader.get_agent(agent_id).config
     if not config:
         return f"Error: Configuration not found for agent {agent_id}"
 

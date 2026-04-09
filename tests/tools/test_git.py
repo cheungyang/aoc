@@ -20,7 +20,7 @@ class TestGitTool(unittest.TestCase):
     def test_missing_config(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = None
+        mock_loader.get_agent.return_value.config = None
         
         result = git.func(action="log", path=".", agent_id="test_agent")
         self.assertIn("Error: Configuration not found", result)
@@ -29,7 +29,7 @@ class TestGitTool(unittest.TestCase):
     def test_permission_denied_path(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "git": { "allowed_folder": ["log"] }
             }
@@ -53,7 +53,7 @@ class TestGitTool(unittest.TestCase):
     def test_permission_denied_action(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "git": { "allowed_folder": ["log"] }
             }
@@ -76,7 +76,7 @@ class TestGitTool(unittest.TestCase):
     def test_git_log_success(self, mock_run, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "git": { "allowed_folder": ["log"] }
             }
@@ -109,7 +109,7 @@ class TestGitTool(unittest.TestCase):
     def test_git_pull_success(self, mock_run, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "git": { "allowed_folder": ["pull"] }
             }
@@ -142,7 +142,7 @@ class TestGitTool(unittest.TestCase):
     def test_git_push_success(self, mock_run, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
-        mock_loader.get_agent_config.return_value = {
+        mock_loader.get_agent.return_value.config = {
             "tools": {
                 "git": { "allowed_folder": ["push"] }
             }

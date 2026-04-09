@@ -34,7 +34,7 @@ class BotRunner:
         # Read channel_hosts from agent.json
         from core.agent.agents_loader import AgentsLoader
         loader = AgentsLoader()
-        config = loader.get_agent_config(self.agent_id)
+        config = loader.get_agent(self.agent_id).config
         channel_hosts = config.get("channel_hosts", [])
 
         channel_id = str(message.channel.id)
@@ -70,7 +70,7 @@ class BotRunner:
             await message.channel.send(f"Session context cleared. {archive_status}")
             return
             
-        agent = await loader.get_agent(self.agent_id)
+        agent = loader.get_agent(self.agent_id)
         await agent.process_message(message, self.bot)
 
     async def run_bot(self):

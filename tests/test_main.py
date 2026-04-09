@@ -14,12 +14,20 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
         
-        # Mock agents list
-        mock_loader_instance.list_agents.return_value = [
-            {"id": "agent1", "discord_token_key": "TOKEN_1"},
-            {"id": "agent2", "discord_token_key": "TOKEN_2"},
-            {"id": "agent3"} # No token key
-        ]
+        # Mock agent IDs
+        mock_loader_instance.list_agent_ids.return_value = ["agent1", "agent2", "agent3"]
+        
+        # Mock get_agent
+        def get_agent_mock(agent_id):
+            m = MagicMock()
+            if agent_id == "agent1":
+                m.config = {"discord_token_key": "TOKEN_1"}
+            elif agent_id == "agent2":
+                m.config = {"discord_token_key": "TOKEN_2"}
+            elif agent_id == "agent3":
+                m.config = {}
+            return m
+        mock_loader_instance.get_agent.side_effect = get_agent_mock
         
         # Mock getenv
         def side_effect(key):
@@ -46,7 +54,7 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
     async def test_run_bots_no_agents(self, mock_getenv, mock_agents_loader):
         mock_loader_instance = MagicMock()
         mock_agents_loader.return_value = mock_loader_instance
-        mock_loader_instance.list_agents.return_value = []
+        mock_loader_instance.list_agent_ids.return_value = []
 
         await main.run_bots()
         # Should just print "No Discord bots to start."

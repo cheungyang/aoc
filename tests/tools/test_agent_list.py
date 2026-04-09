@@ -15,11 +15,18 @@ class TestAgentListTool(unittest.TestCase):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         
-        # Mock agents list with mixed data
-        mock_loader.list_agents.return_value = [
-            {"agent_id": "main", "name": "Concierge", "emoji": "🛎️", "description": "Helper", "extra": "secret"},
-            {"id": "designer", "name": "Aki", "emoji": "🤖", "description": "Designer"}
-        ]
+        # Mock agent IDs
+        mock_loader.list_agent_ids.return_value = ["main", "designer"]
+        
+        # Mock get_agent
+        def get_agent_mock(agent_id):
+            m = MagicMock()
+            if agent_id == "main":
+                m.config = {"name": "Concierge", "emoji": "🛎️", "description": "Helper", "extra": "secret"}
+            elif agent_id == "designer":
+                m.config = {"name": "Aki", "emoji": "🤖", "description": "Designer"}
+            return m
+        mock_loader.get_agent.side_effect = get_agent_mock
         
         result = agent_list.func()
         

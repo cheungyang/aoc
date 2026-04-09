@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from .agent_builder import AgentBuilder
+from .agent import Agent
 
 class AgentsLoader:
     _instance = None
@@ -16,7 +16,7 @@ class AgentsLoader:
 
     def _load_agents(self):
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
-        self._agents = []
+        self._agent_configs = {}
         if not os.path.exists(agents_dir):
             return
         for agent_name in os.listdir(agents_dir):
@@ -32,29 +32,22 @@ class AgentsLoader:
                             config["id"] = agent_name
                         elif "agent_id" in config and "id" not in config:
                             config["id"] = config["agent_id"]
-                        self._agents.append(config)
+                        self._agent_configs[config["id"]] = config
                     except Exception as e:
                         print(f"Error loading config for {agent_name}: {e}")
 
-    def list_agents(self):
-        return self._agents
+    def list_agent_ids(self):
+        return list(self._agent_configs.keys())
 
-    def get_agent_config(self, agent_id):
-        for config in self._agents:
-            if config.get("id") == agent_id:
-                return config
-        return None
-
-    async def get_agent(self, agent_id):  
+    def get_agent(self, agent_id):  
         if agent_id in self._agents_cache:
             print(f"Serving cached agent: {agent_id}")
             return self._agents_cache[agent_id]
             
-        config = self.get_agent_config(agent_id)
+        config = self._agent_configs.get(agent_id)
         if not config:
             raise ValueError(f"Agent configuration not found for: {agent_id}")
             
-        builder = AgentBuilder()
-        agent = await builder.build_agent(agent_id, config)
+        agent = Agent(agent_id, config)
         self._agents_cache[agent_id] = agent
         return agent
