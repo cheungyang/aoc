@@ -11,11 +11,11 @@ from core.memory.flat_file_session_store import FlatFileSessionStore
 # Instantiate store helper
 manager = FlatFileSessionStore()
 
-async def hook_pre_message(thread_id, content):
-    manager.append_message(thread_id, "human", content)
+async def hook_pre_message(thread_id, role, content):
+    manager.append_message(thread_id, role, content)
 
-async def hook_post_message(thread_id, reply_text):
-    manager.append_message(thread_id, "agent", reply_text)
+async def hook_post_message(thread_id, role, reply_text):
+    manager.append_message(thread_id, role, reply_text)
 
 def register_hooks():
     return {

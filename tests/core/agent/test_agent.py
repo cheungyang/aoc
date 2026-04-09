@@ -35,9 +35,9 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         reply = await agent.execute("hello", "session1")
         
         # Assertions
-        mock_pre_hook.assert_called_once_with("session1", "hello")
+        mock_pre_hook.assert_called_once_with("session1", "user", "hello")
         mock_graph.ainvoke.assert_called_once()
-        mock_post_hook.assert_called_once_with("session1", "Reply text")
+        mock_post_hook.assert_called_once_with("session1", "ai", "Reply text")
         self.assertEqual(reply, "Reply text")
 
     

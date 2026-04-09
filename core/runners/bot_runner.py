@@ -5,6 +5,10 @@ from discord.ext import commands
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
+from core.loaders.agents_loader import AgentsLoader
+from core.util import get_session_id
+from core.agent.reaction_handler import ReactionCallbackHandler
+from core.memory.flat_file_session_store import FlatFileSessionStore
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):
@@ -31,15 +35,12 @@ class BotRunner:
             await self.bot.process_commands(message)
             return
 
-        # Read channel_hosts from agent.json
-        from core.loaders.agents_loader import AgentsLoader
+        # Read channel_hosts from agent.json        
         loader = AgentsLoader()
         config = loader.get_agent(self.agent_id).config
         channel_hosts = config.get("channel_hosts", [])
-
         channel_id = str(message.channel.id)
         channel_name = message.channel.name if hasattr(message.channel, "name") else ""
-        
         is_host = (channel_name in channel_hosts) or (channel_id in channel_hosts)
         
         # Check mentions
@@ -62,30 +63,19 @@ class BotRunner:
 
         # Handle [new] command to clear session context
         if message.content.strip() == "[new]":
-            from core.util import get_session_id
-            session_id = get_session_id(message)
-            from core.memory.flat_file_session_store import FlatFileSessionStore
+            session_id = get_session_id(self.agent_id, message)
             manager = FlatFileSessionStore()
             archive_status = manager.archive_session(session_id)
             await message.channel.send(f"Session context cleared. {archive_status}")
             return
             
         agent = loader.get_agent(self.agent_id)
-        
-        from core.util import get_session_id, split_message
-        from core.agent.reaction_handler import ReactionCallbackHandler
-        
-        session_id = get_session_id(message)
-            
+        session_id = get_session_id(self.agent_id, message)
         reaction_handler = ReactionCallbackHandler(message)
         try:
             async with message.channel.typing():
-                reply_text = await agent.execute(message.content, session_id, callbacks=[reaction_handler])
-    
-            if reply_text is not None:
-                chunks = split_message(reply_text)
-                for chunk in chunks:
-                    await message.channel.send(chunk)
+                await agent.execute(message.content, session_id, message.channel, callbacks=[reaction_handler])
+
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")
             await message.channel.send("Sorry, I encountered an error processing the request.")

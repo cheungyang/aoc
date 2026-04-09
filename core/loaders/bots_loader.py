@@ -34,3 +34,16 @@ class BotsLoader:
         bot = BotRunner(token, agent_id)
         self._bots[agent_id] = bot
         return bot
+
+    def get_channel(self, agent_id):
+        bot_runner = self.get_bot(agent_id)
+        if bot_runner and bot_runner.bot:
+            loader = AgentsLoader()
+            agent = loader.get_agent(agent_id)
+            channel_hosts = agent.get_config("channel_hosts", [])
+            
+            for guild in bot_runner.bot.guilds:
+                for ch in guild.text_channels:
+                    if ch.name in channel_hosts or str(ch.id) in channel_hosts:
+                        return ch
+        return None

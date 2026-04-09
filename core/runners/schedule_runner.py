@@ -3,7 +3,7 @@ import datetime
 from croniter import croniter
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.bots_loader import BotsLoader
-from core.util import split_message
+from core.util import split_message, get_cron_id
 
 class ScheduleRunner:
     def __init__(self):
@@ -65,10 +65,8 @@ class ScheduleRunner:
         
         try:
             agent = self.loader.get_agent(agent_id)
-            cron_id = f"cron:{agent_id}:{datetime.date.today().isoformat()}"
-            response = await agent.execute(prompt, cron_id)
-            
-            # Send message to Discord
+            cron_id = get_cron_id(agent_id)
+
             # Find which agent owns the channel
             owner_agent_id = None
             for aid in self.loader.list_agent_ids():
@@ -76,28 +74,13 @@ class ScheduleRunner:
                 if channel_name in a.get_config("channel_hosts", []):
                     owner_agent_id = aid
                     break
+            channel = self.bots_loader.get_channel(owner_agent_id)
             
-            # Fall back to the current agent if no owner found
-            bot_runner = self.bots_loader.get_bot(owner_agent_id or agent_id)
-            if bot_runner and bot_runner.bot:
-                channel = None
-                for guild in bot_runner.bot.guilds:
-                    for ch in guild.text_channels:
-                        if ch.name == channel_name or str(ch.id) == channel_name:
-                            channel = ch
-                            break
-                    if channel:
-                        break
-                        
-                if channel:
-                    chunks = split_message(response)
-                    for chunk in chunks:
-                        await channel.send(chunk)
-                    print(f"Message sent to channel {channel_name} for agent {agent_id}")
-                else:
-                    print(f"Channel {channel_name} not found for agent {agent_id}")
-            else:
-                print(f"Bot not found or not initialized for agent {agent_id}")
-                
+            if channel is None:
+                print(f"Channel {channel_name} not found for agent {agent_id}")
+            
+            # Execute regardless of channel existance
+            await agent.execute(prompt, cron_id, channel=channel, role="system")
+
         except Exception as e:
             print(f"Error executing schedule for {agent_id}: {e}")

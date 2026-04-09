@@ -2,9 +2,11 @@ from core.loaders.hooks_loader import HooksLoader
 from core.agent.debug_handler import DebugLogHandler
 from langchain_core.callbacks import AsyncCallbackHandler
 from core.agent.reaction_handler import ReactionCallbackHandler
+from core.util import split_message
 import json
 import ast
 from typing import Any, Dict
+import discord
 
 class Agent:
     def __init__(self, agent_id, config):
@@ -21,14 +23,14 @@ class Agent:
         builder = GraphBuilder()
         return await builder.build_graph(self.agent_id, self.config)
 
-    async def execute(self, content: str, session_id: str, callbacks: list = None) -> str:
+    async def execute(self, content: str, session_id: str, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
         # Lazy load langgraph graph object
         if self.graph is None:
             self.graph = await self._build_graph()
 
         # Execute pre_message hooks (e.g. Session logging)
         for hook in self.hook_loader.pre_message_hooks:
-            await hook(session_id, content)
+            await hook(session_id, role, content)
 
         debug_handler = DebugLogHandler()
         config = {
@@ -37,7 +39,7 @@ class Agent:
             },
             "callbacks": [debug_handler] + (callbacks or [])
         }
-        inputs = {"messages": [{"role": "user", "content": content}]}
+        inputs = {"messages": [{"role": role, "content": content}]}
         
         try:
             result = await self.graph.ainvoke(inputs, config=config)
@@ -63,10 +65,16 @@ class Agent:
             
         # Execute post_message hooks (e.g. Session logging)
         for hook in self.hook_loader.post_message_hooks:
-             await hook(session_id, reply_text)
+             await hook(session_id, "ai", reply_text)
              
-        return reply_text
+        # Send message to channel
+        if channel is not None:
+            chunks = split_message(reply_text)
+            for chunk in chunks:
+                await channel.send(chunk)
 
+        # Return reponse regardness of channel
+        return reply_text
 
 
 

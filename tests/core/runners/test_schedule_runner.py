@@ -50,8 +50,10 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_agent.config = {
             "schedules": [
                 {"cron": "* * * * *", "prompt": "test prompt", "enabled": "true", "channel": "test-channel"}
-            ]
+            ],
+            "channel_hosts": ["test-channel"]
         }
+        mock_agent.get_config = MagicMock(side_effect=lambda key, default=None: mock_agent.config.get(key, default))
         mock_agent.execute = AsyncMock(return_value="agent response")
         
         mock_bots = MagicMock()
@@ -68,6 +70,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_guild.text_channels = [mock_channel]
         mock_bot.guilds = [mock_guild]
         mock_channel.send = AsyncMock()
+        mock_bots.get_channel.return_value = mock_channel
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
@@ -78,8 +81,8 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         # Test _execute_schedule directly
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once()
-        mock_channel.send.assert_called_once_with("agent response")
+        expected_cron_id = f"cron:agent1:{datetime.date.today().isoformat()}"
+        mock_agent.execute.assert_called_once_with("test prompt", expected_cron_id, channel=mock_channel, role="system")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')
@@ -94,8 +97,10 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_agent.config = {
             "schedules": [
                 {"cron": "* * * * *", "prompt": "test prompt", "enabled": "true", "channel": "test-channel"}
-            ]
+            ],
+            "channel_hosts": ["test-channel"]
         }
+        mock_agent.get_config = MagicMock(side_effect=lambda key, default=None: mock_agent.config.get(key, default))
         # Return a long string (4500 chars)
         long_response = "a" * 4500
         mock_agent.execute = AsyncMock(return_value=long_response)
@@ -113,6 +118,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_guild.text_channels = [mock_channel]
         mock_bot.guilds = [mock_guild]
         mock_channel.send = AsyncMock()
+        mock_bots.get_channel.return_value = mock_channel
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
@@ -122,9 +128,8 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner._execute_schedule(runner.schedules[0])
             
-        self.assertEqual(mock_channel.send.call_count, 3)
-        total_len = sum(len(call.args[0]) for call in mock_channel.send.call_args_list)
-        self.assertEqual(total_len, 4500)
+        expected_cron_id = f"cron:agent1:{datetime.date.today().isoformat()}"
+        mock_agent.execute.assert_called_once_with("test prompt", expected_cron_id, channel=mock_channel, role="system")
 
 if __name__ == '__main__':
     unittest.main()
