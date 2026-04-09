@@ -9,11 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.agent.agent import Agent
 
 class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
- 
-     def setUp(self):
-          from core.loaders.hooks_loader import HooksLoader
-          HooksLoader._instance = None
- 
+
      @patch('core.agent.graph_builder.AgentsLoader')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')

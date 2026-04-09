@@ -1,5 +1,4 @@
-from core.loaders.hooks_loader import HooksLoader
-from core.agent.debug_handler import DebugLogHandler
+from core.agent.logging_handler import LoggingHandler
 from langchain_core.callbacks import AsyncCallbackHandler
 from core.agent.reaction_handler import ReactionCallbackHandler
 from core.util import split_message
@@ -13,7 +12,6 @@ class Agent:
         self.agent_id = agent_id
         self.config = config
         self.graph = None
-        self.hook_loader = HooksLoader() # Load dynamic plugin hooks
 
     def get_config(self, key, default_value=None):
         return self.config.get(key, default_value)
@@ -28,16 +26,12 @@ class Agent:
         if self.graph is None:
             self.graph = await self._build_graph()
 
-        # Execute pre_message hooks (e.g. Session logging)
-        for hook in self.hook_loader.pre_message_hooks:
-            await hook(session_id, role, content)
-
-        debug_handler = DebugLogHandler()
+        logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
         config = {
             "configurable": {
                 "thread_id": session_id
             },
-            "callbacks": [debug_handler] + (callbacks or [])
+            "callbacks": [logging_handler] + (callbacks or [])
         }
         inputs = {"messages": [{"role": role, "content": content}]}
         
@@ -64,10 +58,6 @@ class Agent:
                     texts.append(part)
             reply_text = "".join(texts)
             
-        # Execute post_message hooks (e.g. Session logging)
-        for hook in self.hook_loader.post_message_hooks:
-             await hook(session_id, "ai", reply_text)
-             
         # Send message to channel
         if channel is not None:
             chunks = split_message(reply_text)

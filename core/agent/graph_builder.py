@@ -3,7 +3,6 @@ import os
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
-from core.loaders.hooks_loader import HooksLoader
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.tools_loader import ToolsLoader
