@@ -79,7 +79,7 @@ class TestObsidianTool(unittest.TestCase):
         with patch('os.path.abspath') as mock_abspath:
             mock_abspath.return_value = "/workspace/pkm-oc"
             
-            result = obsidian.func(action="search", vault_id="pkm-oc", agent_id="test_agent", path="")
+            result = obsidian.func(action="file_search", vault_id="pkm-oc", agent_id="test_agent", path="")
             self.assertTrue(result.startswith("Error: Too many results"))
 
     @patch('tools.obsidian.AgentsLoader')
@@ -104,10 +104,61 @@ class TestObsidianTool(unittest.TestCase):
         with patch('os.path.abspath') as mock_abspath:
             mock_abspath.return_value = "/workspace/pkm-oc"
             
-            result = obsidian.func(action="search", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="match")
+            result = obsidian.func(action="file_search", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="match")
             lines = result.split("\n")
             self.assertEqual(len(lines), 51)
             self.assertEqual(lines[-1], "show 50 out of 60 results")
+
+    @patch('tools.obsidian.AgentsLoader')
+    @patch('tools.obsidian.VaultVectorStore')
+    @patch('os.path.exists')
+    def test_vector_search(self, mock_exists, mock_vector_store, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "tools": { "obsidian": { "pkm-oc": ["read"] } }
+        }
+        mock_loader.get_agent.return_value = mock_agent
+        mock_exists.return_value = True
+        
+        mock_store_instance = MagicMock()
+        mock_vector_store.return_value = mock_store_instance
+        mock_store_instance.search.return_value = [
+            {'path': 'note1.md', 'content': 'content1', 'distance': 0.1},
+            {'path': 'note2.md', 'content': 'content2', 'distance': 0.2}
+        ]
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.return_value = "/workspace/pkm-oc"
+            
+            result = obsidian.func(action="vector_search", vault_id="pkm-oc", agent_id="test_agent", obsidian_args="query")
+            self.assertIn("File: note1.md", result)
+            self.assertIn("Content: content1", result)
+            self.assertIn("Distance: 0.1", result)
+
+    @patch('tools.obsidian.AgentsLoader')
+    @patch('tools.obsidian.VaultVectorStore')
+    @patch('os.path.exists')
+    def test_update_vectors(self, mock_exists, mock_vector_store, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "tools": { "obsidian": { "pkm-oc": ["write"] } }
+        }
+        mock_loader.get_agent.return_value = mock_agent
+        mock_exists.return_value = True
+        
+        mock_store_instance = MagicMock()
+        mock_vector_store.return_value = mock_store_instance
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.return_value = "/workspace/pkm-oc"
+            
+            result = obsidian.func(action="update_vectors", vault_id="pkm-oc", agent_id="test_agent")
+            self.assertEqual(result, "Vectors updated successfully.")
+            mock_store_instance.index_vault.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

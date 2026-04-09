@@ -1,12 +1,13 @@
 import os
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
+from core.memory.vault_vector_store import VaultVectorStore
 
 @tool
 def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", obsidian_args: str = "") -> str:
     """
     Perform specific operations on Obsidian vaults with scoped permissions.
-    Actions: search, read, write, overwrite, append.
+    Actions: file_search, read, write, overwrite, append, vector_search, update_vectors.
     """
     if not agent_id:
         return "Error: agent_id is required to verify permissions."
@@ -49,7 +50,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
     
     if "write" in scopes:
         allowed = True
-    elif "read" in scopes and action in ["read", "search"]:
+    elif "read" in scopes and action in ["read", "file_search", "vector_search"]:
         allowed = True
     elif "agent-scoped" in scopes:
         # Check if path contains directory named agent_id
@@ -89,7 +90,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
                 f.write(content)
             return f"Successfully appended to {path}"
             
-        elif action == "search":
+        elif action == "file_search":
             # "list all files in path, filtered the search term"
             search_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
             if not os.path.exists(search_dir):
@@ -118,6 +119,22 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
                 return output
             else:
                 return "\n".join(results)
+                
+        elif action == "vector_search":
+            persist_dir = os.path.join(vault_path, ".chroma_db")
+            store = VaultVectorStore(vault_dir=vault_path, persist_dir=persist_dir)
+            results = store.search(query=obsidian_args, limit=5)
+            
+            output = []
+            for res in results:
+                output.append(f"File: {res['path']}\nContent: {res['content']}\nDistance: {res['distance']}\n---")
+            return "\n".join(output) if output else "No relevant content found."
+            
+        elif action == "update_vectors":
+            persist_dir = os.path.join(vault_path, ".chroma_db")
+            store = VaultVectorStore(vault_dir=vault_path, persist_dir=persist_dir)
+            store.index_vault()
+            return "Vectors updated successfully."
             
         else:
             return f"Error: Unknown action '{action}'"
