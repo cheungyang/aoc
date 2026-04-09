@@ -5,5 +5,6 @@
   "description": "Lightweight testing agent for solving simple algebra problems.",
   "model": "gemini-3-flash-preview",
   "tools": {},
-  "skills": []
+  "skills": [],
+  "schedules": []
 }

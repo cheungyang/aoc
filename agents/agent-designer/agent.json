@@ -32,5 +32,12 @@
     "agent_creation",
     "git",
     "planning"
+  ],
+  "schedules": [
+    {
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory",
+      "channel": "general-aoc"
+    }
   ]
 }
