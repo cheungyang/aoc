@@ -11,7 +11,7 @@ class ToolsLoader:
             cls._instance = super(ToolsLoader, cls).__new__(cls)
             cls._instance.tools_dir = tools_dir
             cls._instance.tools_cache = None
-            cls._instance.agent_permissions_cache = {}
+            cls._instance._agent_permissions_cache = {}
         return cls._instance
 
     def __init__(self, tools_dir="tools"):
@@ -42,8 +42,8 @@ class ToolsLoader:
         return discovered
 
     def _merge_tool_permissions(self, agent_id: str) -> dict:
-        if agent_id in self.agent_permissions_cache:
-            return self.agent_permissions_cache[agent_id]
+        if agent_id in self._agent_permissions_cache:
+            return self._agent_permissions_cache[agent_id]
 
         from core.loaders.agents_loader import AgentsLoader
         from core.loaders.skills_loader import SkillsLoader
@@ -73,7 +73,7 @@ class ToolsLoader:
                 else:
                     merged_tools[tool_name] = skill_scope
 
-        self.agent_permissions_cache[agent_id] = merged_tools
+        self._agent_permissions_cache[agent_id] = merged_tools
         return merged_tools
 
     def check_permission(self, agent_id: str, tool_id: str, action_name: str, path: str = None, **kwargs) -> bool:
@@ -154,5 +154,9 @@ class ToolsLoader:
          
         print(f"Loaded {len(tools)} tools for {agent_id}: {loaded_names}")
         return tools    
+
+    def clear_permissions_cache(self):
+        self._agent_permissions_cache.clear()
+
         
 

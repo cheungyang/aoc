@@ -56,7 +56,7 @@ description: This is a dummy skill.
 Body content of skill.
 """
         
-        self.loader.skills_cache['dummy_skill'] = {
+        self.loader._skills_cache['dummy_skill'] = {
             "name": "Dummy",
             "description": "This is a dummy skill.",
             "path": "skills/dummy_skill/SKILL.md"

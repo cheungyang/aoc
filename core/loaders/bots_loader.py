@@ -47,3 +47,21 @@ class BotsLoader:
                     if ch.name in channel_hosts or str(ch.id) in channel_hosts:
                         return ch
         return None
+
+    async def reload_bot(self, agent_id):
+        import asyncio
+        if agent_id in self._bots:
+            bot_runner = self._bots[agent_id]
+            print(f"BotsLoader: Closing Discord bot for agent {agent_id}...")
+            try:
+                await bot_runner.bot.close()
+            except Exception as e:
+                print(f"BotsLoader: Error closing bot for agent {agent_id}: {e}")
+            del self._bots[agent_id]
+            
+        # Re-instantiate and run
+        print(f"BotsLoader: Reloading Discord bot for agent {agent_id}...")
+        new_bot = self.get_bot(agent_id)
+        if new_bot:
+            asyncio.create_task(new_bot.run_bot())
+
