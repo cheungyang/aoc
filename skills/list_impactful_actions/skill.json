@@ -1,0 +1,21 @@
+{
+  "name": "List Impactful Actions",
+  "description": "Navigate the user's personal vault to identify the most impactful tasks and projects to facilitate daily/weekly planning.",
+  "emoji": "🎯",
+  "skill_id": "list_impactful_actions",
+  "tools": {
+    "git": {
+      "pkm": [
+        "pull",
+        "log-p"
+      ]
+    },
+    "obsidian": {
+      "pkm": [
+        "read",
+        "file_search",
+        "vector_search"
+      ]
+    }
+  }
+}

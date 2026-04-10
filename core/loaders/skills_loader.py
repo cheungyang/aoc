@@ -48,9 +48,10 @@ class SkillsLoader:
         allowed_skills = agent.config.get("skills", [])
         
         self._load_skills(allowed_skills)
-        overview = "<skills_list>\nThe follow lists the names and descriptions of the skills \
-            that you have access to. To use the skill, use the `load_skill` tool with the \
-            skill name to load the skill into your memory\n"
+        overview = f"<skills_list>\nThe following lists the names and descriptions of the skills \n\
+            that you have access to. To use a skill, use the `load_skill` tool with the \n\
+            skill name to load the skill into your memory. Your agent_id is '{agent_id}'.\n"
+
         for skill_name, info in self._skills_cache.items():
             if skill_name not in allowed_skills:
                 continue

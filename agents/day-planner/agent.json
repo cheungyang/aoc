@@ -17,21 +17,10 @@
     }
   ],
   "skills": [
-    "planning",
     "memory",
-    "dream"
+    "dream",
+    "list_impactful_actions",
+    "write_daily_intention"
   ],
-  "tools": {
-    "git": {
-      "pkm": [
-        "pull",
-        "log"
-      ]
-    },
-    "obsidian": {
-      "pkm": [
-        "read"
-      ]
-    }
-  }
+  "tools": {}
 }

@@ -8,5 +8,9 @@ def load_skill(skill_name: str, agent_id: str) -> str:
     Use this when you need to perform a skill listed in the skills overview.
     Requires agent_id to verify permissions.
     """
-    loader = SkillsLoader()
-    return loader.get_skill_prompt(agent_id, skill_name)
+    try:
+        loader = SkillsLoader()
+        return loader.get_skill_prompt(agent_id, skill_name)
+    except Exception as e:
+        return f"Error loading skill: {e}"
+

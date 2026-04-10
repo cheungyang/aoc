@@ -19,11 +19,14 @@ async def agent_call(
     if action == "launch_subagent":
         if not all([agent_id, prompt]):
             return "Error: 'launch_subagent' requires 'agent_id' and 'prompt'."
-        loader = AgentsLoader()
-        agent = loader.get_agent(agent_id)
-        job_id = get_job_id(agent_id)
-        response = await agent.execute(prompt, job_id)
-        return response
+        try:
+            loader = AgentsLoader()
+            agent = loader.get_agent(agent_id)
+            job_id = get_job_id(agent_id)
+            response = await agent.execute(prompt, job_id)
+            return response
+        except Exception as e:
+            return f"Error launching subagent: {e}"
 
     else:
         return f"Error: Unknown action '{action}'."

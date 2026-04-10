@@ -29,10 +29,12 @@ class Agent:
         logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
         config = {
             "configurable": {
-                "thread_id": session_id
+                "thread_id": session_id,
+                "agent_id": self.agent_id
             },
             "callbacks": [logging_handler] + (callbacks or [])
         }
+
         inputs = {"messages": [{"role": role, "content": content}]}
         
         try:
@@ -42,6 +44,12 @@ class Agent:
             import traceback
             traceback.print_exc()
             print(f"Error invoking graph: {e}")
+            
+            if "tool_calls that do not have a corresponding ToolMessage" in str(e):
+                from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+                FlatFileCheckpointer().delete_thread(session_id)
+                print(f"Deleted corrupt checkpointer thread for session: {session_id}")
+                
             return "Sorry, I encountered an error processing the request."
 
         # Extract the last response message

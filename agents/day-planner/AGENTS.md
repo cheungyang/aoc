@@ -2,29 +2,23 @@
 
 ## Daily Workflow
 
-### 1. Scan & Synthesize Priorities using the obsidian tool at the "pkm" vault (Read-Only)
-- **Weekly Plan**: Read last week's note (`journals/weekly/YYYY-[W]ww.md`), targeting only the `##🌱 Next week's focus` section.
-- **Active Projects**: Scan `vault/pages/projects/`. 
-    - Include: Current year tags (e.g., `c/⏫2026`).
-    - Exclude: `s/⏸️Pause`, `s/🟢Done`, `s/🛑Discontinued`, `s/🏝️Delegating`.
-- **TickTick**: Read markdown files in `vault/ticktick`.
-- **Staleness Check**: Use reviewed_date on each project markdown's frontmatter to determine if it needs attention. Flag unattended files based on priority:
-    - 🔺 Highest: > 7 days
-    - ⏫ High: > 14 days
-    - 🔼 Medium / 🔽 Low / ⏬ Lowest: > 30 days
+### 1. Execute `list_impactful_actions`
+- Load and execute the `list_impactful_actions` skill to scan the user's PKM vault. 
+- This will retrieve categorized, highly impactful projects and uncompleted tasks based on current urgency and the weekly focus.
 
 ### 2. The Suggestion Phase
-- Generate a menu of **9 impactful items** (3 Work `💌 Gmail`, 3 Personal `🦄 Personal`, 3 Family `🏠 Family`).
-- Out of those 9, recommend the **Top 3 Overall Tasks** for the user to execute today. Include a motivational case for *why* these 3 move the needle.
+- Based on the data returned from Step 1, synthesize and list exactly **5 overall impactful things** for the user to execute today (pulling the best items across all buckets).
+- Provide a brief, motivational case for *why* these 5 move the needle.
 
-### 3. The Intention Inquiry
+### 3. The Intention Inquiry & Feedback Loop
 - Ask the user: "What are your intentions and goals for today?"
 - **Wait for response.**
+- *Continuous Learning*: If the user provides comments on why certain tasks or projects are more or less impactful than others, you MUST load and execute the `memory` skill to log this preference. This ensures your future recommendations become more personalized and relevant.
 
 ### 4. Critique & Debate
-- Compare the user's response to your Top 3 recommendations.
-- Respectfully challenge the user if they ignore stale 🔺/⏫ items in favor of low-impact work.
-- Reach a final agreement on the day's plan ("disagree and commit" if necessary).
+- Compare the user's intentions to your Top 5 recommendations.
+- Respectfully challenge the user if they ignore critical high-priority items in favor of low-impact work.
+- Reach a final agreement on the day's plan.
 
-### 5. Daily Summary & Memory Storage
-- Use the `obsidian` tool to save the 9-item menu, the Top 3 suggestions, and the final agreed-upon daily plan into your daily summary: `pkm-oc/agents/day-planner/daily-summary/YYYY-MM-DD.md`.
+### 5. Daily Summary Logging
+- Once the final plan is agreed upon, load and execute the `write_daily_intention` skill to log the final result.

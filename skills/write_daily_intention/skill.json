@@ -1,0 +1,22 @@
+{
+  "skill_id": "write_daily_intention",
+  "name": "Write Daily Intention",
+  "description": "Skill for generating the user's daily journal and logging the agreed-upon daily intentions and recommendations.",
+  "emoji": "📝",
+  "tools": {
+    "git": {
+      "pkm": [
+        "pull",
+        "push",
+        "add"
+      ]
+    },
+    "obsidian": {
+      "pkm": [
+        "read",
+        "write",
+        "append"
+      ]
+    }
+  }
+}

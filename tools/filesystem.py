@@ -23,41 +23,41 @@ def filesystem(action: str, path: str, content: str = "", agent_id: str = "") ->
 
     try:
         if action == "read":
-            if not os.path.exists(target_path):
+            if not os.path.exists(path):
                 return f"Error: File not found at {path}"
-            with open(target_path, "r") as f:
+            with open(path, "r") as f:
                 return f.read()
         
         elif action == "write":
-            if os.path.exists(target_path):
+            if os.path.exists(path):
                 return f"Error: File already exists at {path}. Use 'overwrite' if intentional."
             # Ensure parent directories exist
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "w") as f:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
                 f.write(content)
             return f"Successfully wrote to {path}"
             
         elif action == "overwrite":
             # Ensure parent directories exist
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "w") as f:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
                 f.write(content)
             return f"Successfully overwrote {path}"
             
         elif action == "ls":
-            if not os.path.exists(target_path):
+            if not os.path.exists(path):
                 return f"Error: Path not found at {path}"
-            if not os.path.isdir(target_path):
+            if not os.path.isdir(path):
                 return f"Error: Path {path} is not a directory"
-            items = os.listdir(target_path)
+            items = os.listdir(path)
             return "\n".join(items) if items else "Directory is empty"
             
         elif action == "delete":
-            if not os.path.exists(target_path):
+            if not os.path.exists(path):
                 return f"Error: File not found at {path}"
-            if not os.path.isfile(target_path):
+            if not os.path.isfile(path):
                 return f"Error: Path {path} is not a file. 'delete' action only deletes single files."
-            os.remove(target_path)
+            os.remove(path)
             return f"Successfully deleted file {path}"
             
         else:
