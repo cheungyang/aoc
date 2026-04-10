@@ -14,6 +14,7 @@ class SkillsLoader:
         pass
 
     def _load_skills(self, allowed_skills=None):
+        import json
         if os.path.isdir(self.skills_dir):
             for skill_name in os.listdir(self.skills_dir):
                 if allowed_skills is not None and skill_name not in allowed_skills:
@@ -21,26 +22,22 @@ class SkillsLoader:
                 if skill_name in self.skills_cache:
                     continue
                 
-                skill_path = os.path.join(self.skills_dir, skill_name, "SKILL.md")
+                skill_path = os.path.join(self.skills_dir, skill_name, "skill.json")
                 if os.path.isfile(skill_path):
-                    with open(skill_path, "r") as f:
-                        content = f.read()
-                    parts = content.split("---")
-                    if len(parts) >= 3:
-                        frontmatter = parts[1]
-                        name = ""
-                        description = ""
-                        for line in frontmatter.split("\n"):
-                            if line.strip().startswith("name:"):
-                                name = line.split(":", 1)[1].strip()
-                            elif line.strip().startswith("description:"):
-                                description = line.split(":", 1)[1].strip()
-                        
-                        self.skills_cache[skill_name] = {
-                            "name": name or skill_name,
-                            "description": description,
-                            "path": skill_path
-                        }
+                    try:
+                        with open(skill_path, "r") as f:
+                            config = json.load(f)
+                        config["path"] = os.path.join(self.skills_dir, skill_name, "SKILL.md")
+                        self.skills_cache[skill_name] = config
+                    except Exception as e:
+                        print(f"Error loading skill.json for {skill_name}: {e}")
+
+    def get_skill_tools(self, skill_id: str):
+        self._load_skills()
+        info = self.skills_cache.get(skill_id)
+        if not info:
+            return {}
+        return info.get("tools", {})
 
     def get_skills_overview(self, agent_id: str):
         from core.loaders.agents_loader import AgentsLoader

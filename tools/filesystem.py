@@ -14,35 +14,12 @@ def filesystem(action: str, path: str, content: str = "", agent_id: str = "") ->
     if not agent_id:
         return "Error: agent_id is required to verify permissions."
 
-    # Load agent config
-    loader = AgentsLoader()
-    config = loader.get_agent(agent_id).config
-    if not config:
-        return f"Error: Configuration not found for agent {agent_id}"
+    from core.loaders.tools_loader import ToolsLoader
+    tools_loader = ToolsLoader()
 
-    # Get filesystem permissions from root of agent.json
-    permissions = config.get("tools", {}).get("filesystem", {})
-
-    # Resolve absolute path to check against base paths
-    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    
-    # Normalize path
-    target_path = os.path.abspath(path)
-
-    allowed = False
-    allowed_actions = []
-    for base_path, actions in permissions.items():
-        base_abs_path = os.path.abspath(os.path.join(workspace_root, base_path))
-        if target_path.startswith(base_abs_path):
-            allowed = True
-            allowed_actions = actions
-            break # Found a matching base path
-
-    if not allowed:
-        return f"Error: Agent {agent_id} does not have permission to access path {path}"
-
-    if action not in allowed_actions:
-        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}. Allowed: {allowed_actions}"
+    # Centralized validation for scoped tool
+    if not tools_loader.check_permission(agent_id, "filesystem", action, path):
+        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}"
 
     try:
         if action == "read":

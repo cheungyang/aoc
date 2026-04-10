@@ -90,13 +90,13 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         prompt = loader.get_agent_prompt("test-agent")
         
-        self.assertIn("<AGENTS>\nCommon knowledge about other available agents.\nagents content\n</AGENTS>", prompt)
-        self.assertIn("<IDENTITY>\nCore identity, role, and standard instructions of the agent.\nidentity content\n</IDENTITY>", prompt)
-        self.assertIn("<SOUL>\nPrinciples, philosophy, and baseline tendencies of the agent.\nsoul content\n</SOUL>", prompt)
-        self.assertIn("<USER>\nBasic context and instructions regarding interactions with the user.\nuser content\n</USER>", prompt)
-        self.assertIn("<MEMORY>\nSummaries and key recollections of past interactions.\nmemory content\n</MEMORY>", prompt)
-        self.assertIn("<CONTEXT>\nImportant operational background and environmental details.\ncontext content\n</CONTEXT>", prompt)
-        self.assertIn("<FEEDBACK>\nDirect evaluative comments and behavioral reminders.\nfeedback content\n</FEEDBACK>", prompt)
+        self.assertIn("<AGENTS>\nYour specialization and workflow:\n\nagents content\n</AGENTS>", prompt)
+        self.assertIn("<IDENTITY>\nShort description of who you are:\n\nidentity content\n</IDENTITY>", prompt)
+        self.assertIn("<SOUL>\nYour personality, behavior and guiding success in your tasks:\n\nsoul content\n</SOUL>", prompt)
+        self.assertIn("<USER>\nInformation about your human:\n\nuser content\n</USER>", prompt)
+        self.assertIn("<MEMORY>\nLong term memory on key decisions and learnings to make your tasks successful:\n\nmemory content\n</MEMORY>", prompt)
+        self.assertIn("<CONTEXT>\nContext about your human to improve personalization:\n\ncontext content\n</CONTEXT>", prompt)
+        self.assertIn("<FEEDBACK>\nFeedbacks from human to adhere to, avoid repeating the same mistake:\n\nfeedback content\n</FEEDBACK>", prompt)
 
 if __name__ == '__main__':
     unittest.main()

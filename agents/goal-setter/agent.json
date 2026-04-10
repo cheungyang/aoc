@@ -12,7 +12,6 @@
     }
   ],
   "skills": [
-    "obsidian",
     "planning",
     "memory",
     "dream"
@@ -29,9 +28,6 @@
       "pkm": [
         "read",
         "write"
-      ],
-      "pkm-oc": [
-        "agent-scoped"
       ]
     }
   }

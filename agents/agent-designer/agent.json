@@ -16,7 +16,6 @@
     }
   ],
   "skills": [
-    "obsidian",
     "agent_creation",
     "skill_creation",
     "planning",
@@ -43,11 +42,6 @@
         "write",
         "overwrite",
         "ls"
-      ]
-    },
-    "obsidian": {
-      "pkm-oc": [
-        "agent-scoped"
       ]
     }
   }

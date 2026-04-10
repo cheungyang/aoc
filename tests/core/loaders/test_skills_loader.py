@@ -27,12 +27,7 @@ class TestSkillsLoader(unittest.TestCase):
         mock_agent.config = {"skills": ["dummy_skill"]}
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
         
-        skill_content = """---
-name: Dummy
-description: This is a dummy skill.
----
-Body content of skill.
-"""
+        skill_content = '{"name": "Dummy", "description": "This is a dummy skill."}'
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
             result = self.loader.get_skills_overview('agent_1')
@@ -87,12 +82,7 @@ Body content of skill.
         mock_agent.config = {"skills": ["skill1"]}
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
         
-        skill_content = """---
-name: Dummy
-description: Desc
----
-Body content.
-"""
+        skill_content = '{"name": "Dummy", "description": "Desc"}'
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
             result = self.loader.get_skills_overview('agent_1')

@@ -16,20 +16,8 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
     if not path and obsidian_args:
         path = obsidian_args
 
-    # Load agent config
-    loader = AgentsLoader()
-    config = loader.get_agent(agent_id).config
-    if not config:
-        return f"Error: Configuration not found for agent {agent_id}"
-
-    # Get obsidian permissions from tools/obsidian
-    permissions = config.get("tools", {}).get("obsidian", {})
-    
-    # Check if vault_id is in permissions
-    if vault_id not in permissions:
-        return f"Error: Agent {agent_id} does not have permission for vault {vault_id}"
-        
-    scopes = permissions[vault_id]
+    from core.loaders.tools_loader import ToolsLoader
+    tools_loader = ToolsLoader()
 
     # Resolve vault path (assuming it's in the workspace root)
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -45,22 +33,8 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
     if not target_path.startswith(vault_path):
         return f"Error: Path {path} is outside of vault {vault_id}"
 
-    # Permission check
-    allowed = False
-    
-    if "write" in scopes:
-        allowed = True
-    elif "read" in scopes and action in ["read", "file_search", "vector_search"]:
-        allowed = True
-    elif "agent-scoped" in scopes:
-        # Check if path contains directory named agent_id
-        rel_path = os.path.relpath(target_path, vault_path)
-        path_segments = rel_path.split(os.sep)
-        if agent_id in path_segments:
-            allowed = True
-
-    if not allowed:
-        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path} with scopes {scopes}"
+    if not tools_loader.check_permission(agent_id, "obsidian", action, vault_id=vault_id, target_path=target_path):
+        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}"
 
     try:
         if action == "read":

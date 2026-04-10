@@ -16,18 +16,11 @@
     }
   ],
   "skills": [
-    "obsidian",
     "memory",
     "dream"
   ],
   "tools": {
     "agent_call": {},
-    "agent_list": {},
-    "obsidian": {
-      "pkm-oc": [
-        "read",
-        "agent-scoped"
-      ]
-    }
+    "agent_list": {}
   }
 }

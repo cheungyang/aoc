@@ -17,8 +17,6 @@
     }
   ],
   "skills": [
-    "obsidian",
-    "git",
     "planning",
     "memory",
     "dream"
@@ -33,9 +31,6 @@
     "obsidian": {
       "pkm": [
         "read"
-      ],
-      "pkm-oc": [
-        "agent-scoped"
       ]
     }
   }

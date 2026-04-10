@@ -12,22 +12,11 @@
     }
   ],
   "skills": [
-    "obsidian",
     "planning",
     "memory",
     "dream"
   ],
   "tools": {
-    "nlm": {},
-    "obsidian": {
-      "pkm-oc": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "agent-scoped"
-      ]
-    },
     "web_search": {}
   }
 }
