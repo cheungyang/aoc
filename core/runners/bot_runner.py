@@ -24,6 +24,7 @@ class BotRunner:
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
+        await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
 
     async def on_message(self, message):
         # Ignore messages from all bots

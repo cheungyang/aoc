@@ -26,12 +26,16 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
     async def test_on_ready(self, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
+        mock_bot.change_presence = AsyncMock()
         mock_bot_class.return_value = mock_bot
         
         runner = BotRunner("test_token", "main")
         
         # Verify it runs without error
         await runner.on_ready()
+        
+        # Verify change_presence was called
+        mock_bot.change_presence.assert_called_once()
 
     @patch('core.runners.bot_runner.commands.Bot')
     @patch('core.runners.bot_runner.AgentsLoader')
@@ -86,7 +90,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
     async def test_run_bot_success(self, mock_bot_class):
         
         # Bot mock
-        mock_bot = AsyncMock()
+        mock_bot = MagicMock()
+        mock_bot.start = AsyncMock()
         mock_bot_class.return_value = mock_bot
         
         runner = BotRunner("test_token", "main")
