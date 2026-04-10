@@ -70,19 +70,19 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.agents_loader.AgentsLoader._load_agents')
     @patch('os.path.exists')
-    @patch('os.listdir')
-    @patch('os.path.isdir')
     @patch('builtins.open', new_callable=mock_open)
-    def test_get_agent_prompt(self, mock_file, mock_isdir, mock_listdir, mock_exists, mock_load_agents):
+    def test_get_agent_prompt(self, mock_file, mock_exists, mock_load_agents):
         mock_load_agents.return_value = None
-        
         mock_exists.return_value = True
-        mock_isdir.return_value = True
-        mock_listdir.return_value = ['ABOUT.md', 'SOUL.md']
         
         file_contents = [
-            "# About\nThis is about.",
-            "# Soul\nThis is soul."
+            "agents content",   # AGENTS.md
+            "identity content", # IDENTITY.md
+            "soul content",     # SOUL.md
+            "user content",     # USER.md
+            "memory content",   # MEMORY.md
+            "context content",  # CONTEXT.md
+            "feedback content"  # FEEDBACK.md
         ]
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
@@ -90,8 +90,13 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         prompt = loader.get_agent_prompt("test-agent")
         
-        self.assertIn("<ABOUT>\n# About\nThis is about.\n</ABOUT>", prompt)
-        self.assertIn("<SOUL>\n# Soul\nThis is soul.\n</SOUL>", prompt)
+        self.assertIn("<AGENTS>\nCommon knowledge about other available agents.\nagents content\n</AGENTS>", prompt)
+        self.assertIn("<IDENTITY>\nCore identity, role, and standard instructions of the agent.\nidentity content\n</IDENTITY>", prompt)
+        self.assertIn("<SOUL>\nPrinciples, philosophy, and baseline tendencies of the agent.\nsoul content\n</SOUL>", prompt)
+        self.assertIn("<USER>\nBasic context and instructions regarding interactions with the user.\nuser content\n</USER>", prompt)
+        self.assertIn("<MEMORY>\nSummaries and key recollections of past interactions.\nmemory content\n</MEMORY>", prompt)
+        self.assertIn("<CONTEXT>\nImportant operational background and environmental details.\ncontext content\n</CONTEXT>", prompt)
+        self.assertIn("<FEEDBACK>\nDirect evaluative comments and behavioral reminders.\nfeedback content\n</FEEDBACK>", prompt)
 
 if __name__ == '__main__':
     unittest.main()

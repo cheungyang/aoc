@@ -36,6 +36,15 @@ class AgentsLoader:
                     except Exception as e:
                         print(f"Error loading config for {agent_name}: {e}")
 
+    def _load_prompt_from_file(self, file_path, desc):
+        if os.path.exists(file_path):
+            file_name = os.path.basename(file_path)
+            tag = file_name.replace('.md', '')
+            with open(file_path, "r") as f:
+                content = f.read()
+            return f"<{tag}>\n{desc}\n\n{content}\n</{tag}>"
+        return None
+
     def list_agent_ids(self):
         return list(self._agent_configs.keys())
 
@@ -54,13 +63,31 @@ class AgentsLoader:
     def get_agent_prompt(self, agent_id):
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
+        pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm-oc", "agents", agent_id))
 
         prompt_parts = []
-        if os.path.exists(agent_path) and os.path.isdir(agent_path):
-            for file_name in os.listdir(agent_path):
-                if file_name.endswith(".md"):
-                    with open(os.path.join(agent_path, file_name), "r") as f:
-                        content = f.read()
-                    prompt_parts.append(f"<{file_name.replace('.md', '')}>\n{content}\n</{file_name.replace('.md', '')}>")
         
+        core_files = [
+            ("AGENTS.md", "Your specialization and workflow:"),
+            ("IDENTITY.md", "Short description of who you are:"),
+            ("SOUL.md", "Your personality, behavior and guiding success in your tasks:"),
+            ("USER.md", "Information about your human:")
+        ]
+        
+        pkm_files = [
+            ("MEMORY.md", "Long term memory on key decisions and learnings to make your tasks successful:"),
+            ("CONTEXT.md", "Context about your human to improve personalization:"),
+            ("FEEDBACK.md", "Feedbacks from human to adhere to, avoid repeating the same mistake:")
+        ]
+
+        for file_name, desc in core_files:
+            part = self._load_prompt_from_file(os.path.join(agent_path, file_name), desc)
+            if part:
+                prompt_parts.append(part)
+
+        for file_name, desc in pkm_files:
+            part = self._load_prompt_from_file(os.path.join(pkm_dir, file_name), desc)
+            if part:
+                prompt_parts.append(part)
+
         return "\n\n".join(prompt_parts) if prompt_parts else ""
