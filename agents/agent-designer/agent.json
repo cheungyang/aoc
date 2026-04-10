@@ -1,43 +1,54 @@
 {
   "agent_id": "agent-designer",
-  "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
   "channel_hosts": [
     "agent-management-aoc"
   ],
-  "name": "Aki",
-  "emoji": "🤖",
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
+  "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
+  "emoji": "🧠",
   "model": "gemini-3.1-pro-preview",
+  "name": "Aki",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
+  "skills": [
+    "obsidian",
+    "agent_creation",
+    "skill_creation",
+    "planning",
+    "memory",
+    "dream"
+  ],
   "tools": {
-    "obsidian": {
-      "pkm-oc": [
-        "agent-scoped"
-      ]
-    },
     "filesystem": {
       "agents/": [
         "read",
         "write",
-        "overwrite"
+        "overwrite",
+        "ls",
+        "delete"
       ],
       "pkm-oc/": [
         "read",
         "write",
-        "overwrite"
+        "overwrite",
+        "ls"
+      ],
+      "skills/": [
+        "read",
+        "write",
+        "overwrite",
+        "ls"
+      ]
+    },
+    "obsidian": {
+      "pkm-oc": [
+        "agent-scoped"
       ]
     }
-  },
-  "skills": [
-    "obsidian",
-    "agent_creation",
-    "git",
-    "planning"
-  ],
-  "schedules": [
-    {
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory",
-      "channel": "general-aoc"
-    }
-  ]
+  }
 }

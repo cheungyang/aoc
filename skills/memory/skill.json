@@ -1,0 +1,11 @@
+{
+  "skill_id": "memory",
+  "name": "Memory",
+  "description": "MUST LOAD this skill when an overall task concludes, or when human feedback or personal context is detected, to record memories and continuous learning data.",
+  "emoji": "🧠",
+  "tools": {
+    "obsidian": {
+      "pkm-oc": ["agent-scoped"]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "skill_id": "dream",
+  "name": "Dream Routine",
+  "description": "Skill for synthesizing daily memory logs into long-term, token-efficient system context files (MEMORY.md, FEEDBACK.md, CONTEXT.md).",
+  "emoji": "💭",
+  "tools": {
+    "obsidian": {
+      "pkm-oc": ["agent-scoped"]
+    }
+  }
+}

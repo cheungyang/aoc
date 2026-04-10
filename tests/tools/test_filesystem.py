@@ -147,5 +147,107 @@ class TestFilesystemTool(unittest.TestCase):
             self.assertEqual(result, "Successfully overwrote allowed_folder/file.txt")
             mock_file.assert_called_once_with("/workspace/allowed_folder/file.txt", "w")
 
+    @patch('tools.filesystem.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isdir')
+    @patch('os.listdir')
+    def test_ls_allowed(self, mock_listdir, mock_isdir, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.get_agent.return_value.config = {
+            "tools": {
+                "filesystem": { "allowed_folder/": ["ls"] }
+            }
+        }
+        mock_exists.return_value = True
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ["file1.txt", "folder1"]
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "allowed_folder" in path:
+                    return "/workspace/allowed_folder"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = filesystem.func(action="ls", path="allowed_folder/", agent_id="test_agent")
+            self.assertEqual(result, "file1.txt\nfolder1")
+
+    @patch('tools.filesystem.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isdir')
+    @patch('os.listdir')
+    def test_ls_empty_dir(self, mock_listdir, mock_isdir, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.get_agent.return_value.config = {
+            "tools": {
+                "filesystem": { "allowed_folder/": ["ls"] }
+            }
+        }
+        mock_exists.return_value = True
+        mock_isdir.return_value = True
+        mock_listdir.return_value = []
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "allowed_folder" in path:
+                    return "/workspace/allowed_folder"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = filesystem.func(action="ls", path="allowed_folder/", agent_id="test_agent")
+            self.assertEqual(result, "Directory is empty")
+
+    @patch('tools.filesystem.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    @patch('os.remove')
+    def test_delete_allowed(self, mock_remove, mock_isfile, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.get_agent.return_value.config = {
+            "tools": {
+                "filesystem": { "allowed_folder/": ["delete"] }
+            }
+        }
+        mock_exists.return_value = True
+        mock_isfile.return_value = True
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "allowed_folder" in path:
+                    return "/workspace/allowed_folder/file.txt"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = filesystem.func(action="delete", path="allowed_folder/file.txt", agent_id="test_agent")
+            self.assertEqual(result, "Successfully deleted file allowed_folder/file.txt")
+            mock_remove.assert_called_once_with("/workspace/allowed_folder/file.txt")
+
+    @patch('tools.filesystem.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    def test_delete_blocked_directory(self, mock_isfile, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.get_agent.return_value.config = {
+            "tools": {
+                "filesystem": { "allowed_folder/": ["delete"] }
+            }
+        }
+        mock_exists.return_value = True
+        mock_isfile.return_value = False
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "allowed_folder" in path:
+                    return "/workspace/allowed_folder"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = filesystem.func(action="delete", path="allowed_folder", agent_id="test_agent")
+            self.assertIn("Error: Path allowed_folder is not a file", result)
+
 if __name__ == '__main__':
     unittest.main()

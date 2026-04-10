@@ -1,0 +1,7 @@
+{
+  "skill_id": "planning",
+  "name": "Planning",
+  "description": "MUST LOAD this skill if the task would benefit from stepping back and laying out an execution plan versus a single-shot response.",
+  "emoji": "📋",
+  "tools": {}
+}

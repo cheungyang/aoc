@@ -1,0 +1,12 @@
+{
+  "skill_id": "agent_creation",
+  "name": "Agent Creation",
+  "description": "Skill for creating new agents with required files and vault structures.",
+  "emoji": "🤖",
+  "tools": {
+    "filesystem": {
+      "agents/": ["read", "write", "overwrite"],
+      "pkm-oc/": ["read", "write", "overwrite"]
+    }
+  }
+}

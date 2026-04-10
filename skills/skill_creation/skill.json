@@ -1,0 +1,11 @@
+{
+  "skill_id": "skill_creation",
+  "name": "Skill Creation",
+  "description": "Skill for creating new skills with required guidelines and structure, including SKILL.md and skill.json.",
+  "emoji": "🛠️",
+  "tools": {
+    "filesystem": {
+      "skills/": ["read", "write", "overwrite"]
+    }
+  }
+}

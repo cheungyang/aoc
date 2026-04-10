@@ -7,7 +7,7 @@ from core.memory.vault_vector_store import VaultVectorStore
 def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", obsidian_args: str = "") -> str:
     """
     Perform specific operations on Obsidian vaults with scoped permissions.
-    Actions: file_search, read, write, overwrite, append, vector_search, update_vectors.
+    Actions: file_search, read, write, overwrite, append, delete, vector_search, update_vectors.
     """
     if not agent_id:
         return "Error: agent_id is required to verify permissions."
@@ -89,6 +89,14 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
             with open(target_path, "a") as f:
                 f.write(content)
             return f"Successfully appended to {path}"
+            
+        elif action == "delete":
+            if not os.path.exists(target_path):
+                return f"Error: File not found at {path}"
+            if not os.path.isfile(target_path):
+                return f"Error: Path {path} is not a file. 'delete' action only deletes single files."
+            os.remove(target_path)
+            return f"Successfully deleted file {path}"
             
         elif action == "file_search":
             # "list all files in path, filtered the search term"

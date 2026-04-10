@@ -1,9 +1,28 @@
 {
   "agent_id": "day-planner",
-  "name": "Daisy",
-  "emoji": "🌼",
   "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
+  "emoji": "🌼",
   "model": "gemini-3-flash-preview",
+  "name": "Daisy",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "cron": "0 6 * * *",
+      "prompt": "Provide your daily update"
+    },
+    {
+      "channel": "general-aoc",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
+  "skills": [
+    "obsidian",
+    "git",
+    "planning",
+    "memory",
+    "dream"
+  ],
   "tools": {
     "git": {
       "pkm": [
@@ -12,28 +31,12 @@
       ]
     },
     "obsidian": {
-      "pkm-oc": [
-        "agent-scoped"
-      ],
       "pkm": [
         "read"
+      ],
+      "pkm-oc": [
+        "agent-scoped"
       ]
     }
-  },
-  "skills": [
-    "obsidian",
-    "git"
-  ],
-  "schedules": [
-    {
-      "cron": "0 6 * * *",
-      "prompt": "Provide your daily update",
-      "channel": "general-aoc"
-    },
-    {
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory",
-      "channel": "general-aoc"
-    }
-  ]
+  }
 }

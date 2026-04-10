@@ -4,11 +4,20 @@
   "emoji": "🔬",
   "model": "gemini-3-flash-preview",
   "name": "Ted",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "skills": [
-    "obsidian"
+    "obsidian",
+    "planning",
+    "memory",
+    "dream"
   ],
   "tools": {
-    "web_search": {},
     "nlm": {},
     "obsidian": {
       "pkm-oc": [
@@ -18,13 +27,7 @@
         "append",
         "agent-scoped"
       ]
-    }
-  },
-  "schedules": [
-    {
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory",
-      "channel": "general-aoc"
-    }
-  ]
+    },
+    "web_search": {}
+  }
 }

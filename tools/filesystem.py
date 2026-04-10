@@ -5,7 +5,7 @@ from core.loaders.agents_loader import AgentsLoader
 @tool
 def filesystem(action: str, path: str, content: str = "", agent_id: str = "") -> str:
     """
-    Perform file operations (read, write, overwrite) with scoped permissions.
+    Perform file operations (read, write, overwrite, ls, delete) with scoped permissions.
     The 'write' action fails if the file already exists.
     The 'overwrite' action proceeds even if the file exists.
     Both write and overwrite automatically create parent directories if they don't exist.
@@ -66,6 +66,22 @@ def filesystem(action: str, path: str, content: str = "", agent_id: str = "") ->
             with open(target_path, "w") as f:
                 f.write(content)
             return f"Successfully overwrote {path}"
+            
+        elif action == "ls":
+            if not os.path.exists(target_path):
+                return f"Error: Path not found at {path}"
+            if not os.path.isdir(target_path):
+                return f"Error: Path {path} is not a directory"
+            items = os.listdir(target_path)
+            return "\n".join(items) if items else "Directory is empty"
+            
+        elif action == "delete":
+            if not os.path.exists(target_path):
+                return f"Error: File not found at {path}"
+            if not os.path.isfile(target_path):
+                return f"Error: Path {path} is not a file. 'delete' action only deletes single files."
+            os.remove(target_path)
+            return f"Successfully deleted file {path}"
             
         else:
             return f"Error: Unknown action '{action}'"

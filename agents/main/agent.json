@@ -1,26 +1,33 @@
 {
   "agent_id": "main",
-  "discord_token_key": "DISCORD_TOKEN_MAIN",
   "channel_hosts": [
     "general-aoc"
   ],
-  "name": "Concierge",
-  "emoji": "🛎️",
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
+  "discord_token_key": "DISCORD_TOKEN_MAIN",
+  "emoji": "🛎️",
   "model": "gemini-3-flash-preview",
-  "tools": {
-    "obsidian": { "pkm-oc": ["read", "agent-scoped"] },
-    "agent_list": {},
-    "agent_call": {}
-  },
-  "skills": [
-    "obsidian"
-  ],
+  "name": "Concierge",
   "schedules": [
     {
+      "channel": "general-aoc",
       "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory",
-      "channel": "general-aoc"
+      "prompt": "Use the dream skill to refine your memory"
     }
-  ]
+  ],
+  "skills": [
+    "obsidian",
+    "memory",
+    "dream"
+  ],
+  "tools": {
+    "agent_call": {},
+    "agent_list": {},
+    "obsidian": {
+      "pkm-oc": [
+        "read",
+        "agent-scoped"
+      ]
+    }
+  }
 }

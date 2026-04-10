@@ -12,23 +12,26 @@
     }
   ],
   "skills": [
-    "obsidian"
+    "obsidian",
+    "planning",
+    "memory",
+    "dream"
   ],
   "tools": {
-    "obsidian": {
-      "pkm-oc": [
-        "agent-scoped"
-      ],
-      "pkm": [
-        "read",
-        "write"
-      ]
-    },
     "git": {
       "pkm": [
         "pull",
         "push",
         "log-p"
+      ]
+    },
+    "obsidian": {
+      "pkm": [
+        "read",
+        "write"
+      ],
+      "pkm-oc": [
+        "agent-scoped"
       ]
     }
   }

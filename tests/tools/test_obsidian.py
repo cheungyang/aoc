@@ -160,5 +160,55 @@ class TestObsidianTool(unittest.TestCase):
             self.assertEqual(result, "Vectors updated successfully.")
             mock_store_instance.index_vault.assert_called_once()
 
+    @patch('tools.obsidian.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    @patch('os.remove')
+    def test_delete_allowed(self, mock_remove, mock_isfile, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "tools": { "obsidian": { "pkm-oc": ["write"] } }
+        }
+        mock_loader.get_agent.return_value = mock_agent
+        mock_exists.return_value = True
+        mock_isfile.return_value = True
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "pkm-oc" in path:
+                    return "/workspace/pkm-oc/note.md"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
+            self.assertEqual(result, "Successfully deleted file note.md")
+            mock_remove.assert_called_once_with("/workspace/pkm-oc/note.md")
+
+    @patch('tools.obsidian.AgentsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    def test_delete_blocked_directory(self, mock_isfile, mock_exists, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "tools": { "obsidian": { "pkm-oc": ["write"] } }
+        }
+        mock_loader.get_agent.return_value = mock_agent
+        mock_exists.return_value = True
+        mock_isfile.return_value = False
+        
+        with patch('os.path.abspath') as mock_abspath:
+            def abspath_side_effect(path):
+                if "pkm-oc" in path:
+                    return "/workspace/pkm-oc"
+                return "/workspace/" + path
+            mock_abspath.side_effect = abspath_side_effect
+            
+            result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="")
+            self.assertIn("Error: Path  is not a file", result)
+
 if __name__ == '__main__':
     unittest.main()

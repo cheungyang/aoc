@@ -22,6 +22,7 @@ class LoggingHandler(BaseCallbackHandler):
 
     def on_tool_start(self, serialized, input_str, **kwargs):
         tool_name = serialized.get("name", "Unknown")
+        print(f"Tool use: {tool_name}")
         if self.session_id:
             self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}:{input_str}")
 
