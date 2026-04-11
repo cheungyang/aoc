@@ -2,11 +2,14 @@ import os
 import sys
 from dotenv import load_dotenv
 
+# Resolve workspace root dynamically
+workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 # Load environment variables from workspace root
-load_dotenv("/Users/alvac/dev/langgraph/.env")
+load_dotenv(os.path.join(workspace_root, ".env"))
 
 # Add workspace root to path
-sys.path.append("/Users/alvac/dev/langgraph")
+sys.path.append(workspace_root)
 
 from core.loaders.tools_loader import ToolsLoader
 

@@ -21,18 +21,17 @@ class ReactionCallbackHandler(AsyncCallbackHandler):
                     except Exception:
                         return
                 
-                if args.get("action") == "launch_subagent":
-                    agent_id = args.get("agent_id")
-                    if agent_id:
+                agent_id = args.get("agent_id")
+                if agent_id:
+                    try:
+                        config = self.loader.get_agent(agent_id).config
+                        emoji = config.get("emoji", "🤖")
+                        await self.message.add_reaction(emoji)
+                    except Exception as e:
+                        print(f"Error adding reaction in callback: {e}")
                         try:
-                            config = self.loader.get_agent(agent_id).config
-                            emoji = config.get("emoji", "🤖")
-                            await self.message.add_reaction(emoji)
-                        except Exception as e:
-                            print(f"Error adding reaction in callback: {e}")
-                            try:
-                                await self.message.add_reaction("🤖")
-                            except:
-                                pass
+                            await self.message.add_reaction("🤖")
+                        except:
+                            pass
             except Exception as e:
                 print(f"Error in on_tool_start callback: {e}")

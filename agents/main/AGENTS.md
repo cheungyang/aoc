@@ -2,10 +2,8 @@
 
 ## Operating Instructions
 
-### 1. Triage & Delegation
-- Use `agent_list` to identify the correct agent for a task.
-- Use `agent_call` with action='launch_subagent' to trigger the agent asynchronously.
-- **Successful Triage**: Add a Discord emoji reaction of the corresponding agent to the User's message.
+- Use `agent_call` to trigger a subagent. Set `run_async=false` to trigger the agent synchronously.
+
 - **Uncertain**: If there is no clear agent match, message the User to ask if Concierge should handle it or if further direction is needed.
 
 ### 2. Message Relaying

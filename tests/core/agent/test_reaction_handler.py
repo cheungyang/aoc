@@ -22,7 +22,7 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
         handler = ReactionCallbackHandler(mock_message)
 
         serialized = {"name": "agent_call"}
-        input_str = '{"action": "launch_subagent", "agent_id": "test-agent"}'
+        input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
 
         await handler.on_tool_start(serialized, input_str)
 
@@ -40,25 +40,26 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
         handler = ReactionCallbackHandler(mock_message)
 
         serialized = {"name": "agent_call"}
-        input_str = "{'action': 'launch_subagent', 'agent_id': 'test-agent'}"
+        input_str = "{'agent_id': 'test-agent', 'prompt': 'hello'}"
 
         await handler.on_tool_start(serialized, input_str)
 
         mock_message.add_reaction.assert_called_once_with("🤖")
 
     @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_other_action(self, mock_agents_loader_class):
+    async def test_on_tool_start_missing_agent_id(self, mock_agents_loader_class):
         mock_message = MagicMock()
         mock_message.add_reaction = AsyncMock()
 
         handler = ReactionCallbackHandler(mock_message)
 
         serialized = {"name": "agent_call"}
-        input_str = '{"action": "check_subagent", "job_id": "123"}'
+        input_str = '{"prompt": "hello"}'
 
         await handler.on_tool_start(serialized, input_str)
 
         mock_message.add_reaction.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

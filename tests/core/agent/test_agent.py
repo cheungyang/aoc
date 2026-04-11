@@ -9,6 +9,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.agent.agent import Agent
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from core.agent.job_manager import JobManager
+        JobManager._instance = None
+
 
     @patch('core.agent.agent.LoggingHandler')
     async def test_execute_success(self, mock_logging_handler_class):

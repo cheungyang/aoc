@@ -21,6 +21,7 @@
   ],
   "tools": {
     "agent_call": {},
-    "agent_list": {}
+    "agent_list": {},
+    "job_list": {}
   }
 }

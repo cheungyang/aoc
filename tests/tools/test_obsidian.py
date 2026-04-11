@@ -10,17 +10,13 @@ from tools.obsidian import obsidian
 
 class TestObsidianTool(unittest.TestCase):
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open, read_data="note content")
-    def test_read_with_path(self, mock_file, mock_exists, mock_agents_loader):
+    def test_read_with_path(self, mock_file, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["read"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True # File exists
         
         with patch('os.path.abspath') as mock_abspath:
@@ -33,17 +29,13 @@ class TestObsidianTool(unittest.TestCase):
             result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
             self.assertEqual(result, "note content")
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open, read_data="note content")
-    def test_read_with_args_fallback(self, mock_file, mock_exists, mock_agents_loader):
+    def test_read_with_args_fallback(self, mock_file, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["read"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True # File exists
         
         with patch('os.path.abspath') as mock_abspath:
@@ -57,18 +49,14 @@ class TestObsidianTool(unittest.TestCase):
             result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="note.md")
             self.assertEqual(result, "note content")
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isdir')
     @patch('os.walk')
-    def test_search_no_term_too_many_results(self, mock_walk, mock_isdir, mock_exists, mock_agents_loader):
+    def test_search_no_term_too_many_results(self, mock_walk, mock_isdir, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["read"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         mock_isdir.return_value = True
         
@@ -82,18 +70,14 @@ class TestObsidianTool(unittest.TestCase):
             result = obsidian.func(action="file_search", vault_id="pkm-oc", agent_id="test_agent", path="")
             self.assertTrue(result.startswith("Error: Too many results"))
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isdir')
     @patch('os.walk')
-    def test_search_with_term_limit_results(self, mock_walk, mock_isdir, mock_exists, mock_agents_loader):
+    def test_search_with_term_limit_results(self, mock_walk, mock_isdir, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["read"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         mock_isdir.return_value = True
         
@@ -109,17 +93,13 @@ class TestObsidianTool(unittest.TestCase):
             self.assertEqual(len(lines), 51)
             self.assertEqual(lines[-1], "show 50 out of 60 results")
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('tools.obsidian.VaultVectorStore')
     @patch('os.path.exists')
-    def test_vector_search(self, mock_exists, mock_vector_store, mock_agents_loader):
+    def test_vector_search(self, mock_exists, mock_vector_store, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["read"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         
         mock_store_instance = MagicMock()
@@ -137,17 +117,13 @@ class TestObsidianTool(unittest.TestCase):
             self.assertIn("Content: content1", result)
             self.assertIn("Distance: 0.1", result)
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('tools.obsidian.VaultVectorStore')
     @patch('os.path.exists')
-    def test_update_vectors(self, mock_exists, mock_vector_store, mock_agents_loader):
+    def test_update_vectors(self, mock_exists, mock_vector_store, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["write"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         
         mock_store_instance = MagicMock()
@@ -160,55 +136,37 @@ class TestObsidianTool(unittest.TestCase):
             self.assertEqual(result, "Vectors updated successfully.")
             mock_store_instance.index_vault.assert_called_once()
 
-    @patch('tools.obsidian.AgentsLoader')
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isfile')
     @patch('os.remove')
-    def test_delete_allowed(self, mock_remove, mock_isfile, mock_exists, mock_agents_loader):
+    def test_delete_allowed(self, mock_remove, mock_isfile, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["write"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         mock_isfile.return_value = True
         
-        with patch('os.path.abspath') as mock_abspath:
-            def abspath_side_effect(path):
-                if "pkm-oc" in path:
-                    return "/workspace/pkm-oc/note.md"
-                return "/workspace/" + path
-            mock_abspath.side_effect = abspath_side_effect
-            
-            result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
-            self.assertEqual(result, "Successfully deleted file note.md")
-            mock_remove.assert_called_once_with("/workspace/pkm-oc/note.md")
+        result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
+        self.assertEqual(result, "Successfully deleted file note.md")
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        expected_path = os.path.join(workspace_root, "pkm-oc", "note.md")
+        mock_remove.assert_called_once_with(expected_path)
 
-    @patch('tools.obsidian.AgentsLoader')
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isfile')
-    def test_delete_blocked_directory(self, mock_isfile, mock_exists, mock_agents_loader):
+    def test_delete_blocked_directory(self, mock_isfile, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
-        mock_agents_loader.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "tools": { "obsidian": { "pkm-oc": ["write"] } }
-        }
-        mock_loader.get_agent.return_value = mock_agent
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         mock_isfile.return_value = False
         
-        with patch('os.path.abspath') as mock_abspath:
-            def abspath_side_effect(path):
-                if "pkm-oc" in path:
-                    return "/workspace/pkm-oc"
-                return "/workspace/" + path
-            mock_abspath.side_effect = abspath_side_effect
-            
-            result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="")
-            self.assertIn("Error: Path  is not a file", result)
+        result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="")
+        self.assertIn("Error: Path  is not a file", result)
+
 
 if __name__ == '__main__':
     unittest.main()

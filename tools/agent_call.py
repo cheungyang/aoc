@@ -1,32 +1,29 @@
+import asyncio
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_job_id
 
 @tool
 async def agent_call(
-    action: str,
-    agent_id: str = None,
-    prompt: str = None,
-    job_id: str = None,
-    user_input: str = None
+    agent_id: str,
+    prompt: str,
+    run_async: bool = False
 ) -> str:
     """
-    Consolidated tool for interacting with subagents.
-    
-    Supported actions:
-    - 'launch_subagent': Spawns a subagent asynchronously. Requires 'agent_id', 'prompt'.
+    Consolidated tool for interacting with agents.
     """
-    if action == "launch_subagent":
-        if not all([agent_id, prompt]):
-            return "Error: 'launch_subagent' requires 'agent_id' and 'prompt'."
-        try:
-            loader = AgentsLoader()
-            agent = loader.get_agent(agent_id)
-            job_id = get_job_id(agent_id)
+    if not agent_id or not prompt:
+        return "Error: agent_call requires 'agent_id' and 'prompt'."
+    try:
+        loader = AgentsLoader()
+        agent = loader.get_agent(agent_id)
+        job_id = get_job_id(agent_id)
+        
+        if run_async:
+            asyncio.create_task(agent.execute(prompt, job_id))
+            return f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {job_id}."
+        else:
             response = await agent.execute(prompt, job_id)
             return response
-        except Exception as e:
-            return f"Error launching subagent: {e}"
-
-    else:
-        return f"Error: Unknown action '{action}'."
+    except Exception as e:
+        return f"Error calling agent: {e}"

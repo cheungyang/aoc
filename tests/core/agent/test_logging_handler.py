@@ -37,7 +37,8 @@ class TestLoggingHandler(unittest.TestCase):
         
         handler.on_tool_start({"name": "MyTool"}, "input_args")
         
-        handler.manager.append_message.assert_called_once_with("session1", "system", "MyTool:input_args")
+        handler.manager.append_message.assert_called_once_with("session1", "system", "Tool MyTool:input_args")
+
 
     def test_on_tool_end_appends_to_session(self):
         handler = LoggingHandler(session_id="session1")

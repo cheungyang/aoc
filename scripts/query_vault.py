@@ -2,16 +2,19 @@ import os
 import sys
 from dotenv import load_dotenv
 
+# Resolve workspace root dynamically
+workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 # Load environment variables from workspace root
-load_dotenv("/Users/alvac/dev/langgraph/.env")
+load_dotenv(os.path.join(workspace_root, ".env"))
 
 # Add workspace root to path
-sys.path.append("/Users/alvac/dev/langgraph")
+sys.path.append(workspace_root)
 
 from core.memory.vault_vector_store import VaultVectorStore
 
-vault_dir = "/Users/alvac/dev/langgraph/pkm"
-persist_dir = "/Users/alvac/dev/langgraph/pkm/.chroma_db"
+vault_dir = os.path.join(workspace_root, "pkm")
+persist_dir = os.path.join(workspace_root, "pkm", ".chroma_db")
 
 def main():
     if len(sys.argv) > 1:
