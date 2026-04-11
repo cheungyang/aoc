@@ -11,8 +11,6 @@ class Agent:
         self.agent_id = agent_id
         self.config = config
         self.graph = None
-        self._graph_state = "idle"
-
 
     def get_config(self, key, default_value=None):
         return self.config.get(key, default_value)
@@ -22,17 +20,27 @@ class Agent:
         builder = GraphBuilder()
         return await builder.build_graph(self.agent_id, self.config)
 
-    async def execute(self, content: str, session_id: str, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
+    async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
         from core.agent.job_manager import JobManager
+        from core.agent.session_manager import SessionManager
         from core.agent.logging_handler import LoggingHandler
+        
+        # Get the necessary ids
+        session_id = SessionManager().get_session_id(self.agent_id, source, channel)
+        if job_id is None:
+            job_id = JobManager().new_job_id(self.agent_id)
+
+        # Handle [new] command to clear session context
+        if content.strip() == "[new]":    
+            archive_status = SessionManager().clear_session(session_id)
+            await channel.send(f"Session context cleared. {archive_status}")
+            return
 
         # Lazy load langgraph graph object
         if self.graph is None:
             self.graph = await self._build_graph()
 
-        original_agent_id = session_id.split(":")[0] if ":" in session_id else self.agent_id
-        JobManager().add_job(session_id, original_agent_id, self.agent_id, self)
-
+        JobManager().add_job(job_id, self.agent_id, session_id)
         logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
         config = {
             "configurable": {
@@ -45,19 +53,18 @@ class Agent:
         inputs = {"messages": [{"role": role, "content": content}]}
 
         try:
-            self._graph_state = "running"
+            JobManager().updateJob(job_id, "running")
             print(f"Invoking graph for {self.agent_id}")
             result = await self.graph.ainvoke(inputs, config=config)
             
             # Check if paused for human input
             state = self.graph.get_state(config)
             if state.next:
-                self._graph_state = "partial"
+                JobManager().updateJob(job_id, "partial")
             else:
-                self._graph_state = "completed"
+                JobManager().updateJob(job_id, "completed")
         except Exception as e:
-            self._graph_state = "error"
-            JobManager().remove_job(session_id)
+            JobManager().updateJob(job_id, "error")
             import traceback
             traceback.print_exc()
             print(f"Error invoking graph: {e}")
@@ -90,8 +97,4 @@ class Agent:
                 await channel.send(chunk)
 
         # Return reponse regardness of channel
-        JobManager().remove_job(session_id)
         return reply_text
-
-    def get_graph_status(self) -> str:
-        return getattr(self, '_graph_state', 'idle')

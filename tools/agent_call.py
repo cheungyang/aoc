@@ -1,7 +1,7 @@
 import asyncio
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_job_id
+from core.agent.job_manager import JobManager
 
 @tool
 async def agent_call(
@@ -17,13 +17,12 @@ async def agent_call(
     try:
         loader = AgentsLoader()
         agent = loader.get_agent(agent_id)
-        job_id = get_job_id(agent_id)
-        
+        job_id = JobManager().new_job_id(agent_id)
         if run_async:
-            asyncio.create_task(agent.execute(prompt, job_id))
+            asyncio.create_task(agent.execute(prompt, source="tool", job_id=job_id))
             return f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {job_id}."
         else:
-            response = await agent.execute(prompt, job_id)
+            response = await agent.execute(prompt, source="tool", job_id=job_id)
             return response
     except Exception as e:
         return f"Error calling agent: {e}"

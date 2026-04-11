@@ -6,9 +6,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_session_id
+from core.agent.session_manager import SessionManager
 from core.agent.reaction_handler import ReactionCallbackHandler
-from core.memory.flat_file_session_store import FlatFileSessionStore
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):
@@ -62,20 +61,11 @@ class BotRunner:
                 return
             # Respond if tagged
 
-        # Handle [new] command to clear session context
-        if message.content.strip() == "[new]":
-            session_id = get_session_id(self.agent_id, message)
-            manager = FlatFileSessionStore()
-            archive_status = manager.archive_session(session_id)
-            await message.channel.send(f"Session context cleared. {archive_status}")
-            return
-            
         agent = loader.get_agent(self.agent_id)
-        session_id = get_session_id(self.agent_id, message)
         reaction_handler = ReactionCallbackHandler(message)
         try:
             async with message.channel.typing():
-                await agent.execute(message.content, session_id, message.channel, callbacks=[reaction_handler])
+                await agent.execute(message.content, source="discord", channel=message.channel, callbacks=[reaction_handler])
 
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")

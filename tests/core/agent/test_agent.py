@@ -52,7 +52,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Sorry, I encountered an error processing the request.")
 
     @patch('core.agent.agent.LoggingHandler')
-    @patch('core.util.get_session_id')
+    @patch('core.agent.session_manager.SessionManager.get_session_id')
     async def test_execute_parsing_failure(self, mock_get_session_id, mock_logging_handler_class):
         # Graph invoke succeeds but returns empty messages list (causing IndexError)
         mock_graph = MagicMock()

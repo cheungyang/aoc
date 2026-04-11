@@ -6,17 +6,16 @@ from core.agent.job_manager import JobManager
 def job_list() -> list[dict]:
     """
     Returns a list of active background specialization jobs.
-    Output fields array: session_id, agent_id, started, status.
+    Output fields array: job_id, agent_id, session_id, started, status.
     """
-    manager = JobManager()
     return [
         {
-            "agent_id": jobs[0].agent_id,
-            "started": datetime.fromtimestamp(jobs[0].started).strftime('%Y-%m-%d %H:%M:%S'),
-            "status": jobs[0].agent_instance.get_graph_status() if hasattr(jobs[0].agent_instance, 'get_graph_status') else 'idle',
-            "jobs_in_queue": len(jobs) - 1
+            "agent_id": job.agent_id,
+            "job_id": job.job_id,
+            "session_id": job.session_id,
+            "started": datetime.fromtimestamp(job.started).strftime('%Y-%m-%d %H:%M:%S'),
+            "status": job.status,
         }
-        for session_id, jobs in manager._jobs.items()
+        for job in JobManager().get_jobs()
     ]
-
 

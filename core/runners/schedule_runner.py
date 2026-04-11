@@ -3,7 +3,8 @@ import datetime
 from croniter import croniter
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.bots_loader import BotsLoader
-from core.util import split_message, get_cron_id
+from core.util import split_message
+from core.agent.session_manager import SessionManager
 
 class ScheduleRunner:
     def __init__(self):
@@ -65,7 +66,6 @@ class ScheduleRunner:
         
         try:
             agent = self.loader.get_agent(agent_id)
-            cron_id = get_cron_id(agent_id)
 
             # Find which agent owns the channel
             owner_agent_id = None
@@ -80,7 +80,7 @@ class ScheduleRunner:
                 print(f"Channel {channel_name} not found for agent {agent_id}")
             
             # Execute regardless of channel existance
-            await agent.execute(prompt, cron_id, channel=channel, role="system")
+            await agent.execute(prompt, source="scheduled", channel=channel, role="system")
 
         except Exception as e:
             print(f"Error executing schedule for {agent_id}: {e}")
