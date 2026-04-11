@@ -29,7 +29,8 @@
         "write",
         "overwrite",
         "ls",
-        "delete"
+        "delete",
+        "rmdir"
       ],
       "pkm-oc/": [
         "read",
@@ -41,7 +42,9 @@
         "read",
         "write",
         "overwrite",
-        "ls"
+        "ls",
+        "delete",
+        "rmdir"
       ]
     }
   }

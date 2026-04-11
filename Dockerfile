@@ -21,6 +21,11 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install visual browser bindings for visual AI automation
+RUN playwright install chromium
+RUN playwright install-deps
+
+
 # Install gogcli
 RUN wget https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz -O /tmp/gogcli.tar.gz \
     && tar -xzf /tmp/gogcli.tar.gz -C /tmp \

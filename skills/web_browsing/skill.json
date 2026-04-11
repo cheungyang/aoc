@@ -1,0 +1,7 @@
+{
+  "name": "web_browsing",
+  "description": "Skill for automating repetitive visual web interactions via an existing user Chrome instance.",
+  "tools": {
+    "browser": []
+  }
+}

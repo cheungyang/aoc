@@ -5,7 +5,7 @@ from core.loaders.agents_loader import AgentsLoader
 @tool
 def filesystem(action: str, path: str, content: str = "", agent_id: str = "") -> str:
     """
-    Perform file operations (read, write, overwrite, ls, delete) with scoped permissions.
+    Perform file operations (read, write, overwrite, ls, delete, rmdir) with scoped permissions.
     The 'write' action fails if the file already exists.
     The 'overwrite' action proceeds even if the file exists.
     Both write and overwrite automatically create parent directories if they don't exist.
@@ -59,6 +59,15 @@ def filesystem(action: str, path: str, content: str = "", agent_id: str = "") ->
                 return f"Error: Path {path} is not a file. 'delete' action only deletes single files."
             os.remove(path)
             return f"Successfully deleted file {path}"
+            
+        elif action == "rmdir":
+            if not os.path.exists(path):
+                return f"Error: Path not found at {path}"
+            if not os.path.isdir(path):
+                return f"Error: Path {path} is not a directory"
+            import shutil
+            shutil.rmtree(path)
+            return f"Successfully removed directory {path}"
             
         else:
             return f"Error: Unknown action '{action}'"
