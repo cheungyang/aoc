@@ -1,20 +1,16 @@
 import os
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
-from core.memory.vault_vector_store import VaultVectorStore
+
 
 @tool
-def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content: str = "", obsidian_args: str = "") -> str:
+def obsidian(action: str, vault_id: str, agent_id: str, path: str, content: str = "", search_term: str = "") -> str:
     """
     Perform specific operations on Obsidian vaults with scoped permissions.
-    Actions: file_search, read, write, overwrite, append, delete, vector_search, update_vectors.
+    Actions: file_search, read, write, overwrite, append, delete.
     """
     if not agent_id:
         return "Error: agent_id is required to verify permissions."
-
-    # Fallback: if path is empty but args is provided, use args as path
-    if not path and obsidian_args:
-        path = obsidian_args
 
     from core.loaders.tools_loader import ToolsLoader
     tools_loader = ToolsLoader()
@@ -33,7 +29,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
     if not target_path.startswith(vault_path):
         return f"Error: Path {path} is outside of vault {vault_id}"
 
-    if not tools_loader.check_permission(agent_id, "obsidian", action, vault_id=vault_id, target_path=target_path):
+    if not tools_loader.check_permission(agent_id, "obsidian", action, vault_id=vault_id, path=target_path):
         return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}"
 
     try:
@@ -79,7 +75,7 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
                 return f"Error: Search directory not found: {search_dir}"
                 
             results = []
-            search_term = obsidian_args.lower() if obsidian_args else ""
+            search_term = search_term.lower() if search_term else ""
             
             for root, dirs, files in os.walk(search_dir):
                 for file in files:
@@ -102,21 +98,6 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str = "", content:
             else:
                 return "\n".join(results)
                 
-        elif action == "vector_search":
-            persist_dir = os.path.join(vault_path, ".chroma_db")
-            store = VaultVectorStore(vault_dir=vault_path, persist_dir=persist_dir)
-            results = store.search(query=obsidian_args, limit=5)
-            
-            output = []
-            for res in results:
-                output.append(f"File: {res['path']}\nContent: {res['content']}\nDistance: {res['distance']}\n---")
-            return "\n".join(output) if output else "No relevant content found."
-            
-        elif action == "update_vectors":
-            persist_dir = os.path.join(vault_path, ".chroma_db")
-            store = VaultVectorStore(vault_dir=vault_path, persist_dir=persist_dir)
-            store.index_vault()
-            return "Vectors updated successfully."
             
         else:
             return f"Error: Unknown action '{action}'"

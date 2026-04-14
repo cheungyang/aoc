@@ -100,6 +100,21 @@ class TestCheckPermission(unittest.TestCase):
         
         self.assertFalse(self.loader.check_permission("agent2", "generic_tool", "read", path=target_agent1))
 
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_obsidian_agent_id_placeholder(self, mock_merge):
+        mock_merge.return_value = {
+            "obsidian": {
+                "pkm/agents/<agent_id>": ["read"]
+            }
+        }
+        # Go up 3 levels from tests/core/loaders to reach workspace root
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        
+        target_agent1 = os.path.join(workspace_root, "pkm", "agents", "agent1", "file.txt")
+        self.assertTrue(self.loader.check_permission("agent1", "obsidian", "read", path=target_agent1))
+        
+        self.assertFalse(self.loader.check_permission("agent2", "obsidian", "read", path=target_agent1))
+
 if __name__ == "__main__":
     unittest.main()
 

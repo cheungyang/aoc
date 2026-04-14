@@ -13,18 +13,21 @@
     "obsidian": {
       "pkm/vault/pages/projects": [
         "read",
-        "file_search",
-        "vector_search"
+        "file_search"
       ],
       "pkm/ticktick": [
         "read",
-        "file_search",
-        "vector_search"
+        "file_search"
       ],
       "pkm/vault/journals": [
         "read",
         "write",
         "append"
+      ]
+    },
+    "vector_search": {
+      "pkm": [
+        "vector_search"
       ]
     }
   }

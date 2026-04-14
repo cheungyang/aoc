@@ -86,8 +86,6 @@ class ToolsLoader:
             
         if isinstance(permissions, dict):
             target_path_to_check = path
-            if tool_id == "obsidian":
-                target_path_to_check = kwargs.get("target_path")
                 
             if target_path_to_check is None:
                 return False

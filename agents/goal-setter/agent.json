@@ -28,9 +28,13 @@
       "pkm/vault/pages/projects": [
         "read",
         "file_search",
-        "vector_search",
         "write",
         "overwrite"
+      ]
+    },
+    "vector_search": {
+      "pkm": [
+        "vector_search"
       ]
     }
   }

@@ -43,7 +43,7 @@ Always ensure the local vault is up to date before analyzing priorities.
 ### Phase 3: Retrieve, Prioritize Tasks & Track Momentum
 1. For each active project identified in Phase 2, locate its file path and its alias tag (e.g., `#p/my-project`).
 2. **Track Momentum**: Once the project list and paths are known, use the `git` tool's `log-p` action on the specific project files to quickly understand the delta between recent edits. Use these insights to gauge project progression and generate more precise, context-aware recommendations.
-3. Use the `obsidian` tool's `vector_search` action to search the `ticktick/` directory using the project's alias tag as the query.
+3. Use the `vector_search` tool with the project's alias tag as the query to find relevant tasks.
 4. **Parse & Filter Tasks**:
    - Strictly filter the returned markdown lines for uncompleted tasks. An uncompleted task is defined by the exact markdown syntax: `- [ ]`. Ignore completed tasks (`- [x]`).
    - Evaluate the urgency of the uncompleted tasks by checking for any scheduled or due dates mentioned in the task line.
@@ -63,4 +63,5 @@ Compile the findings into clear, categorized buckets.
 
 ## Required Tools
 - `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.
-- `obsidian`: Required to perform `read`, `file_search`, and `vector_search` actions within the `pkm` vault to access projects, tasks, and journals.
+- `obsidian`: Required to perform `read` and `file_search` actions within the `pkm` vault to access projects, tasks, and journals.
+- `vector_search`: Required to perform vector operations on the vault.

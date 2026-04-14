@@ -8,14 +8,19 @@
       "pkm/wiki": [
         "read",
         "file_search",
-        "vector_search",
         "write",
         "overwrite",
         "append"
       ],
       "pkm/inbox": [
         "read",
+        "file_search",
         "delete"
+      ]
+    },
+    "vector_search": {
+      "pkm": [
+        "vector_search"
       ]
     },
     "web_search": []
