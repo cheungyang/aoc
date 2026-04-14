@@ -65,7 +65,27 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(IndexError):
             await agent.execute("hello", "session1")
 
+    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.memory.flat_file_checkpointer.FlatFileCheckpointer.delete_thread')
+    async def test_execute_retry_on_corrupt_checkpointer(self, mock_delete_thread, mock_logging_handler_class):
+        # Graph invoke throws corrupt checkpointer exception on first call, succeeds on second
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock()
+        mock_graph.ainvoke.side_effect = [
+            Exception("Found AIMessages with tool_calls that do not have a corresponding ToolMessage"),
+            {"messages": [MagicMock(content="Success after retry")]}
+        ]
 
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        # Run
+        reply = await agent.execute("hello", "session1")
+        
+        # Assertions
+        self.assertEqual(mock_graph.ainvoke.call_count, 2)
+        mock_delete_thread.assert_called_once_with("test-agent:session1")
+        self.assertEqual(reply, "Success after retry")
 
 
 if __name__ == "__main__":

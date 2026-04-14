@@ -11,10 +11,20 @@
       ]
     },
     "obsidian": {
-      "pkm": [
+      "pkm/vault/pages/projects": [
         "read",
         "file_search",
         "vector_search"
+      ],
+      "pkm/ticktick": [
+        "read",
+        "file_search",
+        "vector_search"
+      ],
+      "pkm/vault/journals": [
+        "read",
+        "write",
+        "append"
       ]
     }
   }

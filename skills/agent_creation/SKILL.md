@@ -19,7 +19,25 @@ Use this skill exclusively when the user explicitly requests the creation of a n
 Create a new directory for the agent under `agents/<agent_id>/`.
 
 ### 2. Create Agent Configuration
-Create `agents/<agent_id>/agent.json`. Follow the patterns from existing agents but do NOT copy agent-specific values (like `agent_id`, `name`, `discord_token_key`, `channel_hosts`) unless they are intended for the new agent. Ensure required skills (like `memory` and `dream`) are included in the skills array.
+Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure template below:
+```json
+{
+  "agent_id": "<agent_id>",
+  "name": "<Agent Name>",
+  "emoji": "<Emoji>",
+  "description": "<Short Description>",
+  "model": "<Optional Model Name>",
+  "discord_token_key": "<Optional Discord Token Key>",
+  "channel_hosts": ["<Optional Channel>"],
+  "tools": {
+    "<tool_name_1>": {}
+  },
+  "skills": ["memory", "dream"]
+}
+```
+*Critical Constraints for agent.json:*
+- The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
+- Do not explicitly add tools to the `tools` object if they are already inherited via the skills listed in the `skills` array (e.g., `obsidian` is inherited via the `memory` skill).
 
 ### 3. Create Core Markdown Files
 Create the following files under `agents/<agent_id>/`:
@@ -29,14 +47,14 @@ Create the following files under `agents/<agent_id>/`:
 - **IDENTITY.md**: Stores basic identity information (Agent ID, Name, Emoji, Description).
 
 ### 4. Create Obsidian Vault Folders
-Create the following folders in the Obsidian vault (assumed path `pkm-oc/`):
-- `pkm-oc/agents/<agent_id>/memory_logs`
+Create the following folders in the Obsidian vault (assumed path `pkm/`):
+- `pkm/agents/<agent_id>/memory_logs`
 
 ### 5. Create Initial Vault Files
 Create the following markdown files in the vault:
-- `pkm-oc/agents/<agent_id>/MEMORY.md` (for long-term, curated memory).
-- `pkm-oc/agents/<agent_id>/FEEDBACK.md` (for long-term, curated feedback from human).
-- `pkm-oc/agents/<agent_id>/CONTEXT.md` (for long-term, curated context about the human).
+- `pkm/agents/<agent_id>/MEMORY.md` (for long-term, curated memory).
+- `pkm/agents/<agent_id>/FEEDBACK.md` (for long-term, curated feedback from human).
+- `pkm/agents/<agent_id>/CONTEXT.md` (for long-term, curated context about the human).
 
 ## Required Tools
-- `filesystem`: Required to read reference files and write/overwrite configuration files in both `agents/<agent_id>/` and `pkm-oc/agents/<agent_id>/`.
+- `filesystem`: Required to read reference files and write/overwrite configuration files in both `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.

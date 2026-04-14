@@ -5,8 +5,16 @@
   "emoji": "🤖",
   "tools": {
     "filesystem": {
-      "agents/": ["read", "write", "overwrite"],
-      "pkm-oc/": ["read", "write", "overwrite"]
+      "agents/": [
+        "read",
+        "write",
+        "overwrite"
+      ],
+      "pkm/agents": [
+        "read",
+        "write",
+        "overwrite"
+      ]
     }
   }
 }

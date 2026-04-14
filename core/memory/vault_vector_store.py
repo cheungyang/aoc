@@ -36,6 +36,17 @@ class VaultVectorStore:
                     if any(part.startswith('.') for part in rel_path.split(os.sep)):
                         continue
                         
+                    # Only include files at ticktick and vault/pages/projects
+                    path_parts = rel_path.split(os.sep)
+                    is_ticktick = path_parts[0] == 'ticktick'
+                    is_project = (len(path_parts) >= 3 and 
+                                  path_parts[0] == 'vault' and 
+                                  path_parts[1] == 'pages' and 
+                                  path_parts[2] == 'projects')
+                    
+                    if not (is_ticktick or is_project):
+                        continue
+                        
                     try:
                         with open(path, 'r', encoding='utf-8') as f:
                             content = f.read()
@@ -105,20 +116,20 @@ class VaultVectorStore:
             
             print(f"Processing batch {i//batch_size + 1} of {(len(documents) - 1)//batch_size + 1}...")
             
-            try:
-                batch_embeds = self.embeddings.embed_documents(batch_docs)
-            except Exception as e:
-                print(f"Error generating embeddings for batch: {e}")
-                if "RESOURCE_EXHAUSTED" in str(e):
-                    print("Rate limit hit. Sleeping 30 seconds before retry...")
-                    time.sleep(30)
-                    try:
-                        batch_embeds = self.embeddings.embed_documents(batch_docs)
-                    except Exception as e2:
-                        print(f"Retry failed: {e2}")
-                        return
-                else:
-                    return
+            max_retries = 5
+            retry_delay = 30
+            for attempt in range(max_retries):
+                try:
+                    batch_embeds = self.embeddings.embed_documents(batch_docs)
+                    break
+                except Exception as e:
+                    print(f"Error generating embeddings for batch: {e}")
+                    if "RESOURCE_EXHAUSTED" in str(e) and attempt < max_retries - 1:
+                        print(f"Rate limit hit. Sleeping {retry_delay} seconds before retry (attempt {attempt+1}/{max_retries})...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        raise e
                 
             try:
                 self.collection.upsert(
@@ -129,7 +140,7 @@ class VaultVectorStore:
                 )
             except Exception as e:
                 print(f"Error adding batch to Chroma: {e}")
-                return
+                raise e
                 
             if i + batch_size < len(documents):
                 print("Sleeping 2 seconds to avoid rate limits...")

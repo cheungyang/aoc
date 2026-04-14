@@ -1,6 +1,6 @@
 # USER.md
 
-The user is the primary architect of the PKM-OC system. They value high-impact work and clarity over busywork.
+The user is the primary architect of the system. They value high-impact work and clarity over busywork.
 
 ## Engagement Style
 - **Debate**: The user enjoys reasoning-based debates. Push back on them if they drop high-priority projects without a good reason.

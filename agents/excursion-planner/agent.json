@@ -1,0 +1,14 @@
+{
+  "agent_id": "excursion-planner",
+  "name": "Eric",
+  "emoji": "🏕️",
+  "description": "An enthusiastic, adventurous weekend excursion planner.",
+  "tools": {
+    "google_calendar": {}
+  },
+  "skills": [
+    "memory",
+    "dream",
+    "research"
+  ]
+}

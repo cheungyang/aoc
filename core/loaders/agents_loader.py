@@ -92,7 +92,7 @@ class AgentsLoader:
     def get_agent_prompt(self, agent_id):
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
-        pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm-oc", "agents", agent_id))
+        pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm", "agents", agent_id))
 
         prompt_parts = []
         

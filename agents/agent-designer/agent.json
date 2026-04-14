@@ -18,11 +18,11 @@
   "skills": [
     "agent_creation",
     "skill_creation",
-    "planning",
     "memory",
     "dream"
   ],
   "tools": {
+    "web_search": [],
     "filesystem": {
       "agents/": [
         "read",
@@ -32,7 +32,7 @@
         "delete",
         "rmdir"
       ],
-      "pkm-oc/": [
+      "pkm/agents": [
         "read",
         "write",
         "overwrite",

@@ -84,32 +84,21 @@ class ToolsLoader:
         if not permissions:
             return False
             
-        if tool_id == "obsidian":
-            vault_id = kwargs.get("vault_id")
-            target_path = kwargs.get("target_path")
-            if not vault_id or vault_id not in permissions:
-                return False
-            scopes = permissions[vault_id]
-            if "write" in scopes:
-                return True
-            elif "read" in scopes and action_name in ["read", "file_search", "vector_search"]:
-                return True
-            elif "agent-scoped" in scopes and target_path:
-                workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-                vault_path = os.path.abspath(os.path.join(workspace_root, vault_id))
-                rel_path = os.path.relpath(target_path, vault_path)
-                path_segments = rel_path.split(os.sep)
-                return agent_id in path_segments
-            return False
-
         if isinstance(permissions, dict):
-            if path is None:
+            target_path_to_check = path
+            if tool_id == "obsidian":
+                target_path_to_check = kwargs.get("target_path")
+                
+            if target_path_to_check is None:
                 return False
+                
             workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            target_path = os.path.abspath(path)
+            target_abs_path = os.path.abspath(target_path_to_check)
+            
             for base_path, actions in permissions.items():
-                base_abs_path = os.path.abspath(os.path.join(workspace_root, base_path))
-                if target_path.startswith(base_abs_path):
+                resolved_base_path = base_path.replace("<agent_id>", agent_id)
+                base_abs_path = os.path.abspath(os.path.join(workspace_root, resolved_base_path))
+                if target_abs_path.startswith(base_abs_path):
                     if action_name in actions:
                         return True
             return False

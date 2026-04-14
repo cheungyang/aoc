@@ -4,7 +4,7 @@ import sys
 from unittest.mock import patch, MagicMock
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.loaders.tools_loader import ToolsLoader
 
@@ -58,5 +58,48 @@ class TestToolsLoader(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].__name__, "git")
 
+class TestCheckPermission(unittest.TestCase):
+    def setUp(self):
+        ToolsLoader._instance = None
+        self.loader = ToolsLoader()
+
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_merge_permissions_overlapping_paths(self, mock_merge):
+        mock_merge.return_value = {
+            "generic_tool": {
+                "pkm": ["read"],
+                "pkm/wiki": ["write"]
+            }
+        }
+        # Go up 3 levels from tests/core/loaders to reach workspace root
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        target_child = os.path.join(workspace_root, "pkm", "wiki", "note.md")
+        
+        self.assertTrue(self.loader.check_permission("test_agent", "generic_tool", "read", path=target_child))
+        self.assertTrue(self.loader.check_permission("test_agent", "generic_tool", "write", path=target_child))
+        self.assertFalse(self.loader.check_permission("test_agent", "generic_tool", "delete", path=target_child))
+        
+        target_parent = os.path.join(workspace_root, "pkm", "note.md")
+        self.assertTrue(self.loader.check_permission("test_agent", "generic_tool", "read", path=target_parent))
+        self.assertFalse(self.loader.check_permission("test_agent", "generic_tool", "write", path=target_parent))
+
+
+
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_agent_id_placeholder_replacement(self, mock_merge):
+        mock_merge.return_value = {
+            "generic_tool": {
+                "pkm/agents/<agent_id>": ["read"]
+            }
+        }
+        # Go up 3 levels from tests/core/loaders to reach workspace root
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        
+        target_agent1 = os.path.join(workspace_root, "pkm", "agents", "agent1", "file.txt")
+        self.assertTrue(self.loader.check_permission("agent1", "generic_tool", "read", path=target_agent1))
+        
+        self.assertFalse(self.loader.check_permission("agent2", "generic_tool", "read", path=target_agent1))
+
 if __name__ == "__main__":
     unittest.main()
+

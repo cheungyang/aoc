@@ -1,0 +1,23 @@
+{
+  "skill_id": "wiki_ingest",
+  "name": "Wiki Ingest",
+  "description": "Processes a reading backlog, extracts/discusses concepts, and compiles a linked LLM Wiki graph.",
+  "emoji": "🕸️",
+  "tools": {
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "file_search",
+        "vector_search",
+        "write",
+        "overwrite",
+        "append"
+      ],
+      "pkm/inbox": [
+        "read",
+        "delete"
+      ]
+    },
+    "web_search": []
+  }
+}

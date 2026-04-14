@@ -21,12 +21,12 @@ class TestObsidianTool(unittest.TestCase):
         
         with patch('os.path.abspath') as mock_abspath:
             def abspath_side_effect(path):
-                if "pkm-oc" in path:
-                    return "/workspace/pkm-oc/note.md" if "note.md" in path else "/workspace/pkm-oc"
+                if "pkm" in path:
+                    return "/workspace/pkm/note.md" if "note.md" in path else "/workspace/pkm"
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
+            result = obsidian.func(action="read", vault_id="pkm", agent_id="test_agent", path="note.md")
             self.assertEqual(result, "note content")
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -40,13 +40,13 @@ class TestObsidianTool(unittest.TestCase):
         
         with patch('os.path.abspath') as mock_abspath:
             def abspath_side_effect(path):
-                if "pkm-oc" in path:
-                    return "/workspace/pkm-oc/note.md" if "note.md" in path else "/workspace/pkm-oc"
+                if "pkm" in path:
+                    return "/workspace/pkm/note.md" if "note.md" in path else "/workspace/pkm"
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
             # Call with path="" and args="note.md"
-            result = obsidian.func(action="read", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="note.md")
+            result = obsidian.func(action="read", vault_id="pkm", agent_id="test_agent", path="", obsidian_args="note.md")
             self.assertEqual(result, "note content")
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -62,12 +62,12 @@ class TestObsidianTool(unittest.TestCase):
         
         # Simulate 51 files
         files = [f"file{i}.md" for i in range(51)]
-        mock_walk.return_value = [("/workspace/pkm-oc", [], files)]
+        mock_walk.return_value = [("/workspace/pkm", [], files)]
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm-oc"
+            mock_abspath.return_value = "/workspace/pkm"
             
-            result = obsidian.func(action="file_search", vault_id="pkm-oc", agent_id="test_agent", path="")
+            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="")
             self.assertTrue(result.startswith("Error: Too many results"))
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -83,12 +83,12 @@ class TestObsidianTool(unittest.TestCase):
         
         # Simulate 60 files matching the term
         files = [f"match_{i}.md" for i in range(60)]
-        mock_walk.return_value = [("/workspace/pkm-oc", [], files)]
+        mock_walk.return_value = [("/workspace/pkm", [], files)]
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm-oc"
+            mock_abspath.return_value = "/workspace/pkm"
             
-            result = obsidian.func(action="file_search", vault_id="pkm-oc", agent_id="test_agent", path="", obsidian_args="match")
+            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="", obsidian_args="match")
             lines = result.split("\n")
             self.assertEqual(len(lines), 51)
             self.assertEqual(lines[-1], "show 50 out of 60 results")
@@ -110,9 +110,9 @@ class TestObsidianTool(unittest.TestCase):
         ]
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm-oc"
+            mock_abspath.return_value = "/workspace/pkm"
             
-            result = obsidian.func(action="vector_search", vault_id="pkm-oc", agent_id="test_agent", obsidian_args="query")
+            result = obsidian.func(action="vector_search", vault_id="pkm", agent_id="test_agent", obsidian_args="query")
             self.assertIn("File: note1.md", result)
             self.assertIn("Content: content1", result)
             self.assertIn("Distance: 0.1", result)
@@ -130,9 +130,9 @@ class TestObsidianTool(unittest.TestCase):
         mock_vector_store.return_value = mock_store_instance
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm-oc"
+            mock_abspath.return_value = "/workspace/pkm"
             
-            result = obsidian.func(action="update_vectors", vault_id="pkm-oc", agent_id="test_agent")
+            result = obsidian.func(action="update_vectors", vault_id="pkm", agent_id="test_agent")
             self.assertEqual(result, "Vectors updated successfully.")
             mock_store_instance.index_vault.assert_called_once()
 
@@ -147,10 +147,10 @@ class TestObsidianTool(unittest.TestCase):
         mock_exists.return_value = True
         mock_isfile.return_value = True
         
-        result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="note.md")
+        result = obsidian.func(action="delete", vault_id="pkm", agent_id="test_agent", path="note.md")
         self.assertEqual(result, "Successfully deleted file note.md")
         workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        expected_path = os.path.join(workspace_root, "pkm-oc", "note.md")
+        expected_path = os.path.join(workspace_root, "pkm", "note.md")
         mock_remove.assert_called_once_with(expected_path)
 
 
@@ -164,7 +164,7 @@ class TestObsidianTool(unittest.TestCase):
         mock_exists.return_value = True
         mock_isfile.return_value = False
         
-        result = obsidian.func(action="delete", vault_id="pkm-oc", agent_id="test_agent", path="")
+        result = obsidian.func(action="delete", vault_id="pkm", agent_id="test_agent", path="")
         self.assertIn("Error: Path  is not a file", result)
 
 

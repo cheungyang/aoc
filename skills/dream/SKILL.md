@@ -17,7 +17,7 @@ This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt
 
 ### 1. The Backup Phase (Failsafe)
 Before altering long-term memory, back up the current state.
-- Use the `obsidian` tool to read the current contents of `agents/<agent_id>/MEMORY.md`, `FEEDBACK.md`, and `CONTEXT.md` (if they exist) from the `pkm-oc` vault.
+- Use the `obsidian` tool to read the current contents of `agents/<agent_id>/MEMORY.md`, `FEEDBACK.md`, and `CONTEXT.md` (if they exist) from the `pkm` vault.
 - Use the `obsidian` tool's `write` action to save exact copies into the archive directory with today's date: 
   - `agents/<agent_id>/memory_archive/MEMORY_YYYY-MM-DD_bak.md`
   - `agents/<agent_id>/memory_archive/FEEDBACK_YYYY-MM-DD_bak.md`
@@ -46,11 +46,11 @@ Carefully parse the log for items worthy of long-term retention:
 
 ### 4. The Archiving Phase
 Once a log file has been fully processed and its contents synthesized into the root files:
-- Use the `obsidian` tool's `write` action to move the raw log file to the archive: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md`.
-- Use the `obsidian` tool's `overwrite` action to clear the contents of the original active log file in `memory_logs/YYYY-MM-DD.md` (leaving it as an empty file, effectively deleting the processed data from the active queue).
+- Use the `obsidian` tool's `append` action to move the raw log file to the archive: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md`. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
+- Use the `obsidian` tool's `delete` action to completely remove the original active log file `memory_logs/YYYY-MM-DD.md` (effectively deleting the processed data from the active queue).
 
 ### 5. Completion Memory Logging
 - Once all logs are processed and archived, **LOAD the `memory` skill** to record the successful execution of the dream routine.
 
 ## Required Tools
-- `obsidian`: Required to perform `file_search`, `read`, `write`, and `overwrite` actions on memory logs and context files within the `pkm-oc` vault. Requires `agent-scoped` permissions.
+- `obsidian`: Required to perform `file_search`, `read`, `write`, `overwrite`, `append`, and `delete` actions on memory logs and context files within the `pkm` vault. Requires `agent-scoped` permissions.

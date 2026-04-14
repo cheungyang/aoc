@@ -18,22 +18,22 @@ class SkillsLoader:
     def _load_skills(self, allowed_skills=None):
         import json
         if os.path.isdir(self.skills_dir):
-            for skill_name in os.listdir(self.skills_dir):
-                if allowed_skills is not None and skill_name not in allowed_skills:
+            for skill_id in os.listdir(self.skills_dir):
+                if allowed_skills is not None and skill_id not in allowed_skills:
                     continue
-                if skill_name in self._skills_cache:
+                if skill_id in self._skills_cache:
                     continue
                 
-                skill_path = os.path.join(self.skills_dir, skill_name, "skill.json")
+                skill_path = os.path.join(self.skills_dir, skill_id, "skill.json")
                 if os.path.isfile(skill_path):
                     try:
                         with open(skill_path, "r") as f:
                             config = json.load(f)
-                        config["path"] = os.path.join(self.skills_dir, skill_name, "SKILL.md")
-                        self._skills_cache[skill_name] = config
+                        config["path"] = os.path.join(self.skills_dir, skill_id, "SKILL.md")
+                        self._skills_cache[skill_id] = config
                         HotReloader().watch(skill_path, self._on_skill_changed)
                     except Exception as e:
-                        print(f"Error loading skill.json for {skill_name}: {e}")
+                        print(f"Error loading skill.json for {skill_id}: {e}")
 
     def get_skill_tools(self, skill_id: str):
         self._load_skills()
@@ -52,32 +52,33 @@ class SkillsLoader:
             that you have access to. To use a skill, use the `load_skill` tool with the \n\
             skill name to load the skill into your memory. Your agent_id is '{agent_id}'.\n"
 
-        for skill_name, info in self._skills_cache.items():
-            if skill_name not in allowed_skills:
+        for skill_id, info in self._skills_cache.items():
+            if skill_id not in allowed_skills:
                 continue
             name = info.get("name")
+            skill_id = info.get("skill_id")
             desc = info.get("description")
-            overview += f"- {name}: {desc}\n"
+            overview += f"- {name} (id:{skill_id}): {desc}\n"
         overview += "</skills_list>"
         return overview
 
-    def get_skill_prompt(self, agent_id: str, skill_name: str):
+    def get_skill_prompt(self, agent_id: str, skill_id: str):
         from core.loaders.agents_loader import AgentsLoader
         agent = AgentsLoader().get_agent(agent_id)
         allowed_skills = agent.config.get("skills", [])
         
-        if skill_name not in allowed_skills:
-            return f"Error: Agent {agent_id} does not have access to skill {skill_name}."
+        if skill_id not in allowed_skills:
+            return f"Error: Agent {agent_id} does not have access to skill {skill_id}."
             
         self._load_skills(allowed_skills)
         
-        info = self._skills_cache.get(skill_name)
+        info = self._skills_cache.get(skill_id)
         if not info:
-            return f"Skill {skill_name} not found."
+            return f"Skill {skill_id} not found."
             
         skill_path = info.get("path")
         if not skill_path or not os.path.isfile(skill_path):
-            return f"Skill file for {skill_name} not found."
+            return f"Skill file for {skill_id} not found."
             
         with open(skill_path, "r") as f:
             content = f.read()

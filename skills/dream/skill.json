@@ -5,7 +5,13 @@
   "emoji": "💭",
   "tools": {
     "obsidian": {
-      "pkm-oc": ["agent-scoped"]
+      "pkm/agents/<agent_id>": [
+        "read",
+        "write",
+        "append",
+        "overwrite",
+        "delete"
+      ]
     }
   }
 }

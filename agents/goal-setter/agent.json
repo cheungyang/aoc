@@ -25,9 +25,12 @@
       ]
     },
     "obsidian": {
-      "pkm": [
+      "pkm/vault/pages/projects": [
         "read",
-        "write"
+        "file_search",
+        "vector_search",
+        "write",
+        "overwrite"
       ]
     }
   }

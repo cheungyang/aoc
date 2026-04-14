@@ -54,4 +54,4 @@ Use the `obsidian` tool's `append` action to write the formatted entry.
 - Briefly summarize what you recorded and state that you will remember it, proving to the user that their feedback is taken seriously and integrated into your learning.
 
 ## Required Tools
-- `obsidian`: Required to use the `append` action on `agents/<agent_id>/memory_logs/YYYY-MM-DD.md` within the `pkm-oc` vault. Requires `agent-scoped` permissions.
+- `obsidian`: Required to use the `append` action on `agents/<agent_id>/memory_logs/YYYY-MM-DD.md` within the `pkm` vault. Requires `agent-scoped` permissions.
