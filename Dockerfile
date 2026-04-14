@@ -9,29 +9,29 @@ RUN apt-get update && apt-get install -y \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Install notebooklm-cli
-RUN pip install notebooklm-cli
-
 # Set working directory
 WORKDIR /app
 
-# Copy requirements.txt first to leverage Docker cache
-COPY requirements.txt .
+# Copy everything into the container
+COPY . .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install visual browser bindings for visual AI automation
 RUN playwright install chromium
 RUN playwright install-deps
 
+# Install notebooklm-mcp-cli (nlm command)
+RUN pip install notebooklm-mcp-cli
 
 # Install gogcli
-RUN wget https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz -O /tmp/gogcli.tar.gz \
-    && tar -xzf /tmp/gogcli.tar.gz -C /tmp \
-    && find /tmp -type f -name gogcli -exec mv {} /usr/local/bin/gogcli \; \
-    && chmod +x /usr/local/bin/gogcli \
-    && rm -rf /tmp/gogcli.tar.gz
+RUN mkdir -p /tmp/gogcli_extract \
+    && wget https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_amd64.tar.gz -O /tmp/gogcli.tar.gz \
+    && tar -xzf /tmp/gogcli.tar.gz -C /tmp/gogcli_extract \
+    && find /tmp/gogcli_extract -type f \( -name "gog" -o -name "gog_*" \) | head -1 | xargs -I{} cp {} /usr/local/bin/gog \
+    && chmod +x /usr/local/bin/gog \
+    && rm -rf /tmp/gogcli.tar.gz /tmp/gogcli_extract
 
 # Create non-root user
 RUN useradd -m appuser

@@ -4,7 +4,7 @@
 # This script assumes you are running it from the root of the project directory.
 
 # Configuration
-IMAGE_NAME="langgraph-app"
+IMAGE_NAME="aoc"
 CONTAINER_WORKDIR="/app"
 
 # Check if .env file exists
