@@ -1,6 +1,7 @@
 import os
 from langchain_core.tools import tool
 import requests
+from core.util import format_tool_response
 
 
 @tool
@@ -18,7 +19,7 @@ async def web_search(query: str) -> str:
     """
     api_key = os.environ.get("BRAVE_API_KEY")
     if not api_key:
-        return "Error: BRAVE_API_KEY environment variable not set. Please set it to use this tool."
+        return format_tool_response("web_search", payload="", errors="Error: BRAVE_API_KEY environment variable not set. Please set it to use this tool.")
 
     url = "https://api.search.brave.com/res/v1/llm/context"
     params = {"q": query}
@@ -33,6 +34,6 @@ async def web_search(query: str) -> str:
         # If async is strictly required, we could use httpx or aiohttp.
         response = requests.get(url, params=params, headers=headers)
         response.raise_for_status()
-        return response.text
+        return format_tool_response("web_search", payload=response.text, errors="None")
     except Exception as e:
-        return f"Error performing search: {e}"
+        return format_tool_response("web_search", payload="", errors=f"Error performing search: {e}")

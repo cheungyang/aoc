@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.obsidian import obsidian
+from core.util import format_tool_response
 
 class TestObsidianTool(unittest.TestCase):
 
@@ -17,7 +18,7 @@ class TestObsidianTool(unittest.TestCase):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
         mock_loader.check_permission.return_value = True
-        mock_exists.return_value = True # File exists
+        mock_exists.return_value = True
         
         with patch('os.path.abspath') as mock_abspath:
             def abspath_side_effect(path):
@@ -26,10 +27,12 @@ class TestObsidianTool(unittest.TestCase):
                 return "/workspace/" + path
             mock_abspath.side_effect = abspath_side_effect
             
-            result = obsidian.func(action="read", vault_id="pkm", agent_id="test_agent", path="note.md")
-            self.assertEqual(result, "note content")
-
-
+            instructions = [{"action": "read", "path": "note.md"}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = '<instruction_result action="read" path="note.md">note content</instruction_result>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+            self.assertEqual(result, expected)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
@@ -49,8 +52,13 @@ class TestObsidianTool(unittest.TestCase):
         with patch('os.path.abspath') as mock_abspath:
             mock_abspath.return_value = "/workspace/pkm"
             
-            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="")
-            self.assertTrue(result.startswith("Error: Too many results"))
+            instructions = [{"action": "file_search", "path": ""}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = ''
+            expected_errors = '<instruction_error action="file_search" path="">Error: Too many results (51). Please provide a search term to narrow down.</instruction_error>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors=expected_errors)
+            self.assertEqual(result, expected)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
@@ -68,12 +76,22 @@ class TestObsidianTool(unittest.TestCase):
         mock_walk.return_value = [("/workspace/pkm", [], files)]
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm"
+            def abspath_side_effect(path):
+                if path.endswith("pkm"):
+                    return "/workspace/pkm"
+                return path
+            mock_abspath.side_effect = abspath_side_effect
             
-            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="", search_term="match")
-            lines = result.split("\n")
-            self.assertEqual(len(lines), 51)
-            self.assertEqual(lines[-1], "show 50 out of 60 results")
+            instructions = [{"action": "file_search", "path": "", "content_or_search_term": "match"}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_results = [f"match_{i}.md" for i in range(50)]
+            expected_output = "\n".join(expected_results)
+            expected_output += f"\nshow 50 out of 60 results"
+            
+            expected_payload = f'<instruction_result action="file_search" path="">{expected_output}</instruction_result>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+            self.assertEqual(result, expected)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
@@ -95,8 +113,13 @@ class TestObsidianTool(unittest.TestCase):
                 return "/workspace/pkm"
             mock_abspath.side_effect = abspath_side_effect
             
-            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="non_existent")
-            self.assertIn("Error: Path not found", result)
+            instructions = [{"action": "file_search", "path": "non_existent"}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = ''
+            expected_errors = '<instruction_error action="file_search" path="non_existent">Error: Path not found: non_existent</instruction_error>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors=expected_errors)
+            self.assertEqual(result, expected)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
@@ -109,12 +132,16 @@ class TestObsidianTool(unittest.TestCase):
         mock_exists.return_value = True
         mock_isfile.return_value = True
         
-        result = obsidian.func(action="delete", vault_id="pkm", agent_id="test_agent", path="note.md")
-        self.assertEqual(result, "Successfully deleted file note.md")
+        instructions = [{"action": "delete", "path": "note.md"}]
+        result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+        
+        expected_payload = '<instruction_result action="delete" path="note.md">Successfully deleted file note.md</instruction_result>'
+        expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+        self.assertEqual(result, expected)
+        
         workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         expected_path = os.path.join(workspace_root, "pkm", "note.md")
         mock_remove.assert_called_once_with(expected_path)
-
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
@@ -126,9 +153,43 @@ class TestObsidianTool(unittest.TestCase):
         mock_exists.return_value = True
         mock_isfile.return_value = False
         
-        result = obsidian.func(action="delete", vault_id="pkm", agent_id="test_agent", path="")
-        self.assertIn("Error: Path  is not a file", result)
+        instructions = [{"action": "delete", "path": ""}]
+        result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+        
+        expected_payload = ''
+        expected_errors = '<instruction_error action="delete" path="">Error: Path  is not a file. \'delete\' action only deletes single files.</instruction_error>'
+        expected = format_tool_response("obsidian", payload=expected_payload, errors=expected_errors)
+        self.assertEqual(result, expected)
 
+    def test_limit_instructions(self):
+        instructions = [{"action": "read", "path": f"path{i}.md"} for i in range(11)]
+        result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+        self.assertIn("Error: Too many instructions requested", result)
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_multi_instruction(self, mock_file, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        
+        # Mock file reads
+        mock_file.return_value.read.side_effect = ["content1", "content2"]
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.side_effect = lambda x: x # Simple mock
+            
+            instructions = [
+                {"action": "read", "path": "note1.md"},
+                {"action": "read", "path": "note2.md"}
+            ]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = '<instruction_result action="read" path="note1.md">content1</instruction_result>\n<instruction_result action="read" path="note2.md">content2</instruction_result>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+            self.assertEqual(result, expected)
 
 if __name__ == '__main__':
     unittest.main()

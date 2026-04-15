@@ -36,6 +36,12 @@ class Agent:
             await channel.send(f"Session context cleared. {archive_status}")
             return
 
+        # Handle [newall] command to clear all session contexts
+        if content.strip() == "[newall]":    
+            archive_status = SessionManager().clear_sessions()
+            await channel.send(f"All session contexts cleared. {archive_status}")
+            return
+
         # Lazy load langgraph graph object
         if self.graph is None:
             self.graph = await self._build_graph()

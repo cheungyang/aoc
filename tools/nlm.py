@@ -2,6 +2,7 @@ import os
 import subprocess
 import shlex
 from langchain_core.tools import tool
+from core.util import format_tool_response
 
 @tool
 def nlm(command: str) -> str:
@@ -17,7 +18,7 @@ def nlm(command: str) -> str:
     nlm_bin = os.path.join(workspace_root, "bin", "nlm")
 
     if not os.path.exists(nlm_bin):
-        return f"Error: nlm binary not found at {nlm_bin}. Please ensure it is installed."
+        return format_tool_response("nlm", payload="", errors=f"Error: nlm binary not found at {nlm_bin}. Please ensure it is installed.")
 
     try:
         # Split command safely
@@ -37,7 +38,7 @@ def nlm(command: str) -> str:
         if result.stderr:
             output.append(result.stderr)
 
-        return "\n".join(output)
+        return format_tool_response("nlm", payload="\n".join(output), errors="None")
 
     except Exception as e:
-        return f"Error performing nlm action: {e}"
+        return format_tool_response("nlm", payload="", errors=f"Error performing nlm action: {e}")

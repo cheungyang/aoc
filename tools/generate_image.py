@@ -2,6 +2,7 @@ import os
 import requests
 import uuid
 from langchain_core.tools import tool
+from core.util import format_tool_response
 
 @tool
 async def generate_image(prompt: str, output_path: str = None) -> str:
@@ -20,7 +21,7 @@ async def generate_image(prompt: str, output_path: str = None) -> str:
     """
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return "Error: OPENAI_API_KEY environment variable not set. Please set it to use this tool."
+        return format_tool_response("generate_image", payload="", errors="Error: OPENAI_API_KEY environment variable not set. Please set it to use this tool.")
 
     try:
         # Lazy import to avoid failures if openai isn't installed in some contexts
@@ -57,7 +58,7 @@ async def generate_image(prompt: str, output_path: str = None) -> str:
         with open(output_path, 'wb') as f:
             f.write(img_response.content)
             
-        return output_path
+        return format_tool_response("generate_image", payload=output_path, errors="None")
         
     except Exception as e:
-        return f"Error generating image: {e}"
+        return format_tool_response("generate_image", payload="", errors=f"Error generating image: {e}")

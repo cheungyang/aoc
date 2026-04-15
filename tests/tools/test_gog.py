@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.gog import gog
+from core.util import format_tool_response
 
 class TestGogTool(unittest.TestCase):
 
@@ -33,7 +34,7 @@ class TestGogTool(unittest.TestCase):
         called_cmd = mock_run.call_args[0][0]
         self.assertTrue(called_cmd[0].endswith("bin/gog"))
         self.assertEqual(called_cmd[1:], ["calendar", "calendars"])
-        self.assertEqual(result, "calendar list")
+        self.assertEqual(result, format_tool_response("gog", payload="calendar list", errors="None"))
 
     @patch('tools.gog.os.path.exists')
     @patch('tools.gog.subprocess.run')
@@ -51,7 +52,7 @@ class TestGogTool(unittest.TestCase):
         self.assertTrue(mock_run.called)
         called_cmd = mock_run.call_args[0][0]
         self.assertEqual(called_cmd[1:], ["calendar", "events", "primary", "--today"])
-        self.assertEqual(result, "events list")
+        self.assertEqual(result, format_tool_response("gog", payload="events list", errors="None"))
 
     @patch('tools.gog.os.path.exists')
     @patch('tools.gog.subprocess.run')
@@ -66,7 +67,7 @@ class TestGogTool(unittest.TestCase):
         
         result = gog.func(command="calendar calendars")
         
-        self.assertEqual(result, "error occurred")
+        self.assertEqual(result, format_tool_response("gog", payload="error occurred", errors="None"))
 
     @patch('tools.gog.os.path.exists')
     @patch('tools.gog.subprocess.run')

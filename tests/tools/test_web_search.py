@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.web_search import web_search
+from core.util import format_tool_response
 
 class TestWebSearchTool(unittest.IsolatedAsyncioTestCase):
 
@@ -34,7 +35,7 @@ class TestWebSearchTool(unittest.IsolatedAsyncioTestCase):
                 "X-Subscription-Token": "test_key"
             }
         )
-        self.assertEqual(result, '{"results": []}')
+        self.assertEqual(result, format_tool_response("web_search", payload='{"results": []}', errors="None"))
 
     @patch.dict(os.environ, {"BRAVE_API_KEY": "test_key"})
     @patch('tools.web_search.requests.get')

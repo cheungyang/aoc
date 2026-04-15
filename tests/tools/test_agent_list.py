@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.agent_list import agent_list
+from core.util import format_tool_response
 
 class TestAgentListTool(unittest.TestCase):
 
@@ -30,16 +31,11 @@ class TestAgentListTool(unittest.TestCase):
         
         result = agent_list.func()
         
-        self.assertEqual(len(result), 2)
-        
-        # Verify first agent
-        self.assertEqual(result[0]["agent_id"], "main")
-        self.assertEqual(result[0]["name"], "Concierge")
-        self.assertNotIn("extra", result[0])
-        
-        # Verify second agent (mapped id to agent_id)
-        self.assertEqual(result[1]["agent_id"], "designer")
-        self.assertEqual(result[1]["name"], "Aki")
+        expected_payload = [
+            {"agent_id": "main", "name": "Concierge", "emoji": "🛎️", "description": "Helper"},
+            {"agent_id": "designer", "name": "Aki", "emoji": "🤖", "description": "Designer"}
+        ]
+        self.assertEqual(result, format_tool_response("agent_list", payload=str(expected_payload), errors="None"))
 
 if __name__ == '__main__':
     unittest.main()

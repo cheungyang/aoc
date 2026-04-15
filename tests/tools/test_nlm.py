@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.nlm import nlm
+from core.util import format_tool_response
 
 class TestNlmTool(unittest.TestCase):
 
@@ -33,7 +34,7 @@ class TestNlmTool(unittest.TestCase):
         called_cmd = mock_run.call_args[0][0]
         self.assertTrue(called_cmd[0].endswith("bin/nlm"))
         self.assertEqual(called_cmd[1:], ["notebook", "list"])
-        self.assertEqual(result, "notebook list output")
+        self.assertEqual(result, format_tool_response("nlm", payload="notebook list output", errors="None"))
 
     @patch('tools.nlm.os.path.exists')
     @patch('tools.nlm.subprocess.run')
@@ -51,7 +52,7 @@ class TestNlmTool(unittest.TestCase):
         self.assertTrue(mock_run.called)
         called_cmd = mock_run.call_args[0][0]
         self.assertEqual(called_cmd[1:], ["notebook", "create", "AI Research"])
-        self.assertEqual(result, "notebook created")
+        self.assertEqual(result, format_tool_response("nlm", payload="notebook created", errors="None"))
 
     @patch('tools.nlm.os.path.exists')
     @patch('tools.nlm.subprocess.run')
@@ -66,7 +67,7 @@ class TestNlmTool(unittest.TestCase):
         
         result = nlm.func(command="notebook list")
         
-        self.assertEqual(result, "error occurred")
+        self.assertEqual(result, format_tool_response("nlm", payload="error occurred", errors="None"))
 
     @patch('tools.nlm.os.path.exists')
     @patch('tools.nlm.subprocess.run')

@@ -3,6 +3,7 @@ import subprocess
 import shlex
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
+from core.util import format_tool_response
 
 @tool
 def gog(command: str) -> str:
@@ -18,7 +19,7 @@ def gog(command: str) -> str:
     gog_bin = os.path.join(workspace_root, "bin", "gog")
 
     if not os.path.exists(gog_bin):
-        return f"Error: gog binary not found at {gog_bin}. Please ensure it is installed."
+        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin}. Please ensure it is installed.")
 
     try:
         # Split command safely
@@ -38,7 +39,7 @@ def gog(command: str) -> str:
         if result.stderr:
             output.append(result.stderr)
 
-        return "\n".join(output)
+        return format_tool_response("gog", payload="\n".join(output), errors="None")
 
     except Exception as e:
-        return f"Error performing gog action: {e}"
+        return format_tool_response("gog", payload="", errors=f"Error performing gog action: {e}")

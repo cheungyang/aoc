@@ -1,6 +1,7 @@
 import os
 from langchain_core.tools import tool
 from core.memory.vault_vector_store import VaultVectorStore
+from core.util import format_tool_response
 
 @tool
 def vector_search(action: str, vault_id: str, agent_id: str, search_term: str = "") -> str:
@@ -9,7 +10,7 @@ def vector_search(action: str, vault_id: str, agent_id: str, search_term: str = 
     Actions: vector_search, update_vectors.
     """
     if not agent_id:
-        return "Error: agent_id is required to verify permissions."
+        return format_tool_response("vector_search", payload="", errors="Error: agent_id is required to verify permissions.")
 
     from core.loaders.tools_loader import ToolsLoader
     tools_loader = ToolsLoader()
@@ -19,11 +20,11 @@ def vector_search(action: str, vault_id: str, agent_id: str, search_term: str = 
     vault_path = os.path.abspath(os.path.join(workspace_root, vault_id))
     
     if not os.path.exists(vault_path):
-        return f"Error: Vault path not found: {vault_path}"
+        return format_tool_response("vector_search", payload="", errors=f"Error: Vault path not found: {vault_path}")
 
     # Check permission using the new tool name 'vector_search'
     if not tools_loader.check_permission(agent_id, "vector_search", action, vault_id=vault_id):
-        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on vault {vault_id}"
+        return format_tool_response("vector_search", payload="", errors=f"Error: Agent {agent_id} does not have permission to perform '{action}' on vault {vault_id}")
 
     persist_dir = os.path.join(vault_path, ".chroma_db")
     store = VaultVectorStore(vault_dir=vault_path, persist_dir=persist_dir)
@@ -31,20 +32,20 @@ def vector_search(action: str, vault_id: str, agent_id: str, search_term: str = 
     try:
         if action == "vector_search":
             if not search_term:
-                return "Error: search_term is required for vector_search."
+                return format_tool_response("vector_search", payload="", errors="Error: search_term is required for vector_search.")
             results = store.search(query=search_term, limit=5)
             
             output = []
             for res in results:
                 output.append(f"File: {res['path']}\nContent: {res['content']}\nDistance: {res['distance']}\n---")
-            return "\n".join(output) if output else "No relevant content found."
+            return format_tool_response("vector_search", payload="\n".join(output) if output else "No relevant content found.", errors="None")
             
         elif action == "update_vectors":
             store.index_vault()
-            return "Vectors updated successfully."
+            return format_tool_response("vector_search", payload="Vectors updated successfully.", errors="None")
             
         else:
-            return f"Error: Unknown action '{action}'"
+            return format_tool_response("vector_search", payload="", errors=f"Error: Unknown action '{action}'")
             
     except Exception as e:
-        return f"Error performing vector action: {e}"
+        return format_tool_response("vector_search", payload="", errors=f"Error performing vector action: {e}")

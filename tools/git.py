@@ -3,6 +3,7 @@ import subprocess
 import shlex
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
+from core.util import format_tool_response
 
 @tool
 def git(action: str, path: str, agent_id: str, message: str = "") -> str:
@@ -15,14 +16,14 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
     Permissions are checked against the agent's allowlist in agent.json.
     """
     if not agent_id:
-        return "Error: agent_id is required to verify permissions."
+        return format_tool_response("git", payload="", errors="Error: agent_id is required to verify permissions.")
 
     from core.loaders.tools_loader import ToolsLoader
     tools_loader = ToolsLoader()
 
     # Centralized validation for scoped tool
     if not tools_loader.check_permission(agent_id, "git", action, path):
-        return f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}"
+        return format_tool_response("git", payload="", errors=f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}")
 
     try:
         def run_git_cmd(cmd_args, cwd):
@@ -43,11 +44,11 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
 
         if action == "pull":
             output, code = run_git_cmd(["pull", "-X", "theirs"], path)
-            return f"Pull result:\n{output}"
+            return format_tool_response("git", payload=f"Pull result:\n{output}", errors="None")
             
         elif action == "push":
             if not message:
-                return "Error: message is required for push action (for commit)."
+                return format_tool_response("git", payload="", errors="Error: message is required for push action (for commit).")
             
             # 1. git pull -X theirs
             pull_output, pull_code = run_git_cmd(["pull", "-X", "theirs"], path)
@@ -58,24 +59,24 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
             # 3. git push
             push_output, push_code = run_git_cmd(["push", "origin", "main"], path)
             
-            return f"Push process result:\nPull:\n{pull_output}\nCommit:\n{commit_output}\nPush:\n{push_output}"
+            return format_tool_response("git", payload=f"Push process result:\nPull:\n{pull_output}\nCommit:\n{commit_output}\nPush:\n{push_output}", errors="None")
             
         elif action == "log-p":
             if os.path.isfile(path):
                 output, code = run_git_cmd(["log", "-p", os.path.basename(path)], os.path.dirname(path))
             else:
                 output, code = run_git_cmd(["log", "-p"], path)
-            return f"Log result:\n{output}"
+            return format_tool_response("git", payload=f"Log result:\n{output}", errors="None")
             
         elif action == "add":
             if os.path.isfile(path):
                 output, code = run_git_cmd(["add", os.path.basename(path)], os.path.dirname(path))
             else:
                 output, code = run_git_cmd(["add", "."], path)
-            return f"Add result:\n{output}"
+            return format_tool_response("git", payload=f"Add result:\n{output}", errors="None")
             
         else:
-            return f"Error: Unknown action '{action}'"
+            return format_tool_response("git", payload="", errors=f"Error: Unknown action '{action}'")
             
     except Exception as e:
-        return f"Error performing git action: {e}"
+        return format_tool_response("git", payload="", errors=f"Error performing git action: {e}")

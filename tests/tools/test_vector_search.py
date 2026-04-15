@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.vector_search import vector_search
+from core.util import format_tool_response
 
 class TestVectorSearchTool(unittest.TestCase):
 
@@ -50,7 +51,7 @@ class TestVectorSearchTool(unittest.TestCase):
             mock_abspath.return_value = "/workspace/pkm"
             
             result = vector_search.func(action="update_vectors", vault_id="pkm", agent_id="test_agent")
-            self.assertEqual(result, "Vectors updated successfully.")
+            self.assertEqual(result, format_tool_response("vector_search", payload="Vectors updated successfully.", errors="None"))
             mock_store_instance.index_vault.assert_called_once()
 
 if __name__ == '__main__':

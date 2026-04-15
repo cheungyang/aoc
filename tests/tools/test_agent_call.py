@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.agent_call import agent_call
+from core.util import format_tool_response
 
 class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
@@ -24,7 +25,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         
         mock_loader.get_agent.assert_called_once_with("agent1")
         mock_agent.execute.assert_called_once_with("hello", source="tool", job_id="job_123")
-        self.assertEqual(result, "agent response")
+        self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
 
     @patch('tools.agent_call.AgentsLoader')
     @patch('core.agent.job_manager.JobManager.new_job_id')
