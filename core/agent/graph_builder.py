@@ -9,7 +9,7 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt
+from core.util import get_knowledge_prompt, get_formatting_prompt
 
 class GraphBuilder:
     def __init__(self):
@@ -25,12 +25,16 @@ class GraphBuilder:
         skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
 
         # 3. Knowledge Prompt
-        knowledge_str = get_knowledge_prompt()
+        knowledge_prompt = get_knowledge_prompt()
+
+        # 4. Formatting Prompt
+        formatting_prompt = get_formatting_prompt()
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", agent_prompt),
             ("system", skills_prompt),
-            ("system", knowledge_str),
+            ("system", knowledge_prompt),
+            ("system", formatting_prompt),
             MessagesPlaceholder(variable_name="messages"),
         ])
         return prompt

@@ -49,5 +49,19 @@ class TestUtil(unittest.TestCase):
         date_str = now.strftime("%Y-%m-%d")
         self.assertIn(date_str, prompt)
 
+    def test_get_formatting_prompt(self):
+        from core.util import get_formatting_prompt
+        prompt = get_formatting_prompt()
+        self.assertIn("<formatting_rules>", prompt)
+        self.assertIn("<agent_response>", prompt)
+        self.assertIn("{{your normal text response}}", prompt)
+
+    def test_format_tool_response(self):
+        from core.util import format_tool_response
+        response = format_tool_response("test_tool", "test_payload", "test_errors")
+        self.assertIn("<test_tool_response>", response)
+        self.assertIn("<payload>test_payload</payload>", response)
+        self.assertIn("<errors>test_errors</errors>", response)
+
 if __name__ == "__main__":
     unittest.main()

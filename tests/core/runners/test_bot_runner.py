@@ -5,7 +5,7 @@ import sys
 import discord
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runners.bot_runner import BotRunner
 
@@ -177,6 +177,64 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.on_message(mock_message)
  
         self.assertEqual(mock_message.channel.send.call_count, 0)
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_handles_self_vote(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        runner.bot.user = mock_bot.user # Ensure runner.bot.user matches
+        
+        mock_message = MagicMock()
+        mock_message.author = mock_bot.user # Message from self
+        mock_message.content = "<@123456789>: i prefer option1"
+        mock_message.mentions = []
+        mock_message.channel.name = "test-channel"
+        mock_message.channel.send = AsyncMock()
+        
+        # Mock channel.typing context manager
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+        
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": ["test-channel"]}
+        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+        
+        # Verify that execute was called with the stripped content
+        mock_agent.execute.assert_called_once_with("i prefer option1", source="discord", channel=mock_message.channel, callbacks=unittest.mock.ANY)
+
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_ignores_self_non_vote(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        runner.bot.user = mock_bot.user
+        
+        mock_message = MagicMock()
+        mock_message.author = mock_bot.user # Message from self
+        mock_message.content = "Just normal text"
+        mock_message.mentions = []
+        mock_message.channel.send = AsyncMock()
+        
+        await runner.on_message(mock_message)
+        
+        # Should return immediately without doing anything
+        mock_agents_loader_class.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

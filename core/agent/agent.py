@@ -5,6 +5,8 @@ import json
 import ast
 from typing import Any, Dict
 import discord
+import xml.etree.ElementTree as ET
+from core.agent.discord_ui import PollButtonView, PollSelectView
 
 class Agent:
     def __init__(self, agent_id, config):
@@ -99,11 +101,54 @@ class Agent:
                     texts.append(part)
             reply_text = "".join(texts)
             
+        # Parse XML
+        text_content = reply_text
+        poll_data = None
+        
+        try:
+            # The user said all responses will be in XML format
+            root = ET.fromstring(reply_text)
+            text_elem = root.find("text")
+            if text_elem is not None:
+                text_content = text_elem.text or ""
+            
+            poll_elem = root.find("poll")
+            if poll_elem is not None:
+                poll_data = {
+                    "question": poll_elem.find("question").text or "",
+                    "allow_multiple": poll_elem.get("allow_multiple") == "true",
+                    "options": []
+                }
+                options_elem = poll_elem.find("options")
+                if options_elem is not None:
+                    for option_elem in options_elem.findall("option"):
+                        poll_data["options"].append({
+                            "text": option_elem.find("text").text or "",
+                            "emoji": option_elem.find("emoji").text or "",
+                            "response": option_elem.find("response").text or ""
+                        })
+        except Exception as e:
+            print(f"XML parsing failed, using raw text: {e}")
+            # Fallback to treating it as raw text if it's not valid XML
+            text_content = reply_text
+
         # Send message to channel
         if channel is not None:
-            chunks = split_message(reply_text)
-            for chunk in chunks:
-                await channel.send(chunk)
+            chunks = split_message(text_content)
+            
+            # If there is a poll, we attach the view to the last chunk
+            view = None
+            if poll_data and source == "discord":
+                if poll_data["allow_multiple"]:
+                    view = PollSelectView(poll_data, channel)
+                else:
+                    view = PollButtonView(poll_data, channel)
+            
+            for i, chunk in enumerate(chunks):
+                if i == len(chunks) - 1 and view:
+                    await channel.send(chunk, view=view)
+                else:
+                    await channel.send(chunk)
 
-        # Return reponse regardness of channel
-        return reply_text
+        # Return reponse regardless of channel
+        return text_content

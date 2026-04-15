@@ -25,6 +25,27 @@ def split_message(text, limit=2000):
         chunks.append(text)
     return chunks
 
+
+def get_formatting_prompt():
+    return """<formatting_rules>    
+You MUST present your response in the following XML format.  <text/> tag is madatory, 
+if you want to present options to the user, use the optional <poll/> tag:
+        <agent_response>
+            <text>{{your normal text response}}</text>
+            <poll allow_multiple="{{true_or_false}}">
+                <question>{{question to ask the user}}</question>
+                <options>
+                    <option>
+                        <text>{{first option}}</text>
+                        <emoji>{{emoji to best represent the option}}</emoji>
+                        <response>{{text to send when this option is selected}}</response>
+                    </option>
+                    {{...additional <option></option> tags for each option...}}
+                </options>
+            </poll>
+        </agent_response>
+</formatting_rules>"""
+
 def get_knowledge_prompt():
     now = datetime.datetime.now()
     date_str = now.strftime("%Y-%m-%d")

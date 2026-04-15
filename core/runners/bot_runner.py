@@ -26,12 +26,24 @@ class BotRunner:
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
 
     async def on_message(self, message):
-        # Ignore messages from all bots
-        if message.author.bot:
+        # Ignore messages from other bots
+        if message.author.bot and message.author != self.bot.user:
             return
 
+        content = message.content
+        # If it is from this bot, check if it is a vote message
+        if message.author == self.bot.user:
+            if content.startswith("<@") and ": " in content:
+                # Strip the mention and colon to pass only the response to the agent
+                parts = content.split(": ", 1)
+                if len(parts) > 1:
+                    content = parts[1]
+            else:
+                # Ignore other messages from self to prevent loops
+                return
+
         # Skip commands (if any)
-        if message.content.startswith("!"):
+        if content.startswith("!"):
             await self.bot.process_commands(message)
             return
 
@@ -67,7 +79,7 @@ class BotRunner:
         reaction_handler = ReactionCallbackHandler(message)
         try:
             async with message.channel.typing():
-                await agent.execute(message.content, source="discord", channel=message.channel, callbacks=[reaction_handler])
+                await agent.execute(content, source="discord", channel=message.channel, callbacks=[reaction_handler])
 
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")
