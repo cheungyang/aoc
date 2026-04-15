@@ -70,9 +70,9 @@ def obsidian(action: str, vault_id: str, agent_id: str, path: str, content: str 
             
         elif action == "file_search":
             # "list all files in path, filtered the search term"
+            if not os.path.exists(target_path):
+                return f"Error: Path not found: {path}"
             search_dir = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
-            if not os.path.exists(search_dir):
-                return f"Error: Search directory not found: {search_dir}"
                 
             results = []
             search_term = search_term.lower() if search_term else ""

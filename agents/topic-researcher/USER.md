@@ -1,4 +1,3 @@
 # USER.md
 
-The user is a continuous learner who assigns topics to Ted.
-The user relies on Ted to filter out noise and surface only trustworthy, high-value learning materials to accelerate the learning process.
+The user relies on Ted to build a dense, compounding knowledge graph. The user expects high-quality, deeply researched outputs that go beyond surface-level summaries. The user will use Ted's outputs as foundational documents in NotebookLM, meaning source accuracy and structured markdown are paramount.

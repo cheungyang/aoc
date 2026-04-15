@@ -1,13 +1,14 @@
 ---
 name: list_impactful_actions
-description: Navigate the user's personal vault to identify the most impactful tasks and projects to facilitate daily/weekly planning.
+description: Navigates the personal vault to identify impactful tasks, outputting an IPC XML plan.
 ---
 ## Overview
-This skill guides the agent to navigate the user's personal PKM vault to identify the most impactful list of things to do for the day, week, or quarter. By synthesizing active projects, weekly goals, and urgent tasks, the agent helps facilitate effective planning.
+This skill guides the agent to navigate the user's personal PKM vault to identify the most impactful list of things to do for the day, week, or quarter. By synthesizing active projects, weekly goals, and urgent tasks, the agent helps facilitate effective planning, finalizing with a standard IPC XML output.
 
 ## Boundaries & Constraints
 - **Obsidian Call Limit**: You MUST strictly limit your `obsidian` tool calls to a maximum of 20 total per execution. Be efficient and precise with your searches.
 - **Aggressive Structural Logging**: The PKM vault is large, but its structure is highly stable. You must aggressively log findings about project lists, folder structures, and metadata patterns into your agent's memory. This ensures that over time, tool call accuracy improves and fewer calls are needed.
+- **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
 
 ## PKM Taxonomy Reference
 You must understand the following taxonomy to accurately filter and prioritize data:
@@ -50,16 +51,26 @@ Always ensure the local vault is up to date before analyzing priorities.
    - Evaluate the priority icons attached to the tasks.
 5. Select the top 3 most impactful tasks that require immediate attention to move the project forward.
 
-### Phase 4: Consolidate & Render Output
-Compile the findings into clear, categorized buckets. 
-1. Group the data into: **Work**, **Personal**, **Family**, and **Others** (using the category tags found on the projects).
-2. Under each bucket, list the active projects.
-3. Under each project, list the top 3 impactful tasks.
-4. **Provide Reasoning**: Include a brief explanation of *why* these specific tasks were highlighted, referencing their priority, urgency, recent commit deltas (from Phase 3), or alignment with the Weekly Focus extracted in Phase 1.
-
-### Phase 5: Structural Memory Logging
-- Before concluding, review any newly discovered structural patterns, project paths, or taxonomy nuances.
-- Load and execute the `memory` skill to log these structural findings into long-term memory, ensuring future executions remain within the 20-call limit.
+### Phase 4: Agent-Friendly Output & Memory (IPC Format)
+Compile the findings and finalize the execution using the strict XML structure below. This format ensures perfect readability for routing agents.
+```xml
+<list_impactful_actions_response>
+  <original_request>[The trigger or request to list impactful actions]</original_request>
+  <triggering_agent>[Agent ID or 'User']</triggering_agent>
+  <payload>
+    <recommended_actions>
+      [The markdown list of tasks grouped by Work, Personal, Family, Others. Includes reasoning for selection based on momentum and priority.]
+    </recommended_actions>
+    <sources_analyzed>
+      [Brief list of files/directories read and analyzed (e.g., vault/pages/journals/weekly/YYYY-Wxx.md, specific project files)]
+    </sources_analyzed>
+    <git_sync_status>[Status of the Pre-Flight pull]</git_sync_status>
+  </payload>
+  <errors>[Any missing files, vector search failures, or 'None']</errors>
+  <learnings>[Observations on the user's workload balance, stalled projects, or newly discovered structural PKM patterns]</learnings>
+</list_impactful_actions_response>
+```
+**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution and maintains the 20-call limit.
 
 ## Required Tools
 - `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.

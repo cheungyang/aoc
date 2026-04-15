@@ -75,7 +75,19 @@ class TestObsidianTool(unittest.TestCase):
             self.assertEqual(len(lines), 51)
             self.assertEqual(lines[-1], "show 50 out of 60 results")
 
-
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    def test_search_path_not_exists(self, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = False
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.return_value = "/workspace/pkm/non_existent"
+            
+            result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="non_existent")
+            self.assertIn("Error: Path not found", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')

@@ -1,9 +1,9 @@
 ---
 name: write_daily_intention
-description: Skill for generating the user's daily journal and logging the agreed-upon daily intentions and recommendations.
+description: Generates the daily journal, resolves templates, appends intentions, and outputs IPC XML.
 ---
 ## Overview
-This skill handles the creation and updating of the user's daily fleeting journal. It ensures the PKM vault is synced, initializes the daily note from a template if needed (resolving dynamic syntax), and appends the agent's recommended daily plan.
+This skill handles the creation and updating of the user's daily fleeting journal. It ensures the PKM vault is synced, initializes the daily note from a template if needed (resolving dynamic syntax), appends the agent's recommended daily plan, and outputs a standard IPC XML block.
 
 ## Workflow
 
@@ -32,6 +32,23 @@ Add the day's plan to the journal.
 ### Step 3: Sync Remote (Post-Flight)
 Upload the new journal entries back to the remote repository.
 - Use the `git` tool to perform a `add` action on the newly created file, then a `push` action on the `pkm` repository with a message.
+
+### Step 4: Agent-Friendly Output & Memory (IPC Format)
+Finalize the execution by outputting the strict XML structure below to ensure perfect readability for routing agents.
+```xml
+<write_daily_intention_response>
+  <original_request>[The user's prompt or the trigger event to write the intention]</original_request>
+  <triggering_agent>[Agent ID or 'User']</triggering_agent>
+  <payload>
+    <intention_set>[The actual synthesized intention appended to the journal]</intention_set>
+    <file_path>[The path of the file that was updated (e.g., vault/journals/fleeting/YYYY-MM-DD.md)]</file_path>
+    <git_sync_status>[Status of the Pre-Flight pull and Post-Flight push]</git_sync_status>
+  </payload>
+  <errors>[Any template resolution errors, sync conflicts, or 'None']</errors>
+  <learnings>[Observations on the user's current project priorities or mood based on the agreed intentions]</learnings>
+</write_daily_intention_response>
+```
+**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
 - `git`: Required to `pull`, `add`, and `push` the `pkm` repository to maintain sync and prevent merge conflicts.

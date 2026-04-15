@@ -4,15 +4,6 @@
   "description": "A structured framework for conducting high-quality web research, evaluating search snippets, selectively fetching full pages, and iteratively refining queries.",
   "emoji": "🔎",
   "tools": {
-    "web_search": {
-      "*": [
-        "execute"
-      ]
-    },
-    "web_fetch": {
-      "*": [
-        "execute"
-      ]
-    }
+    "web_search": []
   }
 }

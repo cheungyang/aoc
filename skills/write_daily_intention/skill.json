@@ -12,7 +12,7 @@
       ]
     },
     "obsidian": {
-      "pkm": [
+      "pkm/vault/journals": [
         "read",
         "write",
         "append"

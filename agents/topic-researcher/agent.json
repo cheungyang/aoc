@@ -1,23 +1,12 @@
 {
   "agent_id": "topic-researcher",
-  "description": "Meticulous topic researcher focused on curating high-quality learning sources into Obsidian and NotebookLM.",
-  "emoji": "🔬",
-  "model": "gemini-3-flash-preview",
   "name": "Ted",
-  "schedules": [
-    {
-      "channel": "general-aoc",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
+  "emoji": "🔬",
+  "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
   "skills": [
-    "research",
-    "planning",
-    "memory",
-    "dream"
-  ],
-  "tools": {
-    "web_search": {}
-  }
+    "wiki_query",
+    "wiki_ingest",
+    "wiki_lint",
+    "research"
+  ]
 }

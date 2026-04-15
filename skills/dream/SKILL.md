@@ -1,9 +1,9 @@
 ---
 name: dream
-description: Skill for synthesizing daily memory logs into long-term, token-efficient system context files (MEMORY.md, FEEDBACK.md, CONTEXT.md).
+description: Skill for synthesizing daily memory logs into token-efficient context files, outputting IPC XML.
 ---
 ## Overview
-The dream skill is a daily consolidation routine. It reads active daily memory logs, extracts highly relevant learnings, feedbacks, and context, and synthesizes them into permanent reference files (`MEMORY.md`, `FEEDBACK.md`, `CONTEXT.md`). It then archives the processed logs. Because these root files are injected into the agent's system prompt on every interaction, they must remain fiercely concise and actionable.
+The dream skill is a daily consolidation routine. It reads active daily memory logs, extracts highly relevant learnings, feedbacks, and context, and synthesizes them into permanent reference files (`MEMORY.md`, `FEEDBACK.md`, `CONTEXT.md`). It then archives the processed logs and outputs an IPC XML block. Because these root files are injected into the agent's system prompt on every interaction, they must remain fiercely concise and actionable.
 
 ## When to Use
 This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt. Do not trigger this organically during standard conversations.
@@ -12,6 +12,7 @@ This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt
 - **Conciseness is Critical**: The long-term files must be straight to the facts. Never include conversational filler.
 - **Synthesis, Not Appending**: Do NOT simply append new facts to the long-term files. You must read the existing files, merge new information, resolve redundancies or conflicts (newer info overrides older info), and then overwrite the file.
 - **Actionable Extractions**: Only extract data that improves future decision-making or personalization. Ignore routine operations.
+- **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
 
 ## Workflow
 
@@ -25,7 +26,7 @@ Before altering long-term memory, back up the current state.
 
 ### 2. The Discovery Phase
 - Use the `obsidian` tool's `file_search` action on the `agents/<agent_id>/memory_logs/` path to find active log files.
-- Identify any daily log files present in this directory. If the directory is empty, the dream skill is complete.
+- Identify any daily log files present in this directory. If the directory is empty, the dream skill is complete (skip to Step 5).
 
 ### 3. Processing & Consolidation Phase
 For every log file discovered in Step 2, process it one by one:
@@ -49,8 +50,25 @@ Once a log file has been fully processed and its contents synthesized into the r
 - Use the `obsidian` tool's `append` action to move the raw log file to the archive: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md`. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
 - Use the `obsidian` tool's `delete` action to completely remove the original active log file `memory_logs/YYYY-MM-DD.md` (effectively deleting the processed data from the active queue).
 
-### 5. Completion Memory Logging
-- Once all logs are processed and archived, **LOAD the `memory` skill** to record the successful execution of the dream routine.
+### 5. Agent-Friendly Output & Memory (IPC Format)
+Finalize the execution using the strict XML structure below to ensure readability for routing and monitoring agents.
+```xml
+<dream_response>
+  <original_request>[The trigger for the dream routine]</original_request>
+  <triggering_agent>[Agent ID, 'System Cron', or 'User']</triggering_agent>
+  <payload>
+    <logs_processed>[Number of daily log files read and archived]</logs_processed>
+    <files_updated>
+      - pkm/agents/<agent_id>/MEMORY.md
+      - pkm/agents/<agent_id>/CONTEXT.md
+      - pkm/agents/<agent_id>/FEEDBACK.md
+    </files_updated>
+  </payload>
+  <errors>[Any file reading, backup, or archiving errors, or 'None']</errors>
+  <learnings>[High-level meta-insights about the agent's recent activity or recurring feedback trends noticed during synthesis]</learnings>
+</dream_response>
+```
+**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from its own synthesis process.
 
 ## Required Tools
 - `obsidian`: Required to perform `file_search`, `read`, `write`, `overwrite`, `append`, and `delete` actions on memory logs and context files within the `pkm` vault. Requires `agent-scoped` permissions.

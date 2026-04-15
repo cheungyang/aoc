@@ -21,8 +21,7 @@
       ],
       "pkm/vault/journals": [
         "read",
-        "write",
-        "append"
+        "file_search"
       ]
     },
     "vector_search": {

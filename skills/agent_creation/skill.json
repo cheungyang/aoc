@@ -5,7 +5,7 @@
   "emoji": "🤖",
   "tools": {
     "filesystem": {
-      "agents/": [
+      "agents": [
         "read",
         "write",
         "overwrite"
