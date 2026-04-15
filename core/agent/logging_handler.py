@@ -22,9 +22,32 @@ class LoggingHandler(BaseCallbackHandler):
 
     def on_tool_start(self, serialized, input_str, **kwargs):
         tool_name = serialized.get("name", "Unknown")
-        print(f"Tool use: {tool_name}")
+        
+        action = None
+        path = None
+        skill_id = None
+        try:
+            import ast
+            input_dict = ast.literal_eval(input_str)
+            if isinstance(input_dict, dict):
+                action = input_dict.get("action")
+                path = input_dict.get("path")
+                skill_id = input_dict.get("skill_id")
+        except Exception:
+            pass
+
+        extra_info = []
+        if action:
+            extra_info.append(f"action: {action}")
+        if path:
+            extra_info.append(f"path: {path}")
+        if skill_id:
+            extra_info.append(f"skill_id: {skill_id}")
+        extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
+        
+        print(f"Tool use: {tool_name}{extra_str}")
         if self.session_id:
-            self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}:{input_str}")
+            self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}{extra_str}:{input_str}")
 
     def on_tool_end(self, output, **kwargs):
         if self.session_id:

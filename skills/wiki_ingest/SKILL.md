@@ -6,11 +6,6 @@ description: Systematically processes a reading backlog, extracts/discusses enti
 ## Overview
 This skill implements the "LLM Wiki" pattern. It systematically reads articles from a backlog, extracts specific Entities and abstract Concepts, engages the user in a discussion to resolve conflicts and gaps, and then compiles the findings into a highly structured, persistent Markdown knowledge graph.
 
-## Operating Modes
-This skill can be executed in two modes depending on the triggering prompt:
-1. **Interactive Mode (Default):** Engages the user in discussion and asks for explicit permission before compiling.
-2. **Silent Mode:** (Triggered if the orchestrating agent specifies "Run in silent mode"). Bypasses the discussion and compilation triggers. It autonomously extracts, compiles, and outputs the final IPC XML without pausing for human input.
-
 ## Boundaries & Guardrails
 - **Strict Formatting:** Adhere perfectly to the YAML frontmatter and file structure templates defined below.
 - **Link Formatting:** Use standard Markdown relative links (e.g., `[Title](../../summaries/Title.md)`) for cross-linking. Do NOT use Obsidian wikilinks (`[[ ]]`) unless explicitly instructed.
@@ -18,10 +13,9 @@ This skill can be executed in two modes depending on the triggering prompt:
 
 ## Workflow
 
-### 1. Discovery & Confirmation
+### 1. Discovery & Auto-Start Ingestion
 - Use the `obsidian` tool (`file_search`) to list files in the `pkm/inbox/` folder.
-- **Interactive Mode:** Identify one article and ask the user: *"Would you like to focus on [Article Title]?"* If declined, select the next.
-- **Silent Mode:** Select the requested article and proceed automatically.
+- Select the first available article and immediately proceed to relocation and ingestion without asking for prior confirmation.
 
 ### 2. Relocation
 - Use the `obsidian` tool (`read`) to read the article into memory.
@@ -30,13 +24,16 @@ This skill can be executed in two modes depending on the triggering prompt:
 
 ### 3. Extraction & Discussion Loop
 - Read `pkm/wiki/entities/index.md` and `pkm/wiki/concepts/index.md` to establish context on existing knowledge.
-- Analyze the raw article to extract specific **Entities** and abstract **Concepts**.
-- Compare extracted knowledge against the existing index to identify "Open Questions" or "Conflicts."
-- **Interactive Mode:** Present a brief summary. Engage the user on Open Questions. Use `web_search` if needed. Ask: *"Are you ready for me to compile this into the wiki?"* Proceed ONLY when the user says yes.
-- **Silent Mode:** Automatically use your best judgment to resolve basic conflicts. Skip the user discussion and proceed directly to Phase 4.
+- Provide a summary of the article.
+- Analyze the raw article to extract specific **Entities** (people, places, books, specific projects) and abstract **Concepts** (theories, properties, mental models).
+- Compare extracted knowledge against the existing index to identify a list of "Open Questions", "Understanding reinforcement points to discuss" or "Conflicts from previous articles."
+- **Discussion Phase:** Present a brief summary of the extractions to the user. Engage the user on the first "Open Question/Conflict." 
+- Use the `web_search` tool if needed to gather more context and solidify understanding.
+- **Looping:** When the clarification for one question finishes, proactively ask if the user wants to tackle the next Open Question on your list.
+- **Compilation Trigger:** Once the Open Questions list is exhausted, explicitly ask: *"Are you ready for me to compile this into the wiki?"* Proceed to step 4 ONLY when the user says yes.
 
 ### 4. Compilation Phase
-Compile the synthesized knowledge into the wiki. Focus heavily on building Markdown links.
+Compile the synthesized knowledge into the wiki. Focus heavily on building Markdown links between Summaries, Entities, and Concepts.
 
 #### A. Summaries
 - Create `pkm/wiki/summaries/[Article Title].md`.
@@ -52,7 +49,7 @@ Compile the synthesized knowledge into the wiki. Focus heavily on building Markd
   <Summary>
 
   ## User Takeaways
-  <Insights from discussion (or AI synthesis if in Silent Mode)>
+  <Insights from discussion>
 
   ## Extracted Entities & Concepts
   - [<Entity 1>](../../entities/Entity_1.md)
@@ -81,33 +78,40 @@ For each extracted Entity or Concept, check the respective `entities/index.md` o
 
   ## YYYY-MM-DD
   **Key Concepts Added:** <Insights, strongly linked to summaries and other concepts>
-  **User Takeaways:** <Article-agnostic takeaways>
+  **User Takeaways:** <Article-agnostic takeaways from discussion>
   **Open Questions:** <Current conflicts>
   ```
-- **Update Index:** Append to the respective `index.md` file.
+- **Update Index:** Read, modify, and `overwrite` the respective `index.md` file by appending:
+  `[YYYY-MM-DD] [<Name>](../../entities/<Name>.md) <one-line description>`
 
 **If Existing (Update File):**
-- Read the existing file. Update `date_updated`.
+- Read the existing file.
+- Update `date_updated` in the YAML frontmatter.
 - Overwrite the `## TLDR` section to encompass the new insights globally.
-- Inject a new `## YYYY-MM-DD` section directly *below* the TLDR section. `overwrite` the file.
-- **Update Index:** Update the respective line in `index.md`.
+- Inject a new `## YYYY-MM-DD` section directly *below* the TLDR section (pushing older date entries downward).
+- `overwrite` the file.
+- **Update Index:** Read, modify, and `overwrite` the respective `index.md` file by updating the date and description line for this entry.
 
-### 5. Agent-Friendly Output (IPC Format)
-Generate the XML response detailing the ingestion. This is critical for inter-agent orchestration.
-```xml
-<wiki_ingest_response>
-  <original_request>[The initial request or trigger for ingestion]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <article_ingested>[Title of the article]</article_ingested>
-    <new_entities>[List of newly created entities]</new_entities>
-    <new_concepts>[List of newly created concepts]</new_concepts>
-    <updated_entities>[List of updated entities]</updated_entities>
-    <updated_concepts>[List of updated concepts]</updated_concepts>
-  </payload>
-  <errors>[Any issues reading the file, parsing text, etc., or 'None']</errors>
-  <learnings>[Execution insights, user preference learnings, edge-cases]</learnings>
-</wiki_ingest_response>
-```
-**Memory Trigger:** Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag.
-- **Interactive Mode Only:** Ask the user: *"Ingestion complete. Would you like to process another article?"* Repeat Step 1 if yes.
+### 5. Agent-Friendly Output & Iteration
+Generate a strictly formatted XML response detailing the ingestion process. This is critical for inter-agent orchestration and providing a rich payload of the synthesized data.
+- **Output Format Structure:**
+  ```xml
+  <wiki_ingest_response>
+    <original_request>[The initial request or trigger for ingestion]</original_request>
+    <triggering_agent>[Agent ID or 'User']</triggering_agent>
+    <payload>
+      <article_ingested>[Title of the article]</article_ingested>
+      <article_summary>[The comprehensive TLDR & Key Concepts summary]</article_summary>
+      <entities_connected>[List of entities extracted, updated, and how they connect to the article]</entities_connected>
+      <concepts_connected>[List of concepts extracted, updated, and how they connect to the article]</concepts_connected>
+    </payload>
+    <errors>[Any issues reading the file, parsing text, etc., or 'None']</errors>
+    <learnings>[Execution insights, user preference learnings gathered during discussion, edge-cases]</learnings>
+  </wiki_ingest_response>
+  ```
+- **Memory Trigger:** Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
+- Ask the user: *"Ingestion complete. Would you like to process another article from your backlog?"* Repeat Step 1 if yes.
+
+## Required Tools
+- `obsidian`: Required to perform `file_search`, `read`, `write`, `overwrite`, and `delete` operations within the `pkm` vault to manage the wiki lifecycle.
+- `web_search`: Required during the discussion phase to resolve conflicts, fetch additional context, and solidify understanding of extracted entities and concepts.

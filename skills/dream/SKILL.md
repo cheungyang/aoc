@@ -47,7 +47,9 @@ Carefully parse the log for items worthy of long-term retention:
 
 ### 4. The Archiving Phase
 Once a log file has been fully processed and its contents synthesized into the root files:
-- Use the `obsidian` tool's `append` action to move the raw log file to the archive: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md`. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
+- Use the `obsidian` tool's `append` action to move the raw log file to the archive. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
+  - **Vault**: `pkm`
+  - **Path**: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md` 
 - Use the `obsidian` tool's `delete` action to completely remove the original active log file `memory_logs/YYYY-MM-DD.md` (effectively deleting the processed data from the active queue).
 
 ### 5. Agent-Friendly Output & Memory (IPC Format)

@@ -1,0 +1,16 @@
+{
+  "skill_id": "wiki_query",
+  "name": "Wiki Query",
+  "description": "Traverses the LLM Wiki (up to 10 hops) to answer queries, outputs XML, and archives syntheses.",
+  "emoji": "🧠",
+  "tools": {
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "write",
+        "overwrite"
+      ]
+    },
+    "web_search": []
+  }
+}

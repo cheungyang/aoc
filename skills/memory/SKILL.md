@@ -45,6 +45,7 @@ Format the extracted information cleanly. Use the current timestamp and categori
 
 ### Step 2: Store the Data
 Use the `obsidian` tool's `append` (or `write` if the file doesn't exist) action to save the formatted entry. 
+- **Vault**: `pkm`
 - **Path**: `agents/<agent_id>/memory_logs/YYYY-MM-DD.md` (Replace with current date).
 - **Formatting Note**: Make sure to include a newline character at the end of your entry so that the next log starts on a fresh line.
 

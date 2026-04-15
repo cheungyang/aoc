@@ -39,7 +39,18 @@ class TestLoggingHandler(unittest.TestCase):
         
         handler.manager.append_message.assert_called_once_with("session1", "system", "Tool MyTool:input_args")
 
-
+    def test_on_tool_start_extracts_extra_info(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_str = "{'action': 'create', 'path': '/tmp', 'skill_id': 'skill_123'}"
+        handler.on_tool_start({"name": "MyTool"}, input_str)
+        
+        handler.manager.append_message.assert_called_once_with(
+            "session1", 
+            "system", 
+            "Tool MyTool [action: create, path: /tmp, skill_id: skill_123]:{'action': 'create', 'path': '/tmp', 'skill_id': 'skill_123'}"
+        )
     def test_on_tool_end_appends_to_session(self):
         handler = LoggingHandler(session_id="session1")
         handler.manager = MagicMock()

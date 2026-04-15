@@ -81,10 +81,19 @@ class TestObsidianTool(unittest.TestCase):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
         mock_loader.check_permission.return_value = True
-        mock_exists.return_value = False
+        
+        def exists_side_effect(path):
+            if "non_existent" in path:
+                return False
+            return True
+        mock_exists.side_effect = exists_side_effect
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm/non_existent"
+            def abspath_side_effect(path):
+                if "non_existent" in path:
+                    return "/workspace/pkm/non_existent"
+                return "/workspace/pkm"
+            mock_abspath.side_effect = abspath_side_effect
             
             result = obsidian.func(action="file_search", vault_id="pkm", agent_id="test_agent", path="non_existent")
             self.assertIn("Error: Path not found", result)

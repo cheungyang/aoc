@@ -3,10 +3,23 @@
   "name": "Ted",
   "emoji": "🔬",
   "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
+  "tools": {
+    "obsidian": {
+      "pkm": [
+        "read",
+        "write",
+        "overwrite",
+        "append"
+      ]
+    },
+    "web_search": {
+      "*": [
+        "search"
+      ]
+    }
+  },
   "skills": [
     "wiki_query",
-    "wiki_ingest",
-    "wiki_lint",
     "research"
   ]
 }

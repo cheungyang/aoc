@@ -1,0 +1,17 @@
+{
+  "skill_id": "wiki_lint",
+  "name": "Wiki Lint",
+  "description": "Automates wiki maintenance: fixes links, creates stubs, flags contradictions, and logs modifications.",
+  "emoji": "🧹",
+  "tools": {
+    "obsidian": {
+      "pkm/wiki": [
+        "file_search",
+        "read",
+        "write",
+        "overwrite",
+        "append"
+      ]
+    }
+  }
+}
