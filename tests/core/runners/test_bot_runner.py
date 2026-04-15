@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import os
 import sys
+import discord
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -83,6 +84,44 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner.on_message(mock_message)
 
+        mock_loader.get_agent.assert_called_with("main")
+        mock_agent.execute.assert_called_once()
+
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_from_thread(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        
+        mock_message = MagicMock()
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
+        mock_message.content = "Hello bot"
+        mock_message.mentions = []
+        mock_message.channel.send = AsyncMock()
+        
+        # Mock channel as a Thread
+        mock_thread = MagicMock(spec=discord.Thread)
+        mock_thread.name = "thread-name"
+        mock_thread.parent = MagicMock()
+        mock_thread.parent.name = "parent-channel-name"
+        mock_message.channel = mock_thread
+        
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": ["parent-channel-name"]}
+        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+
+        # Verify that it considered it a host because of the parent name
         mock_loader.get_agent.assert_called_with("main")
         mock_agent.execute.assert_called_once()
 

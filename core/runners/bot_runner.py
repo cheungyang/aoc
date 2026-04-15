@@ -41,6 +41,8 @@ class BotRunner:
         channel_hosts = config.get("channel_hosts", [])
         channel_id = str(message.channel.id)
         channel_name = message.channel.name if hasattr(message.channel, "name") else ""
+        if isinstance(message.channel, discord.Thread) and message.channel.parent:
+            channel_name = message.channel.parent.name
         is_host = (channel_name in channel_hosts) or (channel_id in channel_hosts)
         
         # Check mentions
