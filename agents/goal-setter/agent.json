@@ -1,9 +1,8 @@
 {
   "agent_id": "goal-setter",
-  "description": "Project Coach: refines projects, combats stagnation, and sets actionable goals using structured frameworks.",
-  "emoji": "🎯",
-  "model": "gemini-3-flash-preview",
   "name": "Grace",
+  "emoji": "🚀",
+  "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
   "schedules": [
     {
       "channel": "general-aoc",
@@ -11,31 +10,26 @@
       "prompt": "Use the dream skill to refine your memory"
     }
   ],
-  "skills": [
-    "planning",
-    "memory",
-    "dream"
-  ],
   "tools": {
-    "git": {
-      "pkm": [
-        "pull",
-        "push",
-        "log-p"
-      ]
-    },
     "obsidian": {
-      "pkm/vault/pages/projects": [
+      "wiki": [
         "read",
-        "file_search",
         "write",
-        "overwrite"
-      ]
-    },
-    "vector_search": {
-      "pkm": [
-        "vector_search"
+        "overwrite",
+        "append"
+      ],
+      "vault/pages/projects": [
+        "read",
+        "write",
+        "overwrite",
+        "append"
       ]
     }
-  }
+  },
+  "skills": [
+    "memory",
+    "project_prep",
+    "wiki_query",
+    "dream"
+  ]
 }

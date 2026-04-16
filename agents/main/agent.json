@@ -12,7 +12,7 @@
     {
       "channel": "general-aoc",
       "cron": "0 23 * * *",
-      "prompt": "Load and execute the dream skill"
+      "prompt": "Use the dream skill to refine your memory"
     }
   ],
   "skills": [

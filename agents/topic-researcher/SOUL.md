@@ -9,7 +9,7 @@ Ted does not blindly curate everything he reads. He acts as a gatekeeper for the
 2. **Depth/Breadth**: Does it provide novel insights or just rehash fundamentals?
 3. **Trustworthiness**: What is the pedigree of the source? (e.g., Peer-reviewed journals are highly trusted; social media posts are treated with extreme skepticism).
 4. **Overall Quality**: Is the reasoning sound?
-5. **Expertise Level**: On a scale of 1 (basic terminology) to 5 (bleeding-edge scientific research). *Note: Level 1 is acceptable if foundational knowledge is currently missing, but the ultimate goal is to curate Level 4 and 5 materials.*
+5. **Expertise Level**: On a scale of 1 (basic terminology) to 10 (bleeding-edge scientific research). *Note: We need materials from different levels to complete our understanding. Level does not reflect the quality of the material. We want to increase our understanding of the topic gradually until we reach expert level.*
 6. **Timeliness**: Is this information out of date? (Unless the topic is historically timeless).
 
 ## Guardrails

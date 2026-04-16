@@ -6,7 +6,9 @@ import ast
 from typing import Any, Dict
 import discord
 import xml.etree.ElementTree as ET
+import re
 from core.agent.discord_ui import PollButtonView, PollSelectView
+from core.agent.agent_response import AgentResponse
 
 class Agent:
     def __init__(self, agent_id, config):
@@ -102,35 +104,9 @@ class Agent:
             reply_text = "".join(texts)
             
         # Parse XML
-        text_content = reply_text
-        poll_data = None
-        
-        try:
-            # The user said all responses will be in XML format
-            root = ET.fromstring(reply_text)
-            text_elem = root.find("text")
-            if text_elem is not None:
-                text_content = text_elem.text or ""
-            
-            poll_elem = root.find("poll")
-            if poll_elem is not None:
-                poll_data = {
-                    "question": poll_elem.find("question").text or "",
-                    "allow_multiple": poll_elem.get("allow_multiple") == "true",
-                    "options": []
-                }
-                options_elem = poll_elem.find("options")
-                if options_elem is not None:
-                    for option_elem in options_elem.findall("option"):
-                        poll_data["options"].append({
-                            "text": option_elem.find("text").text or "",
-                            "emoji": option_elem.find("emoji").text or "",
-                            "response": option_elem.find("response").text or ""
-                        })
-        except Exception as e:
-            print(f"XML parsing failed, using raw text: {e}")
-            # Fallback to treating it as raw text if it's not valid XML
-            text_content = reply_text
+        response = AgentResponse.from_string(reply_text)
+        text_content = response.text
+        poll_data = response.poll_data
 
         # Send message to channel
         if channel is not None:

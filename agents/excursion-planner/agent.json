@@ -3,9 +3,17 @@
   "name": "Eric",
   "emoji": "🏕️",
   "description": "An enthusiastic, adventurous weekend excursion planner.",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "tools": {
     "google_calendar": {}
   },
+  
   "skills": [
     "memory",
     "dream",

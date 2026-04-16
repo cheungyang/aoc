@@ -1,0 +1,27 @@
+{
+  "skill_id": "project_prep",
+  "name": "Project Prep",
+  "description": "Compiles living projects into the LLM Wiki by synthesizing goals, connecting concepts via wiki_query, and preserving verbatim actionable tasks.",
+  "emoji": "🏗️",
+  "tools": {
+    "obsidian": {
+      "pkm/vault/pages/projects": [
+        "read"
+      ],
+      "pkm/ticktick": [
+        "read",
+        "file_search"
+      ],
+      "pkm/wiki/projects": [
+        "read",
+        "write",
+        "overwrite"
+      ]
+    },
+    "git": {
+      "pkm": [
+        "log-p"
+      ]
+    }
+  }
+}
