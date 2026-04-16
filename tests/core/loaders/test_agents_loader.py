@@ -80,8 +80,8 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
             "identity content", # IDENTITY.md
             "soul content",     # SOUL.md
             "user content",     # USER.md
-            "memory content",   # MEMORY.md
             "context content",  # CONTEXT.md
+            "memory content",   # MEMORY.md
             "feedback content"  # FEEDBACK.md
         ]
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
@@ -90,13 +90,61 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         prompt = loader.get_agent_prompt("test-agent")
         
-        self.assertIn("<AGENTS>\nYour specialization and workflow:\n\nagents content\n</AGENTS>", prompt)
-        self.assertIn("<IDENTITY>\nShort description of who you are:\n\nidentity content\n</IDENTITY>", prompt)
-        self.assertIn("<SOUL>\nYour personality, behavior and guiding success in your tasks:\n\nsoul content\n</SOUL>", prompt)
-        self.assertIn("<USER>\nInformation about your human:\n\nuser content\n</USER>", prompt)
-        self.assertIn("<MEMORY>\nLong term memory on key decisions and learnings to make your tasks successful:\n\nmemory content\n</MEMORY>", prompt)
-        self.assertIn("<CONTEXT>\nContext about your human to improve personalization:\n\ncontext content\n</CONTEXT>", prompt)
-        self.assertIn("<FEEDBACK>\nFeedbacks from human to adhere to, avoid repeating the same mistake:\n\nfeedback content\n</FEEDBACK>", prompt)
+        self.assertIn("<SYSTEM_PURPOSE>", prompt)
+        self.assertIn("<description>Your purpose, specialization and workflow</description>", prompt)
+        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        
+        self.assertIn("<PERSONA>", prompt)
+        self.assertIn("<description>This is who you are and how you behave</description>", prompt)
+        self.assertIn("Short description of who you are:\nidentity content", prompt)
+        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        
+        self.assertIn("<HUMAN_CONTEXT>", prompt)
+        self.assertIn("Information about your human:\nuser content", prompt)
+        
+        self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
+        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        
+        self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
+        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
+
+    @patch('core.loaders.agents_loader.AgentsLoader._load_agents')
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_get_agent_prompt_with_headers(self, mock_file, mock_exists, mock_load_agents):
+        mock_load_agents.return_value = None
+        mock_exists.return_value = True
+        
+        file_contents = [
+            "# AGENTS.md\n\nagents content",   # AGENTS.md
+            "# IDENTITY.md\nidentity content", # IDENTITY.md
+            "# SOUL.md\n\n\nsoul content",     # SOUL.md
+            "user content",     # USER.md
+            "context content",  # CONTEXT.md
+            "memory content",   # MEMORY.md
+            "feedback content"  # FEEDBACK.md
+        ]
+        mocks = [mock_open(read_data=c).return_value for c in file_contents]
+        mock_file.side_effect = mocks
+        
+        loader = AgentsLoader()
+        prompt = loader.get_agent_prompt("test-agent")
+        
+        self.assertIn("<SYSTEM_PURPOSE>", prompt)
+        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        
+        self.assertIn("<PERSONA>", prompt)
+        self.assertIn("Short description of who you are:\nidentity content", prompt)
+        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        
+        self.assertIn("<HUMAN_CONTEXT>", prompt)
+        self.assertIn("Information about your human:\nuser content", prompt)
+        
+        self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
+        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        
+        self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
+        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
 
 if __name__ == '__main__':
     unittest.main()
