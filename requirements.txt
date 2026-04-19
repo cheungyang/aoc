@@ -4,6 +4,7 @@ croniter
 discord.py
 langchain-google-genai
 langchain-mcp-adapters
+langchain-ollama
 langchain-openai
 langgraph
 playwright

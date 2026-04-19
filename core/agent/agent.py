@@ -1,5 +1,6 @@
 from core.util import split_message
 from core.agent.logging_handler import LoggingHandler
+from core.agent.base_agent import BaseAgent
 
 import json
 import ast
@@ -10,14 +11,10 @@ import re
 from core.agent.discord_ui import PollButtonView, PollSelectView
 from core.agent.agent_response import AgentResponse
 
-class Agent:
+class Agent(BaseAgent):
     def __init__(self, agent_id, config):
-        self.agent_id = agent_id
-        self.config = config
+        super().__init__(agent_id, config)
         self.graph = None
-
-    def get_config(self, key, default_value=None):
-        return self.config.get(key, default_value)
 
     async def _build_graph(self):
         from .graph_builder import GraphBuilder
@@ -25,6 +22,12 @@ class Agent:
         return await builder.build_graph(self.agent_id, self.config)
 
     async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
+        if not content or not content.strip():
+            msg = "I cannot process empty messages. Please provide some text."
+            if channel is not None:
+                await channel.send(msg)
+            return msg
+
         from core.agent.job_manager import JobManager
         from core.agent.session_manager import SessionManager
         from core.agent.logging_handler import LoggingHandler
@@ -98,7 +101,8 @@ class Agent:
             texts = []
             for part in reply_text:
                 if isinstance(part, dict) and part.get("type") == "text":
-                    texts.append(part.get("text", ""))
+                    val = part.get("text")
+                    texts.append(val if val is not None else "")
                 elif isinstance(part, str):
                     texts.append(part)
             reply_text = "".join(texts)

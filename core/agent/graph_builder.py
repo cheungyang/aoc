@@ -1,7 +1,6 @@
 import contextlib
 import os
 import json
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from core.memory.flat_file_checkpointer import FlatFileCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -9,7 +8,7 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt
+from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt
 
 class GraphBuilder:
     def __init__(self):
@@ -17,8 +16,7 @@ class GraphBuilder:
 
     def _get_prompt_template(self, agent_id):
         # 1. Agent Prompt
-        agents_loader = AgentsLoader()
-        agent_prompt = agents_loader.get_agent_prompt(agent_id)
+        agent_prompt = get_agent_prompt(agent_id)
 
         # 2. Skills Prompt
         skills_loader = SkillsLoader()
@@ -47,13 +45,19 @@ class GraphBuilder:
         agent_path = os.path.join(agents_dir, agent_id)
 
         model_name = config.get("model", "gemini-3-flash-preview")
+        provider = config.get("provider", "google")
         
         loader = ToolsLoader()
         allowed_tools = loader.get_tools(agent_id=agent_id)
 
         prompt = self._get_prompt_template(agent_id)
 
-        llm = ChatGoogleGenerativeAI(model=model_name)
+        if provider == "ollama":
+            from langchain_ollama import ChatOllama
+            llm = ChatOllama(model=model_name)
+        else:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = FlatFileCheckpointer()
         graph = create_react_agent(llm, allowed_tools, prompt=prompt, checkpointer=checkpointer)
         print(f"New Graph for {agent_id} built")

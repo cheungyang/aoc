@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch, mock_open, MagicMock
 import os
 import sys
 
@@ -62,6 +63,80 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<test_tool_response>", response)
         self.assertIn("<payload>test_payload</payload>", response)
         self.assertIn("<errors>test_errors</errors>", response)
+
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_get_agent_prompt(self, mock_file, mock_exists):
+        mock_exists.return_value = True
+        
+        file_contents = [
+            "agents content",   # AGENTS.md
+            "identity content", # IDENTITY.md
+            "soul content",     # SOUL.md
+            "user content",     # USER.md
+            "context content",  # CONTEXT.md
+            "memory content",   # MEMORY.md
+            "feedback content"  # FEEDBACK.md
+        ]
+        mocks = [mock_open(read_data=c).return_value for c in file_contents]
+        mock_file.side_effect = mocks
+        
+        from core.util import get_agent_prompt
+        prompt = get_agent_prompt("test-agent")
+        
+        self.assertIn("<SYSTEM_PURPOSE>", prompt)
+        self.assertIn("<description>Your purpose, specialization and workflow</description>", prompt)
+        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        
+        self.assertIn("<PERSONA>", prompt)
+        self.assertIn("<description>This is who you are and how you behave</description>", prompt)
+        self.assertIn("Short description of who you are:\nidentity content", prompt)
+        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        
+        self.assertIn("<HUMAN_CONTEXT>", prompt)
+        self.assertIn("Information about your human:\nuser content", prompt)
+        
+        self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
+        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        
+        self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
+        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
+
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_get_agent_prompt_with_headers(self, mock_file, mock_exists):
+        mock_exists.return_value = True
+        
+        file_contents = [
+            "# AGENTS.md\n\nagents content",   # AGENTS.md
+            "# IDENTITY.md\nidentity content", # IDENTITY.md
+            "# SOUL.md\n\n\nsoul content",     # SOUL.md
+            "user content",     # USER.md
+            "context content",  # CONTEXT.md
+            "memory content",   # MEMORY.md
+            "feedback content"  # FEEDBACK.md
+        ]
+        mocks = [mock_open(read_data=c).return_value for c in file_contents]
+        mock_file.side_effect = mocks
+        
+        from core.util import get_agent_prompt
+        prompt = get_agent_prompt("test-agent")
+        
+        self.assertIn("<SYSTEM_PURPOSE>", prompt)
+        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        
+        self.assertIn("<PERSONA>", prompt)
+        self.assertIn("Short description of who you are:\nidentity content", prompt)
+        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        
+        self.assertIn("<HUMAN_CONTEXT>", prompt)
+        self.assertIn("Information about your human:\nuser content", prompt)
+        
+        self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
+        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        
+        self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
+        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
 
 if __name__ == "__main__":
     unittest.main()

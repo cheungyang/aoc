@@ -1,0 +1,6 @@
+{
+  "agent_id": "script-executor",
+  "name": "Terminator",
+  "description": "A special non-LLM agent responsible for executing scheduled cron scripts.",
+  "emoji": "⚙️"
+}

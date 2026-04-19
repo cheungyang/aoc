@@ -87,6 +87,39 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_delete_thread.assert_called_once_with("test-agent:session1")
         self.assertEqual(reply, "Success after retry")
 
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_list_content_with_none(self, mock_logging_handler_class):
+        # Graph invoke result with a list content containing None
+        mock_graph = MagicMock()
+        mock_message = MagicMock()
+        mock_message.content = [
+            {"type": "text", "text": "Part 1 "},
+            {"type": "text", "text": None},
+            {"type": "text", "text": "Part 2"}
+        ]
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [mock_message]})
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        # Run
+        reply = await agent.execute("hello", "session1")
+        
+        # Assertions
+        self.assertEqual(reply, "Part 1 Part 2")
+
+
+    async def test_execute_empty_content(self):
+        agent = Agent("test-agent", {})
+        
+        # Run with empty string
+        reply = await agent.execute("", "session1")
+        self.assertEqual(reply, "I cannot process empty messages. Please provide some text.")
+        
+        # Run with whitespace
+        reply = await agent.execute("   ", "session1")
+        self.assertEqual(reply, "I cannot process empty messages. Please provide some text.")
+
 
 if __name__ == "__main__":
     unittest.main()
