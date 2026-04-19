@@ -81,7 +81,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         # Test _execute_schedule directly
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="system", source="scheduled")
+        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')
@@ -127,7 +127,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="system", source="scheduled")
+        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
 
 if __name__ == '__main__':
     unittest.main()

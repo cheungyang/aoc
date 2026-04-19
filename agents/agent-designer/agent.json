@@ -23,6 +23,16 @@
   ],
   "tools": {
     "web_search": [],
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "file_search",
+        "write",
+        "overwrite",
+        "append",
+        "delete"
+      ]
+    },
     "filesystem": {
       "agents/": [
         "read",

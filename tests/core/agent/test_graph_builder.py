@@ -13,7 +13,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
-     @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
+     @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
      async def test_build_graph_success(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
@@ -45,7 +45,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
-     @patch('core.agent.graph_builder.ChatGoogleGenerativeAI')
+     @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
      async def test_build_graph_filtering(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
@@ -78,12 +78,10 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
-     @patch('core.agent.graph_builder.ChatOllama')
      @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_ollama(self, mock_ff_checkpointer, mock_create_react, mock_ollama_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_ollama(self, mock_ff_checkpointer, mock_create_react, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
-         mock_ollama_class.return_value = MagicMock()
          mock_create_react.return_value = "MockGraph"
          
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
@@ -100,8 +98,15 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          
          agent = Agent("main", config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}})
          
-         # Run
-         graph = await agent._build_graph()
+         # Mock sys.modules to handle missing langchain_ollama
+         import sys
+         mock_ollama = MagicMock()
+         mock_ollama_class = mock_ollama.ChatOllama
+         mock_ollama_class.return_value = MagicMock()
+         
+         with patch.dict('sys.modules', {'langchain_ollama': mock_ollama}):
+             # Run
+             graph = await agent._build_graph()
          
          # Assertions
          self.assertEqual(graph, "MockGraph")

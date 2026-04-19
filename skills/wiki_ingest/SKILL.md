@@ -10,6 +10,7 @@ This skill implements the "LLM Wiki" pattern. It systematically reads articles f
 - **Strict Formatting:** Adhere perfectly to the YAML frontmatter and file structure templates defined below.
 - **Link Formatting:** Use standard Markdown relative links (e.g., `[Title](../../summaries/Title.md)`) for cross-linking. Do NOT use Obsidian wikilinks (`[[ ]]`) unless explicitly instructed.
 - **Date Formatting:** Use `YYYY-MM-DD` for all dates.
+- **Strict Directory Boundary:** You MUST NOT create new top-level directories in the `pkm/wiki/` root. All output must strictly go into `summaries/`, `entities/`, `concepts/`, or `clusters/`.
 
 ## Workflow
 
@@ -27,7 +28,12 @@ This skill implements the "LLM Wiki" pattern. It systematically reads articles f
 - Provide a summary of the article.
 - Analyze the raw article to extract specific **Entities** (people, places, books, specific projects) and abstract **Concepts** (theories, properties, mental models).
 - Compare extracted knowledge against the existing index to identify a list of "Open Questions", "Understanding reinforcement points to discuss" or "Conflicts from previous articles."
+- **Clustering Opportunity Check:** Evaluate the growing knowledge base for "clusters". A clustering opportunity is strictly defined as:
+  a) A topic worthy of further refinement (opportunity to deep-dive).
+  b) Containing more than 3 existing related concepts/entities.
+  c) Having a clear, overarching definition.
 - **Discussion Phase:** Present a brief summary of the extractions to the user. Engage the user on the first "Open Question/Conflict." 
+  - *HOLD POINT for Clusters:* If a clustering opportunity was identified, you MUST present the idea during this phase and explicitly ask: *"I see an opportunity to cluster these under [Name]. May I create a new cluster file?"* DO NOT create clusters without affirmative consent.
 - Use the `web_search` tool if needed to gather more context and solidify understanding.
 - **Looping:** When the clarification for one question finishes, proactively ask if the user wants to tackle the next Open Question on your list.
 - **Compilation Trigger:** Once the Open Questions list is exhausted, explicitly ask: *"Are you ready for me to compile this into the wiki?"* Proceed to step 4 ONLY when the user says yes.
@@ -92,6 +98,31 @@ For each extracted Entity or Concept, check the respective `entities/index.md` o
 - `overwrite` the file.
 - **Update Index:** Read, modify, and `overwrite` the respective `index.md` file by updating the date and description line for this entry.
 
+#### C. Clusters (If Approved)
+If the user approved a cluster during the discussion phase:
+**If New (Create File):**
+- Write to `pkm/wiki/clusters/[Name].md`.
+- **Template:**
+  ```markdown
+  ---
+  name: <Name>
+  date_created: YYYY-MM-DD
+  date_updated: YYYY-MM-DD
+  ---
+  ## Definition
+  <Brief summary defining the cluster>
+
+  ## YYYY-MM-DD
+  **Entities/Concepts Clustered:** <Links to the >3 entities/concepts>
+  **Key Insights:** <Why this forms a cluster and takeaways>
+  ```
+**If Existing (Update File):**
+- Read the existing cluster file.
+- Update `date_updated` in the YAML frontmatter.
+- Overwrite the `## Definition` if the understanding has expanded.
+- Inject a new `## YYYY-MM-DD` section below the Definition with newly linked entities/concepts and insights.
+- `overwrite` the file.
+
 ### 5. Agent-Friendly Output & Iteration
 Generate a strictly formatted XML response detailing the ingestion process. This is critical for inter-agent orchestration and providing a rich payload of the synthesized data.
 - **Output Format Structure:**
@@ -104,6 +135,7 @@ Generate a strictly formatted XML response detailing the ingestion process. This
       <article_summary>[The comprehensive TLDR & Key Concepts summary]</article_summary>
       <entities_connected>[List of entities extracted, updated, and how they connect to the article]</entities_connected>
       <concepts_connected>[List of concepts extracted, updated, and how they connect to the article]</concepts_connected>
+      <clusters_updated>[List of clusters created or updated, if any]</clusters_updated>
     </payload>
     <errors>[Any issues reading the file, parsing text, etc., or 'None']</errors>
     <learnings>[Execution insights, user preference learnings gathered during discussion, edge-cases]</learnings>

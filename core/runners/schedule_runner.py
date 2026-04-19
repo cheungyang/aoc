@@ -80,7 +80,7 @@ class ScheduleRunner:
                 print(f"Channel {channel_name} not found for agent {agent_id}")
             
             # Execute regardless of channel existance
-            await agent.execute(prompt, source="scheduled", channel=channel, role="system")
+            await agent.execute(prompt, source="scheduled", channel=channel, role="user")
 
         except Exception as e:
             print(f"Error executing schedule for {agent_id}: {e}")

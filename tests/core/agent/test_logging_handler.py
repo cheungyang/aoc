@@ -70,6 +70,41 @@ class TestLoggingHandler(unittest.TestCase):
         
         handler.manager.append_message.assert_called_once_with("session1", "system", "Tool Output: Simple string output")
 
+    def test_on_llm_end_extracts_token_usage(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        mock_response = MagicMock()
+        mock_generation = MagicMock()
+        mock_generation.text = "AI Reply"
+        mock_message = MagicMock()
+        mock_message.usage_metadata = {"input_tokens": 10, "output_tokens": 5}
+        mock_generation.message = mock_message
+        mock_response.generations = [[mock_generation]]
+        mock_response.llm_output = {"model_name": "gemini-pro"}
+        
+        handler.on_llm_end(mock_response)
+        
+        self.assertEqual(handler.last_token_usage["input_tokens"], 10)
+        self.assertEqual(handler.last_token_usage["output_tokens"], 5)
+        self.assertEqual(handler.last_token_usage["model"], "gemini-pro")
+
+    def test_on_chain_end_logs_token_usage(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        handler.last_token_usage = {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "model": "gemini-pro",
+            "input_token_details": {"cache_read": 20}
+        }
+        
+        handler.on_chain_end({})
+        
+        handler.manager.append_token_usage.assert_called_once_with(
+            "session1", "gemini-pro", 100, 50, 20.0
+        )
+
 if __name__ == "__main__":
     unittest.main()
 

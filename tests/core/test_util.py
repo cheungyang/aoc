@@ -54,8 +54,8 @@ class TestUtil(unittest.TestCase):
         from core.util import get_formatting_prompt
         prompt = get_formatting_prompt()
         self.assertIn("<formatting_rules>", prompt)
-        self.assertIn("<agent_response>", prompt)
-        self.assertIn("{{your normal text response}}", prompt)
+        self.assertIn("<poll allow_multiple=", prompt)
+        self.assertIn("<options>", prompt)
 
     def test_format_tool_response(self):
         from core.util import format_tool_response
@@ -86,21 +86,20 @@ class TestUtil(unittest.TestCase):
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
         self.assertIn("<description>Your purpose, specialization and workflow</description>", prompt)
-        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        self.assertIn("<content>agents content</content>", prompt)
         
         self.assertIn("<PERSONA>", prompt)
         self.assertIn("<description>This is who you are and how you behave</description>", prompt)
-        self.assertIn("Short description of who you are:\nidentity content", prompt)
-        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        self.assertIn("<content>identity content\n\nsoul content</content>", prompt)
         
         self.assertIn("<HUMAN_CONTEXT>", prompt)
-        self.assertIn("Information about your human:\nuser content", prompt)
+        self.assertIn("<content>user content\n\ncontext content</content>", prompt)
         
         self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
-        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        self.assertIn("<content>memory content</content>", prompt)
         
         self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
-        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
+        self.assertIn("<content>feedback content</content>", prompt)
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
@@ -123,20 +122,19 @@ class TestUtil(unittest.TestCase):
         prompt = get_agent_prompt("test-agent")
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
-        self.assertIn("Your specialization and workflow:\nagents content", prompt)
+        self.assertIn("<content>agents content</content>", prompt)
         
         self.assertIn("<PERSONA>", prompt)
-        self.assertIn("Short description of who you are:\nidentity content", prompt)
-        self.assertIn("Your personality, behavior and guiding success in your tasks:\nsoul content", prompt)
+        self.assertIn("<content>identity content\n\nsoul content</content>", prompt)
         
         self.assertIn("<HUMAN_CONTEXT>", prompt)
-        self.assertIn("Information about your human:\nuser content", prompt)
+        self.assertIn("<content>user content\n\ncontext content</content>", prompt)
         
         self.assertIn("<MEMORY_AND_PRECEDENTS>", prompt)
-        self.assertIn("Long term memory on key decisions and learnings to make your tasks successful:\nmemory content", prompt)
+        self.assertIn("<content>memory content</content>", prompt)
         
         self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
-        self.assertIn("Feedbacks from human to adhere to, avoid repeating the same mistake:\nfeedback content", prompt)
+        self.assertIn("<content>feedback content</content>", prompt)
 
 if __name__ == "__main__":
     unittest.main()

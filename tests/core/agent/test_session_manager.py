@@ -32,6 +32,7 @@ class TestSessionManager(unittest.TestCase):
         
         mock_exists.return_value = True
         mock_glob.return_value = ["/dummy/sessions/session1.jsonl", "/dummy/sessions/session2.jsonl"]
+        mock_clear_session.return_value = "cleared"
         
         SessionManager().clear_sessions()
         

@@ -26,6 +26,24 @@ class FlatFileSessionStore:
             
         return f"Appended message to {session_id}"
 
+    def append_token_usage(self, session_id, model, input_token, output_token, cached_token):
+        os.makedirs(self.sessions_dir, exist_ok=True)
+        safe_id = session_id.replace(":", "_").replace("/", "_")
+        token_file = os.path.join(self.sessions_dir, f"token_{safe_id}.jsonl")
+        
+        log_entry = {
+            "ts": int(time.time()),
+            "model": model,
+            "input_token": input_token,
+            "output_token": output_token,
+            "cached_token": cached_token
+        }
+        
+        with open(token_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+            
+        return f"Appended token usage to {session_id}"
+
     def archive_session(self, session_id):
         from core.memory.flat_file_checkpointer import FlatFileCheckpointer
         
@@ -33,15 +51,25 @@ class FlatFileSessionStore:
         if os.path.exists(file_path):
             os.makedirs(self.archive_dir, exist_ok=True)
             safe_id = session_id.replace(":", "_").replace("/", "_")
-            archive_name = f"{safe_id}_{int(time.time())}.jsonl"
+            ts = int(time.time())
+            archive_name = f"{safe_id}_{ts}.jsonl"
             archive_path = os.path.join(self.archive_dir, archive_name)
             shutil.move(file_path, archive_path)
+            
+            # Also move token file if it exists
+            token_file = os.path.join(self.sessions_dir, f"token_{safe_id}.jsonl")
+            token_status = ""
+            if os.path.exists(token_file):
+                token_archive_name = f"token_{safe_id}_{ts}.jsonl"
+                token_archive_path = os.path.join(self.archive_dir, token_archive_name)
+                shutil.move(token_file, token_archive_path)
+                token_status = f" and token file to archive/{token_archive_name}"
             
             # Also delete checkpointer data
             saver = FlatFileCheckpointer()
             saver.delete_thread(session_id)
             
-            return f"Session {session_id} archived to archive/{archive_name}"
+            return f"Session {session_id} archived to archive/{archive_name}{token_status}"
         return "No active session file found to archive."
 
     def load_history(self, session_id, limit=50):
