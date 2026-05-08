@@ -11,7 +11,7 @@
       ]
     },
     "obsidian": {
-      "pkm/vault/pages/projects": [
+      "pkm/vault/projects": [
         "read",
         "file_search"
       ],
@@ -22,11 +22,6 @@
       "pkm/vault/journals": [
         "read",
         "file_search"
-      ]
-    },
-    "vector_search": {
-      "pkm": [
-        "vector_search"
       ]
     }
   }

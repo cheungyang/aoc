@@ -5,7 +5,7 @@
   "emoji": "🏗️",
   "tools": {
     "obsidian": {
-      "pkm/vault/pages/projects": [
+      "pkm/vault/projects": [
         "read"
       ],
       "pkm/ticktick": [

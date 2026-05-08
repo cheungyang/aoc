@@ -28,12 +28,12 @@ Always ensure the local vault is up to date before analyzing priorities.
 
 ### Phase 1: Retrieve the Weekly Focus
 1. Use your internal knowledge of the current date to calculate the correct ISO week number (Format: `YYYY-Www`).
-2. Use the `obsidian` tool to `read` the previous week's journal located at `vault/pages/journals/weekly/YYYY-Www.md` (Note: You are reading *last week's* journal to find the goals set for *this week*).
+2. Use the `obsidian` tool to `read` the previous week's journal located at `vault/journals/weekly/YYYY-Www.md` (Note: You are reading *last week's* journal to find the goals set for *this week*).
 3. Extract the items explicitly listed under the header `##🌱 Next week's focus`.
 
 ### Phase 2: Identify Active Projects
 1. Determine the current year (`YYYY`).
-2. Use the `obsidian` tool to search within the `vault/pages/projects` directory for projects tagged with the current year's commitment tag (e.g., `#c/⏫YYYY`).
+2. Use the `obsidian` tool to search within the `vault/projects` directory for projects tagged with the current year's commitment tag (e.g., `#c/⏫YYYY`).
 3. **Crucial Filtering**: You MUST exclude any projects that contain the following status tags in their frontmatter or body:
    - `#s/⏸️Pause`
    - `#s/🟢Done`
@@ -44,7 +44,7 @@ Always ensure the local vault is up to date before analyzing priorities.
 ### Phase 3: Retrieve, Prioritize Tasks & Track Momentum
 1. For each active project identified in Phase 2, locate its file path and its alias tag (e.g., `#p/my-project`).
 2. **Track Momentum**: Once the project list and paths are known, use the `git` tool's `log-p` action on the specific project files to quickly understand the delta between recent edits. Use these insights to gauge project progression and generate more precise, context-aware recommendations.
-3. Use the `vector_search` tool with the project's alias tag as the query to find relevant tasks.
+3. Use the `obsidian` tool to `read` the project file to find relevant tasks.
 4. **Parse & Filter Tasks**:
    - Strictly filter the returned markdown lines for uncompleted tasks. An uncompleted task is defined by the exact markdown syntax: `- [ ]`. Ignore completed tasks (`- [x]`).
    - Evaluate the urgency of the uncompleted tasks by checking for any scheduled or due dates mentioned in the task line.
@@ -62,7 +62,7 @@ Compile the findings and finalize the execution using the strict XML structure b
       [The markdown list of tasks grouped by Work, Personal, Family, Others. Includes reasoning for selection based on momentum and priority.]
     </recommended_actions>
     <sources_analyzed>
-      [Brief list of files/directories read and analyzed (e.g., vault/pages/journals/weekly/YYYY-Wxx.md, specific project files)]
+      [Brief list of files/directories read and analyzed (e.g., vault/journals/weekly/YYYY-Wxx.md, specific project files)]
     </sources_analyzed>
     <git_sync_status>[Status of the Pre-Flight pull]</git_sync_status>
   </payload>
@@ -75,4 +75,3 @@ Compile the findings and finalize the execution using the strict XML structure b
 ## Required Tools
 - `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.
 - `obsidian`: Required to perform `read` and `file_search` actions within the `pkm` vault to access projects, tasks, and journals.
-- `vector_search`: Required to perform vector operations on the vault.

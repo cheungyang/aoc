@@ -8,6 +8,7 @@
       "pkm/agents/<agent_id>": [
         "read",
         "write",
+        "file_search",
         "append",
         "overwrite",
         "delete"

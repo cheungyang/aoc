@@ -60,7 +60,8 @@ class Agent(BaseAgent):
                 "thread_id": session_id,
                 "agent_id": self.agent_id
             },
-            "callbacks": [logging_handler] + (callbacks or [])
+            "callbacks": [logging_handler] + (callbacks or []),
+            "recursion_limit": 100
         }
 
         inputs = {"messages": [{"role": role, "content": content}]}

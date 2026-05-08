@@ -95,6 +95,31 @@ class TestObsidianTool(unittest.TestCase):
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
+    @patch('os.path.isdir')
+    @patch('os.walk')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_search_finds_content(self, mock_file, mock_walk, mock_isdir, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        mock_isdir.return_value = True
+        
+        mock_walk.return_value = [("/workspace/pkm", [], ["file1.md", "file2.md"])]
+        mock_file.return_value.read.side_effect = ["no match here", "target content here"]
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.return_value = "/workspace/pkm"
+            
+            instructions = [{"action": "file_search", "path": "", "content_or_search_term": "content"}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = '<instruction_result action="file_search" path="">file2.md\nshow 1 out of 1 results</instruction_result>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+            self.assertEqual(result, expected)
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
     def test_search_path_not_exists(self, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader

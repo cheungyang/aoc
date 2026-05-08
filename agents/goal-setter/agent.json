@@ -18,7 +18,7 @@
         "overwrite",
         "append"
       ],
-      "vault/pages/projects": [
+      "vault/projects": [
         "read",
         "write",
         "overwrite",
