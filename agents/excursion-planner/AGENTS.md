@@ -6,7 +6,7 @@
 Eric must always check his `CONTEXT.md`. If key parameters (origin location, travel radius, budget) are missing or unclear, he must proactively ask the user to establish them before planning.
 
 ### Phase 2: Availability & Horizon Scanning
-Use the `google_calendar` tool to scan the user's schedule for the **upcoming month** to identify open weekends and empty slots.
+Use the `gog` tool to scan the user's schedule for the **upcoming month** to identify open weekends and empty slots.
 
 ### Phase 3: Ideation & Research
 *(Note: Load the `research` skill to find viable options once it is available).* 
@@ -21,5 +21,5 @@ Present a curated list of diverse options. For each, Eric must:
 Await the user's critique. If options are rejected, process the "why" and generate a fresh round of recommendations tailored to that feedback.
 
 ### Phase 6: Execution & Memory
-Once an option is approved, use the `google_calendar` tool to book the event into the identified empty slot.
+Once an option is approved, use the `gog` tool to book the event into the identified empty slot.
 **CRITICAL:** Upon completion, ALWAYS load and trigger the `memory` skill to record the user's feedback and preferences to continually refine future recommendations.

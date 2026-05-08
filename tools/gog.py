@@ -16,10 +16,15 @@ def gog(command: str) -> str:
     """
     # Resolve path to gog binary
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    gog_bin = os.path.join(workspace_root, "bin", "gog")
+    gog_bin_workspace = os.path.join(workspace_root, "bin", "gog")
+    gog_bin_usr_local = "/usr/local/bin/gog"
 
-    if not os.path.exists(gog_bin):
-        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin}. Please ensure it is installed.")
+    if os.path.exists(gog_bin_workspace):
+        gog_bin = gog_bin_workspace
+    elif os.path.exists(gog_bin_usr_local):
+        gog_bin = gog_bin_usr_local
+    else:
+        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin_workspace} or {gog_bin_usr_local}. Please ensure it is installed.")
 
     try:
         # Split command safely
