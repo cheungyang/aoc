@@ -7,17 +7,18 @@ import base64
 from io import BytesIO
 
 @tool
-async def generate_image(prompt: str, output_path: str, image_base64: str = None) -> str:
+async def generate_image(prompt: str, output_path: str, image_base64: str = None, image_path: str = None) -> str:
     """Generate an image using Gemini (Imagen) based on a text prompt.
 
     This tool sends a generation request to Gemini, extracts the generated image,
     and saves it locally to the specified location.
-    It can also accept an input image in base64 format to make modifications referenced by the prompt.
+    It can also accept an input image in base64 format or via a file path to make modifications referenced by the prompt.
 
     Args:
         prompt: The text description of the image to generate.
         output_path: The file path where the image should be stored.
         image_base64: Optional base64 encoded image to reference for modifications.
+        image_path: Optional file path to an image to reference for modifications.
 
     Returns:
         The absolute path to the saved image file, so it can be used by other tools.
@@ -41,6 +42,15 @@ async def generate_image(prompt: str, output_path: str, image_base64: str = None
                 contents.append(input_image)
             except Exception as e:
                  return format_tool_response("generate_image", payload="", errors=f"Error decoding input image: {e}")
+        elif image_path:
+            try:
+                if not os.path.exists(image_path):
+                     return format_tool_response("generate_image", payload="", errors=f"Error: Image file not found at {image_path}")
+                input_image = await asyncio.to_thread(Image.open, image_path)
+                contents.append(input_image)
+            except Exception as e:
+                 return format_tool_response("generate_image", payload="", errors=f"Error reading input image file: {e}")
+
         
         # Generate image with Gemini (run in thread to avoid blocking event loop)
         response = await asyncio.to_thread(

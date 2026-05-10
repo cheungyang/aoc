@@ -111,13 +111,29 @@ def _execute_single_action(action: str, target_path: str, path: str, content: st
             if not os.path.isfile(target_path):
                  return "", f"Error: Path {path} is not a file."
             
+            from PIL import Image
+            from io import BytesIO
             import base64
+            
             try:
-                with open(target_path, "rb") as f:
-                    encoded_string = base64.b64encode(f.read()).decode('utf-8')
+                with Image.open(target_path) as img:
+                    # Convert to RGB if necessary (JPEG doesn't support transparency)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    
+                    # Resize image to a max of 1024x1024 maintaining aspect ratio
+                    img.thumbnail((1024, 1024))
+                    
+                    output_buffer = BytesIO()
+                    # Compress using JPEG format with quality=60
+                    img.save(output_buffer, format="JPEG", quality=60)
+                    
+                    encoded_string = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
                     return encoded_string, "None"
             except Exception as e:
-                return "", f"Error reading image: {e}"
+                return "", f"Error reading or compressing image: {e}"
+
+
 
         
         elif action == "write":

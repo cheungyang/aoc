@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import patch, mock_open, MagicMock, ANY
+
 import os
 import sys
 
@@ -37,13 +38,21 @@ class TestObsidianTool(unittest.TestCase):
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isfile')
-    @patch('builtins.open', new_callable=mock_open, read_data=b"fake image data")
-    def test_read_image(self, mock_file, mock_isfile, mock_exists, mock_tools_loader):
+    @patch('PIL.Image.open')
+    def test_read_image(self, mock_image_open, mock_isfile, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
         mock_loader.check_permission.return_value = True
         mock_exists.return_value = True
         mock_isfile.return_value = True
+        
+        mock_img = MagicMock()
+        mock_img.mode = "RGB"
+        mock_image_open.return_value.__enter__.return_value = mock_img
+        
+        def save_side_effect(buffer, format, quality):
+            buffer.write(b"compressed data")
+        mock_img.save.side_effect = save_side_effect
         
         with patch('os.path.abspath') as mock_abspath:
             mock_abspath.side_effect = lambda x: x # Simple mock
@@ -52,13 +61,17 @@ class TestObsidianTool(unittest.TestCase):
             result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
             
             import base64
-            expected_base64 = base64.b64encode(b"fake image data").decode('utf-8')
+            expected_base64 = base64.b64encode(b"compressed data").decode('utf-8')
             
             expected_payload = f'<instruction_result action="read_image" path="image.png">{expected_base64}</instruction_result>'
             expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
             self.assertEqual(result, expected)
             
-            mock_file.assert_called_once_with("/Users/alvac/dev/langgraph/tools/../pkm/image.png", "rb")
+            mock_image_open.assert_called_once_with("/Users/alvac/dev/langgraph/tools/../pkm/image.png")
+            mock_img.thumbnail.assert_called_once_with((1024, 1024))
+            mock_img.save.assert_called_once_with(ANY, format="JPEG", quality=60)
+
+
 
     @patch('core.loaders.tools_loader.ToolsLoader')
 

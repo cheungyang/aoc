@@ -81,6 +81,54 @@ class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, format_tool_response("generate_image", payload="/fake/path/test.png", errors="None"))
 
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"})
+    @patch('google.genai.Client')
+    @patch('os.path.exists')
+    @patch('PIL.Image.open')
+    async def test_successful_generation_with_image_path(self, mock_image_open, mock_exists, mock_genai_client):
+        mock_client = MagicMock()
+        mock_genai_client.return_value = mock_client
+        
+        mock_response = MagicMock()
+        mock_part = MagicMock()
+        mock_part.inline_data = MagicMock()
+        mock_image = MagicMock()
+        mock_part.as_image.return_value = mock_image
+        mock_response.parts = [mock_part]
+        
+        mock_client.models.generate_content.return_value = mock_response
+        mock_exists.return_value = True
+        
+        mock_input_image = MagicMock()
+        mock_image_open.return_value = mock_input_image
+        
+        with patch('os.makedirs'):
+            with patch('os.path.abspath', return_value="/fake/path/test.png"):
+                result = await generate_image.ainvoke({
+                    "prompt": "test", 
+                    "output_path": "test.png",
+                    "image_path": "input.png"
+                })
+                
+        mock_client.models.generate_content.assert_called_once_with(
+            model="gemini-3.1-flash-image-preview",
+            contents=["test", mock_input_image],
+        )
+        mock_image.save.assert_called_once_with("/fake/path/test.png")
+        self.assertEqual(result, format_tool_response("generate_image", payload="/fake/path/test.png", errors="None"))
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"})
+    @patch('os.path.exists')
+    async def test_image_path_not_exists(self, mock_exists):
+        mock_exists.return_value = False
+        result = await generate_image.ainvoke({
+            "prompt": "test", 
+            "output_path": "test.png",
+            "image_path": "non_existent.png"
+        })
+        self.assertIn("Error: Image file not found at non_existent.png", result)
+
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"})
+
     async def test_invalid_base64(self):
         result = await generate_image.ainvoke({
             "prompt": "test", 
