@@ -18,11 +18,6 @@
         "delete"
       ]
     },
-    "vector_search": {
-      "pkm": [
-        "vector_search"
-      ]
-    },
     "web_search": []
   }
 }

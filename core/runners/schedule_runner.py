@@ -44,12 +44,16 @@ class ScheduleRunner:
         while True:
             await asyncio.sleep(30)
             now = datetime.datetime.now()
+            triggered = False
             for item in self.schedules:
                 if not item["enabled"]:
                     continue
                 
                 if now >= item["next_run"]:
+                    if triggered:
+                        await asyncio.sleep(2)
                     await self._execute_schedule(item)
+                    triggered = True
                     # Update next run time
                     try:
                         iter = croniter(item["cron"], now)

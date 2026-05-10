@@ -126,10 +126,26 @@ def _execute_single_action(action: str, target_path: str, path: str, content: st
             
             for root, dirs, files in os.walk(search_dir):
                 for file in files:
-                    if search_term in file.lower() or not search_term:
-                         full_p = os.path.join(root, file)
-                         rel_p = os.path.relpath(full_p, vault_path)
-                         results.append(rel_p)
+                    full_p = os.path.join(root, file)
+                    rel_p = os.path.relpath(full_p, vault_path)
+                    
+                    if not search_term:
+                        results.append(rel_p)
+                        continue
+                        
+                    match = False
+                    if search_term in file.lower():
+                        match = True
+                    else:
+                        try:
+                            with open(full_p, "r", encoding="utf-8") as f:
+                                if search_term in f.read().lower():
+                                    match = True
+                        except Exception:
+                            pass
+                            
+                    if match:
+                        results.append(rel_p)
                          
             total_results = len(results)
             N = 50

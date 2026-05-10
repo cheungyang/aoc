@@ -1,5 +1,4 @@
 browser-use
-chromadb
 croniter
 discord.py
 langchain-google-genai

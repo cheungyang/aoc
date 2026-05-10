@@ -19,6 +19,26 @@ class TestNlmTool(unittest.TestCase):
 
     @patch('tools.nlm.os.path.exists')
     @patch('tools.nlm.subprocess.run')
+    def test_nlm_fallback_success(self, mock_run, mock_exists):
+        # First call (workspace) returns False, second call (user) returns True
+        mock_exists.side_effect = [False, True]
+        
+        mock_result = MagicMock()
+        mock_result.stdout = "notebook list output"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        result = nlm.func(command="notebook list")
+        
+        self.assertTrue(mock_run.called)
+        called_cmd = mock_run.call_args[0][0]
+        self.assertTrue(called_cmd[0].endswith(".local/bin/nlm"))
+        self.assertEqual(called_cmd[1:], ["notebook", "list"])
+        self.assertEqual(result, format_tool_response("nlm", payload="notebook list output", errors="None"))
+
+    @patch('tools.nlm.os.path.exists')
+    @patch('tools.nlm.subprocess.run')
     def test_nlm_success(self, mock_run, mock_exists):
         mock_exists.return_value = True
         

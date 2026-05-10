@@ -13,6 +13,7 @@ This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt
 - **Synthesis, Not Appending**: Do NOT simply append new facts to the long-term files. You must read the existing files, merge new information, resolve redundancies or conflicts (newer info overrides older info), and then overwrite the file.
 - **Actionable Extractions**: Only extract data that improves future decision-making or personalization. Ignore routine operations.
 - **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
+- **Strict Tool Usage**: You MUST strictly use the `obsidian` tool for all file and directory actions (`file_search`, `read`, `write`, `append`, `delete`). You are strictly prohibited from using the `filesystem` tool for this routine.
 
 ## Workflow
 

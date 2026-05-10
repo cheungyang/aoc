@@ -19,6 +19,26 @@ class TestGogTool(unittest.TestCase):
 
     @patch('tools.gog.os.path.exists')
     @patch('tools.gog.subprocess.run')
+    def test_gog_fallback_success(self, mock_run, mock_exists):
+        # First call (workspace) returns False, second call (usr/local) returns True
+        mock_exists.side_effect = [False, True]
+        
+        mock_result = MagicMock()
+        mock_result.stdout = "calendar list"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        result = gog.func(command="calendar calendars")
+        
+        self.assertTrue(mock_run.called)
+        called_cmd = mock_run.call_args[0][0]
+        self.assertEqual(called_cmd[0], "/usr/local/bin/gog")
+        self.assertEqual(called_cmd[1:], ["calendar", "calendars"])
+        self.assertEqual(result, format_tool_response("gog", payload="calendar list", errors="None"))
+
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
     def test_gog_success(self, mock_run, mock_exists):
         mock_exists.return_value = True
         

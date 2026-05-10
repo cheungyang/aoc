@@ -12,14 +12,14 @@
   ],
   "tools": {
     "obsidian": {
-      "wiki": [
+      "pkm/wiki": [
         "read",
         "file_search",
         "write",
         "overwrite",
         "append"
       ],
-      "vault/projects": [
+      "pkm/vault/projects": [
         "read",
         "file_search",
         "write",

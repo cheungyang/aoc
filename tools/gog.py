@@ -10,16 +10,26 @@ def gog(command: str) -> str:
     """
     Execute a gog calendar command using gogcli.
     Example commands:
-    - calendar calendars
-    - calendar events primary --today
-    - calendar create primary --summary 'Meeting' --from 2026-04-07T10:00:00Z --to 2026-04-07T11:00:00Z
+    - calendar calendars (List all calendars)
+    - calendar events primary --today (List events on primary calendar)
+    
+    # To add events to a specific calendar, replace 'primary' with the calendar name or ID:
+    - calendar create 'Work Calendar' --summary 'Meeting' --from 2026-04-07T10:00:00Z --to 2026-04-07T11:00:00Z
+    
+    # To set event color, use the --color flag (Google Calendar uses color IDs 1-11):
+    - calendar create primary --summary 'Meeting' --color 1 --from 2026-04-07T10:00:00Z --to 2026-04-07T11:00:00Z
     """
     # Resolve path to gog binary
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    gog_bin = os.path.join(workspace_root, "bin", "gog")
+    gog_bin_workspace = os.path.join(workspace_root, "bin", "gog")
+    gog_bin_usr_local = "/usr/local/bin/gog"
 
-    if not os.path.exists(gog_bin):
-        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin}. Please ensure it is installed.")
+    if os.path.exists(gog_bin_workspace):
+        gog_bin = gog_bin_workspace
+    elif os.path.exists(gog_bin_usr_local):
+        gog_bin = gog_bin_usr_local
+    else:
+        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin_workspace} or {gog_bin_usr_local}. Please ensure it is installed.")
 
     try:
         # Split command safely

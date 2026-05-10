@@ -120,6 +120,39 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         reply = await agent.execute("   ", "session1")
         self.assertEqual(reply, "I cannot process empty messages. Please provide some text.")
 
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_list_content(self, mock_logging_handler_class):
+        # Setup mocks
+        mock_logging_handler = MagicMock()
+        mock_logging_handler_class.return_value = mock_logging_handler
+
+        # Graph invoke result
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        # Run with list content
+        list_content = [{"type": "text", "text": "hello"}]
+        reply = await agent.execute(list_content, "session1")
+        
+        # Assertions
+        mock_graph.ainvoke.assert_called_once()
+        self.assertEqual(reply, "Reply text")
+        
+        # Verify inputs passed to graph
+        args, kwargs = mock_graph.ainvoke.call_args
+        self.assertEqual(args[0]["messages"][0]["content"], list_content)
+
+    async def test_execute_empty_list_content(self):
+        agent = Agent("test-agent", {})
+        
+        # Run with empty list
+        reply = await agent.execute([], "session1")
+        self.assertEqual(reply, "I cannot process empty messages. Please provide some text.")
+
 
 if __name__ == "__main__":
     unittest.main()
+
