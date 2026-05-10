@@ -84,7 +84,7 @@ class BotRunner:
         attachments = list(message.attachments)
         if not attachments:
             # Look back in history to find the most recent image attachment if current has none
-            async for msg in message.channel.history(limit=10):
+            async for msg in message.channel.history(limit=2):
                 if msg.attachments:
                     if any(a.content_type and a.content_type.startswith("image/") for a in msg.attachments):
                         attachments = list(msg.attachments)

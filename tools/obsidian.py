@@ -10,15 +10,33 @@ def obsidian(agent_id: str, vault_id: str, instructions: list[dict]) -> str:
     Perform specific operations on Obsidian vaults with scoped permissions.
     Supports executing multiple actions in a single call.
     
+    Supported Actions:
+    - 'read': Reads the text content of a file.
+        Requires: 'path'.
+    - 'read_image': Reads an image file and returns its content as a base64-encoded string.
+        Requires: 'path'. Useful for passing images to other tools like generate_image.
+    - 'write': Writes content to a NEW file. Fails if the file already exists.
+        Requires: 'path', 'content_or_search_term' (as content).
+    - 'overwrite': Overwrites an existing file or creates a new one with the provided content.
+        Requires: 'path', 'content_or_search_term' (as content).
+    - 'append': Appends content to the end of an existing file.
+        Requires: 'path', 'content_or_search_term' (as content).
+    - 'delete': Deletes a single file. Cannot delete directories.
+        Requires: 'path'.
+    - 'file_search': Searches for files by name or content within a directory.
+        Requires: 'path' (directory to search in).
+        Optional: 'content_or_search_term' (term to search for in filenames and content). If omitted, lists all files.
+    
     Args:
         agent_id: The ID of the agent running this tool.
-        vault_id: The ID of the vault to operate on.
+        vault_id: The ID of the vault to operate on (e.g., 'pkm').
         instructions: A list of dictionaries, where each dictionary represents an action to perform.
             Each dictionary must contain:
-            - 'action': The operation to perform ('file_search', 'read', 'write', 'overwrite', 'append', 'delete').
-            - 'path': The relative path to vault
+            - 'action': One of the supported actions listed above.
+            - 'path': The relative path to the file or directory within the vault.
             - 'content_or_search_term': (Optional) Content to write/append, or term to search for.
     """
+
     if not agent_id:
         return format_tool_response("obsidian", payload="", errors="Error: agent_id is required to verify permissions.")
 
@@ -86,6 +104,21 @@ def _execute_single_action(action: str, target_path: str, path: str, content: st
                 return "", f"Error: File not found at {path}"
             with open(target_path, "r") as f:
                 return f.read(), "None"
+        
+        elif action == "read_image":
+            if not os.path.exists(target_path):
+                return "", f"Error: File not found at {path}"
+            if not os.path.isfile(target_path):
+                 return "", f"Error: Path {path} is not a file."
+            
+            import base64
+            try:
+                with open(target_path, "rb") as f:
+                    encoded_string = base64.b64encode(f.read()).decode('utf-8')
+                    return encoded_string, "None"
+            except Exception as e:
+                return "", f"Error reading image: {e}"
+
         
         elif action == "write":
             if os.path.exists(target_path):
