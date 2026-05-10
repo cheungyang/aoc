@@ -13,6 +13,8 @@ def obsidian(agent_id: str, vault_id: str, instructions: list[dict]) -> str:
     Supported Actions:
     - 'read': Reads the text content of a file.
         Requires: 'path'.
+    - 'read_image': Reads an image file and returns its content as a base64-encoded string.
+        Requires: 'path'. Use only for image comprehension. 
     - 'write': Writes content to a NEW file. Fails if the file already exists.
         Requires: 'path', 'content_or_search_term' (as content).
     - 'overwrite': Overwrites an existing file or creates a new one with the provided content.
@@ -103,33 +105,33 @@ def _execute_single_action(action: str, target_path: str, path: str, content: st
             with open(target_path, "r") as f:
                 return f.read(), "None"
         
-        # elif action == "read_image":
-        #     if not os.path.exists(target_path):
-        #         return "", f"Error: File not found at {path}"
-        #     if not os.path.isfile(target_path):
-        #          return "", f"Error: Path {path} is not a file."
+        elif action == "read_image":
+            if not os.path.exists(target_path):
+                return "", f"Error: File not found at {path}"
+            if not os.path.isfile(target_path):
+                 return "", f"Error: Path {path} is not a file."
             
-        #     from PIL import Image
-        #     from io import BytesIO
-        #     import base64
+            from PIL import Image
+            from io import BytesIO
+            import base64
             
-        #     try:
-        #         with Image.open(target_path) as img:
-        #             # Convert to RGB if necessary (JPEG doesn't support transparency)
-        #             if img.mode in ("RGBA", "P"):
-        #                 img = img.convert("RGB")
+            try:
+                with Image.open(target_path) as img:
+                    # Convert to RGB if necessary (JPEG doesn't support transparency)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
                     
-        #             # Resize image to a max of 1024x1024 maintaining aspect ratio
-        #             img.thumbnail((1024, 1024))
+                    # Resize image to a max of 1024x1024 maintaining aspect ratio
+                    img.thumbnail((1024, 1024))
                     
-        #             output_buffer = BytesIO()
-        #             # Compress using JPEG format with quality=60
-        #             img.save(output_buffer, format="JPEG", quality=60)
+                    output_buffer = BytesIO()
+                    # Compress using JPEG format with quality=60
+                    img.save(output_buffer, format="JPEG", quality=60)
                     
-        #             encoded_string = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
-        #             return encoded_string, "None"
-        #     except Exception as e:
-        #         return "", f"Error reading or compressing image: {e}"
+                    encoded_string = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
+                    return encoded_string, "None"
+            except Exception as e:
+                return "", f"Error reading or compressing image: {e}"
         
         elif action == "write":
             if os.path.exists(target_path):

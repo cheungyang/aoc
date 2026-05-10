@@ -40,6 +40,32 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')
     @patch('core.runners.schedule_runner.croniter')
+    async def test_schedule_loading_array_prompt(self, mock_croniter, mock_bots_loader, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["agent1"]
+        
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {
+            "schedules": [
+                {"cron": "* * * * *", "prompt": ["line1", "line2"], "enabled": "true", "channel": "test-channel"}
+            ]
+        }
+        
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        
+        runner = ScheduleRunner()
+        
+        self.assertEqual(len(runner.schedules), 1)
+        self.assertEqual(runner.schedules[0]["prompt"], "line1\nline2")
+
+    @patch('core.runners.schedule_runner.AgentsLoader')
+
+    @patch('core.runners.schedule_runner.BotsLoader')
+    @patch('core.runners.schedule_runner.croniter')
     async def test_execute_schedule(self, mock_croniter, mock_bots_loader, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -84,6 +110,46 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
+    @patch('core.runners.schedule_runner.BotsLoader')
+    @patch('core.runners.schedule_runner.croniter')
+    async def test_execute_schedule_with_thread(self, mock_croniter, mock_bots_loader, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["agent1"]
+        
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {
+            "schedules": [
+                {"cron": "* * * * *", "prompt": "test prompt", "enabled": "true", "channel": "test-channel", "thread": "test-thread"}
+            ],
+            "channel_hosts": ["test-channel"]
+        }
+        mock_agent.get_config = MagicMock(side_effect=lambda key, default=None: mock_agent.config.get(key, default))
+        mock_agent.execute = AsyncMock(return_value="agent response")
+        
+        mock_bots = MagicMock()
+        mock_bots_loader.return_value = mock_bots
+        mock_channel = MagicMock()
+        mock_channel.name = "test-channel"
+        mock_bots.get_channel.return_value = mock_channel
+        
+        mock_thread = MagicMock()
+        mock_thread.name = "test-thread"
+        mock_channel.threads = [mock_thread]
+        
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        
+        runner = ScheduleRunner()
+        
+        await runner._execute_schedule(runner.schedules[0])
+            
+        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_thread, role="user", source="scheduled")
+
+    @patch('core.runners.schedule_runner.AgentsLoader')
+
     @patch('core.runners.schedule_runner.BotsLoader')
     @patch('core.runners.schedule_runner.croniter')
     async def test_execute_schedule_long_message(self, mock_croniter, mock_bots_loader, mock_agents_loader):

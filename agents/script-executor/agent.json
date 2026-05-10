@@ -7,12 +7,19 @@
     {
       "channel": "general-aoc",
       "cron": "0 * * * *",
-      "prompt": "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}\ntool git {\"action\": \"pull\", \"path\": \".\", \"agent_id\": \"script-executor\"}"
+      "prompt": [
+        "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}",
+        "tool git {\"action\": \"pull\", \"path\": \".\", \"agent_id\": \"script-executor\"}"
+      ]
     }
   ],
   "tools": {
     "git": {
       "pkm": [
+        "pull",
+        "push"
+      ],
+      ".": [
         "pull",
         "push"
       ]

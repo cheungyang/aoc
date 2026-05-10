@@ -29,14 +29,21 @@ class ScheduleRunner:
                     print(f"Error parsing cron '{cron_expr}' for agent {agent_id}: {e}")
                     continue
 
+                prompt = schedule.get("prompt")
+                if isinstance(prompt, list):
+                    prompt = "\n".join(prompt)
+
                 self.schedules.append({
                     "agent_id": agent_id,
                     "cron": cron_expr,
-                    "prompt": schedule.get("prompt"),
+                    "prompt": prompt,
                     "enabled": str(schedule.get("enabled", "true")).lower() == "true",
                     "channel": schedule.get("channel"),
+                    "thread": schedule.get("thread"),
                     "next_run": next_run
                 })
+
+
         print(f"Loaded {len(self.schedules)} schedules.")
 
     async def start(self):
@@ -65,8 +72,9 @@ class ScheduleRunner:
         agent_id = item["agent_id"]
         prompt = item["prompt"]
         channel_name = item["channel"]
+        thread_name = item.get("thread")
         
-        print(f"Triggering schedule for {agent_id} on channel {channel_name}")
+        print(f"Triggering schedule for {agent_id} on channel {channel_name}" + (f" thread {thread_name}" if thread_name else ""))
         
         try:
             agent = self.loader.get_agent(agent_id)
@@ -83,8 +91,23 @@ class ScheduleRunner:
             if channel is None:
                 print(f"Channel {channel_name} not found for agent {agent_id}")
             
+            if thread_name and channel:
+                found_thread = None
+                # channel.threads is a list of active threads
+                for thread in channel.threads:
+                    if thread.name == thread_name or str(thread.id) == thread_name:
+                        found_thread = thread
+                        break
+                
+                if found_thread:
+                    channel = found_thread
+                    print(f"Using thread {found_thread.name} ({found_thread.id})")
+                else:
+                    print(f"Thread {thread_name} not found in channel {channel_name}, falling back to channel.")
+
             # Execute regardless of channel existance
             await agent.execute(prompt, source="scheduled", channel=channel, role="user")
+
 
         except Exception as e:
             print(f"Error executing schedule for {agent_id}: {e}")
