@@ -236,5 +236,112 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Should return immediately without doing anything
         mock_agents_loader_class.assert_not_called()
 
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_with_image_attachment(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        
+        mock_message = MagicMock()
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
+        mock_message.content = "What is this image?"
+        mock_message.mentions = [runner.bot.user]
+        mock_message.channel.send = AsyncMock()
+        
+        # Mock attachment
+        mock_attachment = MagicMock()
+        mock_attachment.content_type = "image/jpeg"
+        mock_attachment.read = AsyncMock(return_value=b"fake_image_data")
+        mock_message.attachments = [mock_attachment]
+        
+        # Mock channel.typing context manager
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+        
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": []}
+        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+        
+        # Verify that execute was called with the list payload
+        mock_agent.execute.assert_called_once()
+        args, kwargs = mock_agent.execute.call_args
+        content_arg = args[0]
+        
+        self.assertIsInstance(content_arg, list)
+        self.assertEqual(len(content_arg), 2)
+        self.assertEqual(content_arg[0]["type"], "text")
+        self.assertEqual(content_arg[1]["type"], "image_url")
+        self.assertTrue(content_arg[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_with_history_image(self, mock_bot_class, mock_agents_loader_class):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        
+        mock_message = MagicMock()
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
+        mock_message.content = "What is that image?"
+        mock_message.mentions = [runner.bot.user]
+        mock_message.channel.send = AsyncMock()
+        mock_message.attachments = []
+        
+        # Mock history
+        mock_history_msg = MagicMock()
+        mock_attachment = MagicMock()
+        mock_attachment.content_type = "image/png"
+        mock_attachment.read = AsyncMock(return_value=b"fake_png_data")
+        mock_history_msg.attachments = [mock_attachment]
+        
+        async def mock_history(limit):
+            yield mock_history_msg
+            
+        mock_message.channel.history.return_value = mock_history(limit=10)
+        
+        # Mock channel.typing context manager
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+        
+        # Mock AgentsLoader and dynamic Agent
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": []}
+        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+        
+        # Verify that execute was called with the list payload containing the history image
+        mock_agent.execute.assert_called_once()
+        args, kwargs = mock_agent.execute.call_args
+        content_arg = args[0]
+        
+        self.assertIsInstance(content_arg, list)
+        self.assertEqual(len(content_arg), 2)
+        self.assertEqual(content_arg[0]["type"], "text")
+        self.assertEqual(content_arg[1]["type"], "image_url")
+        self.assertTrue(content_arg[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
 if __name__ == "__main__":
     unittest.main()

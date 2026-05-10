@@ -62,7 +62,9 @@ def get_knowledge_prompt():
         f"Current Timezone: {tz_str}",
         "Current City: San Jose"
     ]
-    return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"
+
+    return ""
+    # return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"
 
 
 def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> str:

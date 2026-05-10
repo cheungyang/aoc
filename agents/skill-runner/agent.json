@@ -16,6 +16,10 @@
     "web_browsing",
     "research",
     "wiki_ingest",
-    "wiki_query"
-  ]
+    "wiki_query",
+    "wiki_lint"
+  ],
+  "tools": {
+    "generate_image": {}
+  }
 }

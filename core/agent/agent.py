@@ -1,6 +1,7 @@
 from core.util import split_message
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
+import asyncio
 
 import json
 import ast
@@ -21,8 +22,14 @@ class Agent(BaseAgent):
         builder = GraphBuilder()
         return await builder.build_graph(self.agent_id, self.config)
 
-    async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
-        if not content or not content.strip():
+    async def execute(self, content: str | list, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: list = None, role: str = "user") -> str:
+        if not content:
+            msg = "I cannot process empty messages. Please provide some text."
+            if channel is not None:
+                await channel.send(msg)
+            return msg
+
+        if isinstance(content, str) and not content.strip():
             msg = "I cannot process empty messages. Please provide some text."
             if channel is not None:
                 await channel.send(msg)
@@ -38,13 +45,13 @@ class Agent(BaseAgent):
             job_id = JobManager().new_job_id(self.agent_id)
 
         # Handle [new] command to clear session context
-        if content.strip() == "[new]":    
+        if isinstance(content, str) and content.strip() == "[new]":    
             archive_status = SessionManager().clear_session(session_id)
             await channel.send(f"Session context cleared. {archive_status}")
             return
 
         # Handle [newall] command to clear all session contexts
-        if content.strip() == "[newall]":    
+        if isinstance(content, str) and content.strip() == "[newall]":    
             archive_status = SessionManager().clear_sessions()
             await channel.send(f"All session contexts cleared. {archive_status}")
             return
@@ -126,6 +133,8 @@ class Agent(BaseAgent):
                     view = PollButtonView(poll_data, channel)
             
             for i, chunk in enumerate(chunks):
+                if i > 0:
+                    await asyncio.sleep(1)
                 if i == len(chunks) - 1 and view:
                     await channel.send(chunk, view=view)
                 else:

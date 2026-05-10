@@ -1,6 +1,7 @@
 import os
 import asyncio
 import discord
+import base64
 from discord.ext import commands
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -77,9 +78,41 @@ class BotRunner:
 
         agent = loader.get_agent(self.agent_id)
         reaction_handler = ReactionCallbackHandler(message)
+        
+        content_payload = content
+        
+        attachments = list(message.attachments)
+        if not attachments:
+            # Look back in history to find the most recent image attachment if current has none
+            async for msg in message.channel.history(limit=10):
+                if msg.attachments:
+                    if any(a.content_type and a.content_type.startswith("image/") for a in msg.attachments):
+                        attachments = list(msg.attachments)
+                        break
+
+        if attachments:
+            content_parts = []
+            if content:
+                content_parts.append({"type": "text", "text": content})
+            
+            for attachment in attachments:
+                if attachment.content_type and attachment.content_type.startswith("image/"):
+                    try:
+                        image_data = await attachment.read()
+                        base64_image = base64.b64encode(image_data).decode('utf-8')
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{attachment.content_type};base64,{base64_image}"},
+                        })
+                    except Exception as e:
+                        print(f"Error reading attachment: {e}")
+            
+            if content_parts:
+                content_payload = content_parts
+
         try:
             async with message.channel.typing():
-                await agent.execute(content, source="discord", channel=message.channel, callbacks=[reaction_handler])
+                await agent.execute(content_payload, source="discord", channel=message.channel, callbacks=[reaction_handler])
 
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")
