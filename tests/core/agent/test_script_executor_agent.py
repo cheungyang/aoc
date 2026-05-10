@@ -14,6 +14,13 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from core.agent.job_manager import JobManager
         JobManager._instance = None
+        from core.loaders.tools_loader import ToolsLoader
+        ToolsLoader._instance = None
+        
+        # Set up mock on singleton instance
+        loader = ToolsLoader()
+        self.mock_discover = MagicMock(return_value={"test_tool": ""})
+        loader._discover_tools = self.mock_discover
 
     @patch('subprocess.run')
     async def test_execute_exec_success(self, mock_run):
@@ -26,28 +33,38 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("command output", output)
         mock_run.assert_called_once_with(['echo', 'hello'], capture_output=True, text=True, check=True)
 
-    @patch('subprocess.run')
-    async def test_execute_script_success(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="script output", stderr="", returncode=0)
+    @patch('importlib.import_module')
+    async def test_execute_tool_success(self, mock_import):
+        
+        mock_tool = AsyncMock()
+        mock_tool.ainvoke.return_value = "tool result"
+        
+        mock_module = MagicMock()
+        mock_module.test_tool = mock_tool
+        mock_import.return_value = mock_module
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("script test.sh", "test_source")
+        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", "test_source")
         
-        self.assertIn("Script scripts/test.sh executed successfully", output)
-        self.assertIn("script output", output)
-        mock_run.assert_called_once_with(['bash', 'scripts/test.sh'], capture_output=True, text=True, check=True)
+        self.assertIn("Tool test_tool executed successfully", output)
+        self.assertIn("tool result", output)
+        mock_tool.ainvoke.assert_called_once_with({"arg1": "val1"})
 
-    @patch('subprocess.run')
-    async def test_execute_script_python_success(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="python output", stderr="", returncode=0)
+    @patch('importlib.import_module')
+    async def test_execute_tool_direct_call_success(self, mock_import):
+        
+        async def test_tool(arg1):
+            return f"direct result {arg1}"
+            
+        mock_module = MagicMock()
+        mock_module.test_tool = test_tool
+        mock_import.return_value = mock_module
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("script test.py", "test_source")
+        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", "test_source")
         
-        self.assertIn("Script scripts/test.py executed successfully", output)
-        self.assertIn("python output", output)
-        import sys
-        mock_run.assert_called_once_with([sys.executable, 'scripts/test.py'], capture_output=True, text=True, check=True)
+        self.assertIn("Tool test_tool executed successfully", output)
+        self.assertIn("direct result val1", output)
 
     @patch('subprocess.run')
     async def test_execute_exec_with_tilde(self, mock_run):

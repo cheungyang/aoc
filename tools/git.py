@@ -28,6 +28,8 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
     try:
         def run_git_cmd(cmd_args, cwd):
             cmd = ["git"] + cmd_args
+            print(f"DEBUG: Running git cmd: {cmd} in {cwd}")
+            print(f"DEBUG: SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}")
             result = subprocess.run(
                 cmd,
                 cwd=cwd,

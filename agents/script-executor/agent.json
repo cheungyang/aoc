@@ -2,5 +2,20 @@
   "agent_id": "script-executor",
   "name": "Terminator",
   "description": "A special non-LLM agent responsible for executing scheduled cron scripts.",
-  "emoji": "⚙️"
+  "emoji": "⚙️",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "cron": "0 * * * *",
+      "prompt": "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}\ntool git {\"action\": \"pull\", \"path\": \".\", \"agent_id\": \"script-executor\"}"
+    }
+  ],
+  "tools": {
+    "git": {
+      "pkm": [
+        "pull",
+        "push"
+      ]
+    }
+  }
 }

@@ -191,5 +191,35 @@ class TestObsidianTool(unittest.TestCase):
             expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
             self.assertEqual(result, expected)
 
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.makedirs')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_write_with_content_key_fallback(self, mock_file, mock_makedirs, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        
+        def exists_side_effect(path):
+            if "note.md" in path:
+                return False
+            return True
+        mock_exists.side_effect = exists_side_effect
+        
+        with patch('os.path.abspath') as mock_abspath:
+            mock_abspath.side_effect = lambda x: x # Simple mock
+            
+            # Use 'content' instead of 'content_or_search_term'
+            instructions = [{"action": "write", "path": "note.md", "content": "new content"}]
+            result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
+            
+            expected_payload = '<instruction_result action="write" path="note.md">Successfully wrote to note.md</instruction_result>'
+            expected = format_tool_response("obsidian", payload=expected_payload, errors="None")
+            self.assertEqual(result, expected)
+            
+            # Verify that the file was opened in write mode and the correct content was written
+            mock_file.assert_called_once_with("/Users/alvac/dev/langgraph/tools/../pkm/note.md", "w")
+            mock_file().write.assert_called_once_with("new content")
+
 if __name__ == '__main__':
     unittest.main()

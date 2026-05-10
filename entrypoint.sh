@@ -21,5 +21,8 @@ fi
 # Ensure appuser owns the app directory (if needed, but usually handled by mount permissions or build)
 # chown -R appuser:appuser /app
 
+# Start Chromium in the background as appuser for the browser tool
+runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
+
 # Execute the command passed to docker run as appuser
 exec runuser -u appuser -- "$@"

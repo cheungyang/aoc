@@ -41,7 +41,7 @@ def obsidian(agent_id: str, vault_id: str, instructions: list[dict]) -> str:
     for inst in instructions:
         action = inst.get("action")
         path = inst.get("path")
-        content_or_search_term = inst.get("content_or_search_term", "")
+        content_or_search_term = inst.get("content_or_search_term") or inst.get("content", "")
         
         if action is None or path is None:
              error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Both \'action\' and \'path\' are required in each instruction.</instruction_error>')

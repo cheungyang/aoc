@@ -36,7 +36,7 @@ class VaultVectorStore:
                     if any(part.startswith('.') for part in rel_path.split(os.sep)):
                         continue
                         
-                    # Only include files at ticktick and vault/pages/projects
+                    # Only include files at ticktick and vault/projects
                     path_parts = rel_path.split(os.sep)
                     is_ticktick = path_parts[0] == 'ticktick'
                     is_project = (len(path_parts) >= 3 and 

@@ -5,17 +5,20 @@
   "emoji": "🏗️",
   "tools": {
     "obsidian": {
-      "pkm/vault/pages/projects": [
-        "read"
+      "pkm/vault/projects": [
+        "read",
+        "file_search"
       ],
       "pkm/ticktick": [
         "read",
         "file_search"
       ],
-      "pkm/wiki/projects": [
+      "pkm/wiki": [
         "read",
+        "file_search",
         "write",
-        "overwrite"
+        "overwrite",
+        "append"
       ]
     },
     "git": {

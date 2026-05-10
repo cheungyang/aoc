@@ -15,7 +15,7 @@ This skill acts as a dynamic project compiler and knowledge integrator. It pulls
 ## Workflow
 
 ### Phase 1: Gathering
-1. Read the specified raw project file from `vault/pages/projects/` using the `obsidian` tool, `vault_id` must explicitly be `"pkm"`.
+1. Read the specified raw project file from `vault/projects/` using the `obsidian` tool, `vault_id` must explicitly be `"pkm"`.
 2. Locate the YAML frontmatter and extract the `alias:` field value that begins with `#p/` (e.g., `#p/my-project`).
 3. Read all filenames in the `ticktick/` directory using the `obsidian` tool `file_search` actiom with `.md` as search term, then read each file in ticktick to get a list of all tasks. Extract the tasks that has the alias tag (e.g., `#p/my-project`). Keep *all* matching tasks exactly verbatim. 
 
@@ -46,7 +46,7 @@ This skill acts as a dynamic project compiler and knowledge integrator. It pulls
 
 ### Phase 4: Continuous Sync & Velocity (Existing Projects)
 8. If the project already exists in `wiki/projects/`, perform an "Update & Sync":
-   - Use the `git` tool (`log-p` action) on the raw file in `vault/pages/projects/` to extract the recent "delta" (new goals, narrative shifts, new concepts).
+   - Use the `git` tool (`log-p` action) on the raw file in `vault/projects/` to extract the recent "delta" (new goals, narrative shifts, new concepts).
    - If the delta contains new entities/concepts, re-trigger `wiki_query` and synthesize their impact on the project.
    - `overwrite` `wiki/projects/<project_name>.md` with the updated compilation (refreshing goals, adding new concept links, and replacing the tasks block with the latest verbatim state of tasks from `ticktick/`).
    - Use the `git` tool (`log-p` action) on the `ticktick/` directory to measure task velocity (e.g., completions from `- [ ]` to `- [x]`).

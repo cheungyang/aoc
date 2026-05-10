@@ -91,7 +91,7 @@ class TestVaultVectorStore(unittest.TestCase):
         
         self.assertEqual(len(call_args['documents']), 3)
         
-        self.assertIn("File Summary for vault/pages/projects/file2.md", call_args['documents'][0])
+        self.assertIn("File Summary for vault/projects/file2.md", call_args['documents'][0])
         self.assertIn("Tags: a/tag1, p/tag2", call_args['documents'][0])
         self.assertIn("Priorities: Highest", call_args['documents'][0])
         self.assertIn("Tasks:\n- Task 1\n- Task 2", call_args['documents'][0])

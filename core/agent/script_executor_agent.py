@@ -29,45 +29,78 @@ class ScriptExecutorAgent(BaseAgent):
                 if not line:
                     continue
                 
-                parts = line.split()
+                parts = line.split(maxsplit=1)
                 if not parts:
                     continue
                     
                 action = parts[0]
-                args = parts[1:]
+                rest = parts[1] if len(parts) > 1 else ""
                 
-                if action == "script":
-                    if not args:
-                        results.append("Error: script action requires a path.")
+                if action == "tool":
+                    if not rest:
+                        results.append("Error: tool action requires a tool name and arguments.")
                         continue
-                    script_path = os.path.join("scripts", args[0])
-                    import sys
-                    cmd = [script_path]
-                    if script_path.endswith('.py'):
-                        cmd = [sys.executable, script_path]
-                    elif script_path.endswith('.sh'):
-                        cmd = ['bash', script_path]
+                    
+                    tool_parts = rest.split(maxsplit=1)
+                    tool_name = tool_parts[0]
+                    tool_args_str = tool_parts[1] if len(tool_parts) > 1 else "{}"
+                    
+                    try:
+                        import json
+                        tool_args = json.loads(tool_args_str)
+                    except json.JSONDecodeError as e:
+                        results.append(f"Error parsing JSON arguments for tool {tool_name}: {str(e)}")
+                        continue
+                        
+                    from core.loaders.tools_loader import ToolsLoader
+                    loader = ToolsLoader()
+                    discovered = loader._discover_tools()
+                    
+                    if tool_name not in discovered:
+                        results.append(f"Error: Tool {tool_name} not found.")
+                        continue
+                        
+                    folder = discovered[tool_name]
+                    if folder:
+                        module_path = f"tools.{folder}.{tool_name}"
+                    else:
+                        module_path = f"tools.{tool_name}"
                         
                     try:
-                        res = subprocess.run(cmd + args[1:], capture_output=True, text=True, check=True)
-                        results.append(f"Script {script_path} executed successfully:\n{res.stdout}")
-                    except subprocess.CalledProcessError as e:
-                        results.append(f"Error executing script {script_path}: {e.stderr}")
+                        import importlib
+                        mod = importlib.import_module(module_path)
+                        if hasattr(mod, tool_name):
+                            tool_obj = getattr(mod, tool_name)
+                            
+                            if hasattr(tool_obj, "ainvoke"):
+                                res = await tool_obj.ainvoke(tool_args)
+                            else:
+                                import inspect
+                                if inspect.iscoroutinefunction(tool_obj):
+                                    res = await tool_obj(**tool_args)
+                                else:
+                                    res = tool_obj(**tool_args)
+                                    
+                            results.append(f"Tool {tool_name} executed successfully:\n{res}")
+                        else:
+                            results.append(f"Error: Module {module_path} does not have attribute {tool_name}")
                     except Exception as e:
-                        results.append(f"Error running script {script_path}: {str(e)}")
+                        results.append(f"Error executing tool {tool_name}: {str(e)}")
                         
                 elif action == "exec":
-                    if not args:
+                    if not rest:
                         results.append("Error: exec action requires a command.")
                         continue
                     try:
+                        import shlex
+                        args = shlex.split(rest)
                         expanded_args = [os.path.expanduser(arg) for arg in args]
                         res = subprocess.run(expanded_args, capture_output=True, text=True, check=True)
-                        results.append(f"Command '{' '.join(args)}' executed successfully:\n{res.stdout}")
+                        results.append(f"Command '{rest}' executed successfully:\n{res.stdout}")
                     except subprocess.CalledProcessError as e:
-                        results.append(f"Error executing command '{' '.join(args)}': {e.stderr}")
+                        results.append(f"Error executing command '{rest}': {e.stderr}")
                     except Exception as e:
-                        results.append(f"Error running command '{' '.join(args)}': {str(e)}")
+                        results.append(f"Error running command '{rest}': {str(e)}")
                 else:
                     results.append(f"Unknown action: {action}")
                     

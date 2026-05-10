@@ -14,12 +14,14 @@
     "obsidian": {
       "wiki": [
         "read",
+        "file_search",
         "write",
         "overwrite",
         "append"
       ],
-      "vault/pages/projects": [
+      "vault/projects": [
         "read",
+        "file_search",
         "write",
         "overwrite",
         "append"
