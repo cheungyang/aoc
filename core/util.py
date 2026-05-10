@@ -29,7 +29,8 @@ def split_message(text, limit=2000):
 
 def get_formatting_prompt():
     return """<formatting_rules>
-If you want to present options to the user, use the optional <poll> tag after your response, formatted below:
+If you want to present options to the user, use the optional <poll> tag after your response, formatted below.
+Do not include any xml response to the user except the <poll> block.
 <poll allow_multiple="{{true_or_false}}">
     <question>{{question to ask the user}}</question>
     <options>
