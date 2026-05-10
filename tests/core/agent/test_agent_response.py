@@ -67,5 +67,35 @@ class TestAgentResponse(unittest.TestCase):
         self.assertEqual(response.text, reply_text)
         self.assertIsNone(response.poll_data)
 
+    def test_perfect_images(self):
+        reply_text = """Here are the images:
+<images>
+  <image path="assets/img1.png"/>
+  <image path="assets/img2.jpg"/>
+</images>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here are the images:")
+        self.assertIsNotNone(response.image_paths)
+        self.assertEqual(len(response.image_paths), 2)
+        self.assertEqual(response.image_paths[0], "assets/img1.png")
+        self.assertEqual(response.image_paths[1], "assets/img2.jpg")
+
+    def test_images_fallback(self):
+        reply_text = """Here are the images:
+<images>
+  <image path="assets/img1.png"/>
+  <image path="assets/img2.jpg"/>
+  <invalid>
+</images>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here are the images:")
+        self.assertIsNotNone(response.image_paths)
+        self.assertEqual(len(response.image_paths), 2)
+        self.assertEqual(response.image_paths[0], "assets/img1.png")
+        self.assertEqual(response.image_paths[1], "assets/img2.jpg")
+
 if __name__ == '__main__':
     unittest.main()
+

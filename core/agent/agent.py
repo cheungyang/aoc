@@ -2,6 +2,8 @@ from core.util import split_message
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
 import asyncio
+import os
+
 
 import json
 import ast
@@ -119,6 +121,7 @@ class Agent(BaseAgent):
         response = AgentResponse.from_string(reply_text)
         text_content = response.text
         poll_data = response.poll_data
+        image_paths = response.image_paths
 
         # Send message to channel
         if channel is not None:
@@ -132,13 +135,27 @@ class Agent(BaseAgent):
                 else:
                     view = PollButtonView(poll_data, channel)
             
+            files = []
+            if image_paths and source == "discord":
+                for path in image_paths:
+                    if os.path.exists(path):
+                        files.append(discord.File(path))
+                    else:
+                        print(f"Image file not found: {path}")
+            
             for i, chunk in enumerate(chunks):
                 if i > 0:
                     await asyncio.sleep(1)
-                if i == len(chunks) - 1 and view:
-                    await channel.send(chunk, view=view)
+                if i == len(chunks) - 1:
+                    kwargs = {}
+                    if view:
+                        kwargs["view"] = view
+                    if files:
+                        kwargs["files"] = files
+                    await channel.send(chunk, **kwargs)
                 else:
                     await channel.send(chunk)
+
 
         # Return reponse regardless of channel
         return text_content

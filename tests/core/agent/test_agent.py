@@ -153,6 +153,39 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "I cannot process empty messages. Please provide some text.")
 
 
+    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.agent.agent.os.path.exists')
+    @patch('discord.File')
+    async def test_execute_sends_images(self, mock_discord_file, mock_exists, mock_logging_handler_class):
+        mock_exists.return_value = True
+        mock_file_instance = MagicMock()
+        mock_discord_file.return_value = mock_file_instance
+
+        # Graph invoke result with <images> tag
+        mock_graph = MagicMock()
+        reply_with_images = """Here is an image.
+<images>
+  <image path="assets/test.png"/>
+</images>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_images)]})
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        mock_channel = AsyncMock()
+        
+        # Run
+        reply = await agent.execute("hello", source="discord", channel=mock_channel)
+        
+        # Assertions
+        mock_graph.ainvoke.assert_called_once()
+        self.assertEqual(reply, "Here is an image.")
+        
+        # Verify channel.send was called with files
+        mock_channel.send.assert_called_once_with("Here is an image.", files=[mock_file_instance])
+        mock_discord_file.assert_called_once_with("assets/test.png")
+
 if __name__ == "__main__":
     unittest.main()
+
 

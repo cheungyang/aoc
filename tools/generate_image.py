@@ -1,4 +1,5 @@
 import os
+import asyncio
 from langchain_core.tools import tool
 from core.util import format_tool_response
 from PIL import Image
@@ -41,8 +42,9 @@ async def generate_image(prompt: str, output_path: str, image_base64: str = None
             except Exception as e:
                  return format_tool_response("generate_image", payload="", errors=f"Error decoding input image: {e}")
         
-        # Generate image with Gemini
-        response = client.models.generate_content(
+        # Generate image with Gemini (run in thread to avoid blocking event loop)
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model="gemini-3.1-flash-image-preview",
             contents=contents,
         )
@@ -57,14 +59,15 @@ async def generate_image(prompt: str, output_path: str, image_base64: str = None
              raise Exception("No image data found in response")
              
         output_path = os.path.abspath(output_path)
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        # Ensure the directory exists (run in thread to avoid blocking event loop)
+        await asyncio.to_thread(os.makedirs, os.path.dirname(output_path), exist_ok=True)
             
-        # Save to location
-        image.save(output_path)
+        # Save to location (run in thread to avoid blocking event loop)
+        await asyncio.to_thread(image.save, output_path)
             
         return format_tool_response("generate_image", payload=output_path, errors="None")
         
     except Exception as e:
         return format_tool_response("generate_image", payload="", errors=f"Error generating image: {e}")
+
         

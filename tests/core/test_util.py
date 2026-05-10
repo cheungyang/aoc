@@ -56,6 +56,9 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<formatting_rules>", prompt)
         self.assertIn("<poll allow_multiple=", prompt)
         self.assertIn("<options>", prompt)
+        self.assertIn("<images>", prompt)
+        self.assertIn("<image path=", prompt)
+
 
     def test_format_tool_response(self):
         from core.util import format_tool_response

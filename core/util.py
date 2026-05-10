@@ -30,7 +30,7 @@ def split_message(text, limit=2000):
 def get_formatting_prompt():
     return """<formatting_rules>
 If you want to present options to the user, use the optional <poll> tag after your response, formatted below.
-Do not include any xml response to the user except the <poll> block.
+Do not include any xml response to the user except the <poll> and <images> blocks.
 <poll allow_multiple="{{true_or_false}}">
     <question>{{question to ask the user}}</question>
     <options>
@@ -42,7 +42,14 @@ Do not include any xml response to the user except the <poll> block.
         {{...additional <option></option> tags for each option...}}
     </options>
 </poll>
+
+If you want to send images to the user, use the <images> tag, formatted below.
+<images>
+    <image path="{{path to the image file}}"/>
+    {{...additional <image path="..."/> tags for each image...}}
+</images>
 </formatting_rules>"""
+
 
 def get_knowledge_prompt():
     now = datetime.datetime.now()
