@@ -136,26 +136,35 @@ class Agent(BaseAgent):
                     view = PollButtonView(poll_data, channel)
             
             files = []
+            missing_files = []
             if image_paths and source == "discord":
                 for path in image_paths:
                     if os.path.exists(path):
                         files.append(discord.File(path))
                     else:
-                        print(f"Image file not found: {path}")
+                        missing_files.append(path)
             
-            for i, chunk in enumerate(chunks):
-                if i > 0:
-                    await asyncio.sleep(1)
-                if i == len(chunks) - 1:
-                    kwargs = {}
-                    if view:
-                        kwargs["view"] = view
-                    if files:
-                        kwargs["files"] = files
-                    await channel.send(chunk, **kwargs)
-                else:
-                    await channel.send(chunk)
+            # If no text content, but we have files or view, create an empty chunk to carry them
+            if not chunks and (files or view):
+                chunks = [""]
 
+            if chunks:
+                for i, chunk in enumerate(chunks):
+                    if i > 0:
+                        await asyncio.sleep(1)
+                    if i == len(chunks) - 1:
+                        kwargs = {}
+                        if view:
+                            kwargs["view"] = view
+                        if files:
+                            kwargs["files"] = files
+                        await channel.send(chunk, **kwargs)
+                    else:
+                        await channel.send(chunk)
+            
+            if missing_files:
+                for path in missing_files:
+                    await channel.send(f"Image file not found: {path}")
 
         # Return reponse regardless of channel
         return text_content
