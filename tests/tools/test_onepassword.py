@@ -86,7 +86,7 @@ class TestOnepasswordTool(unittest.TestCase):
         
         result = onepassword.func(search_term="unknown")
         
-        self.assertIn("Error running op command", result)
+        self.assertIn("Error finding item", result)
 
 if __name__ == '__main__':
     unittest.main()

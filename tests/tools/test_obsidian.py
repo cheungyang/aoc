@@ -109,7 +109,11 @@ class TestObsidianTool(unittest.TestCase):
         mock_file.return_value.read.side_effect = ["no match here", "target content here"]
         
         with patch('os.path.abspath') as mock_abspath:
-            mock_abspath.return_value = "/workspace/pkm"
+            def abspath_side_effect(path):
+                if path.endswith("pkm"):
+                    return "/workspace/pkm"
+                return path
+            mock_abspath.side_effect = abspath_side_effect
             
             instructions = [{"action": "file_search", "path": "", "content_or_search_term": "content"}]
             result = obsidian.func(agent_id="test_agent", vault_id="pkm", instructions=instructions)
