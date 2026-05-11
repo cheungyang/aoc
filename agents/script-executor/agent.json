@@ -10,7 +10,7 @@
       "cron": "0 * * * *",
       "prompt": [
         "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}",
-        "tool git {\"action\": \"pull\", \"path\": \".\", \"agent_id\": \"script-executor\"}"
+        "tool git {\"action\": \"push\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}"
       ]
     }
   ],
