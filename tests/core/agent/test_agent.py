@@ -246,6 +246,40 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.send.assert_called_once_with("", files=[mock_file_instance])
         mock_discord_file.assert_called_once_with("assets/test.png")
 
+    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.agent.agent.current_job_id')
+    @patch('core.agent.job_manager.JobManager')
+    async def test_execute_handles_killed_status(self, mock_job_manager_class, mock_current_job_id, mock_logging_handler_class):
+        # Setup mocks
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
+        mock_graph.get_state.return_value = MagicMock(next=["some_node"])
+        
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        mock_job_manager = MagicMock()
+        mock_job_manager_class.return_value = mock_job_manager
+        mock_job = MagicMock()
+        mock_job.status = "killed"
+        mock_job_manager._jobs = {"test-agent:job:123": mock_job}
+        
+        # We need to mock new_job_id to return a fixed id
+        mock_job_manager.new_job_id.return_value = "test-agent:job:123"
+        
+        # Run
+        await agent.execute("hello", "session1")
+        
+        # Assertions
+        # It should NOT update job to partial because it is killed
+        mock_job_manager.update_job.assert_called_with("test-agent:job:123", "running")
+        
+        # And not called with "partial" or "completed"
+        calls = mock_job_manager.update_job.call_args_list
+        status_updates = [call[0][1] for call in calls]
+        self.assertNotIn("partial", status_updates)
+        self.assertNotIn("completed", status_updates)
+
 if __name__ == "__main__":
     unittest.main()
 

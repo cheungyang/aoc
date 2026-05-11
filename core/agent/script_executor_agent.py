@@ -18,7 +18,7 @@ class ScriptExecutorAgent(BaseAgent):
             job_id = JobManager().new_job_id(self.agent_id)
             
         JobManager().add_job(job_id, self.agent_id, session_id)
-        JobManager().updateJob(job_id, "running")
+        JobManager().update_job(job_id, "running")
 
         lines = content.strip().split('\n')
         results = []
@@ -104,9 +104,9 @@ class ScriptExecutorAgent(BaseAgent):
                 else:
                     results.append(f"Unknown action: {action}")
                     
-            JobManager().updateJob(job_id, "completed")
+            JobManager().update_job(job_id, "completed")
         except Exception as e:
-            JobManager().updateJob(job_id, "error")
+            JobManager().update_job(job_id, "error")
             results.append(f"Unexpected error during execution: {str(e)}")
 
         final_output = "\n".join(results)

@@ -70,10 +70,26 @@ class TestJobManager(unittest.TestCase):
         old_updated = job.updated
         
         time.sleep(0.001) # Ensure timestamp updates
-        self.manager.updateJob("job_test", "completed")
+        self.manager.update_job("job_test", "completed")
         
         self.assertEqual(job.status, "completed")
         self.assertGreater(job.updated, old_updated)
+
+    def test_kill_job(self):
+        self.manager.add_job("job_to_kill", "agent_test", "session_test")
+        self.manager.kill_job("job_to_kill")
+        job = self.manager._jobs["job_to_kill"]
+        self.assertEqual(job.status, "killing")
+
+    def test_current_job_id(self):
+        from core.agent.job_manager import current_job_id
+        self.assertIsNone(current_job_id.get())
+        
+        token = current_job_id.set("test_job")
+        self.assertEqual(current_job_id.get(), "test_job")
+        
+        current_job_id.reset(token)
+        self.assertIsNone(current_job_id.get())
 
 if __name__ == "__main__":
 

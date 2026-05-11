@@ -72,7 +72,7 @@ class ScheduleRunner:
         agent_id = item["agent_id"]
         prompt = item["prompt"]
         channel_name = item["channel"]
-        thread_name = item.get("thread")
+        thread_name = item["thread"]
         
         print(f"Triggering schedule for {agent_id} on channel {channel_name}" + (f" thread {thread_name}" if thread_name else ""))
         

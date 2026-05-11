@@ -6,6 +6,7 @@
   "schedules": [
     {
       "channel": "general-aoc",
+      "thread": "cronjobs",
       "cron": "0 * * * *",
       "prompt": [
         "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}",

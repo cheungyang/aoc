@@ -9,6 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt
+from langgraph.types import interrupt
+from core.agent.job_manager import JobManager, current_job_id
 
 class GraphBuilder:
     def __init__(self):
@@ -49,6 +51,35 @@ class GraphBuilder:
         
         loader = ToolsLoader()
         allowed_tools = loader.get_tools(agent_id=agent_id)
+
+        def make_interruptible(t):
+            original_run = t._run
+            original_arun = t._arun
+            
+            def wrapper(*args, **kwargs):
+                job_id = current_job_id.get()
+                if job_id:
+                    job = JobManager()._jobs.get(job_id)
+                    if job and job.status == "killing":
+                        JobManager().update_job(job_id, "killed")
+                        interrupt("Job was killed")
+                return original_run(*args, **kwargs)
+            
+            async def awrapper(*args, **kwargs):
+                job_id = current_job_id.get()
+                if job_id:
+                    job = JobManager()._jobs.get(job_id)
+                    if job and job.status == "killing":
+                        JobManager().update_job(job_id, "killed")
+                        interrupt("Job was killed")
+                return await original_arun(*args, **kwargs)
+
+            t._run = wrapper
+            if original_arun is not None:
+                t._arun = awrapper
+            return t
+
+        allowed_tools = [make_interruptible(t) for t in allowed_tools]
 
         prompt = self._get_prompt_template(agent_id)
 

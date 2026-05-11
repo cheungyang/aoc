@@ -1,6 +1,7 @@
 from core.util import split_message
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
+from core.agent.job_manager import current_job_id
 import asyncio
 import os
 
@@ -75,32 +76,41 @@ class Agent(BaseAgent):
 
         inputs = {"messages": [{"role": role, "content": content}]}
 
+        token = current_job_id.set(job_id)
         try:
-            JobManager().updateJob(job_id, "running")
-            print(f"Invoking graph for {self.agent_id}")
             try:
-                result = await self.graph.ainvoke(inputs, config=config)
-            except Exception as e:
-                if "tool_calls that do not have a corresponding ToolMessage" in str(e):
-                    from core.memory.flat_file_checkpointer import FlatFileCheckpointer
-                    FlatFileCheckpointer().delete_thread(session_id)
-                    print(f"Deleted corrupt checkpointer thread for session: {session_id}, retrying...")
+                JobManager().update_job(job_id, "running")
+                print(f"Invoking graph for {self.agent_id}")
+                try:
                     result = await self.graph.ainvoke(inputs, config=config)
+                except Exception as e:
+                    if "tool_calls that do not have a corresponding ToolMessage" in str(e):
+                        from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+                        FlatFileCheckpointer().delete_thread(session_id)
+                        print(f"Deleted corrupt checkpointer thread for session: {session_id}, retrying...")
+                        result = await self.graph.ainvoke(inputs, config=config)
+                    else:
+                        raise e
+                
+                # Check if paused for human input
+                state = self.graph.get_state(config)
+                
+                from core.agent.job_manager import JobManager
+                job = JobManager()._jobs.get(job_id)
+                if job and job.status == "killed":
+                    pass
+                elif state.next:
+                    JobManager().update_job(job_id, "partial")
                 else:
-                    raise e
-            
-            # Check if paused for human input
-            state = self.graph.get_state(config)
-            if state.next:
-                JobManager().updateJob(job_id, "partial")
-            else:
-                JobManager().updateJob(job_id, "completed")
-        except Exception as e:
-            JobManager().updateJob(job_id, "error")
-            import traceback
-            traceback.print_exc()
-            print(f"Error invoking graph: {e}")
-            return "Sorry, I encountered an error processing the request."
+                    JobManager().update_job(job_id, "completed")
+            except Exception as e:
+                JobManager().update_job(job_id, "error")
+                import traceback
+                traceback.print_exc()
+                print(f"Error invoking graph: {e}")
+                return "Sorry, I encountered an error processing the request."
+        finally:
+            current_job_id.reset(token)
 
         # Extract the last response message
         reply_message = result["messages"][-1]

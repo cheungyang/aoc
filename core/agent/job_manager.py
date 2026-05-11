@@ -1,6 +1,9 @@
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Any
+import contextvars
+
+current_job_id = contextvars.ContextVar("current_job_id", default=None)
 
 @dataclass
 class Job:
@@ -22,9 +25,14 @@ class JobManager:
             cls._instance._job_ids: List[str] = []
         return cls._instance
 
-    def updateJob(self, job_id: str, status: str):
+    def update_job(self, job_id: str, status: str):
         if job_id in self._jobs:
             self._jobs[job_id].status = status
+            self._jobs[job_id].updated = time.time()
+
+    def kill_job(self, job_id: str):
+        if job_id in self._jobs:
+            self._jobs[job_id].status = "killing"
             self._jobs[job_id].updated = time.time()
 
     def new_job_id(self, agent_id: str) -> str:
