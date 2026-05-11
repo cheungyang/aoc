@@ -53,9 +53,11 @@ class GraphBuilder:
         allowed_tools = loader.get_tools(agent_id=agent_id)
 
         def make_interruptible(t):
+            import functools
             original_run = t._run
             original_arun = t._arun
             
+            @functools.wraps(original_run)
             def wrapper(*args, **kwargs):
                 job_id = current_job_id.get()
                 if job_id:
@@ -65,18 +67,20 @@ class GraphBuilder:
                         interrupt("Job was killed")
                 return original_run(*args, **kwargs)
             
-            async def awrapper(*args, **kwargs):
-                job_id = current_job_id.get()
-                if job_id:
-                    job = JobManager()._jobs.get(job_id)
-                    if job and job.status == "killing":
-                        JobManager().update_job(job_id, "killed")
-                        interrupt("Job was killed")
-                return await original_arun(*args, **kwargs)
-
             t._run = wrapper
+            
             if original_arun is not None:
+                @functools.wraps(original_arun)
+                async def awrapper(*args, **kwargs):
+                    job_id = current_job_id.get()
+                    if job_id:
+                        job = JobManager()._jobs.get(job_id)
+                        if job and job.status == "killing":
+                            JobManager().update_job(job_id, "killed")
+                            interrupt("Job was killed")
+                    return await original_arun(*args, **kwargs)
                 t._arun = awrapper
+                
             return t
 
         allowed_tools = [make_interruptible(t) for t in allowed_tools]
