@@ -1,0 +1,12 @@
+{
+  "agent_id": "software-coder",
+  "name": "Scott",
+  "emoji": "💻",
+  "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
+  "tools": {},
+  "skills": [
+    "tdd_execution",
+    "memory",
+    "dream"
+  ]
+}

@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "8b2410962ef3cc62",
+    "type": "split",
+    "children": [
+      {
+        "id": "ef549065c2e9229d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "fda80f52588d2a99",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "pkm/wiki/projects/Real Estate Private Office Plan.md",
+                "mode": "preview",
+                "source": true
+              },
+              "icon": "lucide-file",
+              "title": "Real Estate Private Office Plan"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "fd78a64fae685f03",
+    "type": "split",
+    "children": [
+      {
+        "id": "65f1f34b46b4ea6e",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "2df5b634af7f2b47",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "1af5bb47ddef54ec",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "6442d1349cf8b38d",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "c99d9b3531390b8d",
+    "type": "split",
+    "children": [
+      {
+        "id": "e327cf65b389bff9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7b9ee0947a11d7c9",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "pkm/wiki/projects/Real Estate Private Office Plan.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Real Estate Private Office Plan"
+            }
+          },
+          {
+            "id": "c0432184557ef430",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "pkm/wiki/projects/Real Estate Private Office Plan.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Real Estate Private Office Plan"
+            }
+          },
+          {
+            "id": "87cbb26b925ba69c",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "50c5d21f0fd7b43e",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "784f4471ceda7c7b",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "pkm/wiki/projects/Real Estate Private Office Plan.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Real Estate Private Office Plan"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "fda80f52588d2a99",
+  "lastOpenFiles": [
+    "tools/__pycache__/bash.cpython-313.pyc",
+    "tests/tools/__pycache__/test_bash.cpython-313-pytest-9.0.2.pyc",
+    "tests/tools/test_bash.py",
+    "tools/bash.py",
+    "tests/tools/__pycache__/test_gh.cpython-313-pytest-9.0.2.pyc",
+    "tools/__pycache__/gh.cpython-313.pyc",
+    "tests/tools/__pycache__/test_gh.cpython-313-pytest-8.3.5.pyc",
+    "tests/tools/test_gh.py",
+    "tools/gh.py",
+    "pkm/agents/software-coder/MEMORY.md",
+    "pkm/agents/software-coder/FEEDBACK.md",
+    "pkm/agents/software-coder/CONTEXT.md",
+    "pkm/agents/software-coder",
+    "agents/software-coder/agent.json",
+    "agents/software-coder/USER.md",
+    "agents/software-coder/SOUL.md",
+    "agents/software-coder/IDENTITY.md",
+    "agents/software-coder/AGENTS.md",
+    "skills/tdd_execution/SKILL.md",
+    "pkm/wiki/logs/topic-researcher/2026-05-20.md",
+    "pkm/agents/main/memory_archive/2026-05-processed-logs.md",
+    "pkm/agents/main/memory_archive/CONTEXT_2026-05-20_bak.md",
+    "pkm/agents/main/memory_archive/FEEDBACK_2026-05-20_bak.md",
+    "pkm/agents/main/memory_archive/MEMORY_2026-05-20_bak.md",
+    "pkm/agents/agent-designer/memory_logs/2026-05-20.md",
+    "pkm/agents/agent-designer/memory_archive/2026-05-20.md",
+    "pkm/agents/agent-designer/memory_archive/2026-05-11.md",
+    "pkm/agents/agent-designer/memory_archive/CONTEXT_2026-05-20_bak.md",
+    "pkm/agents/agent-designer/memory_archive/FEEDBACK_2026-05-20_bak.md",
+    "pkm/agents/agent-designer/memory_archive/MEMORY_2026-05-20_bak.md",
+    "pkm/agents/goal-setter/memory_logs/2026-05-20.md",
+    "pkm/agents/goal-setter/memory_archive/2026-05-11.md",
+    "pkm/agents/goal-setter/memory_archive/CONTEXT_2026-05-20_bak.md",
+    "pkm/agents/goal-setter/memory_archive/FEEDBACK_2026-05-20_bak.md",
+    "pkm/agents/goal-setter/memory_archive/MEMORY_2026-05-20_bak.md",
+    "pkm/agents/day-planner/memory_logs/2026-05-20.md"
+  ]
+}

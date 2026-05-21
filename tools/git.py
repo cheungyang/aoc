@@ -8,12 +8,14 @@ from core.util import format_tool_response
 @tool
 def git(action: str, path: str, agent_id: str, message: str = "") -> str:
     """
-    Perform git operations (pull, push, log-p, add) with scoped permissions.
+    Perform git operations (pull, push, log-p, add, clone, branch) with scoped permissions.
     - pull: git pull -X theirs (merges and prefers remote on conflict)
     - push: git pull -X theirs, git commit -am '<message>', git push
     - log-p: git log -p <filename>
     - add: git add <filename> or directory
-    Permissions are checked against the agent's allowlist in agent.json.
+    - clone: git clone <url> <path> (takes URL in message)
+    - branch: create, delete, or switch branches (takes 'create <name>', 'delete <name>', or 'switch <name>' in message)
+    Permissions are checked against the agent's allowlist in agent.json or skill.json.
     """
     if not agent_id:
         return format_tool_response("git", payload="", errors="Error: agent_id is required to verify permissions.")
@@ -76,6 +78,35 @@ def git(action: str, path: str, agent_id: str, message: str = "") -> str:
             else:
                 output, code = run_git_cmd(["add", "."], path)
             return format_tool_response("git", payload=f"Add result:\n{output}", errors="None")
+            
+        elif action == "clone":
+            if not message:
+                return format_tool_response("git", payload="", errors="Error: message (URL) is required for clone action.")
+            
+            workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            output, code = run_git_cmd(["clone", message, path], workspace_root)
+            return format_tool_response("git", payload=f"Clone result:\n{output}", errors="None" if code == 0 else f"Error code {code}")
+            
+        elif action == "branch":
+            if not message:
+                return format_tool_response("git", payload="", errors="Error: message is required for branch action (specify 'create <name>', 'delete <name>', or 'switch <name>').")
+            
+            parts = message.split()
+            if len(parts) != 2:
+                return format_tool_response("git", payload="", errors="Error: message must be in format 'create <name>', 'delete <name>', or 'switch <name>'.")
+            
+            sub_action, branch_name = parts[0], parts[1]
+            
+            if sub_action == "create":
+                output, code = run_git_cmd(["checkout", "-b", branch_name], path)
+            elif sub_action == "delete":
+                output, code = run_git_cmd(["branch", "-D", branch_name], path)
+            elif sub_action == "switch":
+                output, code = run_git_cmd(["checkout", branch_name], path)
+            else:
+                return format_tool_response("git", payload="", errors=f"Error: Unknown branch sub-action '{sub_action}'")
+                
+            return format_tool_response("git", payload=f"Branch {sub_action} result:\n{output}", errors="None" if code == 0 else f"Error code {code}")
             
         else:
             return format_tool_response("git", payload="", errors=f"Error: Unknown action '{action}'")

@@ -1,0 +1,43 @@
+{
+  "skill_id": "tdd_execution",
+  "name": "TDD Execution",
+  "description": "Orchestrates Test-Driven Development (TDD) workflow, branching logic, and a strict 3-attempt failure guardrail within an agent-scoped workspace.",
+  "emoji": "🧪",
+  "tools": {
+    "git": {
+      "pkm/agents/<agent_id>/workspace": [
+        "clone",
+        "branch",
+        "pull",
+        "push",
+        "add"
+      ]
+    },
+    "gh": {
+      "agent-task": [
+        "create",
+        "view"
+      ]
+    },
+    "bash": {
+      "pkm/agents/<agent_id>/workspace": [
+        "python"
+      ]
+    },
+    "obsidian": {
+      "pkm/wiki/software": [
+        "read"
+      ]
+    },
+    "filesystem": {
+      "pkm/agents/<agent_id>/workspace": [
+        "read",
+        "write",
+        "overwrite",
+        "delete",
+        "ls",
+        "rmdir"
+      ]
+    }
+  }
+}

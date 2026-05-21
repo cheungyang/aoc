@@ -1,0 +1,19 @@
+{
+  "agent_id": "software-planner",
+  "name": "Sophie",
+  "emoji": "📐",
+  "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
+  "tools": {
+    "pkm/wiki": [
+      "read",
+      "file_search",
+      "write",
+      "overwrite",
+      "append"
+    ]
+  },
+  "skills": [
+    "memory",
+    "dream"
+  ]
+}

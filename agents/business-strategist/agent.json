@@ -1,0 +1,27 @@
+{
+  "agent_id": "business-strategist",
+  "name": "Ben",
+  "emoji": "💼",
+  "description": "Business Strategist and Consultant. Translates abstract visions into pitch-ready business and operational plans.",
+  "tools": {
+    "web_search": {},
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "file_search",
+        "write",
+        "overwrite",
+        "append"
+      ],
+      "pkm/vault/projects": [
+        "read",
+        "file_search"
+      ]
+    }
+  },
+  "skills": [
+    "research",
+    "memory",
+    "dream"
+  ]
+}

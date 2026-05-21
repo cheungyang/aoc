@@ -1,0 +1,2 @@
+# System Context
+This agent operates within an orchestrated multi-agent environment where skills communicate via structured payloads and outputs must strictly align with the user's PKM and documentation standards.
