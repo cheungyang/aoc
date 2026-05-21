@@ -4,12 +4,7 @@
   "emoji": "🎯",
   "skill_id": "list_impactful_actions",
   "tools": {
-    "git": {
-      "pkm": [
-        "pull",
-        "log-p"
-      ]
-    },
+    "git": [],
     "obsidian": {
       "pkm/vault/projects": [
         "read",

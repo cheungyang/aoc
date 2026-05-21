@@ -11,161 +11,48 @@ from tools.git import git
 class TestGitTool(unittest.TestCase):
 
     @patch('tools.git.subprocess.run')
-    def test_missing_agent_id(self, mock_run):
-        result = git.func(action="log-p", path=".", agent_id="")
-        self.assertIn("Error: agent_id is required", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    def test_permission_denied(self, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = False
-        
-        result = git.func(action="log-p", path="/workspace/secret", agent_id="test_agent")
-        self.assertIn("Error: Agent test_agent does not have permission", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    @patch('tools.git.subprocess.run')
-    def test_git_log_p_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
+    def test_git_command_execution(self, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = "log output"
+        mock_result.stdout = "output"
         mock_result.stderr = ""
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
-        result = git.func(action="log-p", path="/workspace/allowed_folder", agent_id="test_agent")
+        result = git.func(command="status", path="/path/to/repo")
         
         self.assertTrue(mock_run.called)
         called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "log", "-p"])
-        self.assertIn("Log result:\nlog output", result)
+        called_cwd = mock_run.call_args[1]['cwd']
+        self.assertEqual(called_cmd, ["git", "status"])
+        self.assertEqual(called_cwd, "/path/to/repo")
+        self.assertIn("output", result)
 
-    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('tools.git.subprocess.run')
-    def test_git_pull_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
+    def test_git_command_with_quotes(self, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = "pull output"
+        mock_result.stdout = "committed"
         mock_result.stderr = ""
         mock_result.returncode = 0
         mock_run.return_value = mock_result
         
-        result = git.func(action="pull", path="/workspace/allowed_folder", agent_id="test_agent")
+        result = git.func(command='commit -m "My Message"', path="/path/to/repo")
         
         self.assertTrue(mock_run.called)
         called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "pull", "-X", "theirs"])
-        self.assertIn("Pull result:\npull output", result)
+        self.assertEqual(called_cmd, ["git", "commit", "-m", "My Message"])
 
-    @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('tools.git.subprocess.run')
-    def test_git_push_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
+    def test_git_command_failure_captured(self, mock_run):
         mock_result = MagicMock()
-        mock_result.stdout = "success"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = "error message"
+        mock_result.returncode = 1
         mock_run.return_value = mock_result
         
-        result = git.func(action="push", path="/workspace/allowed_folder", agent_id="test_agent", message="feat: test")
+        result = git.func(command="status", path="/path/to/repo")
         
-        self.assertEqual(mock_run.call_count, 3)
-        calls = mock_run.call_args_list
-        self.assertEqual(calls[0][0][0], ["git", "pull", "-X", "theirs"])
-        self.assertEqual(calls[1][0][0], ["git", "commit", "-am", "feat: test"])
-        self.assertEqual(calls[2][0][0], ["git", "push", "origin", "main"])
-        self.assertIn("Push process result:", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    @patch('tools.git.subprocess.run')
-    def test_git_clone_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
-        mock_result = MagicMock()
-        mock_result.stdout = "clone success"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-        
-        result = git.func(action="clone", path="pkm/agents/test_agent/workspace/repo", agent_id="test_agent", message="https://github.com/user/repo.git")
-        
-        self.assertTrue(mock_run.called)
-        called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "clone", "https://github.com/user/repo.git", "pkm/agents/test_agent/workspace/repo"])
-        self.assertIn("Clone result:\nclone success", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    @patch('tools.git.subprocess.run')
-    def test_git_branch_create_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
-        mock_result = MagicMock()
-        mock_result.stdout = "switched to a new branch"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-        
-        result = git.func(action="branch", path="/workspace/repo", agent_id="test_agent", message="create feat/test")
-        
-        self.assertTrue(mock_run.called)
-        called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "checkout", "-b", "feat/test"])
-        self.assertIn("Branch create result:", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    @patch('tools.git.subprocess.run')
-    def test_git_branch_delete_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
-        mock_result = MagicMock()
-        mock_result.stdout = "deleted branch"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-        
-        result = git.func(action="branch", path="/workspace/repo", agent_id="test_agent", message="delete feat/test")
-        
-        self.assertTrue(mock_run.called)
-        called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "branch", "-D", "feat/test"])
-        self.assertIn("Branch delete result:", result)
-
-    @patch('core.loaders.tools_loader.ToolsLoader')
-    @patch('tools.git.subprocess.run')
-    def test_git_branch_switch_success(self, mock_run, mock_tools_loader):
-        mock_loader = MagicMock()
-        mock_tools_loader.return_value = mock_loader
-        mock_loader.check_permission.return_value = True
-        
-        mock_result = MagicMock()
-        mock_result.stdout = "switched to branch"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-        
-        result = git.func(action="branch", path="/workspace/repo", agent_id="test_agent", message="switch main")
-        
-        self.assertTrue(mock_run.called)
-        called_cmd = mock_run.call_args[0][0]
-        self.assertEqual(called_cmd, ["git", "checkout", "main"])
-        self.assertIn("Branch switch result:", result)
-
+        self.assertIn("error message", result)
 
 if __name__ == '__main__':
     unittest.main()
+

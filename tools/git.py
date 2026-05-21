@@ -2,114 +2,47 @@ import os
 import subprocess
 import shlex
 from langchain_core.tools import tool
-from core.loaders.agents_loader import AgentsLoader
 from core.util import format_tool_response
 
 @tool
-def git(action: str, path: str, agent_id: str, message: str = "") -> str:
+def git(command: str, path: str) -> str:
     """
-    Perform git operations (pull, push, log-p, add, clone, branch) with scoped permissions.
-    - pull: git pull -X theirs (merges and prefers remote on conflict)
-    - push: git pull -X theirs, git commit -am '<message>', git push
-    - log-p: git log -p <filename>
-    - add: git add <filename> or directory
-    - clone: git clone <url> <path> (takes URL in message)
-    - branch: create, delete, or switch branches (takes 'create <name>', 'delete <name>', or 'switch <name>' in message)
-    Permissions are checked against the agent's allowlist in agent.json or skill.json.
+    Execute a Git command in the specified path.
+    
+    Focus areas and examples:
+    - Clone: clone <url>
+    - Pull: pull origin <branch>
+    - Add: add <file> or add .
+    - Commit: commit -m "message"
+    - Push: push origin <branch>
+    - Branch: branch or checkout -b <name> or checkout <name>
+    - Log: log --oneline or log -p <file>
+    - Status: status
+    
+    The command argument should be the rest of the command after 'git'.
+    Example: git(command="status", path="/path/to/repo")
     """
-    if not agent_id:
-        return format_tool_response("git", payload="", errors="Error: agent_id is required to verify permissions.")
-
-    from core.loaders.tools_loader import ToolsLoader
-    tools_loader = ToolsLoader()
-
-    # Centralized validation for scoped tool
-    if not tools_loader.check_permission(agent_id, "git", action, path):
-        return format_tool_response("git", payload="", errors=f"Error: Agent {agent_id} does not have permission to perform '{action}' on path {path}")
-
     try:
-        def run_git_cmd(cmd_args, cwd):
-            cmd = ["git"] + cmd_args
-            print(f"DEBUG: Running git cmd: {cmd} in {cwd}")
-            print(f"DEBUG: SSH_AUTH_SOCK={os.environ.get('SSH_AUTH_SOCK')}")
-            result = subprocess.run(
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            output = []
-            if result.stdout:
-                output.append(result.stdout)
-            if result.stderr:
-                output.append(result.stderr)
-            return "\n".join(output), result.returncode
+        # Split command safely
+        args = shlex.split(command)
+        cmd = ["git"] + args
 
-        if action == "pull":
-            output, code = run_git_cmd(["pull", "-X", "theirs"], path)
-            return format_tool_response("git", payload=f"Pull result:\n{output}", errors="None")
-            
-        elif action == "push":
-            if not message:
-                return format_tool_response("git", payload="", errors="Error: message is required for push action (for commit).")
-            
-            # 1. git pull -X theirs
-            pull_output, pull_code = run_git_cmd(["pull", "-X", "theirs"], path)
-            
-            # 2. git commit -am '<message>'
-            commit_output, commit_code = run_git_cmd(["commit", "-am", message], path)
-            
-            # 3. git push
-            push_output, push_code = run_git_cmd(["push", "origin", "main"], path)
-            
-            return format_tool_response("git", payload=f"Push process result:\nPull:\n{pull_output}\nCommit:\n{commit_output}\nPush:\n{push_output}", errors="None")
-            
-        elif action == "log-p":
-            if os.path.isfile(path):
-                output, code = run_git_cmd(["log", "-p", os.path.basename(path)], os.path.dirname(path))
-            else:
-                output, code = run_git_cmd(["log", "-p"], path)
-            return format_tool_response("git", payload=f"Log result:\n{output}", errors="None")
-            
-        elif action == "add":
-            if os.path.isfile(path):
-                output, code = run_git_cmd(["add", os.path.basename(path)], os.path.dirname(path))
-            else:
-                output, code = run_git_cmd(["add", "."], path)
-            return format_tool_response("git", payload=f"Add result:\n{output}", errors="None")
-            
-        elif action == "clone":
-            if not message:
-                return format_tool_response("git", payload="", errors="Error: message (URL) is required for clone action.")
-            
-            workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            output, code = run_git_cmd(["clone", message, path], workspace_root)
-            return format_tool_response("git", payload=f"Clone result:\n{output}", errors="None" if code == 0 else f"Error code {code}")
-            
-        elif action == "branch":
-            if not message:
-                return format_tool_response("git", payload="", errors="Error: message is required for branch action (specify 'create <name>', 'delete <name>', or 'switch <name>').")
-            
-            parts = message.split()
-            if len(parts) != 2:
-                return format_tool_response("git", payload="", errors="Error: message must be in format 'create <name>', 'delete <name>', or 'switch <name>'.")
-            
-            sub_action, branch_name = parts[0], parts[1]
-            
-            if sub_action == "create":
-                output, code = run_git_cmd(["checkout", "-b", branch_name], path)
-            elif sub_action == "delete":
-                output, code = run_git_cmd(["branch", "-D", branch_name], path)
-            elif sub_action == "switch":
-                output, code = run_git_cmd(["checkout", branch_name], path)
-            else:
-                return format_tool_response("git", payload="", errors=f"Error: Unknown branch sub-action '{sub_action}'")
-                
-            return format_tool_response("git", payload=f"Branch {sub_action} result:\n{output}", errors="None" if code == 0 else f"Error code {code}")
-            
-        else:
-            return format_tool_response("git", payload="", errors=f"Error: Unknown action '{action}'")
-            
+        result = subprocess.run(
+            cmd,
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+
+        output = []
+        if result.stdout:
+            output.append(result.stdout)
+        if result.stderr:
+            output.append(result.stderr)
+
+        return format_tool_response("git", payload="\n".join(output), errors="None")
+
     except Exception as e:
         return format_tool_response("git", payload="", errors=f"Error performing git action: {e}")
+

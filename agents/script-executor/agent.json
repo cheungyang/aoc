@@ -9,21 +9,14 @@
       "thread": "cronjobs",
       "cron": "0 * * * *",
       "prompt": [
-        "tool git {\"action\": \"pull\", \"path\": \"pkm\", \"agent_id\": \"script-executor\"}",
-        "tool git {\"action\": \"push\", \"path\": \"pkm\", \"agent_id\": \"script-executor\", \"message\": \"Cron update\"}"
+        "tool git {\"command\": \"pull\", \"path\": \"pkm\"}",
+        "tool git {\"command\": \"commit -am 'cron update'\", \"path\": \"pkm\"}",
+        "tool git {\"command\": \"push\", \"path\": \"pkm\"}",
+        "script software-orchestrator.py"
       ]
     }
   ],
   "tools": {
-    "git": {
-      "pkm": [
-        "pull",
-        "push"
-      ],
-      ".": [
-        "pull",
-        "push"
-      ]
-    }
+    "git": []
   }
 }

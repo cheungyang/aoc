@@ -4,13 +4,7 @@
   "description": "Skill for generating the user's daily journal and logging the agreed-upon daily intentions and recommendations.",
   "emoji": "📝",
   "tools": {
-    "git": {
-      "pkm": [
-        "pull",
-        "push",
-        "add"
-      ]
-    },
+    "git": [],
     "obsidian": {
       "pkm/vault/journals": [
         "read",

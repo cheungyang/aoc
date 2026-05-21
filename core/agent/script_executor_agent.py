@@ -87,20 +87,22 @@ class ScriptExecutorAgent(BaseAgent):
                     except Exception as e:
                         results.append(f"Error executing tool {tool_name}: {str(e)}")
                         
-                elif action == "exec":
+                elif action == "script":
                     if not rest:
-                        results.append("Error: exec action requires a command.")
+                        results.append("Error: script action requires a script name.")
                         continue
                     try:
                         import shlex
                         args = shlex.split(rest)
+                        if args:
+                            args[0] = os.path.join("scripts", args[0])
                         expanded_args = [os.path.expanduser(arg) for arg in args]
                         res = subprocess.run(expanded_args, capture_output=True, text=True, check=True)
-                        results.append(f"Command '{rest}' executed successfully:\n{res.stdout}")
+                        results.append(f"Script '{rest}' executed successfully:\n{res.stdout}")
                     except subprocess.CalledProcessError as e:
-                        results.append(f"Error executing command '{rest}': {e.stderr}")
+                        results.append(f"Error executing script '{rest}': {e.stderr}")
                     except Exception as e:
-                        results.append(f"Error running command '{rest}': {str(e)}")
+                        results.append(f"Error running script '{rest}': {str(e)}")
                 else:
                     results.append(f"Unknown action: {action}")
                     

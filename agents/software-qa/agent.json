@@ -1,0 +1,12 @@
+{
+  "agent_id": "software-qa",
+  "name": "Sona",
+  "emoji": "🛡️",
+  "description": "The Objective Gatekeeper. Enforces quality, tests PRs against specs, and checks for anti-patterns.",
+  "tools": {},
+  "skills": [
+    "qa_evaluation",
+    "memory",
+    "dream"
+  ]
+}

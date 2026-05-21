@@ -23,15 +23,15 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         loader._discover_tools = self.mock_discover
 
     @patch('subprocess.run')
-    async def test_execute_exec_success(self, mock_run):
+    async def test_execute_script_success(self, mock_run):
         mock_run.return_value = MagicMock(stdout="command output", stderr="", returncode=0)
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("exec echo hello", "test_source")
+        output = await agent.execute("script echo hello", "test_source")
         
-        self.assertIn("Command 'echo hello' executed successfully", output)
+        self.assertIn("Script 'echo hello' executed successfully", output)
         self.assertIn("command output", output)
-        mock_run.assert_called_once_with(['echo', 'hello'], capture_output=True, text=True, check=True)
+        mock_run.assert_called_once_with(['scripts/echo', 'hello'], capture_output=True, text=True, check=True)
 
     @patch('importlib.import_module')
     async def test_execute_tool_success(self, mock_import):
@@ -67,15 +67,16 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("direct result val1", output)
 
     @patch('subprocess.run')
-    async def test_execute_exec_with_tilde(self, mock_run):
+    async def test_execute_script_with_tilde(self, mock_run):
         mock_run.return_value = MagicMock(stdout="ls output", stderr="", returncode=0)
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("exec ls -la ~", "test_source")
+        output = await agent.execute("script ls -la ~", "test_source")
         
-        self.assertIn("Command 'ls -la ~' executed successfully", output)
+        self.assertIn("Script 'ls -la ~' executed successfully", output)
         mock_run.assert_called_once()
         called_args = mock_run.call_args[0][0]
+        self.assertEqual(called_args[0], 'scripts/ls')
         self.assertEqual(called_args[2], os.path.expanduser('~'))
 
     async def test_agents_loader_get_agent(self):
