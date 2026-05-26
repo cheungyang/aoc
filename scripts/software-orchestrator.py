@@ -4,6 +4,11 @@ import datetime
 import ast
 import re
 import sys
+import asyncio
+from tools.gh import gh
+from tools.job_list import job_list
+from tools.job_kill import job_kill
+from tools.agent_call import agent_call
 
 MAX_JOB_DURATION_SECONDS = 7200
 MAX_CONCURRENT_JOBS = 1
@@ -18,10 +23,7 @@ def run_command(cmd):
     return result.stdout
 
 def run_gh_tool(command):
-    # Escape single quotes in command for python string
-    escaped_command = command.replace("'", "\\'")
-    cmd = f".venv/bin/python3 -c \"from tools.gh import gh; print(gh.invoke({{'command': '{escaped_command}'}}))\""
-    output = run_command(cmd)
+    output = gh.invoke({"command": command})
     if not output:
         return None
     match = re.search(r"<payload>(.*?)</payload>", output, re.DOTALL)
@@ -31,8 +33,7 @@ def run_gh_tool(command):
     return match.group(1).strip()
 
 def run_job_list_tool():
-    cmd = ".venv/bin/python3 -c \"from tools.job_list import job_list; print(job_list.invoke({}))\""
-    output = run_command(cmd)
+    output = job_list.invoke({})
     if not output:
         return None
     match = re.search(r"<payload>(.*?)</payload>", output, re.DOTALL)
@@ -42,8 +43,7 @@ def run_job_list_tool():
     return match.group(1).strip()
 
 def run_job_kill_tool(job_id):
-    cmd = f".venv/bin/python3 -c \"from tools.job_kill import job_kill; print(job_kill.invoke({{'job_id': '{job_id}'}}))\""
-    output = run_command(cmd)
+    output = job_kill.invoke({"job_id": job_id})
     if not output:
         return None
     match = re.search(r"<payload>(.*?)</payload>", output, re.DOTALL)
@@ -53,10 +53,7 @@ def run_job_kill_tool(job_id):
     return match.group(1).strip()
 
 def run_agent_call_tool(agent_id, prompt, run_async=False):
-    # Escape single quotes in prompt for python string
-    escaped_prompt = prompt.replace("'", "\\'")
-    cmd = f".venv/bin/python3 -c \"import asyncio; from tools.agent_call import agent_call; print(asyncio.run(agent_call.ainvoke({{'agent_id': '{agent_id}', 'prompt': '{escaped_prompt}', 'run_async': {run_async}}})))\""
-    output = run_command(cmd)
+    output = asyncio.run(agent_call.ainvoke({"agent_id": agent_id, "prompt": prompt, "run_async": run_async}))
     if not output:
         return None
     match = re.search(r"<payload>(.*?)</payload>", output, re.DOTALL)

@@ -2,8 +2,13 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Any
 import contextvars
+import os
+import json
 
 current_job_id = contextvars.ContextVar("current_job_id", default=None)
+
+SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
+JOBS_FILE = os.path.join(SESSIONS_DIR, "jobs.json")
 
 @dataclass
 class Job:
@@ -23,17 +28,48 @@ class JobManager:
             cls._instance = super(JobManager, cls).__new__(cls)
             cls._instance._jobs: Dict[str, Job] = {}
             cls._instance._job_ids: List[str] = []
+            cls._instance._load_jobs()
         return cls._instance
+
+    def _load_jobs(self):
+        if os.path.exists(JOBS_FILE):
+            try:
+                with open(JOBS_FILE, "r") as f:
+                    data = json.load(f)
+                    for jid, job_data in data.items():
+                        self._jobs[jid] = Job(**job_data)
+                        if jid not in self._job_ids:
+                            self._job_ids.append(jid)
+            except Exception as e:
+                print(f"Error loading jobs: {e}")
+
+    def _save_jobs(self):
+        try:
+            os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
+            data = {jid: {
+                "job_id": j.job_id,
+                "agent_id": j.agent_id,
+                "session_id": j.session_id,
+                "started": j.started,
+                "updated": j.updated,
+                "status": j.status
+            } for jid, j in self._jobs.items()}
+            with open(JOBS_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"Error saving jobs: {e}")
 
     def update_job(self, job_id: str, status: str):
         if job_id in self._jobs:
             self._jobs[job_id].status = status
             self._jobs[job_id].updated = time.time()
+            self._save_jobs()
 
     def kill_job(self, job_id: str):
         if job_id in self._jobs:
             self._jobs[job_id].status = "killing"
             self._jobs[job_id].updated = time.time()
+            self._save_jobs()
 
     def new_job_id(self, agent_id: str) -> str:
         import uuid
@@ -55,6 +91,7 @@ class JobManager:
                 self._job_ids.remove(jid)
             if jid in self._jobs:
                 del self._jobs[jid]
+        self._save_jobs()
 
     def add_job(self, job_id: str, agent_id: str, session_id: str):
         if len(self._job_ids) > 50:
@@ -67,6 +104,7 @@ class JobManager:
             updated=time.time(),
             status="queued"
         )
+        self._save_jobs()
 
     def get_jobs(self, allowlist: List[str] = ["queued", "running", "error", "partial"]) -> List[Job]:
         filtered_jobs = []

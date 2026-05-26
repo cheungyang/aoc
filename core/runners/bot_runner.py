@@ -116,9 +116,26 @@ class BotRunner:
 
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")
-            await message.channel.send("Sorry, I encountered an error processing the request.")
+            if not self.bot.is_closed():
+                try:
+                    await message.channel.send("Sorry, I encountered an error processing the request.")
+                except Exception as se:
+                    print(f"Error sending failure message: {se}")
 
     async def run_bot(self):
         print(f"Starting Discord bot for agent {self.agent_id}...")
-        async with self.bot:
-            await self.bot.start(self.discord_token)
+        delay = 5
+        while not self.bot.is_closed():
+            try:
+                async with self.bot:
+                    await self.bot.start(self.discord_token)
+            except Exception as e:
+                print(f"Discord bot for agent {self.agent_id} stopped with error: {e}")
+            
+            if self.bot.is_closed():
+                print(f"Discord bot for agent {self.agent_id} closed.")
+                break
+                
+            print(f"Discord bot for agent {self.agent_id} disconnected. Reconnecting in {delay} seconds...")
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)

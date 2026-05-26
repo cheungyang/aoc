@@ -29,37 +29,37 @@ class TestSoftwareOrchestrator(unittest.TestCase):
         
         self.assertEqual(result, "output")
 
-    @patch.object(so, 'run_command')
-    def test_run_gh_tool_success(self, mock_run_cmd):
-        mock_run_cmd.return_value = "<payload>my data</payload>"
+    @patch.object(so, 'gh')
+    def test_run_gh_tool_success(self, mock_gh):
+        mock_gh.invoke.return_value = "<payload>my data</payload>"
         
         result = so.run_gh_tool("issue list")
         
         self.assertEqual(result, "my data")
 
-    @patch.object(so, 'run_command')
-    def test_run_gh_tool_no_payload(self, mock_run_cmd):
-        mock_run_cmd.return_value = "no payload here"
+    @patch.object(so, 'gh')
+    def test_run_gh_tool_no_payload(self, mock_gh):
+        mock_gh.invoke.return_value = "no payload here"
         
         result = so.run_gh_tool("issue list")
         
         self.assertIsNone(result)
 
     @patch.object(so, 'run_job_list_tool')
-    @patch.object(so, 'run_command')
+    @patch.object(so, 'run_job_kill_tool')
     @patch.object(so, 'run_gh_tool')
-    def test_zombie_hunter(self, mock_gh, mock_run_cmd, mock_job_list):
+    def test_zombie_hunter(self, mock_gh, mock_job_kill, mock_job_list):
         three_hours_ago = datetime.datetime.now() - datetime.timedelta(hours=3)
         started_str = three_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
         
         mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}'}}]"
         mock_gh.return_value = "[{\"number\": 1}]"
-        mock_run_cmd.return_value = "<payload>success</payload>"
+        mock_job_kill.return_value = "success"
         
         so.zombie_hunter()
         
-        # Verify job_kill was called (via run_command)
-        self.assertTrue(mock_run_cmd.called)
+        # Verify job_kill was called
+        self.assertTrue(mock_job_kill.called)
         # Verify gh calls were made
         self.assertTrue(mock_gh.called)
 

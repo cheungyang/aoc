@@ -13,7 +13,19 @@ class TestJobManager(unittest.TestCase):
     def setUp(self):
         # Reset singleton instance for isolated tests
         JobManager._instance = None
+        
+        import tempfile
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_jobs_file = os.path.join(self.temp_dir.name, "jobs.json")
+        
+        self.patcher = patch("core.agent.job_manager.JOBS_FILE", self.temp_jobs_file)
+        self.patcher.start()
+        
         self.manager = JobManager()
+
+    def tearDown(self):
+        self.patcher.stop()
+        self.temp_dir.cleanup()
 
     def test_singleton(self):
         manager2 = JobManager()

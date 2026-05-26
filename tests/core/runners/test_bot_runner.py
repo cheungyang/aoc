@@ -131,6 +131,14 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Bot mock
         mock_bot = MagicMock()
         mock_bot.start = AsyncMock()
+        
+        # Mock is_closed to control the loop
+        mock_bot.is_closed.side_effect = [False, True]
+        
+        # Mock async context manager
+        mock_bot.__aenter__ = AsyncMock(return_value=mock_bot)
+        mock_bot.__aexit__ = AsyncMock(return_value=None)
+        
         mock_bot_class.return_value = mock_bot
         
         runner = BotRunner("test_token", "main")
@@ -139,7 +147,6 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.run_bot()
         
         # Assertions
-
         mock_bot.start.assert_called_once_with("test_token")
 
     @patch('core.runners.bot_runner.AgentsLoader')
