@@ -7,6 +7,7 @@
     "obsidian": {
       "pkm/wiki": [
         "read",
+<<<<<<< HEAD
         "file_search",
         "write",
         "overwrite",
@@ -14,6 +15,16 @@
       ]
     },
     "gh": []
+=======
+        "read_image",
+        "file_search",
+        "write",
+        "overwrite",
+        "append",
+        "delete"
+      ]
+    }
+>>>>>>> 6b8ec8a8fdc97b58e4988c56fc1189e01e2567c3
   },
   "skills": [
     "memory",
