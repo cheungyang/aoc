@@ -24,6 +24,7 @@
     "agent_call": {},
     "agent_list": {},
     "job_list": {},
-    "job_kill": {}
+    "job_kill": {},
+    "job_status": {}
   }
 }
