@@ -21,6 +21,7 @@
     "wiki_lint"
   ],
   "tools": {
-    "generate_image": []
+    "generate_image": [],
+    "bash": []
   }
 }
