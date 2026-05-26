@@ -4,13 +4,16 @@
   "emoji": "📐",
   "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
   "tools": {
-    "pkm/wiki": [
-      "read",
-      "file_search",
-      "write",
-      "overwrite",
-      "append"
-    ]
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "file_search",
+        "write",
+        "overwrite",
+        "append"
+      ]
+    },
+    "gh": []
   },
   "skills": [
     "memory",

@@ -21,12 +21,6 @@
     "wiki_lint"
   ],
   "tools": {
-    "generate_image": {},
-    "obsidian": {
-      "pkm/wiki": [
-        "read",
-        "read_image"
-      ]
-    }
+    "generate_image": []
   }
 }

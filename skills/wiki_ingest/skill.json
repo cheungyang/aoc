@@ -7,6 +7,7 @@
     "obsidian": {
       "pkm/wiki": [
         "read",
+        "read_image",
         "file_search",
         "write",
         "overwrite",

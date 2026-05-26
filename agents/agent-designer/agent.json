@@ -20,7 +20,8 @@
     "agent_creation",
     "skill_creation",
     "memory",
-    "dream"
+    "dream",
+    "update_permissions"
   ],
   "tools": {
     "web_search": [],
@@ -36,24 +37,13 @@
     },
     "filesystem": {
       "agents/": [
-        "read",
-        "write",
-        "overwrite",
-        "ls",
         "delete",
         "rmdir"
       ],
       "pkm/agents": [
-        "read",
-        "write",
-        "overwrite",
         "ls"
       ],
       "skills/": [
-        "read",
-        "write",
-        "overwrite",
-        "ls",
         "delete",
         "rmdir"
       ]

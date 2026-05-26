@@ -12,18 +12,11 @@
     }
   ],
   "tools": {
-    "obsidian": {
-      "pkm/wiki": [
-        "read",
-        "write",
-        "overwrite",
-        "append"
-      ]
-    },
-    "web_search": [],
     "nlm": []
   },
   "skills": [
+    "memory",
+    "dream",
     "wiki_ingest",
     "wiki_query",
     "research"

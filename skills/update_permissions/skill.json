@@ -1,0 +1,13 @@
+{
+  "skill_id": "update_permissions",
+  "name": "Update Permissions",
+  "description": "Updates agent.json or skill.json permissions according to strict framework rules and inheritance logic.",
+  "emoji": "🔐",
+  "tools": {
+    "filesystem": {
+      "agents": ["read", "overwrite", "ls"],
+      "skills": ["read", "overwrite", "ls"],
+      "tools": ["read", "ls"]
+    }
+  }
+}

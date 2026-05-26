@@ -8,6 +8,7 @@
       "pkm/wiki": [
         "file_search",
         "read",
+        "read_image",
         "write",
         "overwrite",
         "append"
