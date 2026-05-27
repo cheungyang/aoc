@@ -22,7 +22,7 @@ class BotsLoader:
         token_key = agent.get_config("discord_token_key")
         
         if not token_key:
-            print(f"BotsLoader: No discord_token_key defined for agent {agent_id}.")
+            # print(f"BotsLoader: No discord_token_key defined for agent {agent_id}.")
             return None
             
         token = os.getenv(token_key)

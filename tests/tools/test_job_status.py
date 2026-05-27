@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import os
 import sys
 
@@ -24,8 +24,8 @@ class TestJobStatusTool(unittest.TestCase):
     @patch('tools.job_status.JobManager')
     @patch('tools.job_status.FlatFileSessionStore')
     @patch('tools.job_status.os.path.exists')
-    @patch('tools.job_status.asyncio.run')
-    def test_job_status_from_history(self, mock_asyncio_run, mock_exists, mock_session_store_class, mock_job_manager_class):
+    @patch('tools.job_status.agent_call')
+    def test_job_status_from_history(self, mock_agent_call, mock_exists, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -45,7 +45,7 @@ class TestJobStatusTool(unittest.TestCase):
         ]
         mock_session_store.load_history.return_value = mock_history
         
-        mock_asyncio_run.return_value = "<payload>Compiled progress</payload>"
+        mock_agent_call.ainvoke = AsyncMock(return_value="<payload>Compiled progress</payload>")
         
         result = job_status.func(job_id="test_job_123")
         
@@ -61,8 +61,8 @@ class TestJobStatusTool(unittest.TestCase):
     @patch('tools.job_status.JobManager')
     @patch('tools.job_status.FlatFileSessionStore')
     @patch('tools.job_status.os.path.exists')
-    @patch('tools.job_status.asyncio.run')
-    def test_job_status_fallback_to_last_message(self, mock_asyncio_run, mock_exists, mock_session_store_class, mock_job_manager_class):
+    @patch('tools.job_status.agent_call')
+    def test_job_status_fallback_to_last_message(self, mock_agent_call, mock_exists, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -82,7 +82,7 @@ class TestJobStatusTool(unittest.TestCase):
         ]
         mock_session_store.load_history.return_value = mock_history
         
-        mock_asyncio_run.return_value = "<payload>Compiled progress</payload>"
+        mock_agent_call.ainvoke = AsyncMock(return_value="<payload>Compiled progress</payload>")
         
         result = job_status.func(job_id="test_job_123")
         

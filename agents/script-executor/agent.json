@@ -10,13 +10,18 @@
       "cron": "0 * * * *",
       "prompt": [
         "tool git {\"command\": \"pull\", \"path\": \"pkm\"}",
-        "tool git {\"command\": \"commit -am 'cron update'\", \"path\": \"pkm\"}",
-        "tool git {\"command\": \"push\", \"path\": \"pkm\"}",
-        "script software-orchestrator.py"
+        "tool git {\"command\": \"add -A\", \"path\": \"pkm\"}",
+        "tool git {\"command\": \"commit -m 'cron update'\", \"path\": \"pkm\"}",
+        "tool git {\"command\": \"push\", \"path\": \"pkm\"}"
+      ]
+    },
+    {
+      "channel": "general-aoc",
+      "thread": "cronjobs",
+      "cron": "*/5 * * * *",
+      "prompt": [
+        "script scripts/orchestrator-cron.py"
       ]
     }
-  ],
-  "tools": {
-    "git": []
-  }
+  ]
 }

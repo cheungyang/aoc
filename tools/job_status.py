@@ -8,7 +8,7 @@ from core.memory.flat_file_session_store import FlatFileSessionStore
 from tools.agent_call import agent_call
 
 @tool
-async def job_status(job_id: str) -> str:
+def job_status(job_id: str) -> str:
     """
     Retrieves the current progress of a background job.
     
@@ -20,6 +20,18 @@ async def job_status(job_id: str) -> str:
         including steps done, % of progress, and early snippets of completed artifacts.
     """
     try:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        return loop.run_until_complete(_job_status_async(job_id))
+    except Exception as e:
+        return format_tool_response("job_status", payload="", errors=f"Error performing job status action: {e}")
+
+async def _job_status_async(job_id: str) -> str:
+    try:
         manager = JobManager()
         job = manager._jobs.get(job_id)
         if not job:
@@ -27,7 +39,6 @@ async def job_status(job_id: str) -> str:
             
         session_id = job.session_id
 
-        
         # Use FlatFileSessionStore to get history
         session_store = FlatFileSessionStore()
         file_path = session_store.get_file_path(session_id)

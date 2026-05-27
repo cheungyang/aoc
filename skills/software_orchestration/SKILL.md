@@ -16,9 +16,9 @@ This skill acts as a deterministic workflow router, managing asynchronous handof
 1. Execute the `job_list` tool to view currently active jobs.
 2. Check if any jobs assigned to **Scott** or **Sona** have been running for more than **30 minutes**.
 3. If a job is stuck (> 30 mins):
-    - Extract the `agent` name and the `original_prompt` from the `job_list` output.
+    - Extract the `agent` name and the `initial_prompt` from the `job_list` output.
     - Execute the `job_kill` tool on the stuck job ID.
-    - Immediately trigger a new asynchronous `agent_call` using the extracted `agent` and `original_prompt` to restart the task.
+    - Immediately trigger a new asynchronous `agent_call` using the extracted `agent` and `initial_prompt` to restart the task.
 
 ### Step 2: Environment Assessment
 1. Check the provided context for open Pull Requests (PRs) and open Issues.

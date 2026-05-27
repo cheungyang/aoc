@@ -25,6 +25,7 @@
     "agent_list": {},
     "job_list": {},
     "job_kill": {},
-    "job_status": {}
+    "job_status": {},
+    "software_orchestration": {}
   }
 }
