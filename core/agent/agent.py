@@ -56,7 +56,12 @@ class Agent(BaseAgent):
         # Handle [newall] command to clear all session contexts
         if isinstance(content, str) and content.strip() == "[newall]":    
             archive_status = SessionManager().clear_sessions()
-            await channel.send(f"All session contexts cleared. {archive_status}")
+            full_msg = f"All session contexts cleared. {archive_status}"
+            chunks = split_message(full_msg)
+            for i, chunk in enumerate(chunks):
+                if i > 0:
+                    await asyncio.sleep(1)
+                await channel.send(chunk)
             return
 
         # Lazy load langgraph graph object
