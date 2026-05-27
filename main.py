@@ -29,10 +29,16 @@ async def run_bots():
     tasks.append(schedule_runner.start())
             
     if tasks:
-        await asyncio.gather(*tasks)
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            print("\nShutting down bots and runners...")
     else:
         print("No Discord bots to start.")
 
 if __name__ == "__main__":
     import sys
-    asyncio.run(run_bots())
+    try:
+        asyncio.run(run_bots())
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user. Exiting.")
