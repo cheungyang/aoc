@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import subprocess
 import json
 import datetime
@@ -5,6 +6,14 @@ import ast
 import re
 import sys
 import asyncio
+import os
+
+# Add project root to sys.path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from tools.job_list import job_list
 from tools.agent_call import agent_call
 from tools.gh import gh
@@ -110,7 +119,7 @@ def main():
     
     # Asynchronously call Concierge (id: main)
     prompt = "Execute the software_orchestration skill."
-    result = run_agent_call_tool("main", prompt, run_async=True)
+    result = run_agent_call_tool("main", prompt)
     print(f"Agent call result: {result}")
     
     print("=== Orchestrator Cron Finished ===")

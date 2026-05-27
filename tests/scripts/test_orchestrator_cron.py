@@ -44,7 +44,7 @@ class TestOrchestratorCron(unittest.TestCase):
     def test_check_watchdog_stuck_job(self, mock_job_list):
         two_hours_ago = datetime.datetime.now() - datetime.timedelta(hours=2)
         started_str = two_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
-        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'running'}}]"
+        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'running', 'initial_prompt': ''}}]"
         
         result = oc.check_watchdog()
         self.assertTrue(result)
@@ -53,7 +53,7 @@ class TestOrchestratorCron(unittest.TestCase):
     def test_check_watchdog_no_stuck_job(self, mock_job_list):
         ten_mins_ago = datetime.datetime.now() - datetime.timedelta(minutes=10)
         started_str = ten_mins_ago.strftime('%Y-%m-%d %H:%M:%S')
-        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'running'}}]"
+        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'running', 'initial_prompt': ''}}]"
         
         result = oc.check_watchdog()
         self.assertFalse(result)
@@ -62,7 +62,7 @@ class TestOrchestratorCron(unittest.TestCase):
     def test_check_watchdog_job_not_running(self, mock_job_list):
         two_hours_ago = datetime.datetime.now() - datetime.timedelta(hours=2)
         started_str = two_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
-        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'completed'}}]"
+        mock_job_list.return_value = f"[{{'job_id': '1', 'agent_id': 'agent1', 'started': '{started_str}', 'status': 'completed', 'initial_prompt': ''}}]"
         
         result = oc.check_watchdog()
         self.assertFalse(result)

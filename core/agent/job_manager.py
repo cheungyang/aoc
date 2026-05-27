@@ -56,7 +56,7 @@ class JobManager:
                 "started": j.started,
                 "updated": j.updated,
                 "status": j.status,
-                "initial_prompt": j.initial_prompt
+                "initial_prompt": getattr(j, "initial_prompt", "")
             } for jid, j in self._jobs.items()}
             with open(JOBS_FILE, "w") as f:
                 json.dump(data, f, indent=4)
