@@ -1,0 +1,12 @@
+{
+  "skill_id": "software_orchestration",
+  "name": "Software Orchestration",
+  "description": "Deterministically orchestrates the software development lifecycle by routing tasks between agents based on live system state.",
+  "emoji": "🚦",
+  "tools": {
+    "job_list": {},
+    "job_kill": {},
+    "agent_call": {},
+    "gh": {}
+  }
+}

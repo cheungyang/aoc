@@ -84,5 +84,20 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         agent = loader.get_agent("script-executor")
         self.assertIsInstance(agent, ScriptExecutorAgent)
 
+    @patch('subprocess.run')
+    @patch('core.agent.script_executor_agent.JobManager')
+    async def test_execute_passes_initial_prompt_to_job_manager(self, mock_job_manager_class, mock_run):
+        mock_job_manager = MagicMock()
+        mock_job_manager_class.return_value = mock_job_manager
+        mock_job_manager.new_job_id.return_value = "test-job-id"
+        mock_run.return_value = MagicMock(stdout="output", stderr="", returncode=0)
+        
+        agent = ScriptExecutorAgent("script-executor")
+        await agent.execute("script echo hello", "test_source")
+        
+        mock_job_manager.add_job.assert_called_once_with(
+            "test-job-id", "script-executor", "script-executor:test_source", initial_prompt="script echo hello"
+        )
+
 if __name__ == "__main__":
     unittest.main()

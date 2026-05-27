@@ -17,6 +17,7 @@ def job_list() -> str:
                 "session_id": job.session_id,
                 "started": datetime.fromtimestamp(job.started).strftime('%Y-%m-%d %H:%M:%S'),
                 "status": job.status,
+                "initial_prompt": job.initial_prompt,
             }
             for job in JobManager().get_jobs()
         ]

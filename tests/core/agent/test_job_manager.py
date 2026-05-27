@@ -46,6 +46,11 @@ class TestJobManager(unittest.TestCase):
         self.assertEqual(job.session_id, "session456")
         self.assertIsInstance(job.started, float)
 
+    def test_add_job_with_prompt(self):
+        self.manager.add_job("job456", "agent2", "session789", initial_prompt="test prompt")
+        job = self.manager._jobs["job456"]
+        self.assertEqual(job.initial_prompt, "test prompt")
+
     def test_get_jobs(self):
         self.manager.add_job("job1", "agent1", "session1")
         self.manager.add_job("job2", "agent2", "session2")

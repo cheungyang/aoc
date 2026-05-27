@@ -68,7 +68,7 @@ class Agent(BaseAgent):
         if self.graph is None:
             self.graph = await self._build_graph()
 
-        JobManager().add_job(job_id, self.agent_id, session_id)
+        JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content if isinstance(content, str) else str(content))
         logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
         config = {
             "configurable": {

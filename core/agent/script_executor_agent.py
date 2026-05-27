@@ -17,7 +17,7 @@ class ScriptExecutorAgent(BaseAgent):
         if job_id is None:
             job_id = JobManager().new_job_id(self.agent_id)
             
-        JobManager().add_job(job_id, self.agent_id, session_id)
+        JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content)
         JobManager().update_job(job_id, "running")
 
         lines = content.strip().split('\n')

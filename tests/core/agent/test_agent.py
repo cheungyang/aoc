@@ -280,6 +280,25 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("partial", status_updates)
         self.assertNotIn("completed", status_updates)
 
+    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.agent.job_manager.JobManager')
+    async def test_execute_passes_initial_prompt_to_job_manager(self, mock_job_manager_class, mock_logging_handler_class):
+        mock_job_manager = MagicMock()
+        mock_job_manager_class.return_value = mock_job_manager
+        mock_job_manager.new_job_id.return_value = "test-job-id"
+        
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
+        
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        await agent.execute("hello world", "session1")
+        
+        mock_job_manager.add_job.assert_called_once_with(
+            "test-job-id", "test-agent", "test-agent:session1", initial_prompt="hello world"
+        )
+
 if __name__ == "__main__":
     unittest.main()
 

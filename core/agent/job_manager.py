@@ -18,6 +18,7 @@ class Job:
     started: float
     updated: float
     status: str
+    initial_prompt: str = ""
 
 
 class JobManager:
@@ -37,6 +38,8 @@ class JobManager:
                 with open(JOBS_FILE, "r") as f:
                     data = json.load(f)
                     for jid, job_data in data.items():
+                        if "initial_prompt" not in job_data:
+                            job_data["initial_prompt"] = ""
                         self._jobs[jid] = Job(**job_data)
                         if jid not in self._job_ids:
                             self._job_ids.append(jid)
@@ -52,7 +55,8 @@ class JobManager:
                 "session_id": j.session_id,
                 "started": j.started,
                 "updated": j.updated,
-                "status": j.status
+                "status": j.status,
+                "initial_prompt": j.initial_prompt
             } for jid, j in self._jobs.items()}
             with open(JOBS_FILE, "w") as f:
                 json.dump(data, f, indent=4)
@@ -93,7 +97,7 @@ class JobManager:
                 del self._jobs[jid]
         self._save_jobs()
 
-    def add_job(self, job_id: str, agent_id: str, session_id: str):
+    def add_job(self, job_id: str, agent_id: str, session_id: str, initial_prompt: str = ""):
         if len(self._job_ids) > 50:
             self._clean_jobs()
         self._jobs[job_id] = Job(
@@ -102,7 +106,8 @@ class JobManager:
             session_id=session_id,
             started=time.time(),
             updated=time.time(),
-            status="queued"
+            status="queued",
+            initial_prompt=initial_prompt
         )
         self._save_jobs()
 
