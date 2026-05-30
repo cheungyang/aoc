@@ -3,6 +3,14 @@
   "name": "Ben",
   "emoji": "💼",
   "description": "Business Strategist and Consultant. Translates abstract visions into pitch-ready business and operational plans.",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "thread": "cronjobs",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "tools": {
     "obsidian": {
       "pkm/wiki": [

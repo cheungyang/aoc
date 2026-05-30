@@ -21,7 +21,8 @@
     "skill_creation",
     "memory",
     "dream",
-    "update_permissions"
+    "update_permissions",
+    "update_schedule"
   ],
   "tools": {
     "web_search": [],

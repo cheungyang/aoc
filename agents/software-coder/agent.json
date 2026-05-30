@@ -3,6 +3,14 @@
   "name": "Scott",
   "emoji": "💻",
   "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "thread": "cronjobs",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "tools": {},
   "skills": [
     "tdd_execution",

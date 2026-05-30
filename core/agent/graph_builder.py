@@ -31,9 +31,9 @@ class GraphBuilder:
         formatting_prompt = get_formatting_prompt()
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", agent_prompt),
-            ("system", skills_prompt),
-            ("system", knowledge_prompt),
+            ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
+            ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
+            ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
             ("system", formatting_prompt),
             MessagesPlaceholder(variable_name="messages"),
         ])

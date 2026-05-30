@@ -1,0 +1,15 @@
+{
+  "skill_id": "update_schedule",
+  "name": "Update Schedule",
+  "description": "Adds or modifies cron schedules within an agent's agent.json file, supporting both script-executor syntax and LLM prompt formats.",
+  "emoji": "⏰",
+  "tools": {
+    "filesystem": {
+      "agents": [
+        "read",
+        "write",
+        "overwrite"
+      ]
+    }
+  }
+}

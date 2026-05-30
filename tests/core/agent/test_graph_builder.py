@@ -167,5 +167,22 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          self.assertEqual(graph, "MockGraph")
          mock_create_react.assert_called_once_with(mock_ollama_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
 
+
+
+     @patch('core.agent.graph_builder.get_agent_prompt')
+     @patch('core.agent.graph_builder.SkillsLoader')
+     def test_get_prompt_template_escapes_braces(self, mock_skills_loader_class, mock_get_agent_prompt):
+          mock_get_agent_prompt.return_value = "Prompt with braces {} and {variable}"
+          mock_skills_loader = MagicMock()
+          mock_skills_loader_class.return_value = mock_skills_loader
+          mock_skills_loader.get_skills_overview.return_value = "Skills with braces {}"
+          
+          from core.agent.graph_builder import GraphBuilder
+          builder = GraphBuilder()
+          
+          prompt = builder._get_prompt_template("main")
+          
+          self.assertEqual(prompt.input_variables, ['messages'])
+
 if __name__ == "__main__":
     unittest.main()
