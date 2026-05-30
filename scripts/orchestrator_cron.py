@@ -60,8 +60,6 @@ def check_github():
         
     return has_work
 
-
-
 def check_watchdog():
     has_work = False
     payload_str = run_job_list_tool()
