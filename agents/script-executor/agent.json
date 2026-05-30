@@ -18,9 +18,9 @@
     {
       "channel": "general-aoc",
       "thread": "cronjobs",
-      "cron": "*/5 * * * *",
+      "cron": "*/2 * * * *",
       "prompt": [
-        "script scripts/orchestrator-cron.py"
+        "script orchestrator_cron.py"
       ]
     }
   ]
