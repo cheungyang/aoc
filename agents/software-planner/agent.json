@@ -3,6 +3,14 @@
   "name": "Sophie",
   "emoji": "📐",
   "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "thread": "cronjobs",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "tools": {
     "obsidian": {
       "pkm/wiki": [

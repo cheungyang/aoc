@@ -3,6 +3,14 @@
   "name": "Sona",
   "emoji": "🛡️",
   "description": "The Objective Gatekeeper. Enforces quality, tests PRs against specs, and checks for anti-patterns.",
+  "schedules": [
+    {
+      "channel": "general-aoc",
+      "thread": "cronjobs",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "tools": {},
   "skills": [
     "qa_evaluation",
