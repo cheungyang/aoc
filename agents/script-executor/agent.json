@@ -14,14 +14,6 @@
         "tool git {\"command\": \"commit -m 'cron update'\", \"path\": \"pkm\"}",
         "tool git {\"command\": \"push\", \"path\": \"pkm\"}"
       ]
-    },
-    {
-      "channel": "general-aoc",
-      "thread": "cronjobs",
-      "cron": "*/2 * * * *",
-      "prompt": [
-        "script orchestrator_cron.py"
-      ]
     }
   ]
 }
