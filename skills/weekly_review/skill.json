@@ -1,0 +1,32 @@
+{
+  "skill_id": "weekly_review",
+  "name": "Weekly Review",
+  "description": "Synthesizes the past week's daily journals and git history to collaboratively identify wins, and iteratively drafts a concise 3-point focus for the upcoming week.",
+  "emoji": "📅",
+  "tools": {
+    "git": {
+      "pkm": [
+        "pull",
+        "log",
+        "add",
+        "push"
+      ]
+    },
+    "obsidian": {
+      "pkm/vault": [
+        "read",
+        "file_search"
+      ],
+      "pkm/vault/journals/weekly": [
+        "write",
+        "overwrite",
+        "append",
+        "delete"
+      ],
+      "pkm/templates": [
+        "read",
+        "file_search"
+      ]
+    }
+  }
+}

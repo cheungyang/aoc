@@ -16,13 +16,20 @@
       "thread": "cronjobs",
       "cron": "0 23 * * *",
       "prompt": "Use the dream skill to refine your memory"
+    },
+    {
+      "channel": "general-aoc",
+      "thread": "Planning: Weekly",
+      "cron": "0 8 * * 0",
+      "prompt": "Trigger the weekly_review skill to start the collaborative weekly review process."
     }
   ],
   "skills": [
     "memory",
     "dream",
     "list_impactful_actions",
-    "write_daily_intention"
+    "write_daily_intention",
+    "weekly_review"
   ],
   "tools": {}
 }
