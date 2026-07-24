@@ -4,6 +4,7 @@
 .vscode
 .gemini
 .pytest_cache
+.DS_Store
 **/__pycache__/
 **/__init__.py
 sessions/

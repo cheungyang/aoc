@@ -56,11 +56,23 @@ class FlatFileCheckpointer(BaseCheckpointSaver):
             
         checkpoint_id = config["configurable"].get("checkpoint_id")
         
+        def normalize_entry_config(entry_config):
+            # Create a copy to prevent mutation issues
+            cfg = {
+                **entry_config,
+                "configurable": {
+                    **entry_config.get("configurable", {})
+                }
+            }
+            if "checkpoint_ns" not in cfg["configurable"]:
+                cfg["configurable"]["checkpoint_ns"] = config["configurable"].get("checkpoint_ns", "")
+            return cfg
+
         if checkpoint_id:
             if checkpoint_id in checkpoints:
                 entry = checkpoints[checkpoint_id]
                 return CheckpointTuple(
-                    config=entry["config"],
+                    config=normalize_entry_config(entry["config"]),
                     checkpoint=entry["checkpoint"],
                     metadata=entry["metadata"],
                     parent_config=entry.get("parent_config"),
@@ -79,7 +91,7 @@ class FlatFileCheckpointer(BaseCheckpointSaver):
         latest_entry = sorted_entries[-1]
         
         return CheckpointTuple(
-            config=latest_entry["config"],
+            config=normalize_entry_config(latest_entry["config"]),
             checkpoint=latest_entry["checkpoint"],
             metadata=latest_entry["metadata"],
             parent_config=latest_entry.get("parent_config"),
@@ -94,11 +106,15 @@ class FlatFileCheckpointer(BaseCheckpointSaver):
         data = self._load_data(thread_id)
         
         checkpoint_id = checkpoint["id"]
+        
+        configurable = {}
+        for k, v in config.get("configurable", {}).items():
+            if not k.startswith("__"):
+                configurable[k] = v
+        configurable["checkpoint_id"] = checkpoint_id
+        
         return_config = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_id": checkpoint_id
-            }
+            "configurable": configurable
         }
         
         data["checkpoints"][checkpoint_id] = {
@@ -108,7 +124,28 @@ class FlatFileCheckpointer(BaseCheckpointSaver):
             "new_versions": new_versions
         }
         
-        self._save_data(thread_id, data)
+        try:
+            self._save_data(thread_id, data)
+        except Exception as e:
+            print(f"--- PICKLE FAILURE DIAGNOSTICS ---")
+            print(f"Error pickling data: {e}")
+            def find_unpickleable(obj, path=""):
+                try:
+                    import pickle
+                    pickle.dumps(obj)
+                except Exception as pe:
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            find_unpickleable(v, f"{path}[{k!r}]")
+                    elif isinstance(obj, list) or isinstance(obj, tuple):
+                        for i, v in enumerate(obj):
+                            find_unpickleable(v, f"{path}[{i}]")
+                    else:
+                        print(f"Unpickleable at {path}: {type(obj)} -> {obj} (Error: {pe})")
+            find_unpickleable(data, "data")
+            print(f"----------------------------------")
+            raise e
+            
         return return_config
 
     def put_writes(self, config: RunnableConfig, writes: Sequence[tuple[str, Any]], task_id: str, task_path: str = "") -> None:

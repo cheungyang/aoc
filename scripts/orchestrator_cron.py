@@ -117,7 +117,7 @@ def main():
     
     # Asynchronously call Concierge (id: main)
     prompt = "Execute the software_orchestration skill."
-    result = run_agent_call_tool("main", prompt)
+    result = run_agent_call_tool("main", prompt, run_async=True)
     print(f"Agent call result: {result}")
     
     print("=== Orchestrator Cron Finished ===")

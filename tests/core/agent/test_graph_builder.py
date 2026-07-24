@@ -10,6 +10,17 @@ from core.agent.agent import Agent
 
 class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
 
+     def setUp(self):
+         self.subgraphs_loader_patcher = patch('core.loaders.subgraphs_loader.SubgraphsLoader')
+         self.mock_subgraphs_loader_class = self.subgraphs_loader_patcher.start()
+         self.mock_subgraphs_loader = MagicMock()
+         self.mock_subgraphs_loader_class.return_value = self.mock_subgraphs_loader
+         self.mock_subgraphs_loader.get_subgraphs_overview.return_value = "Mock Subgraphs"
+
+     def tearDown(self):
+         self.subgraphs_loader_patcher.stop()
+
+
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
@@ -190,6 +201,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
           # Verify that it compiled and returned formatted messages without template resolution errors
           self.assertTrue(any("Prompt with braces {} and {variable}" in msg.content for msg in messages))
           self.assertTrue(any("Skills with braces {}" in msg.content for msg in messages))
+          self.assertTrue(any("Mock Subgraphs" in msg.content for msg in messages))
           self.assertTrue(any("Knowledge with braces {}" in msg.content for msg in messages))
 
 if __name__ == "__main__":

@@ -25,6 +25,11 @@ class GraphBuilder:
             skills_loader = SkillsLoader()
             skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
 
+            # 2.5. Subgraphs Prompt
+            from core.loaders.subgraphs_loader import SubgraphsLoader
+            subgraphs_loader = SubgraphsLoader()
+            subgraphs_prompt = subgraphs_loader.get_subgraphs_overview()
+
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()
 
@@ -34,6 +39,7 @@ class GraphBuilder:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", formatting_prompt),
                 MessagesPlaceholder(variable_name="messages"),
