@@ -167,22 +167,30 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          self.assertEqual(graph, "MockGraph")
          mock_create_react.assert_called_once_with(mock_ollama_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
 
-
-
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
-     def test_get_prompt_template_escapes_braces(self, mock_skills_loader_class, mock_get_agent_prompt):
+     @patch('core.agent.graph_builder.get_knowledge_prompt')
+     def test_get_prompt_template_escapes_braces(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
           mock_get_agent_prompt.return_value = "Prompt with braces {} and {variable}"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
           mock_skills_loader.get_skills_overview.return_value = "Skills with braces {}"
+          mock_get_knowledge_prompt.return_value = "Knowledge with braces {}"
           
           from core.agent.graph_builder import GraphBuilder
           builder = GraphBuilder()
           
-          prompt = builder._get_prompt_template("main")
+          prompt_fn = builder._get_prompt_template("main")
+          self.assertTrue(callable(prompt_fn))
           
-          self.assertEqual(prompt.input_variables, ['messages'])
+          # Call the dynamic prompt function with a mock state
+          from langchain_core.messages import HumanMessage
+          messages = prompt_fn({"messages": [HumanMessage(content="test message")]})
+          
+          # Verify that it compiled and returned formatted messages without template resolution errors
+          self.assertTrue(any("Prompt with braces {} and {variable}" in msg.content for msg in messages))
+          self.assertTrue(any("Skills with braces {}" in msg.content for msg in messages))
+          self.assertTrue(any("Knowledge with braces {}" in msg.content for msg in messages))
 
 if __name__ == "__main__":
     unittest.main()

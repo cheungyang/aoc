@@ -1,0 +1,21 @@
+{
+  "agent_id": "chase",
+  "name": "Chase",
+  "emoji": "🕸️",
+  "description": "Web Automation Engineer generating stealth scripts and API discovery tools.",
+  "tools": {
+    "filesystem": {
+      "pkm/agents/chase/workspace": [
+        "read",
+        "write",
+        "overwrite",
+        "ls",
+        "delete"
+      ]
+    }
+  },
+  "skills": [
+    "memory",
+    "dream"
+  ]
+}

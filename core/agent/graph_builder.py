@@ -17,27 +17,29 @@ class GraphBuilder:
         pass
 
     def _get_prompt_template(self, agent_id):
-        # 1. Agent Prompt
-        agent_prompt = get_agent_prompt(agent_id)
+        def dynamic_prompt(state):
+            # 1. Agent Prompt
+            agent_prompt = get_agent_prompt(agent_id)
 
-        # 2. Skills Prompt
-        skills_loader = SkillsLoader()
-        skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
+            # 2. Skills Prompt
+            skills_loader = SkillsLoader()
+            skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
 
-        # 3. Knowledge Prompt
-        knowledge_prompt = get_knowledge_prompt()
+            # 3. Knowledge Prompt
+            knowledge_prompt = get_knowledge_prompt()
 
-        # 4. Formatting Prompt
-        formatting_prompt = get_formatting_prompt()
+            # 4. Formatting Prompt
+            formatting_prompt = get_formatting_prompt()
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
-            ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
-            ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
-            ("system", formatting_prompt),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
-        return prompt
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", formatting_prompt),
+                MessagesPlaceholder(variable_name="messages"),
+            ])
+            return prompt.format_messages(messages=state["messages"])
+        return dynamic_prompt
 
     async def build_graph(self, agent_id, config):
         if config is None:
