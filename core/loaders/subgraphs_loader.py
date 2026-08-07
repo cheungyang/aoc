@@ -65,10 +65,12 @@ class SubgraphsLoader:
                             cached.get("md_mtime") != md_mtime):
                             
                             # Load compiled graph from graph.py
-                            spec = importlib.util.spec_from_file_location(f"subgraphs.{item}", graph_py_path)
+                            spec = importlib.util.spec_from_file_location(f"subgraphs.{item}.graph", graph_py_path)
                             if spec is None or spec.loader is None:
                                 continue
+                            import sys
                             module = importlib.util.module_from_spec(spec)
+                            sys.modules[f"subgraphs.{item}.graph"] = module
                             spec.loader.exec_module(module)
                             
                             graph_obj = getattr(module, "graph", None)

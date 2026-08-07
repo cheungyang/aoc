@@ -12,6 +12,12 @@ from core.loaders.tools_loader import ToolsLoader
 class TestToolsLoader(unittest.TestCase):
     def setUp(self):
         ToolsLoader._instance = None # Reset singleton
+        from core.loaders.agents_loader import AgentsLoader
+        self.original_agents_loader_instance = AgentsLoader._instance
+
+    def tearDown(self):
+        from core.loaders.agents_loader import AgentsLoader
+        AgentsLoader._instance = self.original_agents_loader_instance
 
     @patch('importlib.import_module')
     @patch('os.listdir')
