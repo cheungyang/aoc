@@ -48,6 +48,15 @@ class BotsLoader:
                         return ch
         return None
 
+    def find_channel(self, channel_name: str):
+        for bot_runner in self._bots.values():
+            if bot_runner.bot:
+                for guild in bot_runner.bot.guilds:
+                    for ch in guild.text_channels:
+                        if ch.name == channel_name or str(ch.id) == channel_name:
+                            return ch
+        return None
+
     async def reload_bot(self, agent_id):
         import asyncio
         if agent_id in self._bots:

@@ -11,7 +11,7 @@ def agent_list() -> str:
         loader = AgentsLoader()
         agent_ids = loader.list_agent_ids()
         
-        allowed_attributes = ["name", "emoji", "description"]
+        allowed_attributes = ["name", "emoji", "description", "channels"]
         result = []
         
         for agent_id in agent_ids:

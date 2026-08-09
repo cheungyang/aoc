@@ -1,27 +1,32 @@
 {
-  "agent_id": "skill-runner",
-  "name": "Skelly",
-  "emoji": "💀",
-  "description": "An empty shell test runner and chameleon. Adapts personality and tone based on the loaded skill, providing debug-style execution reporting.",
-  "schedules": [
-    {
-      "channel": "general-aoc",
-      "thread": "cronjobs",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
+    "agent_id": "skill-runner",
+    "channels": [
+        "software-dev"
+    ],
+    "name": "Skelly",
+    "emoji": "\ud83d\udc80",
+    "description": "An empty shell test runner and chameleon. Adapts personality and tone based on the loaded skill, providing debug-style execution reporting.",
+    "schedules": [
+        {
+            "channel": "general",
+            "thread": "cronjobs",
+            "cron": "0 23 * * *",
+            "prompt": "Use the dream skill to refine your memory"
+        }
+    ],
+    "skills": [
+        "memory",
+        "dream",
+        "web_browsing",
+        "research",
+        "wiki_ingest",
+        "wiki_query",
+        "wiki_lint"
+    ],
+    "tools": {
+        "generate_image": [],
+        "bash": [
+            "python"
+        ]
     }
-  ],
-  "skills": [
-    "memory",
-    "dream",
-    "web_browsing",
-    "research",
-    "wiki_ingest",
-    "wiki_query",
-    "wiki_lint"
-  ],
-  "tools": {
-    "generate_image": [],
-    "bash": ["python"]
-  }
 }

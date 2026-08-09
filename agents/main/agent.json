@@ -1,7 +1,16 @@
 {
   "agent_id": "main",
+  "channels": [
+    "*"
+  ],
   "channel_hosts": [
-    "general-aoc"
+    "general",
+    "day-planning",
+    "weekend-planning",
+    "weekly-planning",
+    "project-planning",
+    "topic-research",
+    "software-dev"
   ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
@@ -10,7 +19,7 @@
   "name": "Concierge",
   "schedules": [
     {
-      "channel": "general-aoc",
+      "channel": "general",
       "thread": "cronjobs",
       "cron": "0 23 * * *",
       "prompt": "Use the dream skill to refine your memory"

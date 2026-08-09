@@ -81,7 +81,15 @@ class Agent(BaseAgent):
 
         inputs = {"messages": [{"role": role, "content": content}]}
 
+        channel_name = ""
+        if channel is not None:
+            channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
+            if isinstance(channel, discord.Thread) and channel.parent:
+                channel_name = channel.parent.name
+
+        from core.agent.job_manager import current_channel_name
         token = current_job_id.set(job_id)
+        channel_token = current_channel_name.set(channel_name)
         try:
             try:
                 JobManager().update_job(job_id, "running")
@@ -116,6 +124,7 @@ class Agent(BaseAgent):
                 return "Sorry, I encountered an error processing the request."
         finally:
             current_job_id.reset(token)
+            current_channel_name.reset(channel_token)
 
         # Extract the last response message
         reply_message = result["messages"][-1]

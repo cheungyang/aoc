@@ -24,6 +24,7 @@ Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure tem
 ```json
 {
   "agent_id": "<agent_id>",
+  "channels": ["*"],
   "name": "<Agent Name>",
   "emoji": "<Emoji>",
   "description": "<Short Description>",

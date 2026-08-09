@@ -1,11 +1,14 @@
 {
   "agent_id": "script-executor",
+  "channels": [
+    "*"
+  ],
   "name": "Terminator",
   "description": "A special non-LLM agent responsible for executing scheduled cron scripts.",
   "emoji": "⚙️",
   "schedules": [
     {
-      "channel": "general-aoc",
+      "channel": "general",
       "thread": "cronjobs",
       "cron": "0 * * * *",
       "prompt": [

@@ -1,7 +1,10 @@
 {
   "agent_id": "agent-designer",
+  "channels": [
+    "agent-management"
+  ],
   "channel_hosts": [
-    "agent-management-aoc"
+    "agent-management"
   ],
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
@@ -10,7 +13,7 @@
   "name": "Aki",
   "schedules": [
     {
-      "channel": "general-aoc",
+      "channel": "general",
       "thread": "cronjobs",
       "cron": "0 23 * * *",
       "prompt": "Use the dream skill to refine your memory"

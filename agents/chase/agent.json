@@ -1,5 +1,9 @@
 {
   "agent_id": "chase",
+  "channels": [
+    "topic-research",
+    "software-dev"
+  ],
   "name": "Chase",
   "emoji": "🕸️",
   "description": "Web Automation Engineer generating stealth scripts and API discovery tools.",

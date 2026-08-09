@@ -23,6 +23,7 @@ Use this skill when:
 5. **Tool Naming**: The name of a tool MUST exactly match its filename (without `.py`) located in the `tools/` directory.
 6. **Skill Naming**: The name of a skill MUST exactly match its directory/filename located in the `skills/` directory.
 7. **Action Name Validation (No Guessing)**: You MUST NOT guess or hallucinate action names. Action names are programmatically checked. You MUST find them by reading the comments inside the individual `tools/<tool_name>.py` file.
+8. **Channel Restrictions Enforcement**: The `channels` block in `agent.json` MUST strictly be an array of channel names where the agent is allowed to be included or called (e.g., `"channels": ["day-planning", "weekly-planning"]`). Use `"*"` inside the array to indicate the agent has no channel restrictions (e.g., `"channels": ["*"]`).
 
 ## Execution Workflow
 

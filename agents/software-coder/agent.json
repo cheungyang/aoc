@@ -1,20 +1,23 @@
 {
-  "agent_id": "software-coder",
-  "name": "Scott",
-  "emoji": "💻",
-  "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
-  "schedules": [
-    {
-      "channel": "general-aoc",
-      "thread": "cronjobs",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
-  "tools": {},
-  "skills": [
-    "tdd_execution",
-    "memory",
-    "dream"
-  ]
+    "agent_id": "software-coder",
+    "channels": [
+        "software-dev"
+    ],
+    "name": "Scott",
+    "emoji": "\ud83d\udcbb",
+    "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
+    "schedules": [
+        {
+            "channel": "general",
+            "thread": "cronjobs",
+            "cron": "0 23 * * *",
+            "prompt": "Use the dream skill to refine your memory"
+        }
+    ],
+    "tools": {},
+    "skills": [
+        "tdd_execution",
+        "memory",
+        "dream"
+    ]
 }

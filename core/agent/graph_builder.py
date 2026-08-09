@@ -36,14 +36,26 @@ class GraphBuilder:
             # 4. Formatting Prompt
             formatting_prompt = get_formatting_prompt()
 
-            prompt = ChatPromptTemplate.from_messages([
+            from core.agent.job_manager import current_channel_name
+            channel_name = current_channel_name.get()
+
+            system_messages = [
                 ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
+            ]
+
+            if channel_name:
+                channel_prompt = f"<current_channel_context>\nYou are currently executing in the Discord channel: #{channel_name}\n</current_channel_context>"
+                system_messages.append(("system", channel_prompt))
+
+            system_messages.extend([
                 ("system", formatting_prompt),
                 MessagesPlaceholder(variable_name="messages"),
             ])
+
+            prompt = ChatPromptTemplate.from_messages(system_messages)
             return prompt.format_messages(messages=state["messages"])
         return dynamic_prompt
 
