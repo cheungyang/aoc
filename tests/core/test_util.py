@@ -59,6 +59,33 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<images>", prompt)
         self.assertIn("<image path=", prompt)
 
+    def test_get_channel_prompt_explicit(self):
+        from core.util import get_channel_prompt
+        prompt = get_channel_prompt("software-dev")
+        self.assertIn("<current_channel_context>", prompt)
+        self.assertIn("Discord channel: #software-dev", prompt)
+
+    def test_get_channel_prompt_context_var(self):
+        from core.util import get_channel_prompt
+        from core.agent.job_manager import current_channel_name
+        token = current_channel_name.set("weekend-planning")
+        try:
+            prompt = get_channel_prompt()
+            self.assertIn("<current_channel_context>", prompt)
+            self.assertIn("Discord channel: #weekend-planning", prompt)
+        finally:
+            current_channel_name.reset(token)
+
+    def test_get_channel_prompt_empty(self):
+        from core.util import get_channel_prompt
+        from core.agent.job_manager import current_channel_name
+        token = current_channel_name.set("")
+        try:
+            prompt = get_channel_prompt()
+            self.assertEqual(prompt, "")
+        finally:
+            current_channel_name.reset(token)
+
 
     def test_format_tool_response(self):
         from core.util import format_tool_response

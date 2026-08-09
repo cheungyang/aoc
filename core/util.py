@@ -51,6 +51,16 @@ If you want to send images to the user, use the <images> tag, formatted below.
 </formatting_rules>"""
 
 
+def get_channel_prompt(channel_name: str = None) -> str:
+    if channel_name is None:
+        from core.agent.job_manager import current_channel_name
+        channel_name = current_channel_name.get()
+
+    if channel_name:
+        return f"<current_channel_context>\nYou are currently executing in the Discord channel: #{channel_name}\n</current_channel_context>"
+    return ""
+
+
 def get_knowledge_prompt():
     now = datetime.datetime.now()
     date_str = now.strftime("%Y-%m-%d")

@@ -8,7 +8,7 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt
+from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt
 from langgraph.types import interrupt
 from core.agent.job_manager import JobManager, current_job_id
 
@@ -33,11 +33,11 @@ class GraphBuilder:
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()
 
-            # 4. Formatting Prompt
-            formatting_prompt = get_formatting_prompt()
+            # 4. Channel Prompt
+            channel_prompt = get_channel_prompt()
 
-            from core.agent.job_manager import current_channel_name
-            channel_name = current_channel_name.get()
+            # 5. Formatting Prompt
+            formatting_prompt = get_formatting_prompt()
 
             system_messages = [
                 ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
@@ -46,9 +46,8 @@ class GraphBuilder:
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
             ]
 
-            if channel_name:
-                channel_prompt = f"<current_channel_context>\nYou are currently executing in the Discord channel: #{channel_name}\n</current_channel_context>"
-                system_messages.append(("system", channel_prompt))
+            if channel_prompt:
+                system_messages.append(("system", channel_prompt.replace("{", "{{").replace("}", "}}")))
 
             system_messages.extend([
                 ("system", formatting_prompt),
