@@ -1,10 +1,11 @@
 {
     "agent_id": "software-planner",
     "channels": [
-        "software-dev"
+        "software-dev",
+        "aoc-debug"
     ],
     "name": "Sophie",
-    "emoji": "\ud83d\udcd0",
+    "emoji": "📐",
     "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
     "schedules": [
         {

@@ -68,6 +68,12 @@ class Agent(BaseAgent):
         if self.graph is None:
             self.graph = await self._build_graph()
 
+        channel_name = ""
+        if channel is not None:
+            channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
+            if isinstance(channel, discord.Thread) and channel.parent:
+                channel_name = channel.parent.name
+
         JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content if isinstance(content, str) else str(content))
         logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
         config = {
@@ -76,16 +82,20 @@ class Agent(BaseAgent):
                 "agent_id": self.agent_id
             },
             "callbacks": [logging_handler] + (callbacks or []),
-            "recursion_limit": 100
+            "recursion_limit": 100,
+            "run_name": f"agent:{self.agent_id}",
+            "tags": [self.agent_id, source, f"role:{role}"],
+            "metadata": {
+                "agent_id": self.agent_id,
+                "session_id": session_id,
+                "source": source,
+                "job_id": job_id,
+                "channel": channel_name,
+                "role": role
+            }
         }
 
         inputs = {"messages": [{"role": role, "content": content}]}
-
-        channel_name = ""
-        if channel is not None:
-            channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
-            if isinstance(channel, discord.Thread) and channel.parent:
-                channel_name = channel.parent.name
 
         from core.agent.job_manager import current_channel_name
         token = current_job_id.set(job_id)

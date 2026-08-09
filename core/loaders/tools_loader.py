@@ -101,7 +101,7 @@ class ToolsLoader:
                         return True
             return False
         elif isinstance(permissions, list):
-            return action_name in permissions
+            return len(permissions) == 0 or "*" in permissions or action_name in permissions
             
         return False
 

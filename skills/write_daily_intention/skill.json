@@ -5,6 +5,7 @@
   "emoji": "📝",
   "tools": {
     "git": [],
+    "task_query": [],
     "obsidian": {
       "pkm/vault/journals": [
         "read",

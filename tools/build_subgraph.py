@@ -20,7 +20,14 @@ async def build_subgraph(subgraph_name: str, query: str) -> str:
         graph = subgraph_info["graph"]
         inputs = {"messages": [{"role": "user", "content": query}]}
         
-        result = await graph.ainvoke(inputs)
+        config = {
+            "run_name": f"subgraph:{subgraph_name}",
+            "tags": ["subgraph", subgraph_name],
+            "metadata": {
+                "subgraph_name": subgraph_name,
+            }
+        }
+        result = await graph.ainvoke(inputs, config=config)
         
         if isinstance(result, dict) and "messages" in result and result["messages"]:
             reply = result["messages"][-1].content

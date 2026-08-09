@@ -3,16 +3,16 @@
     "channels": [
         "day-planning",
         "weekend-planning",
-        "weekly-planning"
+        "weekly-planning",
+        "aoc-debug"
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
-    "emoji": "\ud83c\udf3c",
+    "emoji": "🌼",
     "model": "gemini-3-flash-preview",
     "name": "Daisy",
     "schedules": [
         {
             "channel": "day-planning",
-            "thread": "Planning: Daily",
             "cron": "0 6 * * *",
             "prompt": "Provide your daily update"
         },
@@ -24,7 +24,6 @@
         },
         {
             "channel": "weekly-planning",
-            "thread": "Planning: Weekly",
             "cron": "0 8 * * 0",
             "prompt": "Trigger the weekly_review skill to start the collaborative weekly review process."
         }

@@ -49,6 +49,46 @@ The script will automatically:
 
 Since the project directory is mounted as a volume (`-v "$(pwd)":/app`), any edits you make to the files on your host machine will be immediately reflected inside the Docker instance. You do not need to enter the Docker instance to make code changes.
 
+## LangSmith Observability & Tracing
+
+This LangGraph system is integrated with [LangSmith](https://smith.langchain.com) for real-time observability, tracing, debugging, and latency/cost monitoring.
+
+### 1. Set up LangSmith in `.env`
+
+Add your LangSmith configuration to your `.env` file (see `.env.example`):
+
+```bash
+# Enable tracing
+LANGSMITH_TRACING=true
+
+# Your LangSmith API Key (create one at https://smith.langchain.com/settings)
+LANGSMITH_API_KEY=lsv2_pt_...
+
+# Optional: Set the project name (defaults to 'default')
+LANGSMITH_PROJECT=langgraph-agents
+
+# Optional: Set regional endpoint (defaults to GCP US)
+# - EU: https://eu.api.smith.langchain.com
+# - APAC: https://apac.api.smith.langchain.com
+# - AWS US: https://aws.api.smith.langchain.com
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+```
+
+### 2. Verify Tracing
+
+You can run the verification script to test connectivity with LangSmith:
+
+```bash
+python scripts/verify_langsmith.py
+```
+
+### 3. Viewing Traces
+
+Once enabled, all agent executions, subgraph runs, LLM calls, and tool invocations will be automatically tracked in your LangSmith project dashboard at [https://smith.langchain.com](https://smith.langchain.com):
+- **Traces**: Full execution tree showing graph nodes, tool calls, and LLM prompts/outputs with execution duration.
+- **Threads / Sessions**: Multi-turn conversation history grouped by Discord session/thread ID.
+- **Metadata & Tags**: Filter traces by agent ID (e.g. `main`, `agent-designer`), source (`discord`, `tool`, `scheduled`), or role.
+
 ## Customization
 
 If your SSH keys or `gogcli` config are in non-standard locations, you can edit the `install.sh` script to point to the correct paths before running it.

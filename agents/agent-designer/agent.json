@@ -1,7 +1,8 @@
 {
   "agent_id": "agent-designer",
   "channels": [
-    "agent-management"
+    "agent-management",
+    "aoc-debug"
   ],
   "channel_hosts": [
     "agent-management"

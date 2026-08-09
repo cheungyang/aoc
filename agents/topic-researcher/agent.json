@@ -1,10 +1,11 @@
 {
     "agent_id": "topic-researcher",
     "channels": [
-        "topic-research"
+        "topic-research",
+        "aoc-debug"
     ],
     "name": "Ted",
-    "emoji": "\ud83d\udd2c",
+    "emoji": "🔬",
     "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
     "schedules": [
         {

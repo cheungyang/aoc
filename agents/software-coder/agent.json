@@ -1,10 +1,11 @@
 {
     "agent_id": "software-coder",
     "channels": [
-        "software-dev"
+        "software-dev",
+        "aoc-debug"
     ],
     "name": "Scott",
-    "emoji": "\ud83d\udcbb",
+    "emoji": "💻",
     "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
     "schedules": [
         {

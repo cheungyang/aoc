@@ -5,6 +5,7 @@
   "skill_id": "list_impactful_actions",
   "tools": {
     "git": [],
+    "task_query": [],
     "obsidian": {
       "pkm/vault/projects": [
         "read",

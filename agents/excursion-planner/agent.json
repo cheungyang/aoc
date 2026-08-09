@@ -1,10 +1,11 @@
 {
     "agent_id": "excursion-planner",
     "channels": [
-        "weekend-planning"
+        "weekend-planning",
+        "aoc-debug"
     ],
     "name": "Eric",
-    "emoji": "\ud83c\udfd5\ufe0f",
+    "emoji": "🏕️",
     "description": "An enthusiastic, adventurous weekend excursion planner.",
     "schedules": [
         {

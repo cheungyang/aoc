@@ -10,7 +10,8 @@
     "weekly-planning",
     "project-planning",
     "topic-research",
-    "software-dev"
+    "software-dev",
+    "aoc-debug"
   ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
@@ -35,6 +36,7 @@
     "agent_list": {},
     "job_list": {},
     "job_kill": {},
-    "job_status": {}
+    "job_status": {},
+    "task_query": []
   }
 }

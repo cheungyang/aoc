@@ -9,9 +9,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from dotenv import load_dotenv
-load_dotenv()
-
+from core.config import Config
 from tools.generate_image import generate_image
 
 async def main():
@@ -23,9 +21,9 @@ async def main():
     print("Image Generation Tool Tester")
     print("=" * 60)
     
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = Config().gemini_api_key
     if not api_key:
-        print("❌ Error: OPENAI_API_KEY not found in environment or .env file.")
+        print("❌ Error: GEMINI_API_KEY not found in environment or .env file.")
         print("Please ensure it is set before running this test.")
         sys.exit(1)
 

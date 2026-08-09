@@ -5,6 +5,7 @@ from core.loaders.agents_loader import AgentsLoader
 from core.loaders.bots_loader import BotsLoader
 from core.util import split_message
 from core.agent.session_manager import SessionManager
+from core.config import Config
 
 class ScheduleRunner:
     def __init__(self):
@@ -74,6 +75,10 @@ class ScheduleRunner:
         channel_name = item["channel"]
         thread_name = item["thread"]
         
+        if not Config().is_channel_allowed(channel_name):
+            print(f"ScheduleRunner: Skipping schedule for {agent_id} on channel '{channel_name}' (debug mode active, restricted to '{Config().debug_channel}')")
+            return
+
         print(f"Triggering schedule for {agent_id} on channel {channel_name}" + (f" thread {thread_name}" if thread_name else ""))
         
         try:

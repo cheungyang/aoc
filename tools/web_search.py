@@ -1,7 +1,7 @@
-import os
 from langchain_core.tools import tool
 import requests
 from core.util import format_tool_response
+from core.config import Config
 
 
 @tool
@@ -17,7 +17,7 @@ async def web_search(query: str) -> str:
     Returns:
         The search results as a JSON string.
     """
-    api_key = os.environ.get("BRAVE_API_KEY")
+    api_key = Config().brave_api_key
     if not api_key:
         return format_tool_response("web_search", payload="", errors="Error: BRAVE_API_KEY environment variable not set. Please set it to use this tool.")
 

@@ -1,6 +1,6 @@
-import os
 from core.loaders.agents_loader import AgentsLoader
 from core.runners.bot_runner import BotRunner
+from core.config import Config
 
 class BotsLoader:
     _instance = None
@@ -25,7 +25,7 @@ class BotsLoader:
             # print(f"BotsLoader: No discord_token_key defined for agent {agent_id}.")
             return None
             
-        token = os.getenv(token_key)
+        token = Config().get(token_key)
         if not token or token == "your_discord_bot_token_here":
             print(f"BotsLoader: Token key {token_key} not found or invalid in env for agent {agent_id}.")
             return None

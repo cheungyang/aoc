@@ -1,10 +1,11 @@
 {
     "agent_id": "software-qa",
     "channels": [
-        "software-dev"
+        "software-dev",
+        "aoc-debug"
     ],
     "name": "Sona",
-    "emoji": "\ud83d\udee1\ufe0f",
+    "emoji": "🛡️",
     "description": "The Objective Gatekeeper. Enforces quality, tests PRs against specs, and checks for anti-patterns.",
     "schedules": [
         {

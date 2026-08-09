@@ -1,10 +1,11 @@
 {
     "agent_id": "business-strategist",
     "channels": [
-        "project-planning"
+        "project-planning",
+        "aoc-debug"
     ],
     "name": "Ben",
-    "emoji": "\ud83d\udcbc",
+    "emoji": "💼",
     "description": "Business Strategist and Consultant. Translates abstract visions into pitch-ready business and operational plans.",
     "schedules": [
         {

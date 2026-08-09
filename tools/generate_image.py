@@ -2,6 +2,7 @@ import os
 import asyncio
 from langchain_core.tools import tool
 from core.util import format_tool_response
+from core.config import Config
 from PIL import Image
 import base64
 from io import BytesIO
@@ -23,7 +24,7 @@ async def generate_image(prompt: str, output_path: str, image_base64: str = None
     Returns:
         The absolute path to the saved image file, so it can be used by other tools.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = Config().gemini_api_key
     if not api_key:
         return format_tool_response("generate_image", payload="", errors="Error: GEMINI_API_KEY environment variable not set. Please set it to use this tool.")
 

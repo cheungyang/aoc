@@ -9,6 +9,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
 from core.agent.reaction_handler import ReactionCallbackHandler
+from core.config import Config
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):
@@ -29,6 +30,10 @@ class BotRunner:
     async def on_message(self, message):
         # Ignore messages from other bots
         if message.author.bot and message.author != self.bot.user:
+            return
+
+        # In debug mode, ignore messages outside debug_channel
+        if not Config().is_channel_allowed(message.channel):
             return
 
         content = message.content

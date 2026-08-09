@@ -4,6 +4,7 @@
   "description": "Synthesizes the past week's daily journals and git history to collaboratively identify wins, and iteratively drafts a concise 3-point focus for the upcoming week.",
   "emoji": "📅",
   "tools": {
+    "task_query": [],
     "git": {
       "pkm": [
         "pull",

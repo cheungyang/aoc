@@ -2,7 +2,9 @@
     "agent_id": "skill-runner",
     "channels": [
         "agent-management",
-        "software-dev"
+        "software-dev",
+        "aoc-debug",
+        "general"
     ],
     "name": "Skelly",
     "emoji": "💀",
@@ -26,6 +28,7 @@
     ],
     "tools": {
         "generate_image": [],
+        "task_query": [],
         "bash": [
             "python"
         ]
