@@ -44,15 +44,13 @@ class GraphBuilder:
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", channel_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", formatting_prompt),
             ]
 
-            if channel_prompt:
-                system_messages.append(("system", channel_prompt.replace("{", "{{").replace("}", "}}")))
-
-            system_messages.extend([
-                ("system", formatting_prompt),
-                MessagesPlaceholder(variable_name="messages"),
-            ])
+            # Filter out empty prompt messages (e.g. when channel_prompt is empty)
+            system_messages = [msg for msg in system_messages if msg[1]]
+            system_messages.append(MessagesPlaceholder(variable_name="messages"))
 
             prompt = ChatPromptTemplate.from_messages(system_messages)
             return prompt.format_messages(messages=state["messages"])
