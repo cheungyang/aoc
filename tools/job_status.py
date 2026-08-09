@@ -2,7 +2,7 @@ import os
 import asyncio
 import re
 from langchain_core.tools import tool
-from core.agent.job_manager import JobManager
+from core.agent.job_manager import JobManager, current_channel_name
 from core.util import format_tool_response
 from core.memory.flat_file_session_store import FlatFileSessionStore
 from tools.agent_call import agent_call
@@ -70,7 +70,8 @@ async def _job_status_async(job_id: str) -> str:
         prompt = f"Here are the AI messages from the session history. Please compile the 'steps done, % of progress, and early snippets' requested:\n\n{ai_messages_text}"
         
         try:
-            tool_res = await agent_call.ainvoke({"agent_id": "skill-runner", "prompt": prompt})
+            channel = current_channel_name.get() or "agent-management"
+            tool_res = await agent_call.ainvoke({"agent_id": "skill-runner", "prompt": prompt, "channel": channel})
             
             # Extract payload
             match = re.search(r"<payload>(.*?)</payload>", tool_res, re.DOTALL)

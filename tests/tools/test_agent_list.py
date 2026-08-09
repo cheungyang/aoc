@@ -23,17 +23,17 @@ class TestAgentListTool(unittest.TestCase):
         def get_agent_mock(agent_id):
             m = MagicMock()
             if agent_id == "main":
-                m.config = {"name": "Concierge", "emoji": "🛎️", "description": "Helper", "extra": "secret"}
+                m.config = {"name": "Concierge", "emoji": "🛎️", "description": "Helper", "channels": ["*"], "extra": "secret"}
             elif agent_id == "designer":
-                m.config = {"name": "Aki", "emoji": "🤖", "description": "Designer"}
+                m.config = {"name": "Aki", "emoji": "🤖", "description": "Designer", "channels": ["agent-management"]}
             return m
         mock_loader.get_agent.side_effect = get_agent_mock
         
         result = agent_list.func()
         
         expected_payload = [
-            {"agent_id": "main", "name": "Concierge", "emoji": "🛎️", "description": "Helper"},
-            {"agent_id": "designer", "name": "Aki", "emoji": "🤖", "description": "Designer"}
+            {"agent_id": "main", "name": "Concierge", "emoji": "🛎️", "description": "Helper", "channels": ["*"]},
+            {"agent_id": "designer", "name": "Aki", "emoji": "🤖", "description": "Designer", "channels": ["agent-management"]}
         ]
         self.assertEqual(result, format_tool_response("agent_list", payload=str(expected_payload), errors="None"))
 

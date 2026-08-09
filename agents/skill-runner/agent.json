@@ -1,10 +1,11 @@
 {
     "agent_id": "skill-runner",
     "channels": [
+        "agent-management",
         "software-dev"
     ],
     "name": "Skelly",
-    "emoji": "\ud83d\udc80",
+    "emoji": "💀",
     "description": "An empty shell test runner and chameleon. Adapts personality and tone based on the loaded skill, providing debug-style execution reporting.",
     "schedules": [
         {

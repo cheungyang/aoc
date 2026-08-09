@@ -78,7 +78,7 @@ class TestOrchestratorCron(unittest.TestCase):
         oc.main()
         
         self.assertTrue(mock_agent_call.called)
-        mock_agent_call.assert_called_with('main', 'Execute the software_orchestration skill.', run_async=True)
+        mock_agent_call.assert_called_with('main', 'Execute the software_orchestration skill.', channel='general', run_async=True)
 
     @patch.object(oc, 'check_github')
     @patch.object(oc, 'check_watchdog')

@@ -28,8 +28,8 @@ def run_job_list_tool():
         return None
     return match.group(1).strip()
 
-def run_agent_call_tool(agent_id, prompt, run_async=False):
-    output = asyncio.run(agent_call.ainvoke({"agent_id": agent_id, "prompt": prompt, "run_async": run_async}))
+def run_agent_call_tool(agent_id, prompt, channel="general", run_async=False):
+    output = asyncio.run(agent_call.ainvoke({"agent_id": agent_id, "prompt": prompt, "channel": channel, "run_async": run_async}))
     if not output:
         return None
     match = re.search(r"<payload>(.*?)</payload>", output, re.DOTALL)
@@ -117,7 +117,7 @@ def main():
     
     # Asynchronously call Concierge (id: main)
     prompt = "Execute the software_orchestration skill."
-    result = run_agent_call_tool("main", prompt, run_async=True)
+    result = run_agent_call_tool("main", prompt, channel="general", run_async=True)
     print(f"Agent call result: {result}")
     
     print("=== Orchestrator Cron Finished ===")

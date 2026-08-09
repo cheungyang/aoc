@@ -74,5 +74,59 @@ class TestBotsLoader(unittest.TestCase):
         bot = loader.get_bot("test-no-env-token")
         self.assertIsNone(bot)
 
+    def test_find_channel_found_by_name(self):
+        loader = BotsLoader()
+        
+        mock_ch = MagicMock()
+        mock_ch.name = "software-dev"
+        mock_ch.id = 12345
+        
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch]
+        
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        
+        loader._bots = {"main": mock_bot_runner}
+        
+        found = loader.find_channel("software-dev")
+        self.assertEqual(found, mock_ch)
+
+    def test_find_channel_found_by_id(self):
+        loader = BotsLoader()
+        
+        mock_ch = MagicMock()
+        mock_ch.name = "software-dev"
+        mock_ch.id = 12345
+        
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch]
+        
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        
+        loader._bots = {"main": mock_bot_runner}
+        
+        found = loader.find_channel("12345")
+        self.assertEqual(found, mock_ch)
+
+    def test_find_channel_not_found(self):
+        loader = BotsLoader()
+        
+        mock_ch = MagicMock()
+        mock_ch.name = "software-dev"
+        mock_ch.id = 12345
+        
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch]
+        
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        
+        loader._bots = {"main": mock_bot_runner}
+        
+        found = loader.find_channel("general")
+        self.assertIsNone(found)
+
 if __name__ == '__main__':
     unittest.main()

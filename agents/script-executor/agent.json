@@ -12,10 +12,7 @@
       "thread": "cronjobs",
       "cron": "0 * * * *",
       "prompt": [
-        "tool git {\"command\": \"pull\", \"path\": \"pkm\"}",
-        "tool git {\"command\": \"add -A\", \"path\": \"pkm\"}",
-        "tool git {\"command\": \"commit -m 'cron update'\", \"path\": \"pkm\"}",
-        "tool git {\"command\": \"push\", \"path\": \"pkm\"}"
+        "script git-sync.sh"
       ]
     }
   ]
