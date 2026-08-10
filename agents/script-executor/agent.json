@@ -12,8 +12,8 @@
       "thread": "cronjobs",
       "cron": "0 * * * *",
       "prompt": [
-        "script sync-git.py",
-        "script sync-tasks.py"
+        "script sync_git.py",
+        "script sync_tasks.py"
       ]
     }
   ]
