@@ -4,7 +4,7 @@ import discord
 from typing import List
 import subprocess
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import JobManager
+from core.agent.job_manager import JobManager, current_job_id, current_channel_name, current_agent_id
 from core.agent.session_manager import SessionManager
 from core.util import split_message
 
@@ -19,6 +19,11 @@ class ScriptExecutorAgent(BaseAgent):
             
         JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content)
         JobManager().update_job(job_id, "running")
+
+        channel_name = channel.name if channel and hasattr(channel, "name") else ""
+        token = current_job_id.set(job_id)
+        channel_token = current_channel_name.set(channel_name)
+        agent_token = current_agent_id.set(self.agent_id)
 
         lines = content.strip().split('\n')
         results = []
@@ -110,6 +115,10 @@ class ScriptExecutorAgent(BaseAgent):
         except Exception as e:
             JobManager().update_job(job_id, "error")
             results.append(f"Unexpected error during execution: {str(e)}")
+        finally:
+            current_job_id.reset(token)
+            current_channel_name.reset(channel_token)
+            current_agent_id.reset(agent_token)
 
         final_output = "\n".join(results)
         

@@ -108,6 +108,15 @@ class TestJobManager(unittest.TestCase):
         current_job_id.reset(token)
         self.assertIsNone(current_job_id.get())
 
-if __name__ == "__main__":
+    def test_current_agent_id(self):
+        from core.agent.job_manager import current_agent_id
+        self.assertIsNone(current_agent_id.get())
+        
+        token = current_agent_id.set("main")
+        self.assertEqual(current_agent_id.get(), "main")
+        
+        current_agent_id.reset(token)
+        self.assertIsNone(current_agent_id.get())
 
+if __name__ == "__main__":
     unittest.main()

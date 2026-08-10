@@ -1,7 +1,7 @@
 from core.util import split_message
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import current_job_id
+from core.agent.job_manager import current_job_id, current_agent_id
 import asyncio
 import os
 
@@ -100,6 +100,7 @@ class Agent(BaseAgent):
         from core.agent.job_manager import current_channel_name
         token = current_job_id.set(job_id)
         channel_token = current_channel_name.set(channel_name)
+        agent_token = current_agent_id.set(self.agent_id)
         try:
             try:
                 JobManager().update_job(job_id, "running")
@@ -135,6 +136,7 @@ class Agent(BaseAgent):
         finally:
             current_job_id.reset(token)
             current_channel_name.reset(channel_token)
+            current_agent_id.reset(agent_token)
 
         # Extract the last response message
         reply_message = result["messages"][-1]

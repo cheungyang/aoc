@@ -43,14 +43,16 @@
     "filesystem": {
       "agents/": [
         "delete",
-        "rmdir"
+        "rmdir",
+        "read"
       ],
       "pkm/agents": [
         "ls"
       ],
       "skills/": [
         "delete",
-        "rmdir"
+        "rmdir",
+        "read"
       ]
     }
   }

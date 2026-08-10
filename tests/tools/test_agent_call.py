@@ -90,6 +90,101 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Successfully triggered agent 'agent1'", result)
 
+    @patch('core.loaders.bots_loader.BotsLoader')
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('core.agent.job_manager.JobManager.new_job_id')
+    async def test_agent_call_with_caller_param(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channels": ["software-dev"]}
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.execute = AsyncMock(return_value="agent response")
+        mock_get_job_id.return_value = "job_123"
+        
+        mock_discord_channel = MagicMock()
+        mock_bots_loader.return_value.find_channel.return_value = mock_discord_channel
+        
+        result = await agent_call.ainvoke({
+            "agent_id": "agent1",
+            "prompt": "hello",
+            "channel": "software-dev",
+            "caller": "main"
+        })
+        
+        mock_agent.execute.assert_called_once_with(
+            "<caller>main</caller>\nhello",
+            source="tool",
+            job_id="job_123",
+            channel=mock_discord_channel
+        )
+        self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
+
+    @patch('core.loaders.bots_loader.BotsLoader')
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('core.agent.job_manager.JobManager.new_job_id')
+    async def test_agent_call_with_contextvar_caller(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
+        from core.agent.job_manager import current_agent_id
+        
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channels": ["software-dev"]}
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.execute = AsyncMock(return_value="agent response")
+        mock_get_job_id.return_value = "job_123"
+        
+        mock_discord_channel = MagicMock()
+        mock_bots_loader.return_value.find_channel.return_value = mock_discord_channel
+        
+        token = current_agent_id.set("software-orchestrator")
+        try:
+            result = await agent_call.ainvoke({
+                "agent_id": "agent1",
+                "prompt": "hello",
+                "channel": "software-dev"
+            })
+            
+            mock_agent.execute.assert_called_once_with(
+                "<caller>software-orchestrator</caller>\nhello",
+                source="tool",
+                job_id="job_123",
+                channel=mock_discord_channel
+            )
+            self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
+        finally:
+            current_agent_id.reset(token)
+
+    @patch('core.loaders.bots_loader.BotsLoader')
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('core.agent.job_manager.JobManager.new_job_id')
+    async def test_agent_call_does_not_duplicate_caller_tag(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channels": ["software-dev"]}
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.execute = AsyncMock(return_value="agent response")
+        mock_get_job_id.return_value = "job_123"
+        
+        mock_discord_channel = MagicMock()
+        mock_bots_loader.return_value.find_channel.return_value = mock_discord_channel
+        
+        result = await agent_call.ainvoke({
+            "agent_id": "agent1",
+            "prompt": "<caller>custom_caller</caller>\nhello",
+            "channel": "software-dev",
+            "caller": "main"
+        })
+        
+        mock_agent.execute.assert_called_once_with(
+            "<caller>custom_caller</caller>\nhello",
+            source="tool",
+            job_id="job_123",
+            channel=mock_discord_channel
+        )
+        self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
+
     async def test_missing_args(self):
         with self.assertRaises(Exception):
             await agent_call.ainvoke({"agent_id": "agent1"})
