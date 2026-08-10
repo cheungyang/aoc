@@ -1,7 +1,7 @@
 import unittest
 import os
 import tempfile
-from core.projects.parser import (
+from core.knowledge.projects.parser import (
     extract_frontmatter,
     extract_id_from_frontmatter,
     inject_frontmatter_id,

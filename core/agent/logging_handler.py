@@ -3,7 +3,7 @@ import os
 import json
 import time
 from langchain_core.callbacks import BaseCallbackHandler
-from core.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
 
 class LoggingHandler(BaseCallbackHandler):
     def __init__(self, session_id=None, role=None, human_message=None):

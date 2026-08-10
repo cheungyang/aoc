@@ -2,7 +2,7 @@ import os
 import asyncio
 from langchain_core.tools import tool
 from core.util import format_tool_response
-from core.config import Config
+from core.util.config import Config
 from PIL import Image
 import base64
 from io import BytesIO

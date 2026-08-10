@@ -108,7 +108,7 @@ class Agent(BaseAgent):
                     result = await self.graph.ainvoke(inputs, config=config)
                 except Exception as e:
                     if "tool_calls that do not have a corresponding ToolMessage" in str(e):
-                        from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+                        from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
                         FlatFileCheckpointer().delete_thread(session_id)
                         print(f"Deleted corrupt checkpointer thread for session: {session_id}, retrying...")
                         result = await self.graph.ainvoke(inputs, config=config)

@@ -1,6 +1,6 @@
 from core.loaders.agents_loader import AgentsLoader
 from core.runners.bot_runner import BotRunner
-from core.config import Config
+from core.util.config import Config
 
 class BotsLoader:
     _instance = None

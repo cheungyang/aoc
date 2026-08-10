@@ -15,7 +15,7 @@ import json
 import time
 import shutil
 
-SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
+SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sessions"))
 CHECKPOINTS_DIR = os.path.join(SESSIONS_DIR, "checkpoints")
 
 class FlatFileCheckpointer(BaseCheckpointSaver):

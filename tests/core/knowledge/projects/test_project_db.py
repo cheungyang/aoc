@@ -4,7 +4,7 @@ import os
 import shutil
 import sqlite3
 
-from core.projects.db import (
+from core.knowledge.projects.db import (
     get_connection,
     init_db,
     upsert_projects,

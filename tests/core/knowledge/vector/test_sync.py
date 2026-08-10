@@ -4,13 +4,13 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-from core.config import Config
-from core.knowledge.sync import (
+from core.util.config import Config
+from core.knowledge.vector.sync import (
     scan_knowledge_markdown_files,
     sync_knowledge,
     get_pkm_dir,
 )
-from core.knowledge.db import init_knowledge_db, get_db_connection
+from core.knowledge.vector.db import init_knowledge_db, get_db_connection
 
 
 class TestKnowledgeSync(unittest.TestCase):

@@ -41,7 +41,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
         if os.path.exists(self.session_file):
             os.remove(self.session_file)
 
-    @patch('subgraphs.coding.graph.git')
+    @patch('graphs.coding.graph.git')
     async def test_coding_subgraph_success(self, mock_git):
         # 1. Setup mock responses
         # Planner returns a single task breakdown
@@ -93,7 +93,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["completed_tasks"]), 1)
         self.assertEqual(len(result["failed_tasks"]), 0)
 
-    @patch('subgraphs.coding.graph.git')
+    @patch('graphs.coding.graph.git')
     async def test_coding_subgraph_retry_and_fail(self, mock_git):
         # Planner returns a single task
         tasks_json = json.dumps([

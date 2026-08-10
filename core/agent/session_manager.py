@@ -2,7 +2,7 @@ import os
 import glob
 import discord
 import datetime
-from core.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
 
 class SessionManager:
     _instance = None

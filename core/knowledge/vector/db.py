@@ -8,7 +8,7 @@ import pyarrow as pa
 import lancedb
 from lancedb.index import FTS
 
-from core.config import Config
+from core.util.config import Config
 
 TABLE_NAME = "vault_chunks"
 

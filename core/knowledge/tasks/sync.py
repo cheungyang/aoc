@@ -3,9 +3,9 @@ import re
 import tempfile
 from typing import Dict, Any, List, Optional, Tuple
 
-from core.tasks.parser import is_task_line, parse_task_line, extract_id
-from core.tasks.db import get_connection, init_db, upsert_tasks, prune_deleted_tasks, get_db_path
-from core.config import Config
+from core.knowledge.tasks.parser import is_task_line, parse_task_line, extract_id
+from core.knowledge.tasks.db import get_connection, init_db, upsert_tasks, prune_deleted_tasks, get_db_path
+from core.util.config import Config
 
 
 DEFAULT_PKM_DIR = os.path.expanduser("~/pkm")

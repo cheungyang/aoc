@@ -119,9 +119,9 @@ def _load_prompt_from_file(file_inputs, tag, group_desc=None):
 
 
 def get_agent_prompt(agent_id):
-    agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
+    agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
     agent_path = os.path.join(agents_dir, agent_id)
-    pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pkm", "agents", agent_id))
+    pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm", "agents", agent_id))
 
     files = {
         "AGENT": (os.path.join(agent_path, "AGENTS.md"), "Your specialization and workflow:"),

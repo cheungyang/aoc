@@ -3,12 +3,12 @@ import tempfile
 import os
 import shutil
 
-from core.projects.db import (
+from core.knowledge.projects.db import (
     get_connection,
     query_projects_db,
     get_project_by_id,
 )
-from core.projects.sync import sync_projects
+from core.knowledge.projects.sync import sync_projects
 
 
 class TestProjectSync(unittest.TestCase):

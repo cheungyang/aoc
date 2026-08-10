@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from core.config import Config
-from core.knowledge.indexer import (
+from core.util.config import Config
+from core.knowledge.vector.indexer import (
     extract_frontmatter,
     extract_inline_tags,
     extract_title,

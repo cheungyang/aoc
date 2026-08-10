@@ -4,9 +4,9 @@ import os
 import sys
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.config import Config
+from core.util.config import Config
 
 class TestConfig(unittest.TestCase):
 

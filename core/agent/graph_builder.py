@@ -2,7 +2,7 @@ import contextlib
 import os
 import json
 from langgraph.prebuilt import create_react_agent
-from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder

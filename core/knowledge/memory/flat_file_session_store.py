@@ -4,7 +4,7 @@ import time
 import shutil
 
 # Compute SESSIONS_DIR relative to this file's location
-SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
+SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sessions"))
 
 class FlatFileSessionStore:
     def __init__(self, sessions_dir=SESSIONS_DIR):
@@ -45,7 +45,7 @@ class FlatFileSessionStore:
         return f"Appended token usage to {session_id}"
 
     def archive_session(self, session_id):
-        from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+        from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
         
         file_path = self.get_file_path(session_id)
         if os.path.exists(file_path):

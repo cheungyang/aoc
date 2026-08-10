@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
 
-from core.config import Config
+from core.util.config import Config
 
 
 class GitSyncError(Exception):

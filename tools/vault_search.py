@@ -3,16 +3,16 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
-from core.knowledge.db import (
+from core.knowledge.vector.db import (
     init_knowledge_db,
     hybrid_search_vault,
     get_knowledge_db_path,
 )
-from core.knowledge.indexer import (
+from core.knowledge.vector.indexer import (
     generate_query_embedding,
     get_embedding_client,
 )
-from core.knowledge.sync import sync_knowledge
+from core.knowledge.vector.sync import sync_knowledge
 
 
 @tool

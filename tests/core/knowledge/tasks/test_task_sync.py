@@ -4,7 +4,7 @@ import os
 import shutil
 import sqlite3
 
-from core.tasks.db import (
+from core.knowledge.tasks.db import (
     get_connection,
     init_db,
     upsert_tasks,
@@ -14,7 +14,7 @@ from core.tasks.db import (
     get_task_stats,
     execute_read_sql
 )
-from core.tasks.sync import sync_tasks, process_file
+from core.knowledge.tasks.sync import sync_tasks, process_file
 
 
 class TestTaskSyncAndDb(unittest.TestCase):

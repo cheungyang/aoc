@@ -6,7 +6,7 @@ import shutil
 import json
 
 from tools.task_query import task_query
-from core.tasks.db import get_connection, init_db, upsert_tasks
+from core.knowledge.tasks.db import get_connection, init_db, upsert_tasks
 
 
 class TestTaskQueryTool(unittest.TestCase):
@@ -62,7 +62,7 @@ class TestTaskQueryTool(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
-    @patch("core.tasks.db.get_db_path")
+    @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
     def test_search_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -82,7 +82,7 @@ class TestTaskQueryTool(unittest.TestCase):
         res_query = task_query.func(agent_id="day-planner", action="search", status="all", query="MCP")
         self.assertIn("tt_001", res_query)
 
-    @patch("core.tasks.db.get_db_path")
+    @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
     def test_get_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -96,7 +96,7 @@ class TestTaskQueryTool(unittest.TestCase):
         res_inv = task_query.func(agent_id="day-planner", action="get", task_id="nonexistent")
         self.assertIn("Error: Task not found with ID 'nonexistent'", res_inv)
 
-    @patch("core.tasks.db.get_db_path")
+    @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
     def test_stats_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -105,7 +105,7 @@ class TestTaskQueryTool(unittest.TestCase):
         res = task_query.func(agent_id="day-planner", action="stats")
         self.assertIn('"total_tasks": 2', res)
 
-    @patch("core.tasks.db.get_db_path")
+    @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
     def test_sql_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path

@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 import requests
 from core.util import format_tool_response
-from core.config import Config
+from core.util.config import Config
 
 
 @tool

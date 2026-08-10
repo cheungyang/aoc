@@ -2,15 +2,15 @@ import os
 import tempfile
 from typing import Dict, Any, List, Optional, Tuple
 
-from core.projects.parser import parse_project_file
-from core.projects.db import (
+from core.knowledge.projects.parser import parse_project_file
+from core.knowledge.projects.db import (
     get_connection,
     init_db,
     upsert_projects,
     prune_deleted_projects,
     get_db_path,
 )
-from core.config import Config
+from core.util.config import Config
 
 
 def get_pkm_dir() -> str:

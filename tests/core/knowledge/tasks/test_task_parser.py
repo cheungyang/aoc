@@ -1,5 +1,5 @@
 import unittest
-from core.tasks.parser import (
+from core.knowledge.tasks.parser import (
     is_task_line,
     parse_task_line,
     clean_title,

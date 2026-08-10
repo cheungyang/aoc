@@ -4,7 +4,7 @@ import re
 from langchain_core.tools import tool
 from core.agent.job_manager import JobManager, current_channel_name
 from core.util import format_tool_response
-from core.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
 from tools.agent_call import agent_call
 
 @tool

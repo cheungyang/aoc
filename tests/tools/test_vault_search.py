@@ -6,12 +6,12 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from tools.vault_search import vault_search
-from core.knowledge.db import (
+from core.knowledge.vector.db import (
     get_db_connection,
     init_knowledge_db,
     upsert_chunks,
 )
-from core.config import Config
+from core.util.config import Config
 
 
 class TestVaultSearchTool(unittest.TestCase):

@@ -6,9 +6,9 @@ import sys
 from unittest.mock import patch
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
 
 class TestFlatFileCheckpointer(unittest.TestCase):
     def setUp(self):

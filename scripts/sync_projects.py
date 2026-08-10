@@ -15,8 +15,8 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.projects.sync import sync_projects, get_pkm_dir, get_projects_dir
-from core.projects.db import get_db_path
+from core.knowledge.projects.sync import sync_projects, get_pkm_dir, get_projects_dir
+from core.knowledge.projects.db import get_db_path
 
 
 def parse_args():

@@ -5,7 +5,7 @@ from core.loaders.agents_loader import AgentsLoader
 from core.loaders.bots_loader import BotsLoader
 from core.util import split_message
 from core.agent.session_manager import SessionManager
-from core.config import Config
+from core.util.config import Config
 
 class ScheduleRunner:
     def __init__(self):

@@ -274,7 +274,7 @@ class Config:
     def codebase_dir(self) -> str:
         if self._codebase_dir is not None:
             return self._codebase_dir
-        return os.getenv("CODEBASE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+        return os.getenv("CODEBASE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
     @codebase_dir.setter
     def codebase_dir(self, value):

@@ -26,8 +26,8 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.sync.git_sync import sync_all, GitSyncConflictError, GitSyncError
-from core.config import Config
+from core.util.git_sync import sync_all, GitSyncConflictError, GitSyncError
+from core.util.config import Config
 
 
 def parse_args():

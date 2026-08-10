@@ -66,7 +66,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             await agent.execute("hello", "session1")
 
     @patch('core.agent.agent.LoggingHandler')
-    @patch('core.memory.flat_file_checkpointer.FlatFileCheckpointer.delete_thread')
+    @patch('core.knowledge.memory.flat_file_checkpointer.FlatFileCheckpointer.delete_thread')
     async def test_execute_retry_on_corrupt_checkpointer(self, mock_delete_thread, mock_logging_handler_class):
         # Graph invoke throws corrupt checkpointer exception on first call, succeeds on second
         mock_graph = MagicMock()

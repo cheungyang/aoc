@@ -7,7 +7,7 @@ import unittest
 import subprocess
 from unittest.mock import patch, MagicMock
 
-from core.sync.git_sync import (
+from core.util.git_sync import (
     is_git_repo,
     get_current_branch,
     get_uncommitted_files,
@@ -155,9 +155,9 @@ class TestGitSync(unittest.TestCase):
     def test_unresolvable_conflict_error_reporting(self):
         """Test that unresolvable conflicts abort merge and produce structured error message with files."""
         # Create a mock failure in resolve_conflicts_with_theirs
-        with patch("core.sync.git_sync.get_unmerged_files", return_value=["conflicted_file_1.md", "conflicted_file_2.md"]), \
-             patch("core.sync.git_sync.resolve_conflicts_with_theirs", return_value=(False, ["conflicted_file_1.md", "conflicted_file_2.md"])), \
-             patch("core.sync.git_sync.run_git_cmd") as mock_git:
+        with patch("core.util.git_sync.get_unmerged_files", return_value=["conflicted_file_1.md", "conflicted_file_2.md"]), \
+             patch("core.util.git_sync.resolve_conflicts_with_theirs", return_value=(False, ["conflicted_file_1.md", "conflicted_file_2.md"])), \
+             patch("core.util.git_sync.run_git_cmd") as mock_git:
             
             # Setup mock git return for merge failing
             def git_side_effect(args, cwd=None, **kwargs):

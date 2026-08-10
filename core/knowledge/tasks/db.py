@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
 
-from core.config import Config
+from core.util.config import Config
 
 DEFAULT_DB_PATH = os.path.expanduser("~/pkm/tasks.db")
 
@@ -281,7 +281,7 @@ def query_tasks_db(
         where_clauses.append("priority = ?")
         params.append(priority)
 
-    from core.tasks.parser import PRIORITY_MAP
+    from core.knowledge.tasks.parser import PRIORITY_MAP
     if min_priority and min_priority in PRIORITY_MAP:
         max_rank = PRIORITY_MAP[min_priority]
         where_clauses.append("priority_rank <= ?")

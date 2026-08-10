@@ -9,7 +9,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
 from core.agent.reaction_handler import ReactionCallbackHandler
-from core.config import Config
+from core.util.config import Config
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):

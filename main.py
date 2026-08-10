@@ -1,7 +1,7 @@
 import sys
 import argparse
 import asyncio
-from core.config import Config
+from core.util.config import Config
 from core.loaders.bots_loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.runners.schedule_runner import ScheduleRunner

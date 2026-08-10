@@ -6,7 +6,7 @@ import json
 from unittest.mock import patch
 
 from tools.project_query import project_query
-from core.projects.db import get_connection, init_db, upsert_projects
+from core.knowledge.projects.db import get_connection, init_db, upsert_projects
 
 
 class TestProjectQueryTool(unittest.TestCase):
@@ -69,7 +69,7 @@ class TestProjectQueryTool(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
-    @patch("core.projects.db.get_db_path")
+    @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
     def test_search_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -100,7 +100,7 @@ class TestProjectQueryTool(unittest.TestCase):
         )
         self.assertIn("Alpha Project", resp_year)
 
-    @patch("core.projects.db.get_db_path")
+    @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
     def test_get_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -122,7 +122,7 @@ class TestProjectQueryTool(unittest.TestCase):
         )
         self.assertIn("Error: Project not found", resp_nf)
 
-    @patch("core.projects.db.get_db_path")
+    @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
     def test_stats_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path
@@ -134,7 +134,7 @@ class TestProjectQueryTool(unittest.TestCase):
         )
         self.assertIn('"total_projects": 2', resp)
 
-    @patch("core.projects.db.get_db_path")
+    @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
     def test_sql_action(self, mock_db_path1, mock_db_path2):
         mock_db_path1.return_value = self.db_path

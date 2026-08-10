@@ -2,8 +2,8 @@ import os
 import shutil
 import tempfile
 import unittest
-from core.config import Config
-from core.knowledge.db import (
+from core.util.config import Config
+from core.knowledge.vector.db import (
     get_knowledge_db_path,
     get_db_connection,
     init_knowledge_db,

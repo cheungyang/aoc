@@ -35,15 +35,15 @@ class SubgraphsLoader:
         return metadata
 
     def load_subgraphs(self):
-        subgraphs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "subgraphs"))
-        if not os.path.exists(subgraphs_dir):
-            os.makedirs(subgraphs_dir)
+        graphs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "graphs"))
+        if not os.path.exists(graphs_dir):
+            os.makedirs(graphs_dir)
             return
 
         current_names = set()
 
-        for item in os.listdir(subgraphs_dir):
-            item_path = os.path.join(subgraphs_dir, item)
+        for item in os.listdir(graphs_dir):
+            item_path = os.path.join(graphs_dir, item)
             if os.path.isdir(item_path) and not item.startswith("__") and not item.startswith("."):
                 graph_py_path = os.path.join(item_path, "graph.py")
                 graph_md_path = os.path.join(item_path, "GRAPH.md")
@@ -65,12 +65,12 @@ class SubgraphsLoader:
                             cached.get("md_mtime") != md_mtime):
                             
                             # Load compiled graph from graph.py
-                            spec = importlib.util.spec_from_file_location(f"subgraphs.{item}.graph", graph_py_path)
+                            spec = importlib.util.spec_from_file_location(f"graphs.{item}.graph", graph_py_path)
                             if spec is None or spec.loader is None:
                                 continue
                             import sys
                             module = importlib.util.module_from_spec(spec)
-                            sys.modules[f"subgraphs.{item}.graph"] = module
+                            sys.modules[f"graphs.{item}.graph"] = module
                             spec.loader.exec_module(module)
                             
                             graph_obj = getattr(module, "graph", None)

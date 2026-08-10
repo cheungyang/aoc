@@ -5,7 +5,7 @@ import yaml
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 
-# Priority mappings (matching core.tasks)
+# Priority mappings (matching core.knowledge.tasks)
 PRIORITY_MAP = {
     "🔺": 1,
     "⏫": 2,

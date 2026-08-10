@@ -1,8 +1,8 @@
 import os
 from typing import Dict, Any, List, Optional, Tuple
 
-from core.config import Config
-from core.knowledge.db import (
+from core.util.config import Config
+from core.knowledge.vector.db import (
     init_knowledge_db,
     upsert_chunks,
     prune_deleted_files,
@@ -10,7 +10,7 @@ from core.knowledge.db import (
     get_knowledge_db_path,
     build_fts_index,
 )
-from core.knowledge.indexer import (
+from core.knowledge.vector.indexer import (
     split_markdown_into_chunks,
     generate_embeddings,
     get_embedding_client,

@@ -2,7 +2,7 @@ import time
 from langchain_core.tools import tool
 from core.agent.job_manager import JobManager
 from core.util import format_tool_response
-from core.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
 
 @tool
 def job_kill(job_id: str) -> str:

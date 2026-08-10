@@ -33,7 +33,7 @@ if 'discord' not in sys.modules:
 
 import discord
 from core.runners.bot_runner import BotRunner
-from core.config import Config
+from core.util.config import Config
 
 class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
 

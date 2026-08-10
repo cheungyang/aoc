@@ -7,10 +7,10 @@ import sys
 import json
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.memory.flat_file_session_store import FlatFileSessionStore
-from core.memory import flat_file_checkpointer
+from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory import flat_file_checkpointer
 
 class TestFlatFileSessionStore(unittest.TestCase):
     def setUp(self):
@@ -41,7 +41,7 @@ class TestFlatFileSessionStore(unittest.TestCase):
                 parsed = json.loads(line)
                 self.assertIn("from", parsed)
 
-    @patch('core.memory.flat_file_checkpointer.FlatFileCheckpointer')
+    @patch('core.knowledge.memory.flat_file_checkpointer.FlatFileCheckpointer')
     def test_archive_session(self, mock_saver_class):
         # Setup mock saver
         mock_saver = mock_saver_class.return_value
@@ -83,7 +83,7 @@ class TestFlatFileSessionStore(unittest.TestCase):
             self.assertEqual(parsed["output_token"], 50)
             self.assertEqual(parsed["cached_token"], 20.0)
 
-    @patch('core.memory.flat_file_checkpointer.FlatFileCheckpointer')
+    @patch('core.knowledge.memory.flat_file_checkpointer.FlatFileCheckpointer')
     def test_archive_session_with_token_file(self, mock_saver_class):
         mock_saver = mock_saver_class.return_value
         

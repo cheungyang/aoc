@@ -4,7 +4,7 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
-from core.tasks.db import (
+from core.knowledge.tasks.db import (
     get_connection,
     init_db,
     query_tasks_db,
@@ -13,7 +13,7 @@ from core.tasks.db import (
     execute_read_sql,
     get_db_path,
 )
-from core.tasks.sync import sync_tasks
+from core.knowledge.tasks.sync import sync_tasks
 
 
 @tool
