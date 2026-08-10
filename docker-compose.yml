@@ -1,0 +1,30 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: langgraph-app:latest
+    container_name: langgraph-system
+    restart: unless-stopped
+    stdin_open: true # Equivalent to -i
+    tty: true        # Equivalent to -t
+    init: true       # Proper signal forwarding and zombie reaping
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Default PKM paths inside the container (can be overridden via .env)
+      - PKM_DIR=${PKM_DIR:-/home/appuser/pkm}
+      - TASKS_DB_PATH=${TASKS_DB_PATH:-/home/appuser/pkm/tasks.db}
+    volumes:
+      # Project directory mount for hot-reloading and live code edits
+      - .:/app
+      # Host SSH keys mounted read-only; copied to ~/.ssh by entrypoint with secure permissions
+      - ${HOME}/.ssh:/mnt/.ssh:ro
+      # Gogcli config mount for Google Calendar integration
+      - ${HOME}/.config/gogcli:/home/appuser/.config/gogcli
+      # PKM storage directory mount
+      - ${HOME}/pkm:/home/appuser/pkm
+    ports:
+      # Chrome remote debugging port for visual AI browser automation (optional)
+      - "9222:9222"

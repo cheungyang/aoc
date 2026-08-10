@@ -9,18 +9,56 @@ This guide explains how to set up and run the LangGraph system in a Docker conta
 
 ## Files Created
 
-- `Dockerfile`: Defines the container environment.
+- `docker-compose.yml`: Docker Compose configuration for launching the system as a managed service.
+- `Dockerfile`: Defines the container environment (Python 3.11, Chromium, Playwright, gogcli, gh CLI, nlm).
+- `.dockerignore`: Excludes local caches, `.venv`, and artifacts from the build context.
 - `entrypoint.sh`: Handles copying SSH keys and setting permissions inside the container.
-- `install.sh`: A helper script to run the container with correct volume mounts.
+- `install.sh`: A helper script to run the container directly with `docker run`.
 
-## Steps
+---
+
+## Running with Docker Compose (Recommended)
+
+### 1. Build and Start the Service
+
+Make sure your `.env` file is configured in the root directory, then run:
+
+```bash
+docker compose up --build -d
+```
+
+### 2. View Live Logs
+
+```bash
+docker compose logs -f app
+```
+
+### 3. Stop the Service
+
+```bash
+docker compose down
+```
+
+### 4. Run Interactive Shell or One-Off Commands
+
+```bash
+# Open an interactive bash shell inside the container
+docker compose exec app bash
+
+# Run debug mode or tests inside the container
+docker compose exec app python main.py --debug
+```
+
+---
+
+## Alternative: Running with Helper Script (`install.sh`)
 
 ### 1. Build the Docker Image
 
 Navigate to the root directory of the project (where the `Dockerfile` is located) and run:
 
 ```bash
-docker build -t langgraph-app .
+docker build -t aoc .
 ```
 
 ### 2. Prepare Configuration Files
@@ -29,25 +67,22 @@ Ensure you have the following files/directories on your host machine if you want
 - `.env` file in the project root.
 - SSH keys in `~/.ssh` (to allow git operations inside the container).
 - `gogcli` config files in `~/.config/gogcli`.
+- PKM directory in `~/pkm` (if using PKM tasks/vaults).
 
 ### 3. Run the Container
 
-You can use the provided `install.sh` script to run the container. Make it executable first if it isn't:
+You can use the provided `install.sh` script:
 
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-The script will automatically:
-- Mount the current project directory to `/app` in the container.
-- Pass the `.env` file if it exists.
-- Mount your host's `~/.ssh` to `/mnt/.ssh` in the container, where `entrypoint.sh` will copy them to the container user's home and fix permissions.
-- Mount `~/.config/gogcli` to `/home/appuser/.config/gogcli`.
+---
 
-### 4. Editing Files
+## Live Code Editing
 
-Since the project directory is mounted as a volume (`-v "$(pwd)":/app`), any edits you make to the files on your host machine will be immediately reflected inside the Docker instance. You do not need to enter the Docker instance to make code changes.
+Since the project directory is mounted as a volume (`.:/app` in `docker-compose.yml` or `-v "$(pwd)":/app`), any edits you make to the files on your host machine are immediately reflected inside the running Docker container without needing a rebuild.
 
 ## LangSmith Observability & Tracing
 

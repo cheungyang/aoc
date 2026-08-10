@@ -25,6 +25,7 @@ class Config:
             cls._instance._anthropic_api_key = None
             cls._instance._tasks_db_path = None
             cls._instance._pkm_dir = None
+            cls._instance._codebase_dir = None
             cls._instance.load_from_env()
         return cls._instance
 
@@ -43,6 +44,7 @@ class Config:
         self._anthropic_api_key = None
         self._tasks_db_path = None
         self._pkm_dir = None
+        self._codebase_dir = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Generic access to environment variables via the central Config."""
@@ -202,6 +204,16 @@ class Config:
     def pkm_dir(self, value):
         self._pkm_dir = str(value) if value is not None else None
 
+    @property
+    def codebase_dir(self) -> str:
+        if self._codebase_dir is not None:
+            return self._codebase_dir
+        return os.getenv("CODEBASE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+    @codebase_dir.setter
+    def codebase_dir(self, value):
+        self._codebase_dir = str(value) if value is not None else None
+
     # -------------------------------------------------------------------------
     # Channel Filtering Logic
     # -------------------------------------------------------------------------
@@ -262,6 +274,7 @@ class Config:
         self._anthropic_api_key = None
         self._tasks_db_path = None
         self._pkm_dir = None
+        self._codebase_dir = None
         self.load_from_env()
 
 

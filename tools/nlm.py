@@ -14,6 +14,7 @@ def nlm(command: str) -> str:
     - source add <notebook_id> --url "https://example.com"
     """
     # Resolve path to nlm binary
+    import shutil
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     nlm_bin_workspace = os.path.join(workspace_root, "bin", "nlm")
     nlm_bin_user = os.path.expanduser("~/.local/bin/nlm")
@@ -22,8 +23,11 @@ def nlm(command: str) -> str:
         nlm_bin = nlm_bin_workspace
     elif os.path.exists(nlm_bin_user):
         nlm_bin = nlm_bin_user
+    elif shutil.which("nlm"):
+        nlm_bin = shutil.which("nlm")
     else:
-        return format_tool_response("nlm", payload="", errors=f"Error: nlm binary not found at {nlm_bin_workspace} or {nlm_bin_user}. Please ensure it is installed.")
+        return format_tool_response("nlm", payload="", errors=f"Error: nlm binary not found at {nlm_bin_workspace}, {nlm_bin_user}, or in PATH. Please ensure it is installed.")
+
 
     try:
         # Split command safely
