@@ -69,4 +69,4 @@ Compile the findings and finalize the execution using the strict XML structure b
 - `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.
 - `project_query`: Required to query active projects efficiently.
 - `task_query`: Required to query pending tasks efficiently.
-- `obsidian`: Permitted ONLY to perform `read` and `file_search` actions on journals, or `read` on specific target paths.
+- `obsidian`: Permitted ONLY to perform `read` actions on journals or specific target paths.

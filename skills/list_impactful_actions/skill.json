@@ -15,8 +15,7 @@
         "read"
       ],
       "pkm/vault/journals": [
-        "read",
-        "file_search"
+        "read"
       ]
     }
   }

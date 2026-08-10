@@ -5,6 +5,7 @@
   "emoji": "📅",
   "tools": {
     "task_query": [],
+    "project_query": [],
     "git": {
       "pkm": [
         "pull",
@@ -15,8 +16,7 @@
     },
     "obsidian": {
       "pkm/vault": [
-        "read",
-        "file_search"
+        "read"
       ],
       "pkm/vault/journals/weekly": [
         "write",
@@ -25,8 +25,7 @@
         "delete"
       ],
       "pkm/templates": [
-        "read",
-        "file_search"
+        "read"
       ]
     }
   }

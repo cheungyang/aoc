@@ -26,7 +26,7 @@ Always ensure the local vault is up to date before making changes.
 3. **DO NOT PROCEED** until the user reviews, provides input, and gives explicit approval for the final list of wins.
 
 ### Phase 3: Project Forward & HUMAN HOLD POINT
-1. Determine the active projects by checking `vault/projects` (excluding paused/done).
+1. Determine the active projects by executing a `project_query` tool call (using `action="search"` and filtering for active statuses like `executing` or `planning`). Ensure you exclude paused or discontinued projects.
 2. Draft a short, concise 3-point list for `##🌱 Next week's focus`.
 3. **STOP INSTRUCTION**: Halt execution. Present the draft focus to the user.
 4. **DO NOT PROCEED** until you and the user finalize the 3 points in multiple round-trips. Wait for explicit final approval.
@@ -62,4 +62,5 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
 
 ## Required Tools
 - `git`: Required to `pull`, `log`, `add`, and `push` the `pkm` repository.
+- `project_query`: Required to retrieve active projects.
 - `obsidian`: Required to `read` fleeting notes and templates, and `write` the new weekly journal in the vault.

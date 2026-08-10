@@ -1,36 +1,35 @@
 {
-    "agent_id": "software-planner",
-    "channels": [
-        "software-dev",
-        "aoc-debug"
-    ],
-    "name": "Sophie",
-    "emoji": "📐",
-    "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
-    "schedules": [
-        {
-            "channel": "general",
-            "thread": "cronjobs",
-            "cron": "0 23 * * *",
-            "prompt": "Use the dream skill to refine your memory"
-        }
-    ],
-    "tools": {
-        "obsidian": {
-            "pkm/wiki": [
-                "read",
-                "file_search",
-                "read_image",
-                "write",
-                "overwrite",
-                "append",
-                "delete"
-            ]
-        },
-        "gh": {}
+  "agent_id": "software-planner",
+  "channels": [
+    "software-dev",
+    "aoc-debug"
+  ],
+  "name": "Sophie",
+  "emoji": "📐",
+  "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
+  "schedules": [
+    {
+      "channel": "general",
+      "thread": "cronjobs",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
+  "tools": {
+    "obsidian": {
+      "pkm/wiki": [
+        "read",
+        "read_image",
+        "write",
+        "overwrite",
+        "append",
+        "delete"
+      ]
     },
-    "skills": [
-        "memory",
-        "dream"
-    ]
+    "gh": {}
+  },
+  "skills": [
+    "memory",
+    "dream"
+  ]
 }
