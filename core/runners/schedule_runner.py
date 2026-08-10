@@ -91,7 +91,9 @@ class ScheduleRunner:
                 if channel_name in a.get_config("channel_hosts", []):
                     owner_agent_id = aid
                     break
-            channel = self.bots_loader.get_channel(owner_agent_id)
+            channel = self.bots_loader.get_channel(owner_agent_id, channel_name)
+            if channel is None:
+                channel = self.bots_loader.find_channel(channel_name)
             
             if channel is None:
                 print(f"Channel {channel_name} not found for agent {agent_id}")

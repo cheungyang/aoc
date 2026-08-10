@@ -195,5 +195,47 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
             
         mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
 
+    @patch('core.runners.schedule_runner.AgentsLoader')
+    @patch('core.runners.schedule_runner.BotsLoader')
+    @patch('core.runners.schedule_runner.croniter')
+    async def test_execute_schedule_passes_channel_name_to_get_channel(self, mock_croniter, mock_bots_loader, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["main", "day-planner"]
+        
+        mock_main_agent = MagicMock()
+        mock_main_agent.config = {
+            "channel_hosts": ["general", "day-planning"]
+        }
+        mock_main_agent.get_config = MagicMock(side_effect=lambda key, default=None: mock_main_agent.config.get(key, default))
+        
+        mock_day_planner = MagicMock()
+        mock_day_planner.config = {
+            "schedules": [
+                {"cron": "0 6 * * *", "prompt": "Provide your daily update", "enabled": "true", "channel": "day-planning"}
+            ]
+        }
+        mock_day_planner.get_config = MagicMock(side_effect=lambda key, default=None: mock_day_planner.config.get(key, default))
+        mock_day_planner.execute = AsyncMock(return_value="response")
+        
+        mock_loader.get_agent.side_effect = lambda aid: mock_main_agent if aid == "main" else mock_day_planner
+        
+        mock_bots = MagicMock()
+        mock_bots_loader.return_value = mock_bots
+        
+        mock_target_channel = MagicMock()
+        mock_target_channel.name = "day-planning"
+        mock_bots.get_channel.return_value = mock_target_channel
+        
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        
+        runner = ScheduleRunner()
+        await runner._execute_schedule(runner.schedules[0])
+        
+        mock_bots.get_channel.assert_called_once_with("main", "day-planning")
+        mock_day_planner.execute.assert_called_once_with("Provide your daily update", channel=mock_target_channel, role="user", source="scheduled")
+
 if __name__ == '__main__':
     unittest.main()

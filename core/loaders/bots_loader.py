@@ -35,7 +35,7 @@ class BotsLoader:
         self._bots[agent_id] = bot
         return bot
 
-    def get_channel(self, agent_id):
+    def get_channel(self, agent_id, channel_name: str = None):
         bot_runner = self.get_bot(agent_id)
         if bot_runner and bot_runner.bot:
             loader = AgentsLoader()
@@ -44,8 +44,12 @@ class BotsLoader:
             
             for guild in bot_runner.bot.guilds:
                 for ch in guild.text_channels:
-                    if ch.name in channel_hosts or str(ch.id) in channel_hosts:
-                        return ch
+                    if channel_name:
+                        if (ch.name == channel_name or str(ch.id) == channel_name) and (ch.name in channel_hosts or str(ch.id) in channel_hosts):
+                            return ch
+                    else:
+                        if ch.name in channel_hosts or str(ch.id) in channel_hosts:
+                            return ch
         return None
 
     def find_channel(self, channel_name: str):

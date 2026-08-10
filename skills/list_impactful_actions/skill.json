@@ -1,19 +1,18 @@
 {
   "name": "List Impactful Actions",
-  "description": "Navigate the user's personal vault to identify the most impactful tasks and projects to facilitate daily/weekly planning.",
+  "description": "Navigate the user's databases and vault to identify the most impactful tasks and projects to facilitate daily/weekly planning.",
   "emoji": "🎯",
   "skill_id": "list_impactful_actions",
   "tools": {
     "git": [],
     "task_query": [],
+    "project_query": [],
     "obsidian": {
       "pkm/vault/projects": [
-        "read",
-        "file_search"
+        "read"
       ],
       "pkm/ticktick": [
-        "read",
-        "file_search"
+        "read"
       ],
       "pkm/vault/journals": [
         "read",

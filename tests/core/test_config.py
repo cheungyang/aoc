@@ -234,6 +234,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.openai_api_key, "")
             self.assertEqual(self.config.anthropic_api_key, "")
             self.assertEqual(self.config.tasks_db_path, os.path.expanduser("~/pkm/tasks.db"))
+            self.assertEqual(self.config.projects_db_path, os.path.expanduser("~/pkm/projects.db"))
+            self.assertEqual(self.config.projects_dir, os.path.join(os.path.expanduser("~/pkm"), "vault", "projects"))
             self.assertEqual(self.config.knowledge_db_path, os.path.expanduser("~/pkm/.lancedb"))
             self.assertEqual(self.config.embedding_model, "text-embedding-3-small")
             self.assertEqual(self.config.embedding_dimensions, 1536)
@@ -255,6 +257,12 @@ class TestConfig(unittest.TestCase):
         self.config.tasks_db_path = "/custom/path/tasks.db"
         self.assertEqual(self.config.tasks_db_path, "/custom/path/tasks.db")
 
+        self.config.projects_db_path = "/custom/path/projects.db"
+        self.assertEqual(self.config.projects_db_path, "/custom/path/projects.db")
+
+        self.config.projects_dir = "/custom/path/vault/projects"
+        self.assertEqual(self.config.projects_dir, "/custom/path/vault/projects")
+
         self.config.knowledge_db_path = "/custom/path/.lancedb"
         self.assertEqual(self.config.knowledge_db_path, "/custom/path/.lancedb")
 
@@ -274,6 +282,8 @@ class TestConfig(unittest.TestCase):
             "OPENAI_API_KEY": "env_openai_key",
             "ANTHROPIC_API_KEY": "env_anthropic_key",
             "TASKS_DB_PATH": "/env/tasks.db",
+            "PROJECTS_DB_PATH": "/env/projects.db",
+            "PROJECTS_DIR": "/env/projects",
             "KNOWLEDGE_DB_PATH": "/env/.lancedb",
             "EMBEDDING_MODEL": "bge-m3",
             "EMBEDDING_DIMENSIONS": "1024",
@@ -285,6 +295,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.openai_api_key, "env_openai_key")
             self.assertEqual(self.config.anthropic_api_key, "env_anthropic_key")
             self.assertEqual(self.config.tasks_db_path, "/env/tasks.db")
+            self.assertEqual(self.config.projects_db_path, "/env/projects.db")
+            self.assertEqual(self.config.projects_dir, "/env/projects")
             self.assertEqual(self.config.knowledge_db_path, "/env/.lancedb")
             self.assertEqual(self.config.embedding_model, "bge-m3")
             self.assertEqual(self.config.embedding_dimensions, 1024)

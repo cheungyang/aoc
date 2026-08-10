@@ -4,7 +4,7 @@ import os
 import sys
 
 # Inject root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.loaders.bots_loader import BotsLoader
 
@@ -127,6 +127,67 @@ class TestBotsLoader(unittest.TestCase):
         
         found = loader.find_channel("general")
         self.assertIsNone(found)
+
+    @patch('core.loaders.bots_loader.AgentsLoader')
+    def test_get_channel_multiple_hosts_resolves_correct_channel(self, mock_agents_loader):
+        loader = BotsLoader()
+        
+        mock_agents = MagicMock()
+        mock_agents_loader.return_value = mock_agents
+        
+        mock_agent = MagicMock()
+        mock_agent.get_config.return_value = ["general", "day-planning"]
+        mock_agents.get_agent.return_value = mock_agent
+        
+        mock_ch_general = MagicMock()
+        mock_ch_general.name = "general"
+        mock_ch_general.id = 111
+        
+        mock_ch_day_planning = MagicMock()
+        mock_ch_day_planning.name = "day-planning"
+        mock_ch_day_planning.id = 222
+        
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch_general, mock_ch_day_planning]
+        
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        
+        loader._bots = {"main": mock_bot_runner}
+        
+        # When requesting day-planning channel for main agent:
+        found = loader.get_channel("main", channel_name="day-planning")
+        self.assertEqual(found, mock_ch_day_planning)
+
+    @patch('core.loaders.bots_loader.AgentsLoader')
+    def test_get_channel_by_id(self, mock_agents_loader):
+        loader = BotsLoader()
+        
+        mock_agents = MagicMock()
+        mock_agents_loader.return_value = mock_agents
+        
+        mock_agent = MagicMock()
+        mock_agent.get_config.return_value = ["general", "222"]
+        mock_agents.get_agent.return_value = mock_agent
+        
+        mock_ch_general = MagicMock()
+        mock_ch_general.name = "general"
+        mock_ch_general.id = 111
+        
+        mock_ch_day_planning = MagicMock()
+        mock_ch_day_planning.name = "day-planning"
+        mock_ch_day_planning.id = 222
+        
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch_general, mock_ch_day_planning]
+        
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        
+        loader._bots = {"main": mock_bot_runner}
+        
+        found = loader.get_channel("main", channel_name="222")
+        self.assertEqual(found, mock_ch_day_planning)
 
 if __name__ == '__main__':
     unittest.main()

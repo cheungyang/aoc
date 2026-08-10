@@ -24,6 +24,8 @@ class Config:
             cls._instance._openai_api_key = None
             cls._instance._anthropic_api_key = None
             cls._instance._tasks_db_path = None
+            cls._instance._projects_db_path = None
+            cls._instance._projects_dir = None
             cls._instance._knowledge_db_path = None
             cls._instance._embedding_model = None
             cls._instance._embedding_dimensions = None
@@ -46,6 +48,8 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._tasks_db_path = None
+        self._projects_db_path = None
+        self._projects_dir = None
         self._knowledge_db_path = None
         self._embedding_model = None
         self._embedding_dimensions = None
@@ -201,6 +205,26 @@ class Config:
         self._tasks_db_path = str(value) if value is not None else None
 
     @property
+    def projects_db_path(self) -> str:
+        if self._projects_db_path is not None:
+            return self._projects_db_path
+        return os.getenv("PROJECTS_DB_PATH", os.path.expanduser("~/pkm/projects.db"))
+
+    @projects_db_path.setter
+    def projects_db_path(self, value):
+        self._projects_db_path = str(value) if value is not None else None
+
+    @property
+    def projects_dir(self) -> str:
+        if self._projects_dir is not None:
+            return self._projects_dir
+        return os.getenv("PROJECTS_DIR", os.path.join(self.pkm_dir, "vault", "projects"))
+
+    @projects_dir.setter
+    def projects_dir(self, value):
+        self._projects_dir = str(value) if value is not None else None
+
+    @property
     def knowledge_db_path(self) -> str:
         if self._knowledge_db_path is not None:
             return self._knowledge_db_path
@@ -315,6 +339,8 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._tasks_db_path = None
+        self._projects_db_path = None
+        self._projects_dir = None
         self._knowledge_db_path = None
         self._embedding_model = None
         self._embedding_dimensions = None
