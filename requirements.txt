@@ -10,3 +10,6 @@ langsmith>=0.1.0
 playwright
 pytest
 python-dotenv
+lancedb
+tantivy
+pyarrow

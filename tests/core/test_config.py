@@ -234,6 +234,9 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.openai_api_key, "")
             self.assertEqual(self.config.anthropic_api_key, "")
             self.assertEqual(self.config.tasks_db_path, os.path.expanduser("~/pkm/tasks.db"))
+            self.assertEqual(self.config.knowledge_db_path, os.path.expanduser("~/pkm/.lancedb"))
+            self.assertEqual(self.config.embedding_model, "text-embedding-3-small")
+            self.assertEqual(self.config.embedding_dimensions, 1536)
             self.assertEqual(self.config.pkm_dir, os.path.expanduser("~/pkm"))
 
         # Programmatic setters
@@ -252,6 +255,15 @@ class TestConfig(unittest.TestCase):
         self.config.tasks_db_path = "/custom/path/tasks.db"
         self.assertEqual(self.config.tasks_db_path, "/custom/path/tasks.db")
 
+        self.config.knowledge_db_path = "/custom/path/.lancedb"
+        self.assertEqual(self.config.knowledge_db_path, "/custom/path/.lancedb")
+
+        self.config.embedding_model = "text-embedding-3-large"
+        self.assertEqual(self.config.embedding_model, "text-embedding-3-large")
+
+        self.config.embedding_dimensions = 3072
+        self.assertEqual(self.config.embedding_dimensions, 3072)
+
         self.config.pkm_dir = "/custom/pkm"
         self.assertEqual(self.config.pkm_dir, "/custom/pkm")
 
@@ -262,6 +274,9 @@ class TestConfig(unittest.TestCase):
             "OPENAI_API_KEY": "env_openai_key",
             "ANTHROPIC_API_KEY": "env_anthropic_key",
             "TASKS_DB_PATH": "/env/tasks.db",
+            "KNOWLEDGE_DB_PATH": "/env/.lancedb",
+            "EMBEDDING_MODEL": "bge-m3",
+            "EMBEDDING_DIMENSIONS": "1024",
             "PKM_DIR": "/env/pkm"
         }, clear=True):
             self.config.reset()
@@ -270,6 +285,9 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.openai_api_key, "env_openai_key")
             self.assertEqual(self.config.anthropic_api_key, "env_anthropic_key")
             self.assertEqual(self.config.tasks_db_path, "/env/tasks.db")
+            self.assertEqual(self.config.knowledge_db_path, "/env/.lancedb")
+            self.assertEqual(self.config.embedding_model, "bge-m3")
+            self.assertEqual(self.config.embedding_dimensions, 1024)
             self.assertEqual(self.config.pkm_dir, "/env/pkm")
 
 

@@ -83,6 +83,10 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         agent = loader.get_agent("script-executor")
         self.assertIsInstance(agent, ScriptExecutorAgent)
+        schedules = agent.config.get("schedules", [])
+        self.assertTrue(len(schedules) > 0)
+        prompts = schedules[0].get("prompt", [])
+        self.assertIn("script sync_knowledge.py", prompts)
 
     @patch('subprocess.run')
     @patch('core.agent.script_executor_agent.JobManager')

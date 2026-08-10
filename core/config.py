@@ -24,6 +24,9 @@ class Config:
             cls._instance._openai_api_key = None
             cls._instance._anthropic_api_key = None
             cls._instance._tasks_db_path = None
+            cls._instance._knowledge_db_path = None
+            cls._instance._embedding_model = None
+            cls._instance._embedding_dimensions = None
             cls._instance._pkm_dir = None
             cls._instance._codebase_dir = None
             cls._instance.load_from_env()
@@ -43,6 +46,9 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._tasks_db_path = None
+        self._knowledge_db_path = None
+        self._embedding_model = None
+        self._embedding_dimensions = None
         self._pkm_dir = None
         self._codebase_dir = None
 
@@ -195,6 +201,42 @@ class Config:
         self._tasks_db_path = str(value) if value is not None else None
 
     @property
+    def knowledge_db_path(self) -> str:
+        if self._knowledge_db_path is not None:
+            return self._knowledge_db_path
+        return os.getenv("KNOWLEDGE_DB_PATH", os.path.expanduser("~/pkm/.lancedb"))
+
+    @knowledge_db_path.setter
+    def knowledge_db_path(self, value):
+        self._knowledge_db_path = str(value) if value is not None else None
+
+    @property
+    def embedding_model(self) -> str:
+        if self._embedding_model is not None:
+            return self._embedding_model
+        return os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
+    @embedding_model.setter
+    def embedding_model(self, value):
+        self._embedding_model = str(value) if value is not None else None
+
+    @property
+    def embedding_dimensions(self) -> int:
+        if self._embedding_dimensions is not None:
+            return self._embedding_dimensions
+        env_val = os.getenv("EMBEDDING_DIMENSIONS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 1536
+
+    @embedding_dimensions.setter
+    def embedding_dimensions(self, value):
+        self._embedding_dimensions = int(value) if value is not None else None
+
+    @property
     def pkm_dir(self) -> str:
         if self._pkm_dir is not None:
             return self._pkm_dir
@@ -273,6 +315,9 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._tasks_db_path = None
+        self._knowledge_db_path = None
+        self._embedding_model = None
+        self._embedding_dimensions = None
         self._pkm_dir = None
         self._codebase_dir = None
         self.load_from_env()
