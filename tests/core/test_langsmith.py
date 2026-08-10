@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from core.agent.agent import Agent
 from core.agent.script_executor_agent import ScriptExecutorAgent
-from tools.build_subgraph import build_subgraph
+from tools.graph_call import graph_call
 from scripts.verify_langsmith import verify_langsmith
 
 
@@ -42,28 +42,28 @@ class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata.get("source"), "discord")
         self.assertEqual(metadata.get("role"), "user")
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_passes_tracing_config(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_passes_tracing_config(self, mock_graphs_loader_class):
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
+        mock_graphs_loader_class.return_value = mock_loader
 
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Subgraph Done")]})
 
-        mock_loader.get_subgraph.return_value = {
+        mock_loader.get_graph.return_value = {
             "graph": mock_graph,
             "metadata": {"name": "coding"}
         }
 
-        result = await build_subgraph.ainvoke({"subgraph_name": "coding", "query": "Build feature"})
+        result = await graph_call.ainvoke({"graph_name": "coding", "query": "Build feature"})
 
         mock_graph.ainvoke.assert_called_once()
         args, kwargs = mock_graph.ainvoke.call_args
         config = kwargs.get("config", {})
 
-        self.assertEqual(config.get("run_name"), "subgraph:coding")
-        self.assertEqual(config.get("tags"), ["subgraph", "coding"])
-        self.assertEqual(config.get("metadata"), {"subgraph_name": "coding"})
+        self.assertEqual(config.get("run_name"), "graph:coding")
+        self.assertEqual(config.get("tags"), ["graph", "coding"])
+        self.assertEqual(config.get("metadata"), {"graph_name": "coding"})
         self.assertIn("Subgraph Done", result)
 
     @patch.dict(os.environ, {"LANGSMITH_TRACING": "false"}, clear=False)

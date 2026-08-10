@@ -2,15 +2,15 @@ import os
 import importlib.util
 from typing import Dict, Any, List
 
-class SubgraphsLoader:
+class GraphsLoader:
     _instance = None
-    _subgraphs = None
+    _graphs = None
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(SubgraphsLoader, cls).__new__(cls)
-            cls._instance._subgraphs = {}
-            cls._instance.load_subgraphs()
+            cls._instance = super(GraphsLoader, cls).__new__(cls)
+            cls._instance._graphs = {}
+            cls._instance.load_graphs()
         return cls._instance
 
     def _parse_frontmatter(self, filepath: str) -> Dict[str, str]:
@@ -31,10 +31,10 @@ class SubgraphsLoader:
                             k, v = line.split(":", 1)
                             metadata[k.strip()] = v.strip()
         except Exception as e:
-            print(f"SubgraphsLoader: Error parsing frontmatter from {filepath}: {e}")
+            print(f"GraphsLoader: Error parsing frontmatter from {filepath}: {e}")
         return metadata
 
-    def load_subgraphs(self):
+    def load_graphs(self):
         graphs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "graphs"))
         if not os.path.exists(graphs_dir):
             os.makedirs(graphs_dir)
@@ -55,11 +55,11 @@ class SubgraphsLoader:
                         
                         # Parse metadata first
                         metadata = self._parse_frontmatter(graph_md_path)
-                        subgraph_name = metadata.get("name", item)
-                        current_names.add(subgraph_name)
+                        graph_name = metadata.get("name", item)
+                        current_names.add(graph_name)
                         
                         # Check cache
-                        cached = self._subgraphs.get(subgraph_name)
+                        cached = self._graphs.get(graph_name)
                         if (cached is None or 
                             cached.get("py_mtime") != py_mtime or 
                             cached.get("md_mtime") != md_mtime):
@@ -75,41 +75,50 @@ class SubgraphsLoader:
                             
                             graph_obj = getattr(module, "graph", None)
                             if graph_obj is not None:
-                                self._subgraphs[subgraph_name] = {
+                                self._graphs[graph_name] = {
                                     "graph": graph_obj,
                                     "metadata": metadata,
                                     "py_mtime": py_mtime,
                                     "md_mtime": md_mtime,
                                     "folder": item
                                 }
-                                print(f"SubgraphsLoader: Loaded/Reloaded subgraph '{subgraph_name}'")
+                                print(f"GraphsLoader: Loaded/Reloaded graph '{graph_name}'")
                     except Exception as e:
-                        print(f"SubgraphsLoader: Failed to load subgraph in {item}: {e}")
+                        print(f"GraphsLoader: Failed to load graph in {item}: {e}")
 
-        # Clean up removed subgraphs
-        for name in list(self._subgraphs.keys()):
+        # Clean up removed graphs
+        for name in list(self._graphs.keys()):
             if name not in current_names:
-                del self._subgraphs[name]
-                print(f"SubgraphsLoader: Removed subgraph '{name}'")
+                del self._graphs[name]
+                print(f"GraphsLoader: Removed graph '{name}'")
 
-    def list_subgraph_names(self) -> List[str]:
-        self.load_subgraphs()
-        return list(self._subgraphs.keys())
+    def list_graph_names(self) -> List[str]:
+        self.load_graphs()
+        return list(self._graphs.keys())
 
-    def get_subgraph(self, name: str) -> Dict[str, Any] | None:
-        self.load_subgraphs()
-        return self._subgraphs.get(name)
+    def get_graph(self, name: str) -> Dict[str, Any] | None:
+        self.load_graphs()
+        return self._graphs.get(name)
 
-    def get_subgraphs_overview(self) -> str:
-        self.load_subgraphs()
+    def get_graphs_overview(self) -> str:
+        self.load_graphs()
         overview = "<subgraphs_list>\n"
         overview += "The following lists the names and descriptions of the subgraphs that you have access to. "
-        overview += "To execute a subgraph, use the `build_subgraph` tool with the subgraph name and your query.\n"
+        overview += "To execute a graph, use the `graph_call` tool with the graph name and your query.\n"
         
-        for name, info in self._subgraphs.items():
+        for name, info in self._graphs.items():
             metadata = info.get("metadata", {})
             desc = metadata.get("description", "No description available.")
             overview += f"- {name}: {desc}\n"
             
         overview += "</subgraphs_list>"
         return overview
+
+    # Backward compatibility aliases
+    load_subgraphs = load_graphs
+    list_subgraph_names = list_graph_names
+    get_subgraph = get_graph
+    get_subgraphs_overview = get_graphs_overview
+
+
+SubgraphsLoader = GraphsLoader

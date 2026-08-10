@@ -118,8 +118,8 @@ class ToolsLoader:
         if config.get("skills"):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
-        if "build_subgraph" not in allowed_tool_names:
-            allowed_tool_names.append("build_subgraph")
+        if "graph_call" not in allowed_tool_names:
+            allowed_tool_names.append("graph_call")
                 
         discovered = self._discover_tools()
         tools = []

@@ -8,29 +8,29 @@ import shutil
 # Add root directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.loaders.subgraphs_loader import SubgraphsLoader
-from tools.build_subgraph import build_subgraph
+from core.loaders.graphs_loader import GraphsLoader
+from tools.graph_call import graph_call
 
-class TestSubgraphsLoader(unittest.TestCase):
+class TestGraphsLoader(unittest.TestCase):
     def test_subgraph_loading(self):
-        loader = SubgraphsLoader()
-        names = loader.list_subgraph_names()
+        loader = GraphsLoader()
+        names = loader.list_graph_names()
         self.assertIn("coding", names)
         
-        info = loader.get_subgraph("coding")
+        info = loader.get_graph("coding")
         self.assertIsNotNone(info)
         self.assertEqual(info["metadata"]["name"], "coding")
         self.assertIn("description", info["metadata"])
 
-    def test_get_subgraphs_overview(self):
-        loader = SubgraphsLoader()
-        overview = loader.get_subgraphs_overview()
+    def test_get_graphs_overview(self):
+        loader = GraphsLoader()
+        overview = loader.get_graphs_overview()
         self.assertIn("<subgraphs_list>", overview)
         self.assertIn("coding", overview)
         self.assertIn("</subgraphs_list>", overview)
 
-    def test_subgraphs_hot_reloading(self):
-        loader = SubgraphsLoader()
+    def test_graphs_hot_reloading(self):
+        loader = GraphsLoader()
         
         graphs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "graphs"))
         temp_dir = os.path.join(graphs_dir, "temp_test_subgraph")

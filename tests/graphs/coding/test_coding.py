@@ -9,8 +9,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # Add root directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.loaders.subgraphs_loader import SubgraphsLoader
-from tools.build_subgraph import build_subgraph
+from core.loaders.graphs_loader import GraphsLoader
+from tools.graph_call import graph_call
 from core.loaders.agents_loader import AgentsLoader
 
 class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
@@ -60,8 +60,8 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
         mock_git.invoke = MagicMock(return_value="Git response")
 
         # Load coding subgraph
-        subgraphs_loader = SubgraphsLoader()
-        subgraph_info = subgraphs_loader.get_subgraph("coding")
+        graphs_loader = GraphsLoader()
+        subgraph_info = graphs_loader.get_graph("coding")
         self.assertIsNotNone(subgraph_info)
         
         graph = subgraph_info["graph"]
@@ -111,8 +111,8 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
         
         mock_git.invoke = MagicMock(return_value="Git response")
 
-        subgraphs_loader = SubgraphsLoader()
-        graph = subgraphs_loader.get_subgraph("coding")["graph"]
+        graphs_loader = GraphsLoader()
+        graph = graphs_loader.get_graph("coding")["graph"]
         
         inputs = {
             "messages": [],

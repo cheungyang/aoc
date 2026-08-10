@@ -6,39 +6,39 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from tools.build_subgraph import build_subgraph
+from tools.graph_call import graph_call
 from core.util import format_tool_response
 from core.agent.job_manager import current_agent_id
 
-class TestBuildSubgraphTool(unittest.IsolatedAsyncioTestCase):
+class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
-    async def test_build_subgraph_missing_args(self):
-        result = await build_subgraph.ainvoke({"subgraph_name": "", "query": ""})
-        self.assertIn("requires 'subgraph_name' and 'query'", result)
+    async def test_graph_call_missing_args(self):
+        result = await graph_call.ainvoke({"graph_name": "", "query": ""})
+        self.assertIn("requires 'graph_name' and 'query'", result)
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_not_found(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_not_found(self, mock_graphs_loader_class):
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
-        mock_loader.get_subgraph.return_value = None
+        mock_graphs_loader_class.return_value = mock_loader
+        mock_loader.get_graph.return_value = None
 
-        result = await build_subgraph.ainvoke({"subgraph_name": "unknown", "query": "do something"})
-        self.assertIn("Subgraph 'unknown' not found", result)
+        result = await graph_call.ainvoke({"graph_name": "unknown", "query": "do something"})
+        self.assertIn("Graph 'unknown' not found", result)
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_without_caller(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_without_caller(self, mock_graphs_loader_class):
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
+        mock_graphs_loader_class.return_value = mock_loader
 
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Finished execution")]})
 
-        mock_loader.get_subgraph.return_value = {
+        mock_loader.get_graph.return_value = {
             "graph": mock_graph,
             "metadata": {"name": "coding"}
         }
 
-        result = await build_subgraph.ainvoke({"subgraph_name": "coding", "query": "Build feature"})
+        result = await graph_call.ainvoke({"graph_name": "coding", "query": "Build feature"})
 
         mock_graph.ainvoke.assert_called_once()
         args, kwargs = mock_graph.ainvoke.call_args
@@ -47,27 +47,27 @@ class TestBuildSubgraphTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inputs["messages"][0]["content"], "Build feature")
 
         config = kwargs.get("config", {})
-        self.assertEqual(config.get("run_name"), "subgraph:coding")
-        self.assertEqual(config.get("tags"), ["subgraph", "coding"])
-        self.assertEqual(config.get("metadata"), {"subgraph_name": "coding"})
+        self.assertEqual(config.get("run_name"), "graph:coding")
+        self.assertEqual(config.get("tags"), ["graph", "coding"])
+        self.assertEqual(config.get("metadata"), {"graph_name": "coding"})
 
-        self.assertEqual(result, format_tool_response("build_subgraph", payload="Finished execution", errors="None"))
+        self.assertEqual(result, format_tool_response("graph_call", payload="Finished execution", errors="None"))
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_with_caller_param(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_with_caller_param(self, mock_graphs_loader_class):
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
+        mock_graphs_loader_class.return_value = mock_loader
 
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Finished execution")]})
 
-        mock_loader.get_subgraph.return_value = {
+        mock_loader.get_graph.return_value = {
             "graph": mock_graph,
             "metadata": {"name": "coding"}
         }
 
-        result = await build_subgraph.ainvoke({
-            "subgraph_name": "coding",
+        result = await graph_call.ainvoke({
+            "graph_name": "coding",
             "query": "Build feature",
             "caller": "main"
         })
@@ -80,32 +80,32 @@ class TestBuildSubgraphTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inputs["messages"][0]["content"], expected_query)
 
         config = kwargs.get("config", {})
-        self.assertEqual(config.get("run_name"), "subgraph:coding")
+        self.assertEqual(config.get("run_name"), "graph:coding")
         self.assertIn("caller:main", config.get("tags", []))
         self.assertEqual(config.get("metadata", {}).get("caller"), "main")
         self.assertEqual(config.get("metadata", {}).get("triggering_agent"), "main")
 
-        self.assertEqual(result, format_tool_response("build_subgraph", payload="Finished execution", errors="None"))
+        self.assertEqual(result, format_tool_response("graph_call", payload="Finished execution", errors="None"))
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_with_contextvar_caller(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_with_contextvar_caller(self, mock_graphs_loader_class):
         from core.agent.job_manager import current_agent_id
 
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
+        mock_graphs_loader_class.return_value = mock_loader
 
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Finished execution")]})
 
-        mock_loader.get_subgraph.return_value = {
+        mock_loader.get_graph.return_value = {
             "graph": mock_graph,
             "metadata": {"name": "coding"}
         }
 
         token = current_agent_id.set("topic-researcher")
         try:
-            result = await build_subgraph.ainvoke({
-                "subgraph_name": "coding",
+            result = await graph_call.ainvoke({
+                "graph_name": "coding",
                 "query": "Research codebase"
             })
 
@@ -123,21 +123,21 @@ class TestBuildSubgraphTool(unittest.IsolatedAsyncioTestCase):
         finally:
             current_agent_id.reset(token)
 
-    @patch('tools.build_subgraph.SubgraphsLoader')
-    async def test_build_subgraph_does_not_duplicate_caller_tag(self, mock_subgraphs_loader_class):
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_does_not_duplicate_caller_tag(self, mock_graphs_loader_class):
         mock_loader = MagicMock()
-        mock_subgraphs_loader_class.return_value = mock_loader
+        mock_graphs_loader_class.return_value = mock_loader
 
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Finished execution")]})
 
-        mock_loader.get_subgraph.return_value = {
+        mock_loader.get_graph.return_value = {
             "graph": mock_graph,
             "metadata": {"name": "coding"}
         }
 
-        result = await build_subgraph.ainvoke({
-            "subgraph_name": "coding",
+        result = await graph_call.ainvoke({
+            "graph_name": "coding",
             "query": "<caller>existing_agent</caller>\nBuild feature",
             "caller": "main"
         })

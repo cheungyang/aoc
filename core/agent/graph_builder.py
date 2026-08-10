@@ -26,9 +26,9 @@ class GraphBuilder:
             skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
 
             # 2.5. Subgraphs Prompt
-            from core.loaders.subgraphs_loader import SubgraphsLoader
-            subgraphs_loader = SubgraphsLoader()
-            subgraphs_prompt = subgraphs_loader.get_subgraphs_overview()
+            from core.loaders.graphs_loader import GraphsLoader
+            graphs_loader = GraphsLoader()
+            subgraphs_prompt = graphs_loader.get_graphs_overview()
 
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()

@@ -11,10 +11,11 @@ from core.agent.agent import Agent
 class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
 
      def setUp(self):
-         self.subgraphs_loader_patcher = patch('core.loaders.subgraphs_loader.SubgraphsLoader')
+         self.subgraphs_loader_patcher = patch('core.loaders.graphs_loader.GraphsLoader')
          self.mock_subgraphs_loader_class = self.subgraphs_loader_patcher.start()
          self.mock_subgraphs_loader = MagicMock()
          self.mock_subgraphs_loader_class.return_value = self.mock_subgraphs_loader
+         self.mock_subgraphs_loader.get_graphs_overview.return_value = "Mock Subgraphs"
          self.mock_subgraphs_loader.get_subgraphs_overview.return_value = "Mock Subgraphs"
 
      def tearDown(self):
