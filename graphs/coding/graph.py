@@ -215,26 +215,55 @@ def should_continue(state: CodingState):
         return "end"
     return "execute"
 
-workflow = StateGraph(CodingState)
-workflow.add_node("plan", plan_node)
-workflow.add_node("execute_tasks", execute_tasks_node)
-workflow.add_node("replan", replan_node)
-workflow.add_node("finalize", finalize_node)
+def create_graph(checkpointer=None, **kwargs):
+    """Compiles and returns the coding orchestration graph."""
+    workflow = StateGraph(CodingState)
+    workflow.add_node("plan", plan_node)
+    workflow.add_node("execute_tasks", execute_tasks_node)
+    workflow.add_node("replan", replan_node)
+    workflow.add_node("finalize", finalize_node)
 
-workflow.add_edge(START, "plan")
-workflow.add_edge("plan", "execute_tasks")
+    workflow.add_edge(START, "plan")
+    workflow.add_edge("plan", "execute_tasks")
 
-workflow.add_conditional_edges(
-    "execute_tasks",
-    should_continue,
-    {
-        "execute": "execute_tasks",
-        "replan": "replan",
-        "end": "finalize"
+    workflow.add_conditional_edges(
+        "execute_tasks",
+        should_continue,
+        {
+            "execute": "execute_tasks",
+            "replan": "replan",
+            "end": "finalize"
+        }
+    )
+    workflow.add_edge("replan", END)
+    workflow.add_edge("finalize", END)
+
+    return workflow.compile(checkpointer=checkpointer)
+
+# Backward-compatible precompiled graph instance
+graph = create_graph()
+
+def prepare_input(query: str, caller: str = None, **kwargs) -> Dict[str, Any]:
+    """Translates incoming text query into initial CodingState."""
+    if caller and "<caller>" not in query:
+        formatted_query = f"<caller>{caller}</caller>\n{query}"
+    else:
+        formatted_query = query
+
+    return {
+        "messages": [{"role": "user", "content": formatted_query}],
+        "query": formatted_query,
+        "repo_path": kwargs.get("repo_path", ""),
+        "session_id": kwargs.get("session_id", "default_session"),
+        "max_concurrency": kwargs.get("max_concurrency", 1),
+        "max_retries": kwargs.get("max_retries", 2)
     }
-)
 
-workflow.add_edge("replan", END)
-workflow.add_edge("finalize", END)
-
-graph = workflow.compile()
+def format_output(state: Dict[str, Any]) -> str:
+    """Formats final CodingState into response string."""
+    if isinstance(state, dict):
+        if "messages" in state and state["messages"]:
+            return state["messages"][-1].content
+        if state.get("error_message"):
+            return f"Coding failed: {state['error_message']}"
+    return str(state)

@@ -16,11 +16,18 @@ class TestGraphsLoader(unittest.TestCase):
         loader = GraphsLoader()
         names = loader.list_graph_names()
         self.assertIn("coding", names)
+        self.assertIn("main", names)
         
         info = loader.get_graph("coding")
         self.assertIsNotNone(info)
         self.assertEqual(info["metadata"]["name"], "coding")
         self.assertIn("description", info["metadata"])
+        self.assertIsNotNone(info["create_graph"])
+
+        main_info = loader.get_graph("main")
+        self.assertIsNotNone(main_info)
+        self.assertEqual(main_info["metadata"]["name"], "main")
+        self.assertIsNotNone(main_info["create_graph"])
 
     def test_get_graphs_overview(self):
         loader = GraphsLoader()

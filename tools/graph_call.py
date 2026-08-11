@@ -1,7 +1,7 @@
 from typing import Optional
 from langchain_core.tools import tool
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import current_agent_id
+from core.agent.job_manager import current_agent_id, current_job_id
 from core.util import format_tool_response
 
 @tool
@@ -25,19 +25,29 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         if not graph_info:
             return format_tool_response("graph_call", payload="", errors=f"Error: Graph '{target_graph}' not found.")
             
-        graph = graph_info["graph"]
-        
+        graph = graph_info.get("graph")
+        if graph is None and graph_info.get("create_graph") is not None:
+            graph = graph_info["create_graph"]()
+            
         triggering_agent = caller or current_agent_id.get()
-        if triggering_agent and "<caller>" not in query:
-            formatted_query = f"<caller>{triggering_agent}</caller>\n{query}"
-        else:
-            formatted_query = query
-
-        inputs = {"messages": [{"role": "user", "content": formatted_query}], "query": formatted_query}
         
+        # 1. Adapt input
+        prepare_input_fn = graph_info.get("prepare_input")
+        if prepare_input_fn is not None:
+            inputs = prepare_input_fn(query, caller=triggering_agent)
+        else:
+            if triggering_agent and "<caller>" not in query:
+                formatted_query = f"<caller>{triggering_agent}</caller>\n{query}"
+            else:
+                formatted_query = query
+            inputs = {"messages": [{"role": "user", "content": formatted_query}], "query": formatted_query}
+        
+        job_id = current_job_id.get() or "default"
+        thread_id = f"graph:{target_graph}:{job_id}"
         tags = ["graph", target_graph]
         metadata = {
             "graph_name": target_graph,
+            "thread_id": thread_id,
         }
         if triggering_agent:
             tags.append(f"caller:{triggering_agent}")
@@ -45,17 +55,23 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
             metadata["triggering_agent"] = triggering_agent
             
         config = {
+            "configurable": {"thread_id": thread_id},
             "run_name": f"graph:{target_graph}",
             "tags": tags,
             "metadata": metadata
         }
         result = await graph.ainvoke(inputs, config=config)
         
-        if isinstance(result, dict) and "messages" in result and result["messages"]:
+        # 2. Adapt output
+        format_output_fn = graph_info.get("format_output")
+        if format_output_fn is not None:
+            reply = format_output_fn(result)
+        elif isinstance(result, dict) and "messages" in result and result["messages"]:
             reply = result["messages"][-1].content
-            return format_tool_response("graph_call", payload=reply, errors="None")
+        else:
+            reply = str(result)
             
-        return format_tool_response("graph_call", payload=str(result), errors="None")
+        return format_tool_response("graph_call", payload=reply, errors="None")
     except Exception as e:
         return format_tool_response("graph_call", payload="", errors=f"Error executing graph: {e}")
 

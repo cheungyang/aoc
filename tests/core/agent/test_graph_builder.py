@@ -17,6 +17,10 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          self.mock_subgraphs_loader_class.return_value = self.mock_subgraphs_loader
          self.mock_subgraphs_loader.get_graphs_overview.return_value = "Mock Subgraphs"
          self.mock_subgraphs_loader.get_subgraphs_overview.return_value = "Mock Subgraphs"
+         self.mock_create_graph = MagicMock(return_value="MockGraph")
+         self.mock_subgraphs_loader.get_graph.return_value = {
+             "create_graph": self.mock_create_graph
+         }
 
      def tearDown(self):
          self.subgraphs_loader_patcher.stop()
@@ -26,12 +30,10 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_success(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_success(self, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_llm_class.return_value = MagicMock()
-         mock_create_react.return_value = "MockGraph"
          
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
@@ -52,15 +54,21 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          
          # Assertions
          self.assertEqual(graph, "MockGraph")
-         mock_create_react.assert_called_once_with(mock_llm_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
+         self.mock_create_graph.assert_called_once_with(
+             llm=mock_llm_class.return_value,
+             tools=[mock_tool1],
+             prompt=unittest.mock.ANY,
+             checkpointer=mock_ff_checkpointer.return_value,
+             agent_id="main",
+             config={"tools": {"tool1": {}}}
+         )
  
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_filtering(self, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_filtering(self, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
  
@@ -78,11 +86,13 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
  
          graph = await agent._build_graph()
  
-         mock_create_react.assert_called_once_with(
-             unittest.mock.ANY, 
-             [mock_tool1],
-             prompt=unittest.mock.ANY, 
-             checkpointer=unittest.mock.ANY
+         self.mock_create_graph.assert_called_once_with(
+             llm=unittest.mock.ANY,
+             tools=[mock_tool1],
+             prompt=unittest.mock.ANY,
+             checkpointer=mock_ff_checkpointer.return_value,
+             agent_id="test_agent",
+             config={"tools": {"tool1": {}}, "skills": ["skill1"]}
          )
 
             
@@ -91,12 +101,11 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
      @patch('core.agent.graph_builder.current_job_id')
      @patch('core.agent.graph_builder.JobManager')
      @patch('core.agent.graph_builder.interrupt')
-     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_job_id, mock_ff_checkpointer, mock_create_react, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_job_id, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
@@ -118,8 +127,8 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          # Run
          await agent._build_graph()
          
-         # Get the wrapped tool passed to create_react_agent
-         wrapped_tools = mock_create_react.call_args[0][1]
+         # Get the wrapped tool passed to create_graph
+         wrapped_tools = self.mock_create_graph.call_args.kwargs["tools"]
          wrapped_tool = wrapped_tools[0]
          
          # Test normal execution
@@ -145,12 +154,9 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
-     @patch('core.agent.graph_builder.create_react_agent')
      @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_ollama(self, mock_ff_checkpointer, mock_create_react, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_ollama(self, mock_ff_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
-         mock_create_react.return_value = "MockGraph"
-         
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
@@ -177,7 +183,14 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
          
          # Assertions
          self.assertEqual(graph, "MockGraph")
-         mock_create_react.assert_called_once_with(mock_ollama_class.return_value, [mock_tool1], prompt=unittest.mock.ANY, checkpointer=mock_ff_checkpointer.return_value)
+         self.mock_create_graph.assert_called_once_with(
+             llm=mock_ollama_class.return_value,
+             tools=[mock_tool1],
+             prompt=unittest.mock.ANY,
+             checkpointer=mock_ff_checkpointer.return_value,
+             agent_id="main",
+             config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}}
+         )
 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')

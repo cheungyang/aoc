@@ -111,6 +111,22 @@ class GraphBuilder:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = FlatFileCheckpointer()
-        graph = create_react_agent(llm, allowed_tools, prompt=prompt, checkpointer=checkpointer)
-        print(f"New Graph for {agent_id} built")
+
+        graph_name = config.get("graph", "main")
+        from core.loaders.graphs_loader import GraphsLoader
+        graphs_loader = GraphsLoader()
+        graph_info = graphs_loader.get_graph(graph_name)
+        if not graph_info or "create_graph" not in graph_info or not graph_info["create_graph"]:
+            raise ValueError(f"Graph '{graph_name}' not found or does not export create_graph.")
+
+        create_graph_fn = graph_info["create_graph"]
+        graph = create_graph_fn(
+            llm=llm,
+            tools=allowed_tools,
+            prompt=prompt,
+            checkpointer=checkpointer,
+            agent_id=agent_id,
+            config=config
+        )
+        print(f"New Graph '{graph_name}' for {agent_id} built")
         return graph

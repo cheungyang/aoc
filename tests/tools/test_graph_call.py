@@ -49,7 +49,8 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         config = kwargs.get("config", {})
         self.assertEqual(config.get("run_name"), "graph:coding")
         self.assertEqual(config.get("tags"), ["graph", "coding"])
-        self.assertEqual(config.get("metadata"), {"graph_name": "coding"})
+        self.assertEqual(config.get("metadata", {}).get("graph_name"), "coding")
+        self.assertEqual(config.get("configurable", {}).get("thread_id"), "graph:coding:default")
 
         self.assertEqual(result, format_tool_response("graph_call", payload="Finished execution", errors="None"))
 
@@ -147,6 +148,32 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         inputs = args[0]
         self.assertEqual(inputs["query"], "<caller>existing_agent</caller>\nBuild feature")
         self.assertEqual(inputs["messages"][0]["content"], "<caller>existing_agent</caller>\nBuild feature")
+
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_uses_graph_adapters(self, mock_graphs_loader_class):
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"custom_result": "done"})
+
+        mock_prepare = MagicMock(return_value={"custom_input": "prepared"})
+        mock_format = MagicMock(return_value="Custom Formatted Output")
+
+        mock_loader.get_graph.return_value = {
+            "graph": mock_graph,
+            "prepare_input": mock_prepare,
+            "format_output": mock_format,
+            "metadata": {"name": "custom"}
+        }
+
+        result = await graph_call.ainvoke({"graph_name": "custom", "query": "Run custom flow"})
+
+        mock_prepare.assert_called_once()
+        mock_graph.ainvoke.assert_called_once()
+        self.assertEqual(mock_graph.ainvoke.call_args[0][0], {"custom_input": "prepared"})
+        mock_format.assert_called_once_with({"custom_result": "done"})
+        self.assertEqual(result, format_tool_response("graph_call", payload="Custom Formatted Output", errors="None"))
 
 
 if __name__ == "__main__":

@@ -73,9 +73,17 @@ class GraphsLoader:
                             sys.modules[f"graphs.{item}.graph"] = module
                             spec.loader.exec_module(module)
                             
+                            create_graph_fn = getattr(module, "create_graph", None)
+                            prepare_input_fn = getattr(module, "prepare_input", None)
+                            format_output_fn = getattr(module, "format_output", None)
                             graph_obj = getattr(module, "graph", None)
-                            if graph_obj is not None:
+                            
+                            if create_graph_fn is not None or graph_obj is not None:
                                 self._graphs[graph_name] = {
+                                    "module": module,
+                                    "create_graph": create_graph_fn,
+                                    "prepare_input": prepare_input_fn,
+                                    "format_output": format_output_fn,
                                     "graph": graph_obj,
                                     "metadata": metadata,
                                     "py_mtime": py_mtime,
@@ -107,6 +115,8 @@ class GraphsLoader:
         overview += "To execute a graph, use the `graph_call` tool with the graph name and your query.\n"
         
         for name, info in self._graphs.items():
+            if name == "main":
+                continue
             metadata = info.get("metadata", {})
             desc = metadata.get("description", "No description available.")
             overview += f"- {name}: {desc}\n"

@@ -63,7 +63,8 @@ class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(config.get("run_name"), "graph:coding")
         self.assertEqual(config.get("tags"), ["graph", "coding"])
-        self.assertEqual(config.get("metadata"), {"graph_name": "coding"})
+        self.assertEqual(config.get("metadata", {}).get("graph_name"), "coding")
+        self.assertEqual(config.get("metadata", {}).get("thread_id"), "graph:coding:default")
         self.assertIn("Subgraph Done", result)
 
     @patch.dict(os.environ, {"LANGSMITH_TRACING": "false"}, clear=False)
