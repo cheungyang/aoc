@@ -1,0 +1,17 @@
+{
+  "skill_id": "recommend_meals",
+  "name": "Recommend Meals",
+  "description": "Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.",
+  "emoji": "🍱",
+  "tools": {
+    "obsidian": {
+      "wiki/kitchen": [
+        "read",
+        "append"
+      ],
+      "agents/meal-planner": [
+        "read"
+      ]
+    }
+  }
+}

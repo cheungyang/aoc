@@ -11,7 +11,8 @@
     "project-planning",
     "topic-research",
     "software-dev",
-    "aoc-debug"
+    "aoc-debug",
+    "meal-planning"
   ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
@@ -38,5 +39,15 @@
     "job_kill": {},
     "job_status": {},
     "task_query": []
+  },
+  "voice_config": {
+    "enabled": true,
+    "auto_join": true,
+    "voice_channel": "general-voice",
+    "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
+    "tts_voice": "en-US-JennyNeural",
+    "tts_speed": 1.0,
+    "stt_model": "base.en",
+    "post_transcript_to_chat": true
   }
 }

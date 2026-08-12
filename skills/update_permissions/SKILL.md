@@ -11,7 +11,7 @@ Use this skill when:
 - Updating an existing agent or skill to give it new capabilities.
 - Debugging permission errors based on an agent's failure context.
 
-## The 7 Immutable Permission Rules
+## The 9 Immutable Permission & Configuration Rules
 1. **Implicit Allowance**: `load_skill` is inherently allowed in the system. **NEVER** add `load_skill` to the `tools` permission list in any file.
 2. **Inheritance & Deduplication**: Tools permitted inside a loaded skill (`skills/<skill_name>/skill.json`) merge seamlessly with `agent.json`. Therefore, you do NOT need to declare a tool in `agent.json` if a loaded skill already provides it.
 3. **Tool Format Enforcement**: 
@@ -23,7 +23,8 @@ Use this skill when:
 5. **Tool Naming**: The name of a tool MUST exactly match its filename (without `.py`) located in the `tools/` directory.
 6. **Skill Naming**: The name of a skill MUST exactly match its directory/filename located in the `skills/` directory.
 7. **Action Name Validation (No Guessing)**: You MUST NOT guess or hallucinate action names. Action names are programmatically checked. You MUST find them by reading the comments inside the individual `tools/<tool_name>.py` file.
-8. **Channel Restrictions Enforcement**: The `channels` block in `agent.json` MUST strictly be an array of channel names where the agent is allowed to be included or called (e.g., `"channels": ["day-planning", "weekly-planning"]`). Use `"*"` inside the array to indicate the agent has no channel restrictions (e.g., `"channels": ["*"]`).
+8. **Channel Restrictions Enforcement**: The `channels` block in an agent's `agent.json` MUST strictly be an array of channel names where the agent is allowed to be included or called. When setting up an agent to communicate in a new channel, you MUST ensure that channel is explicitly listed in its `channels` array. Use `"*"` inside the array to indicate the agent has no channel restrictions (e.g., `"channels": ["*"]`).
+9. **Concierge Channel Hosting**: If an agent configuration update introduces a **new channel**, you MUST also ensure that new channel is added to the `channel_hosts` array in the `concierge` agent's configuration (`agents/main/agent.json`). Without this, the concierge will not listen to or route messages from that channel. *(Note: Child agents do not need `channel_hosts` or `discord_token_key` defined if they rely on the concierge).*
 
 ## Execution Workflow
 

@@ -1,0 +1,15 @@
+{
+  "skill_id": "manage_kitchen_inventory",
+  "name": "Manage Kitchen Inventory",
+  "description": "Translates English grocery inputs into Traditional Chinese and smartly deduces/deducts ingredients for cooked meals in INVENTORY.md.",
+  "emoji": "🗄️",
+  "tools": {
+    "obsidian": {
+      "wiki/kitchen": [
+        "read",
+        "overwrite",
+        "append"
+      ]
+    }
+  }
+}
