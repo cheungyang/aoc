@@ -2,7 +2,7 @@ import contextlib
 import os
 import json
 from langgraph.prebuilt import create_react_agent
-from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -110,7 +110,7 @@ class GraphBuilder:
         else:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(model=model_name)
-        checkpointer = FlatFileCheckpointer()
+        checkpointer = SqliteCheckpointer()
 
         graph_name = config.get("graph", "main")
         from core.loaders.graphs_loader import GraphsLoader

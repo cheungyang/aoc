@@ -2,7 +2,7 @@ import time
 from langchain_core.tools import tool
 from core.agent.job_manager import JobManager
 from core.util import format_tool_response
-from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 
 @tool
 def job_kill(job_id: str) -> str:
@@ -34,7 +34,7 @@ def job_kill(job_id: str) -> str:
              return format_tool_response("job_kill", payload=f"Job {job_id} did not stop in time. Current status: {job.status}", errors="None")
 
         # Retrieve state from checkpointer
-        checkpointer = FlatFileCheckpointer()
+        checkpointer = SqliteCheckpointer()
         config = {"configurable": {"thread_id": session_id}}
         checkpoint_tuple = checkpointer.get_tuple(config)
         

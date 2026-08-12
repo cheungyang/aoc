@@ -11,7 +11,7 @@ from core.agent.session_manager import SessionManager
 
 class TestSessionManager(unittest.TestCase):
     
-    @patch('core.agent.session_manager.FlatFileSessionStore')
+    @patch('core.agent.session_manager.SqliteSessionStore')
     def test_clear_session(self, mock_store_class):
         mock_store = MagicMock()
         mock_store.archive_session.return_value = "Archived"
@@ -21,24 +21,15 @@ class TestSessionManager(unittest.TestCase):
         self.assertEqual(result, "Archived")
         mock_store.archive_session.assert_called_once_with("test_session")
 
-    @patch('core.agent.session_manager.SessionManager.clear_session')
-    @patch('glob.glob')
-    @patch('os.path.exists')
-    @patch('core.agent.session_manager.FlatFileSessionStore')
-    def test_clear_sessions(self, mock_store_class, mock_exists, mock_glob, mock_clear_session):
+    @patch('core.agent.session_manager.SqliteSessionStore')
+    def test_clear_sessions(self, mock_store_class):
         mock_store = MagicMock()
-        mock_store.sessions_dir = "/dummy/sessions"
+        mock_store.archive_all_sessions.return_value = "Archived all"
         mock_store_class.return_value = mock_store
         
-        mock_exists.return_value = True
-        mock_glob.return_value = ["/dummy/sessions/session1.jsonl", "/dummy/sessions/session2.jsonl"]
-        mock_clear_session.return_value = "cleared"
-        
-        SessionManager().clear_sessions()
-        
-        self.assertEqual(mock_clear_session.call_count, 2)
-        mock_clear_session.assert_any_call("session1")
-        mock_clear_session.assert_any_call("session2")
+        result = SessionManager().clear_sessions()
+        self.assertEqual(result, "Archived all")
+        mock_store.archive_all_sessions.assert_called_once()
 
     def test_get_session_id_standard(self):
         message = MagicMock()
@@ -59,5 +50,4 @@ class TestSessionManager(unittest.TestCase):
         self.assertEqual(session_id, "agent1:discord:general:456")
 
 if __name__ == '__main__':
-
     unittest.main()

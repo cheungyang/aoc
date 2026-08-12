@@ -1,37 +1,37 @@
 import unittest
+from unittest.mock import patch, MagicMock
 import os
 import sys
-from unittest.mock import patch, MagicMock, AsyncMock
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.agent.agent import Agent
 
-class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
-
+class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      def setUp(self):
-         self.subgraphs_loader_patcher = patch('core.loaders.graphs_loader.GraphsLoader')
-         self.mock_subgraphs_loader_class = self.subgraphs_loader_patcher.start()
-         self.mock_subgraphs_loader = MagicMock()
-         self.mock_subgraphs_loader_class.return_value = self.mock_subgraphs_loader
-         self.mock_subgraphs_loader.get_graphs_overview.return_value = "Mock Subgraphs"
-         self.mock_subgraphs_loader.get_subgraphs_overview.return_value = "Mock Subgraphs"
+         # Create a patcher for GraphsLoader to avoid filesystem scans
+         self.graphs_loader_patcher = patch('core.loaders.graphs_loader.GraphsLoader')
+         self.mock_graphs_loader_class = self.graphs_loader_patcher.start()
+         self.mock_graphs_loader = MagicMock()
+         self.mock_graphs_loader_class.return_value = self.mock_graphs_loader
+         
          self.mock_create_graph = MagicMock(return_value="MockGraph")
-         self.mock_subgraphs_loader.get_graph.return_value = {
+         self.mock_graphs_loader.get_graph.return_value = {
              "create_graph": self.mock_create_graph
          }
+         self.mock_graphs_loader.get_graphs_overview.return_value = "Mock Subgraphs"
 
      def tearDown(self):
-         self.subgraphs_loader_patcher.stop()
+         self.graphs_loader_patcher.stop()
 
 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_success(self, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     @patch('core.agent.graph_builder.SqliteCheckpointer')
+     async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_llm_class.return_value = MagicMock()
          
@@ -58,7 +58,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
              llm=mock_llm_class.return_value,
              tools=[mock_tool1],
              prompt=unittest.mock.ANY,
-             checkpointer=mock_ff_checkpointer.return_value,
+             checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="main",
              config={"tools": {"tool1": {}}}
          )
@@ -67,8 +67,8 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_filtering(self, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     @patch('core.agent.graph_builder.SqliteCheckpointer')
+     async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
  
@@ -90,22 +90,20 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
              llm=unittest.mock.ANY,
              tools=[mock_tool1],
              prompt=unittest.mock.ANY,
-             checkpointer=mock_ff_checkpointer.return_value,
+             checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="test_agent",
              config={"tools": {"tool1": {}}, "skills": ["skill1"]}
          )
-
-            
 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
-     @patch('core.agent.graph_builder.FlatFileCheckpointer')
+     @patch('core.agent.graph_builder.SqliteCheckpointer')
      @patch('core.agent.graph_builder.current_job_id')
      @patch('core.agent.graph_builder.JobManager')
      @patch('core.agent.graph_builder.interrupt')
-     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_job_id, mock_ff_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_job_id, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
@@ -154,8 +152,8 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
-     @patch('core.agent.graph_builder.FlatFileCheckpointer')
-     async def test_build_graph_ollama(self, mock_ff_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     @patch('core.agent.graph_builder.SqliteCheckpointer')
+     async def test_build_graph_ollama(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
@@ -187,7 +185,7 @@ class TestAgentGraphBuilding(unittest.IsolatedAsyncioTestCase):
              llm=mock_ollama_class.return_value,
              tools=[mock_tool1],
              prompt=unittest.mock.ANY,
-             checkpointer=mock_ff_checkpointer.return_value,
+             checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="main",
              config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}}
          )

@@ -1,89 +1,15 @@
-import os
-import json
-import time
-import shutil
+"""
+Backwards-compatible wrapper around SqliteSessionStore.
+"""
+from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
 
-# Compute SESSIONS_DIR relative to this file's location
-SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sessions"))
-
-class FlatFileSessionStore:
-    def __init__(self, sessions_dir=SESSIONS_DIR):
-        self.sessions_dir = sessions_dir
-        self.archive_dir = os.path.join(self.sessions_dir, "archive")
-
-    def get_file_path(self, session_id):
-        safe_id = session_id.replace(":", "_").replace("/", "_")
-        return os.path.join(self.sessions_dir, f"{safe_id}.jsonl")
-
-    def append_message(self, session_id, from_user, message):
-        os.makedirs(self.sessions_dir, exist_ok=True)
-        file_path = self.get_file_path(session_id)
-        
-        log_entry = {"from": from_user, "message": message, "ts": int(time.time())}
-        
-        with open(file_path, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-            
-        return f"Appended message to {session_id}"
-
-    def append_token_usage(self, session_id, model, input_token, output_token, cached_token):
-        os.makedirs(self.sessions_dir, exist_ok=True)
-        safe_id = session_id.replace(":", "_").replace("/", "_")
-        token_file = os.path.join(self.sessions_dir, f"token_{safe_id}.jsonl")
-        
-        log_entry = {
-            "ts": int(time.time()),
-            "model": model,
-            "input_token": input_token,
-            "output_token": output_token,
-            "cached_token": cached_token
-        }
-        
-        with open(token_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-            
-        return f"Appended token usage to {session_id}"
-
-    def archive_session(self, session_id):
-        from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
-        
-        file_path = self.get_file_path(session_id)
-        if os.path.exists(file_path):
-            os.makedirs(self.archive_dir, exist_ok=True)
-            safe_id = session_id.replace(":", "_").replace("/", "_")
-            ts = int(time.time())
-            archive_name = f"{safe_id}_{ts}.jsonl"
-            archive_path = os.path.join(self.archive_dir, archive_name)
-            shutil.move(file_path, archive_path)
-            
-            # Also move token file if it exists
-            token_file = os.path.join(self.sessions_dir, f"token_{safe_id}.jsonl")
-            token_status = ""
-            if os.path.exists(token_file):
-                token_archive_name = f"token_{safe_id}_{ts}.jsonl"
-                token_archive_path = os.path.join(self.archive_dir, token_archive_name)
-                shutil.move(token_file, token_archive_path)
-                token_status = f" and token file to archive/{token_archive_name}"
-            
-            # Also delete checkpointer data
-            saver = FlatFileCheckpointer()
-            saver.delete_thread(session_id)
-            
-            return f"Session {session_id} archived to archive/{archive_name}{token_status}"
-        return "No active session file found to archive."
-
-    def load_history(self, session_id, limit=50):
-        file_path = self.get_file_path(session_id)
-        if os.path.exists(file_path):
-            data = []
-            try:
-                with open(file_path, "r") as f:
-                    for line in f:
-                        if line.strip():
-                            data.append(json.loads(line))
-                if limit and limit > 0:
-                     return data[-limit:]
-                return data
-            except json.JSONDecodeError:
-                return []
-        return []
+class FlatFileSessionStore(SqliteSessionStore):
+    """Backwards compatibility wrapper for SqliteSessionStore."""
+    def __init__(self, sessions_dir: str = None, db_path: str = None):
+        if db_path is not None:
+            super().__init__(db_path=db_path)
+        elif sessions_dir is not None:
+            import os
+            super().__init__(db_path=os.path.join(sessions_dir, "memory.db"))
+        else:
+            super().__init__()

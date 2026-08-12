@@ -1,8 +1,7 @@
 import os
-import glob
 import discord
 import datetime
-from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 
 class SessionManager:
     _instance = None
@@ -13,20 +12,12 @@ class SessionManager:
         return cls._instance
 
     def clear_session(self, session_id: str) -> str:
-        store = FlatFileSessionStore()
+        store = SqliteSessionStore()
         return store.archive_session(session_id)
         
-    def clear_sessions(self):
-        store = FlatFileSessionStore()
-        sessions_dir = store.sessions_dir
-        if not os.path.exists(sessions_dir):
-            return
-        responses = []
-        for filepath in glob.glob(os.path.join(sessions_dir, "*.jsonl")):
-            filename = os.path.basename(filepath)
-            safe_id = filename[:-6]  # remove .jsonl
-            responses.append(self.clear_session(safe_id))
-        return "\n".join(responses)
+    def clear_sessions(self) -> str:
+        store = SqliteSessionStore()
+        return store.archive_all_sessions()
 
     def get_session_id(self, agent_id: str, source: str, channel: discord.TextChannel = None) -> str:
         postfix = ""

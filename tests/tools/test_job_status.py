@@ -22,10 +22,9 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload="", errors="Job unknown_job not found."))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.FlatFileSessionStore')
-    @patch('tools.job_status.os.path.exists')
+    @patch('tools.job_status.SqliteSessionStore')
     @patch('tools.job_status.agent_call')
-    def test_job_status_from_history(self, mock_agent_call, mock_exists, mock_session_store_class, mock_job_manager_class):
+    def test_job_status_from_history(self, mock_agent_call, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -35,9 +34,6 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store
-        mock_session_store.get_file_path.return_value = "/dummy/path.jsonl"
-        
-        mock_exists.return_value = True
         
         mock_history = [
             {"from": "user", "message": "hello", "ts": 123},
@@ -50,7 +46,7 @@ class TestJobStatusTool(unittest.TestCase):
         result = job_status.func(job_id="test_job_123")
         
         expected_payload = "Job test_job_123 status (Session: session_123):\n"
-        expected_payload += "File found: True, AI messages: 1\n"
+        expected_payload += "AI messages: 1\n"
         expected_payload += "\n--- AI Messages ---\n"
         expected_payload += "[1] I am working on steps 1 and 2. 50% done.\n"
         expected_payload += "-------------------\n\n"
@@ -59,10 +55,9 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload=expected_payload, errors="None"))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.FlatFileSessionStore')
-    @patch('tools.job_status.os.path.exists')
+    @patch('tools.job_status.SqliteSessionStore')
     @patch('tools.job_status.agent_call')
-    def test_job_status_fallback_to_last_message(self, mock_agent_call, mock_exists, mock_session_store_class, mock_job_manager_class):
+    def test_job_status_fallback_to_last_message(self, mock_agent_call, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -72,9 +67,6 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store
-        mock_session_store.get_file_path.return_value = "/dummy/path.jsonl"
-        
-        mock_exists.return_value = True
         
         mock_history = [
             {"from": "user", "message": "hello", "ts": 123},
@@ -87,7 +79,7 @@ class TestJobStatusTool(unittest.TestCase):
         result = job_status.func(job_id="test_job_123")
         
         expected_payload = "Job test_job_123 status (Session: session_123):\n"
-        expected_payload += "File found: True, AI messages: 0\n"
+        expected_payload += "AI messages: 0\n"
         expected_payload += "\n--- AI Messages ---\n"
         expected_payload += "-------------------\n\n"
         expected_payload += "Compiled Progress from skill-runner:\nCompiled progress\n"
@@ -95,9 +87,8 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload=expected_payload, errors="None"))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.FlatFileSessionStore')
-    @patch('tools.job_status.os.path.exists')
-    def test_job_status_no_history(self, mock_exists, mock_session_store_class, mock_job_manager_class):
+    @patch('tools.job_status.SqliteSessionStore')
+    def test_job_status_no_history(self, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -107,14 +98,11 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store
-        mock_session_store.get_file_path.return_value = "/dummy/path.jsonl"
-        
-        mock_exists.return_value = False
         mock_session_store.load_history.return_value = []
         
         result = job_status.func(job_id="test_job_123")
         
-        expected_payload = "File found: False, AI messages: 0\nNo session history found for session session_123."
+        expected_payload = "No session history found for session session_123."
         self.assertEqual(result, format_tool_response("job_status", payload=expected_payload, errors="None"))
 
 if __name__ == '__main__':

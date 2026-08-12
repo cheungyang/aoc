@@ -4,7 +4,7 @@ import re
 from langchain_core.tools import tool
 from core.agent.job_manager import JobManager, current_channel_name
 from core.util import format_tool_response
-from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 from tools.agent_call import agent_call
 
 @tool
@@ -39,25 +39,17 @@ async def _job_status_async(job_id: str) -> str:
             
         session_id = job.session_id
 
-        # Use FlatFileSessionStore to get history
-        session_store = FlatFileSessionStore()
-        file_path = session_store.get_file_path(session_id)
-        file_exists = os.path.exists(file_path)
-        if not file_exists:
-            print(f"Session file not found for session: {session_id}")
-            
+        # Use SqliteSessionStore to get history
+        session_store = SqliteSessionStore()
         history = session_store.load_history(session_id, limit=100)
         ai_messages = [entry.get("message", "") for entry in history if entry.get("from") == "ai"]
         ai_message_count = len(ai_messages)
         
-        debug_msg = f"File found: {file_exists}, AI messages: {ai_message_count}\n"
-        print(debug_msg)
-        
         if not history:
-            return format_tool_response("job_status", payload=f"{debug_msg}No session history found for session {session_id}.", errors="None")
+            return format_tool_response("job_status", payload=f"No session history found for session {session_id}.", errors="None")
             
         summary = f"Job {job_id} status (Session: {session_id}):\n"
-        summary += debug_msg
+        summary += f"AI messages: {ai_message_count}\n"
         
         # Show AI messages
         summary += "\n--- AI Messages ---\n"

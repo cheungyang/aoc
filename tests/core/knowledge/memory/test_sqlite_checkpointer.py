@@ -4,26 +4,32 @@ import shutil
 import tempfile
 import sys
 import asyncio
+from unittest.mock import patch
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
 
-class TestFlatFileCheckpointer(unittest.TestCase):
+class TestSqliteCheckpointer(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.checkpointer = FlatFileCheckpointer(directory=self.test_dir)
+        self.db_path = os.path.join(self.test_dir, "test_memory.db")
+        self.checkpointer = SqliteCheckpointer(db_path=self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    def test_init_creates_dir(self):
-        self.assertTrue(os.path.exists(self.test_dir))
+    def test_init_creates_db_file(self):
+        self.assertTrue(os.path.exists(self.db_path))
+
+    def test_sanitize_table_name(self):
+        tbl = sanitize_table_name("thread:123/abc-test.xyz")
+        self.assertEqual(tbl, "ctx_thread_123_abc_test_xyz")
 
     def test_put_and_get_tuple_latest(self):
         config = {"configurable": {"thread_id": "thread1"}}
-        checkpoint = {"id": "cp1"}
+        checkpoint = {"id": "cp1", "channel_values": {"messages": ["hello"]}}
         metadata = {"step": 1}
         new_versions = {}
 
@@ -52,6 +58,7 @@ class TestFlatFileCheckpointer(unittest.TestCase):
         # Get specific
         specific_config = {"configurable": {"thread_id": "thread1", "checkpoint_id": "cp1"}}
         cp_tuple_spec = self.checkpointer.get_tuple(specific_config)
+        self.assertIsNotNone(cp_tuple_spec)
         self.assertEqual(cp_tuple_spec.checkpoint["id"], "cp1")
 
     def test_list(self):
@@ -70,15 +77,15 @@ class TestFlatFileCheckpointer(unittest.TestCase):
         self.assertEqual(filtered[0].checkpoint["id"], "cp2")
 
     def test_delete_thread(self):
-         config = {"configurable": {"thread_id": "thread1"}}
-         self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
-         
-         cp_tuple = self.checkpointer.get_tuple(config)
-         self.assertIsNotNone(cp_tuple)
-         
-         self.checkpointer.delete_thread("thread1")
-         cp_tuple_after = self.checkpointer.get_tuple(config)
-         self.assertIsNone(cp_tuple_after)
+        config = {"configurable": {"thread_id": "thread1"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+        
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        
+        self.checkpointer.delete_thread("thread1")
+        cp_tuple_after = self.checkpointer.get_tuple(config)
+        self.assertIsNone(cp_tuple_after)
 
     def test_aput_and_aget_tuple(self):
         config = {"configurable": {"thread_id": "thread2"}}
@@ -101,6 +108,8 @@ class TestFlatFileCheckpointer(unittest.TestCase):
         
         async def run_test():
             await self.checkpointer.aput_writes(config, writes, "task1")
+            cp_tuple = await self.checkpointer.aget_tuple(config)
+            # Tuple doesn't error when pending writes exist
         
         asyncio.run(run_test())
 

@@ -3,14 +3,14 @@ import os
 import json
 import time
 from langchain_core.callbacks import BaseCallbackHandler
-from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 
 class LoggingHandler(BaseCallbackHandler):
     def __init__(self, session_id=None, role=None, human_message=None):
         self.session_id = session_id
         self.role = role
         self.human_message = human_message
-        self.manager = FlatFileSessionStore()
+        self.manager = SqliteSessionStore()
         
     def on_llm_start(self, serialized, prompts, **kwargs):
         if self.session_id and self.role and self.human_message:
@@ -89,4 +89,3 @@ class LoggingHandler(BaseCallbackHandler):
         if self.session_id:
             content = output.content if hasattr(output, 'content') else str(output)
             self.manager.append_message(self.session_id, 'system', f"Tool Output: {content}")
-

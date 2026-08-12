@@ -13,7 +13,7 @@ from core.util import format_tool_response
 class TestJobKillTool(unittest.TestCase):
 
     @patch('tools.job_kill.JobManager')
-    @patch('tools.job_kill.FlatFileCheckpointer')
+    @patch('tools.job_kill.SqliteCheckpointer')
     @patch('tools.job_kill.time.sleep') # Mock sleep to speed up tests
     def test_job_kill_success(self, mock_sleep, mock_checkpointer_class, mock_job_manager_class):
         mock_manager = MagicMock()
