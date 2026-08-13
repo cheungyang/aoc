@@ -81,5 +81,17 @@ class TestSqliteSessionStore(unittest.TestCase):
         active_after = self.store.list_active_sessions()
         self.assertEqual(len(active_after), 0)
 
+    def test_append_list_and_dict_message(self):
+        session_id = "session_structured"
+        list_msg = [{"type": "text", "text": "hello"}]
+        dict_msg = {"key": "val"}
+        self.store.append_message(session_id, "user", list_msg)
+        self.store.append_message(session_id, "bot", dict_msg)
+
+        history = self.store.load_history(session_id)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["message"], json.dumps(list_msg))
+        self.assertEqual(history[1]["message"], json.dumps(dict_msg))
+
 if __name__ == "__main__":
     unittest.main()

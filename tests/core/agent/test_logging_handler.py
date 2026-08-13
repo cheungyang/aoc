@@ -105,6 +105,44 @@ class TestLoggingHandler(unittest.TestCase):
             "session1", "gemini-pro", 100, 50, 20.0
         )
 
+    def test_on_llm_start_appends_list_human_message_as_json(self):
+        msg_list = [{"type": "text", "text": "hello"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]
+        handler = LoggingHandler(session_id="session1", role="user", human_message=msg_list)
+        handler.manager = MagicMock()
+        
+        handler.on_llm_start(None, ["Prompt 1"])
+        
+        import json
+        handler.manager.append_message.assert_called_once_with("session1", "user", json.dumps(msg_list))
+
+    def test_on_llm_start_does_not_duplicate_on_subsequent_calls(self):
+        handler = LoggingHandler(session_id="session1", role="user", human_message="hello")
+        handler.manager = MagicMock()
+        
+        handler.on_llm_start(None, ["Prompt 1"])
+        handler.on_llm_start(None, ["Prompt 2"])
+        
+        handler.manager.append_message.assert_called_once_with("session1", "user", "hello")
+
+    def test_on_llm_end_handles_list_content(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        mock_response = MagicMock()
+        mock_generation = MagicMock()
+        mock_generation.text = ""
+        mock_message = MagicMock()
+        mock_message.content = [{"type": "text", "text": "AI reply list"}]
+        mock_message.usage_metadata = None
+        mock_generation.message = mock_message
+        mock_response.generations = [[mock_generation]]
+        mock_response.llm_output = None
+        
+        handler.on_llm_end(mock_response)
+        
+        import json
+        handler.manager.append_message.assert_called_once_with("session1", "ai", json.dumps([{"type": "text", "text": "AI reply list"}]))
+
 if __name__ == "__main__":
     unittest.main()
 

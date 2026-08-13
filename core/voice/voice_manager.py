@@ -118,7 +118,9 @@ class VoiceManager:
                 break
                 
         if not target_channel:
-            print(f"[VoiceManager:{self.agent_id}] Could not find voice channel '{channel_name_or_id}'")
+            available_vcs = [f"'{vc.name}'" for guild in self.bot.guilds for vc in guild.voice_channels]
+            available_str = f" Available voice channels: [{', '.join(available_vcs)}]" if available_vcs else " No voice channels found in connected Discord servers."
+            print(f"[VoiceManager:{self.agent_id}] Could not find voice channel '{channel_name_or_id}'.{available_str}")
             return False
             
         try:

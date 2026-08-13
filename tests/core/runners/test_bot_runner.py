@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import os
 import sys
+import asyncio
 import discord
 
 # Inject root
@@ -72,19 +73,69 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channels, ["general-voice", "day-planning-voice", "agent-management-voice"])
 
     @patch('core.runners.bot_runner.commands.Bot')
-    async def test_on_ready(self, mock_bot_class):
+    @patch('core.runners.bot_runner.AgentsLoader')
+    async def test_on_ready(self, mock_loader_class, mock_bot_class):
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
         mock_bot.change_presence = AsyncMock()
+        mock_bot.wait_until_ready = AsyncMock()
+        mock_bot.guilds = []
         mock_bot_class.return_value = mock_bot
         
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "channel_hosts": ["general"],
+            "voice_config": {"enabled": True, "auto_join": True}
+        }
+        mock_loader = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_loader_class.return_value = mock_loader
+
         runner = BotRunner("test_token", "main")
+        runner.voice_manager.join_voice_channel = AsyncMock(return_value=True)
         
-        # Verify it runs without error
-        await runner.on_ready()
+        with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
+            await runner.on_ready()
+            mock_create_task.assert_called_once()
+            await mock_create_task.call_args[0][0]
         
         # Verify change_presence was called
         mock_bot.change_presence.assert_called_once()
+        runner.voice_manager.join_voice_channel.assert_called_with("general-voice")
+
+    @patch('core.runners.bot_runner.commands.Bot')
+    @patch('core.runners.bot_runner.AgentsLoader')
+    async def test_on_ready_picks_existing_guild_channel(self, mock_loader_class, mock_bot_class):
+        mock_bot = MagicMock()
+        mock_bot.user = "TestBot#1234"
+        mock_bot.change_presence = AsyncMock()
+        mock_bot.wait_until_ready = AsyncMock()
+        
+        mock_vc = MagicMock()
+        mock_vc.name = "day-planning-voice"
+        mock_guild = MagicMock()
+        mock_guild.voice_channels = [mock_vc]
+        mock_bot.guilds = [mock_guild]
+        mock_bot_class.return_value = mock_bot
+        
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "channel_hosts": ["general", "day-planning"],
+            "voice_config": {"enabled": True, "auto_join": True}
+        }
+        mock_loader = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_loader_class.return_value = mock_loader
+
+        runner = BotRunner("test_token", "main")
+        runner.voice_manager.join_voice_channel = AsyncMock(return_value=True)
+        
+        with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
+            await runner.on_ready()
+            mock_create_task.assert_called_once()
+            await mock_create_task.call_args[0][0]
+        
+        runner.voice_manager.join_voice_channel.assert_called_with("day-planning-voice")
 
     @patch('core.runners.bot_runner.commands.Bot')
     @patch('core.runners.bot_runner.AgentsLoader')

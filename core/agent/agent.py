@@ -159,8 +159,8 @@ class Agent(BaseAgent):
         poll_data = response.poll_data
         image_paths = response.image_paths
 
-        # Send message to channel
-        if channel is not None:
+        # Send message to channel only for direct Discord or scheduled invocations
+        if channel is not None and source in ["discord", "scheduled"]:
             chunks = split_message(text_content)
             
             # If there is a poll, we attach the view to the last chunk

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import json
 import time
 from typing import List, Dict, Any, Optional
 
@@ -57,9 +58,17 @@ class SqliteSessionStore:
         )
         return cursor.fetchone() is not None
 
-    def append_message(self, session_id: str, from_user: str, message: str) -> str:
+    def append_message(self, session_id: str, from_user: str, message: Any) -> str:
         table_name = sanitize_table_name(session_id)
         now = time.time()
+        if isinstance(message, (list, dict)):
+            try:
+                message = json.dumps(message)
+            except Exception:
+                message = str(message)
+        elif not isinstance(message, str):
+            message = str(message) if message is not None else ""
+        from_user = str(from_user) if from_user is not None else ""
         with self._get_connection() as conn:
             self._ensure_table(conn, table_name)
             conn.execute(

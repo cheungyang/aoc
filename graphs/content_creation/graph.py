@@ -146,7 +146,7 @@ def should_continue_image_review(state: ContentCreationState):
 async def generate_images_node(state: ContentCreationState):
     """Step 3: Content Creator executes dalle_image_generator for the 5 prompts."""
     drafts = state.get("draft_prompts", [])
-    output_dir = state.get("output_dir") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "toddler-tales", state.get("session_id", "session_1")))
+    output_dir = state.get("output_dir") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "ayla-first-words", state.get("session_id", "session_1")))
     os.makedirs(output_dir, exist_ok=True)
 
     generated_paths = []
@@ -260,7 +260,7 @@ async def generate_video_node(state: ContentCreationState):
     """Step 7: Content Creator executes runway_video_animator."""
     selected_image = state.get("selected_image_path", "")
     motion_prompt = state.get("draft_motion_prompt", "Slow camera push in, gentle character smile and movement")
-    output_dir = state.get("output_dir") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "toddler-tales", state.get("session_id", "session_1")))
+    output_dir = state.get("output_dir") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "ayla-first-words", state.get("session_id", "session_1")))
     video_output_path = os.path.join(output_dir, "animated_story.mp4")
 
     print(f"ContentCreationGraph: Generating Runway video from {selected_image} to {video_output_path}...")

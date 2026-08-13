@@ -299,6 +299,58 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             "test-job-id", "test-agent", "test-agent:session1", initial_prompt="hello world"
         )
 
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_suppresses_channel_send_for_tool_and_subgraph(self, mock_logging_handler_class):
+        """
+        Tests the problem & fix:
+        Sub-agents invoked via tools (source="tool", e.g., agent_call) or subgraphs (source="subgraph")
+        must NOT post messages directly to Discord, even if a channel is passed for session context.
+        Only the orchestrator (or direct user/scheduled invocations) should send messages to Discord.
+        """
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Subagent internal response")]})
+
+        agent = Agent("sub-agent", {})
+        agent.graph = mock_graph
+
+        mock_channel = AsyncMock()
+
+        # 1. When source="tool" (e.g., invoked via agent_call)
+        tool_reply = await agent.execute("run subtask", source="tool", channel=mock_channel)
+        self.assertEqual(tool_reply, "Subagent internal response")
+        mock_channel.send.assert_not_called()
+
+        # 2. When source="subgraph" (e.g., invoked within a graph node)
+        subgraph_reply = await agent.execute("critique prompt", source="subgraph", channel=mock_channel)
+        self.assertEqual(subgraph_reply, "Subagent internal response")
+        mock_channel.send.assert_not_called()
+
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_sends_channel_message_for_scheduled_and_discord(self, mock_logging_handler_class):
+        """
+        Verifies that direct user interactions (source="discord") and automated cron tasks
+        (source="scheduled") DO post messages to the Discord channel.
+        """
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Scheduled report")]})
+
+        agent = Agent("cron-agent", {})
+        agent.graph = mock_graph
+
+        mock_channel = AsyncMock()
+
+        # 1. When source="scheduled"
+        reply = await agent.execute("daily check", source="scheduled", channel=mock_channel)
+        self.assertEqual(reply, "Scheduled report")
+        mock_channel.send.assert_called_once_with("Scheduled report")
+
+        # 2. When source="discord"
+        mock_channel.reset_mock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Direct user response")]})
+        reply_discord = await agent.execute("user query", source="discord", channel=mock_channel)
+        self.assertEqual(reply_discord, "Direct user response")
+        mock_channel.send.assert_called_once_with("Direct user response")
+
 if __name__ == "__main__":
     unittest.main()
 

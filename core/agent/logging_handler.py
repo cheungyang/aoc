@@ -13,13 +13,32 @@ class LoggingHandler(BaseCallbackHandler):
         self.manager = SqliteSessionStore()
         
     def on_llm_start(self, serialized, prompts, **kwargs):
-        if self.session_id and self.role and self.human_message:
-            self.manager.append_message(self.session_id, self.role, self.human_message)
+        if self.session_id and self.role and self.human_message is not None:
+            msg = self.human_message
+            if isinstance(msg, (list, dict)):
+                try:
+                    msg = json.dumps(msg)
+                except Exception:
+                    msg = str(msg)
+            elif not isinstance(msg, str):
+                msg = str(msg)
+            self.manager.append_message(self.session_id, self.role, msg)
+            self.human_message = None
 
     def on_llm_end(self, response, **kwargs):
-        if response.generations:
+        if response.generations and response.generations[0]:
              if self.session_id:
-                  ai_response = response.generations[0][0].text
+                  gen = response.generations[0][0]
+                  ai_response = gen.text
+                  if not ai_response and hasattr(gen, 'message') and gen.message:
+                      ai_response = gen.message.content
+                  if isinstance(ai_response, (list, dict)):
+                      try:
+                          ai_response = json.dumps(ai_response)
+                      except Exception:
+                          ai_response = str(ai_response)
+                  elif not isinstance(ai_response, str):
+                      ai_response = str(ai_response) if ai_response is not None else ""
                   self.manager.append_message(self.session_id, 'ai', ai_response)
         
         # Extract token usage
@@ -88,4 +107,11 @@ class LoggingHandler(BaseCallbackHandler):
     def on_tool_end(self, output, **kwargs):
         if self.session_id:
             content = output.content if hasattr(output, 'content') else str(output)
+            if isinstance(content, (list, dict)):
+                try:
+                    content = json.dumps(content)
+                except Exception:
+                    content = str(content)
+            elif not isinstance(content, str):
+                content = str(content)
             self.manager.append_message(self.session_id, 'system', f"Tool Output: {content}")

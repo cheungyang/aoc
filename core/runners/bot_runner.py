@@ -91,12 +91,30 @@ class BotRunner:
             voice_config = agent.config.get("voice_config", {})
             if voice_config.get("enabled") and voice_config.get("auto_join"):
                 vc_targets = self.get_hosted_voice_channels(agent)
-                vc_target = vc_targets[0] if vc_targets else "general-voice"
                 async def _auto_join():
                     await self.bot.wait_until_ready()
                     await asyncio.sleep(1.5) # Allow guild cache to populate
-                    print(f"Agent {self.agent_id} auto-joining voice channel '{vc_target}'...")
-                    await self.voice_manager.join_voice_channel(vc_target)
+                    targets = vc_targets if vc_targets else ["general-voice"]
+                    
+                    selected_target = None
+                    for t in targets:
+                        norm_t = self.voice_manager.normalize_channel_name(str(t))
+                        for guild in self.bot.guilds:
+                            for vc in guild.voice_channels:
+                                if str(t).isdigit() and vc.id == int(t):
+                                    selected_target = t
+                                    break
+                                if vc.name == t or self.voice_manager.normalize_channel_name(vc.name) == norm_t:
+                                    selected_target = t
+                                    break
+                            if selected_target:
+                                break
+                        if selected_target:
+                            break
+
+                    target_to_join = selected_target or targets[0]
+                    print(f"Agent {self.agent_id} auto-joining voice channel '{target_to_join}'...")
+                    await self.voice_manager.join_voice_channel(target_to_join)
                 asyncio.create_task(_auto_join())
 
 
