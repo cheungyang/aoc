@@ -25,6 +25,7 @@ class BotRunner:
         # Register events
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
+        self.bot.event(self.on_voice_state_update)
         
         # Register voice commands
         @self.bot.command(name="join")
@@ -44,6 +45,41 @@ class BotRunner:
             await self.voice_manager.leave_voice_channel()
             await ctx.send("Disconnected from voice channel. 👋")
 
+    def get_hosted_voice_channels(self, agent) -> list:
+        """Resolves target voice channels for an agent from explicit voice_config or channel_hosts convention."""
+        if not agent:
+            return []
+        voice_config = agent.config.get("voice_config", {})
+        if "voice_channels" in voice_config:
+            return voice_config["voice_channels"]
+        if "voice_channel" in voice_config:
+            return [voice_config["voice_channel"]]
+            
+        channel_hosts = agent.config.get("channel_hosts", [])
+        return [f"{ch}-voice" for ch in channel_hosts]
+
+    async def on_voice_state_update(self, member, before, after):
+        """Auto-follows human users when they join any voice channel matching the agent's channel_hosts."""
+        if member.bot:
+            return
+        loader = AgentsLoader()
+        agent = loader.get_agent(self.agent_id)
+        if not agent:
+            return
+        voice_config = agent.config.get("voice_config", {})
+        if not voice_config.get("enabled"):
+            return
+            
+        vc_targets = self.get_hosted_voice_channels(agent)
+        
+        if after.channel and any(
+            after.channel.name == vc or self.voice_manager.normalize_channel_name(after.channel.name) == self.voice_manager.normalize_channel_name(vc)
+            for vc in vc_targets
+        ):
+            if not self.voice_manager.voice_client or self.voice_manager.voice_client.channel != after.channel:
+                print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
+                await self.voice_manager.join_voice_channel(after.channel.name)
+
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
@@ -54,7 +90,8 @@ class BotRunner:
         if agent:
             voice_config = agent.config.get("voice_config", {})
             if voice_config.get("enabled") and voice_config.get("auto_join"):
-                vc_target = voice_config.get("voice_channel", "general-voice")
+                vc_targets = self.get_hosted_voice_channels(agent)
+                vc_target = vc_targets[0] if vc_targets else "general-voice"
                 async def _auto_join():
                     await self.bot.wait_until_ready()
                     await asyncio.sleep(1.5) # Allow guild cache to populate

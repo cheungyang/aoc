@@ -53,8 +53,28 @@ class BotsLoader:
         return None
 
     def find_channel(self, channel_name: str):
+        loader = AgentsLoader()
+        # 1. Primary: Prefer the bot whose agent lists this channel in channel_hosts
+        for agent_id, bot_runner in self._bots.items():
+            if bot_runner and bot_runner.bot:
+                agent = loader.get_agent(agent_id)
+                channel_hosts = agent.get_config("channel_hosts", []) if agent else []
+                if channel_name in channel_hosts or any(str(h) == str(channel_name) for h in channel_hosts):
+                    for guild in bot_runner.bot.guilds:
+                        for ch in guild.text_channels:
+                            if ch.name == channel_name or str(ch.id) == channel_name:
+                                return ch
+
+        # 2. Secondary: If main / concierge bot is active, use it as default host
+        if "main" in self._bots and self._bots["main"] and self._bots["main"].bot:
+            for guild in self._bots["main"].bot.guilds:
+                for ch in guild.text_channels:
+                    if ch.name == channel_name or str(ch.id) == channel_name:
+                        return ch
+
+        # 3. Fallback: Any bot with access to the channel
         for bot_runner in self._bots.values():
-            if bot_runner.bot:
+            if bot_runner and bot_runner.bot:
                 for guild in bot_runner.bot.guilds:
                     for ch in guild.text_channels:
                         if ch.name == channel_name or str(ch.id) == channel_name:

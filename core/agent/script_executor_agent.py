@@ -1,5 +1,6 @@
 from abc import ABC
 import os
+import asyncio
 import discord
 from typing import List
 import subprocess
@@ -102,7 +103,7 @@ class ScriptExecutorAgent(BaseAgent):
                         if args:
                             args[0] = os.path.join("scripts", args[0])
                         expanded_args = [os.path.expanduser(arg) for arg in args]
-                        res = subprocess.run(expanded_args, capture_output=True, text=True, check=True)
+                        res = await asyncio.to_thread(subprocess.run, expanded_args, capture_output=True, text=True, check=True)
                         results.append(f"Script '{rest}' executed successfully:\n{res.stdout}")
                     except subprocess.CalledProcessError as e:
                         results.append(f"Error executing script '{rest}': {e.stderr}")

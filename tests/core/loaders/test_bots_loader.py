@@ -129,6 +129,50 @@ class TestBotsLoader(unittest.TestCase):
         self.assertIsNone(found)
 
     @patch('core.loaders.bots_loader.AgentsLoader')
+    def test_find_channel_respects_channel_hosts(self, mock_agents_loader):
+        loader = BotsLoader()
+        
+        # Bot 1: Aki (hosts agent-management)
+        mock_ch_day_aki = MagicMock()
+        mock_ch_day_aki.name = "day-planning"
+        mock_guild_aki = MagicMock()
+        mock_guild_aki.text_channels = [mock_ch_day_aki]
+        mock_bot_aki = MagicMock()
+        mock_bot_aki.bot.guilds = [mock_guild_aki]
+        
+        # Bot 2: Main / Concierge (hosts day-planning, general)
+        mock_ch_day_main = MagicMock()
+        mock_ch_day_main.name = "day-planning"
+        mock_guild_main = MagicMock()
+        mock_guild_main.text_channels = [mock_ch_day_main]
+        mock_bot_main = MagicMock()
+        mock_bot_main.bot.guilds = [mock_guild_main]
+        
+        loader._bots = {
+            "agent-designer": mock_bot_aki,
+            "main": mock_bot_main
+        }
+        
+        mock_agents = MagicMock()
+        mock_agents_loader.return_value = mock_agents
+        
+        def get_agent_side_effect(agent_id):
+            agent = MagicMock()
+            if agent_id == "agent-designer":
+                agent.get_config.return_value = ["agent-management"]
+            elif agent_id == "main":
+                agent.get_config.return_value = ["general", "day-planning"]
+            else:
+                agent.get_config.return_value = []
+            return agent
+            
+        mock_agents.get_agent.side_effect = get_agent_side_effect
+        
+        # When finding day-planning, it should return mock_ch_day_main, NOT mock_ch_day_aki
+        found = loader.find_channel("day-planning")
+        self.assertEqual(found, mock_ch_day_main)
+
+    @patch('core.loaders.bots_loader.AgentsLoader')
     def test_get_channel_multiple_hosts_resolves_correct_channel(self, mock_agents_loader):
         loader = BotsLoader()
         

@@ -58,6 +58,9 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<options>", prompt)
         self.assertIn("<images>", prompt)
         self.assertIn("<image path=", prompt)
+        self.assertIn("<tool_execution_rules>", prompt)
+        self.assertIn("Permission Restrictions", prompt)
+        self.assertIn("Cross-Channel Communication", prompt)
 
     def test_get_channel_prompt_explicit(self):
         from core.util import get_channel_prompt

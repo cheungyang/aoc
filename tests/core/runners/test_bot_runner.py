@@ -18,10 +18,58 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner = BotRunner("test_token", "main")
         
-        # Verify event registration
-        self.assertEqual(mock_bot.event.call_count, 2)
+        # Verify event registration (on_ready, on_message, on_voice_state_update)
+        self.assertEqual(mock_bot.event.call_count, 3)
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
+        mock_bot.event.assert_any_call(runner.on_voice_state_update)
+
+    @patch('core.runners.bot_runner.commands.Bot')
+    @patch('core.runners.bot_runner.AgentsLoader')
+    async def test_on_voice_state_update_auto_follows_user(self, mock_loader_class, mock_bot_class):
+        mock_bot = MagicMock()
+        mock_bot_class.return_value = mock_bot
+        
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "channel_hosts": ["general", "day-planning"],
+            "voice_config": {
+                "enabled": True
+            }
+        }
+        mock_loader = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_loader_class.return_value = mock_loader
+        
+        runner = BotRunner("test_token", "main")
+        runner.voice_manager = MagicMock()
+        runner.voice_manager.voice_client = None
+        runner.voice_manager.join_voice_channel = AsyncMock()
+        runner.voice_manager.normalize_channel_name = lambda n: n.replace("-voice", "").replace("-", "")
+        
+        # User joins day-planning-voice
+        mock_member = MagicMock(bot=False, display_name="Alva")
+        mock_before = MagicMock(channel=None)
+        mock_channel = MagicMock(name="day-planning-voice")
+        mock_channel.name = "day-planning-voice"
+        mock_after = MagicMock(channel=mock_channel)
+        
+        await runner.on_voice_state_update(mock_member, mock_before, mock_after)
+        runner.voice_manager.join_voice_channel.assert_awaited_once_with("day-planning-voice")
+
+    @patch('core.runners.bot_runner.commands.Bot')
+    def test_get_hosted_voice_channels_convention(self, mock_bot_class):
+        mock_bot = MagicMock()
+        mock_bot_class.return_value = mock_bot
+        runner = BotRunner("test_token", "main")
+        
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "channel_hosts": ["general", "day-planning", "agent-management"],
+            "voice_config": {"enabled": True}
+        }
+        channels = runner.get_hosted_voice_channels(mock_agent)
+        self.assertEqual(channels, ["general-voice", "day-planning-voice", "agent-management-voice"])
 
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_ready(self, mock_bot_class):

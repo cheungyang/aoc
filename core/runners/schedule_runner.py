@@ -60,7 +60,7 @@ class ScheduleRunner:
                 if now >= item["next_run"]:
                     if triggered:
                         await asyncio.sleep(2)
-                    await self._execute_schedule(item)
+                    asyncio.create_task(self._execute_schedule(item))
                     triggered = True
                     # Update next run time
                     try:

@@ -48,7 +48,12 @@ If you want to send images to the user, use the <images> tag, formatted below.
     <image path="{{path to the image file}}"/>
     {{...additional <image path="..."/> tags for each image...}}
 </images>
-</formatting_rules>"""
+</formatting_rules>
+
+<tool_execution_rules>
+- Permission Restrictions: If a tool use or execution is blocked by permission, do NOT re-attempt or retry the action with different paths or parameter variations, as this will not help and permissions cannot be bypassed by retrying. Instead, explain the limitation to the user or delegate to an authorized specialized agent.
+- Cross-Channel Communication: If you intend to send a message to a different Discord channel (via `agent_call` with a `channel` parameter), you MUST obtain the user's explicit approval before doing so.
+</tool_execution_rules>"""
 
 
 def get_channel_prompt(channel_name: str = None) -> str:

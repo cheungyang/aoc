@@ -44,6 +44,8 @@ class VoiceManager:
         
         self._is_processing = False
         self._lock = asyncio.Lock()
+        self._active_turn = 0
+        self._current_task = None
 
     def normalize_channel_name(self, name: str) -> str:
         """Normalizes a channel name (strips 'voice-', '-voice', 'vc-', spaces, special chars)."""
@@ -74,40 +76,44 @@ class VoiceManager:
         agent = loader.get_agent(self.agent_id)
         channel_hosts = agent.config.get("channel_hosts", []) if agent else []
 
-        # Find matching text channel in the same guild
+        # 1. Exact normalized name match (e.g. day-planning-voice -> day-planning)
         for ch in voice_channel.guild.text_channels:
-            ch_normalized = self.normalize_channel_name(ch.name)
-            # Exact normalized name match (e.g. day-planning-voice -> day-planning)
-            if ch_normalized == vc_normalized:
-                return ch
-            # Check if channel is in channel_hosts and matches
-            if (ch.name in channel_hosts or str(ch.id) in channel_hosts) and (ch_normalized in vc_normalized or vc_normalized in ch_normalized):
+            if self.normalize_channel_name(ch.name) == vc_normalized:
                 return ch
 
-        # Fallback to the voice channel's built-in chat
+        # 2. Match channel_hosts if related
+        for ch in voice_channel.guild.text_channels:
+            ch_norm = self.normalize_channel_name(ch.name)
+            if (ch.name in channel_hosts or str(ch.id) in channel_hosts) and (ch_norm in vc_normalized or vc_normalized in ch_norm):
+                return ch
+
+        # Fallback to the voice channel itself (Discord voice channels support text chat)
         return voice_channel
 
     async def join_voice_channel(self, channel_name_or_id: str = None, text_channel: discord.TextChannel = None) -> bool:
-        """Connects the bot to a designated Discord voice channel and links text channel context."""
+        """Joins a Discord voice channel and starts listening with VADSink."""
         if text_channel is not None:
             self.linked_text_channel = text_channel
             
-        if not channel_name_or_id:
-            channel_name_or_id = self.config.get("voice_channel", "")
-            
         target_channel = None
         for guild in self.bot.guilds:
-            for vc in guild.voice_channels:
-                if channel_name_or_id:
-                    if vc.name.lower() == str(channel_name_or_id).lower() or str(vc.id) == str(channel_name_or_id):
-                        target_channel = vc
-                        break
-                    elif self.normalize_channel_name(vc.name) == self.normalize_channel_name(channel_name_or_id):
-                        target_channel = vc
-                        break
-                else:
-                    target_channel = vc
+            # 1. Match by channel ID
+            if str(channel_name_or_id).isdigit():
+                target_channel = guild.get_channel(int(channel_name_or_id))
+                if target_channel and isinstance(target_channel, discord.VoiceChannel):
                     break
+            
+            # 2. Match by exact or normalized channel name
+            if channel_name_or_id:
+                norm_target = self.normalize_channel_name(str(channel_name_or_id))
+                for vc in guild.voice_channels:
+                    if vc.name == channel_name_or_id or self.normalize_channel_name(vc.name) == norm_target:
+                        target_channel = vc
+                        break
+            else:
+                # Default to first available
+                target_channel = guild.voice_channels[0] if guild.voice_channels else None
+            
             if target_channel:
                 break
                 
@@ -160,28 +166,59 @@ class VoiceManager:
             self.voice_client = None
             print(f"[VoiceManager:{self.agent_id}] Disconnected from voice channel.")
 
+    def _stop_playback(self):
+        """Stops active audio playback without stopping voice reception."""
+        if not self.voice_client:
+            return
+        try:
+            if hasattr(self.voice_client, "stop_playing"):
+                self.voice_client.stop_playing()
+            elif hasattr(self.voice_client, "stop"):
+                self.voice_client.stop()
+        except Exception:
+            pass
+
     async def on_speech_started(self, user):
-        """Called when user begins speaking. Handles barge-in by halting current audio."""
+        """Called when user begins speaking. Handles barge-in by halting current audio and cancelling prior in-flight task."""
         if user and getattr(user, "bot", False) is True:
             return
         if self.voice_client and getattr(self.voice_client, "user", None) and getattr(user, "id", None) == getattr(self.voice_client.user, "id", None):
             return
 
+        self._active_turn += 1
+        
+        # 1. Stop audio playback immediately (without stopping voice reception!)
         if self.voice_client and self.voice_client.is_playing():
             user_name = getattr(user, "display_name", str(user))
-            print(f"[VoiceManager:{self.agent_id}] User {user_name} spoke during playback. Halting audio (Barge-in).")
-            self.voice_client.stop()
+            print(f"[VoiceManager:{self.agent_id}] 🛑 User {user_name} spoke during playback. Halting audio (Barge-in).")
+            self._stop_playback()
+
+        # 2. Cancel prior in-flight generation/synthesis task
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+            self._current_task = None
 
     async def on_speech_finished(self, user, wav_bytes: bytes):
-        """Called when user finishes speaking. Orchestrates blurp, STT, agent execution, and TTS."""
+        """Called when user finishes speaking. Spawns processing task for this turn."""
         if user and getattr(user, "bot", False) is True:
             return
         if self.voice_client and getattr(self.voice_client, "user", None) and getattr(user, "id", None) == getattr(self.voice_client.user, "id", None):
             return
 
+        # Cancel any previous task
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+
+        turn_id = self._active_turn
+        self._current_task = asyncio.create_task(self._process_speech_turn(user, wav_bytes, turn_id))
+
+    async def _process_speech_turn(self, user, wav_bytes: bytes, turn_id: int):
+        """Processes a speech turn through STT, Agent, and TTS."""
         async with self._lock:
             try:
                 # 1. Instantly play static acoustic blurp
+                if turn_id != self._active_turn:
+                    return
                 print(f"[VoiceManager:{self.agent_id}] 🔔 Playing signature blurp...")
                 self._play_blurp()
                 
@@ -192,6 +229,9 @@ class VoiceManager:
                     print(f"[VoiceManager:{self.agent_id}] Transcription empty or filtered as noise. Ignoring.")
                     return
                     
+                if turn_id != self._active_turn:
+                    return
+
                 author_name = getattr(user, "display_name", str(user)) if user else "Speaker"
                 print(f"[VoiceManager:{self.agent_id}] 📝 Transcribed prompt from {author_name}: '{transcript}'")
                 
@@ -206,6 +246,9 @@ class VoiceManager:
                     except Exception as te:
                         print(f"[VoiceManager:{self.agent_id}] Error posting transcript: {te}")
                 
+                if turn_id != self._active_turn:
+                    return
+
                 # 4. Execute LangGraph Agent with source="discord" so it shares the EXACT same session context as typing!
                 loader = AgentsLoader()
                 agent = loader.get_agent(self.agent_id)
@@ -218,16 +261,29 @@ class VoiceManager:
                     source="discord", # Shared context with text channel
                     channel=target_channel
                 )
+                
+                if turn_id != self._active_turn:
+                    print(f"[VoiceManager:{self.agent_id}] Discarding response due to newer voice interruption.")
+                    return
+
                 print(f"[VoiceManager:{self.agent_id}] 💬 Agent response: '{response_text[:80]}...'")
                 
                 # 5. Synthesize and speak reply
                 if response_text and self.voice_client and self.voice_client.is_connected():
                     print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing speech with Edge-TTS...")
                     tts_file = await self.tts_engine.synthesize_to_file(response_text)
+                    
+                    if turn_id != self._active_turn:
+                        if tts_file and os.path.exists(tts_file):
+                            os.unlink(tts_file)
+                        return
+
                     if tts_file and os.path.exists(tts_file):
                         print(f"[VoiceManager:{self.agent_id}] 🎧 Streaming audio reply to voice channel...")
                         self._play_audio_file(tts_file)
                         
+            except asyncio.CancelledError:
+                pass
             except Exception as e:
                 print(f"[VoiceManager:{self.agent_id}] Error in voice pipeline: {e}")
                 import traceback
@@ -241,6 +297,8 @@ class VoiceManager:
             return
             
         try:
+            if self.voice_client.is_playing():
+                self._stop_playback()
             blurp_file = BlurpGenerator.get_blurp_audio(self.config)
             if blurp_file and os.path.exists(blurp_file):
                 source = discord.FFmpegPCMAudio(blurp_file, executable=FFMPEG_EXE)
@@ -267,7 +325,7 @@ class VoiceManager:
         try:
             # Stop any playing blurp before speaking
             if self.voice_client.is_playing():
-                self.voice_client.stop()
+                self._stop_playback()
                 
             source = discord.FFmpegPCMAudio(file_path, executable=FFMPEG_EXE)
             self.voice_client.play(source, after=_after_play)

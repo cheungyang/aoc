@@ -237,5 +237,77 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         mock_bots.get_channel.assert_called_once_with("main", "day-planning")
         mock_day_planner.execute.assert_called_once_with("Provide your daily update", channel=mock_target_channel, role="user", source="scheduled")
 
+    @patch('core.runners.schedule_runner.AgentsLoader')
+    @patch('core.runners.schedule_runner.BotsLoader')
+    @patch('core.runners.schedule_runner.croniter')
+    @patch('core.runners.schedule_runner.asyncio.create_task')
+    @patch('asyncio.sleep')
+    async def test_start_spawns_async_tasks_for_schedules(self, mock_sleep, mock_create_task, mock_croniter, mock_bots_loader, mock_agents_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["agent1"]
+        
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {
+            "schedules": [
+                {"cron": "* * * * *", "prompt": "test prompt", "enabled": "true", "channel": "test-channel"}
+            ]
+        }
+        
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        past_time = datetime.datetime.now() - datetime.timedelta(minutes=1)
+        future_time = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = future_time
+        
+        runner = ScheduleRunner()
+        runner.schedules[0]["next_run"] = past_time
+        
+        import asyncio
+        mock_sleep.side_effect = [None, asyncio.CancelledError()]
+        
+        try:
+            await runner.start()
+        except asyncio.CancelledError:
+            pass
+            
+        mock_create_task.assert_called_once()
+        coro = mock_create_task.call_args[0][0]
+        coro.close()
+        self.assertEqual(runner.schedules[0]["next_run"], future_time)
+
+    @patch('core.runners.schedule_runner.AgentsLoader')
+    @patch('core.runners.schedule_runner.BotsLoader')
+    @patch('core.runners.schedule_runner.croniter')
+    @patch('core.runners.schedule_runner.Config')
+    async def test_debug_mode_skips_unallowed_channels(self, mock_config_class, mock_croniter, mock_bots_loader, mock_agents_loader):
+        mock_config = MagicMock()
+        mock_config.is_channel_allowed.return_value = False
+        mock_config.debug_channel = "debug-only"
+        mock_config_class.return_value = mock_config
+        
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["agent1"]
+        
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {
+            "schedules": [
+                {"cron": "* * * * *", "prompt": "test prompt", "enabled": "true", "channel": "other-channel"}
+            ]
+        }
+        mock_agent.execute = AsyncMock()
+        
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        
+        runner = ScheduleRunner()
+        await runner._execute_schedule(runner.schedules[0])
+        
+        mock_agent.execute.assert_not_called()
+
 if __name__ == '__main__':
     unittest.main()
