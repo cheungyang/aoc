@@ -23,6 +23,7 @@ class Config:
             cls._instance._brave_api_key = None
             cls._instance._openai_api_key = None
             cls._instance._anthropic_api_key = None
+            cls._instance._runway_api_key = None
             cls._instance._tasks_db_path = None
             cls._instance._projects_db_path = None
             cls._instance._projects_dir = None
@@ -47,6 +48,7 @@ class Config:
         self._brave_api_key = None
         self._openai_api_key = None
         self._anthropic_api_key = None
+        self._runway_api_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None
@@ -190,6 +192,16 @@ class Config:
     @anthropic_api_key.setter
     def anthropic_api_key(self, value):
         self._anthropic_api_key = str(value) if value is not None else None
+
+    @property
+    def runway_api_key(self) -> str:
+        if self._runway_api_key is not None:
+            return self._runway_api_key
+        return os.getenv("RUNWAYML_API_SECRET", os.getenv("RUNWAY_API_KEY", ""))
+
+    @runway_api_key.setter
+    def runway_api_key(self, value):
+        self._runway_api_key = str(value) if value is not None else None
 
     # -------------------------------------------------------------------------
     # PKM & Tasks Storage Paths
@@ -338,6 +350,7 @@ class Config:
         self._brave_api_key = None
         self._openai_api_key = None
         self._anthropic_api_key = None
+        self._runway_api_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None
