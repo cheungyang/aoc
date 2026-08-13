@@ -19,3 +19,4 @@ faster-whisper
 edge-tts
 soundfile
 imageio-ffmpeg
+pillow

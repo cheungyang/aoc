@@ -3,6 +3,7 @@ import sqlite3
 import pickle
 import json
 import time
+import zlib
 from typing import Optional, List, Iterator, Sequence, Any, Dict
 from collections import defaultdict
 from langchain_core.runnables import RunnableConfig
@@ -45,6 +46,22 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         with self._get_connection() as conn:
             pass
 
+    def _serialize_blob(self, obj: Any) -> bytes:
+        """Serializes and zlib-compresses a Python object to save disk space."""
+        raw = pickle.dumps(obj)
+        return zlib.compress(raw, level=6)
+
+    def _deserialize_blob(self, blob: bytes) -> Any:
+        """Decompresses and deserializes a Python object, supporting backwards-compatible uncompressed blobs."""
+        if not blob:
+            return None
+        try:
+            decompressed = zlib.decompress(blob)
+            return pickle.loads(decompressed)
+        except Exception:
+            # Fallback for uncompressed legacy blobs
+            return pickle.loads(blob)
+
     def _ensure_table(self, conn: sqlite3.Connection, table_name: str):
         conn.execute(f"""
         CREATE TABLE IF NOT EXISTS "{table_name}" (
@@ -59,19 +76,25 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             from_role TEXT,
             message TEXT,
             model TEXT,
-            input_tokens INTEGER DEFAULT 0,
-            output_tokens INTEGER DEFAULT 0,
-            cached_tokens REAL DEFAULT 0.0,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            cached_tokens REAL,
             created_at REAL NOT NULL
-        );
+        )
         """)
-        conn.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_type" ON "{table_name}" (entry_type);')
-        conn.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_cp_id" ON "{table_name}" (checkpoint_id);')
-        conn.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_created" ON "{table_name}" (created_at);')
+        # Index for efficient lookups by entry_type, step, and checkpoint_id
+        conn.execute(f"""
+        CREATE INDEX IF NOT EXISTS "idx_{table_name}_entry_step"
+        ON "{table_name}" (entry_type, step, id)
+        """)
+        conn.execute(f"""
+        CREATE INDEX IF NOT EXISTS "idx_{table_name}_cpid"
+        ON "{table_name}" (entry_type, checkpoint_id)
+        """)
 
     def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
         cursor = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
             (table_name,)
         )
         return cursor.fetchone() is not None
@@ -102,7 +125,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             if not row:
                 return None
 
-            checkpoint_data = pickle.loads(row["data"])
+            checkpoint_data = self._deserialize_blob(row["data"])
             checkpoint = checkpoint_data.get("checkpoint")
             metadata = checkpoint_data.get("metadata", {})
             entry_config = checkpoint_data.get("config", {})
@@ -116,7 +139,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             )
             pending_writes = []
             for w_row in writes_cursor.fetchall():
-                write_info = pickle.loads(w_row["data"])
+                write_info = self._deserialize_blob(w_row["data"])
                 if isinstance(write_info, dict) and "writes" in write_info:
                     for w in write_info["writes"]:
                         pending_writes.append((write_info.get("task_id", ""), w[0], w[1]))
@@ -167,7 +190,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             "new_versions": new_versions
         }
 
-        blob = pickle.dumps(entry_data)
+        blob = self._serialize_blob(entry_data)
         step = metadata.get("step", -1) if isinstance(metadata, dict) else -1
         meta_json = json.dumps(metadata) if isinstance(metadata, dict) else str(metadata)
         now = time.time()
@@ -181,6 +204,31 @@ class SqliteCheckpointer(BaseCheckpointSaver):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 ("checkpoint", checkpoint_id, step, blob, meta_json, json.dumps(return_config), now)
+            )
+
+            # Prune older intermediate checkpoints (keep last 10 snapshots) to prevent exponential bloat
+            conn.execute(
+                f"""
+                DELETE FROM "{table_name}"
+                WHERE entry_type = 'checkpoint'
+                AND id NOT IN (
+                    SELECT id FROM "{table_name}"
+                    WHERE entry_type = 'checkpoint'
+                    ORDER BY step DESC, id DESC
+                    LIMIT 10
+                )
+                """
+            )
+            # Prune orphaned writes
+            conn.execute(
+                f"""
+                DELETE FROM "{table_name}"
+                WHERE entry_type = 'write'
+                AND checkpoint_id NOT IN (
+                    SELECT checkpoint_id FROM "{table_name}"
+                    WHERE entry_type = 'checkpoint'
+                )
+                """
             )
             conn.commit()
 
@@ -201,7 +249,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             "task_path": task_path,
             "checkpoint_id": checkpoint_id
         }
-        blob = pickle.dumps(write_data)
+        blob = self._serialize_blob(write_data)
 
         with self._get_connection() as conn:
             self._ensure_table(conn, table_name)
@@ -235,7 +283,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
                         continue
 
                     try:
-                        checkpoint_data = pickle.loads(row["data"])
+                        checkpoint_data = self._deserialize_blob(row["data"])
                     except Exception:
                         continue
 
@@ -270,6 +318,14 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             if self._table_exists(conn, table_name):
                 conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                 conn.commit()
+
+    def vacuum(self) -> None:
+        """Reclaims unused space in SQLite database."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         return self.get_tuple(config)

@@ -343,7 +343,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
-    async def test_on_message_with_history_image(self, mock_bot_class, mock_agents_loader_class):
+    async def test_on_message_without_attachments_does_not_pull_history(self, mock_bot_class, mock_agents_loader_class):
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()
         mock_bot.user.bot = True
@@ -358,18 +358,6 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = [runner.bot.user]
         mock_message.channel.send = AsyncMock()
         mock_message.attachments = []
-        
-        # Mock history
-        mock_history_msg = MagicMock()
-        mock_attachment = MagicMock()
-        mock_attachment.content_type = "image/png"
-        mock_attachment.read = AsyncMock(return_value=b"fake_png_data")
-        mock_history_msg.attachments = [mock_attachment]
-        
-        async def mock_history(limit):
-            yield mock_history_msg
-            
-        mock_message.channel.history.return_value = mock_history(limit=10)
         
         # Mock channel.typing context manager
         mock_typing = MagicMock()
@@ -387,16 +375,12 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner.on_message(mock_message)
         
-        # Verify that execute was called with the list payload containing the history image
+        # Verify that execute was called with string payload (no history image pulled)
         mock_agent.execute.assert_called_once()
         args, kwargs = mock_agent.execute.call_args
         content_arg = args[0]
         
-        self.assertIsInstance(content_arg, list)
-        self.assertEqual(len(content_arg), 2)
-        self.assertEqual(content_arg[0]["type"], "text")
-        self.assertEqual(content_arg[1]["type"], "image_url")
-        self.assertTrue(content_arg[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(content_arg, "What is that image?")
 
 if __name__ == "__main__":
     unittest.main()

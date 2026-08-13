@@ -129,5 +129,43 @@ class TestSqliteCheckpointer(unittest.TestCase):
             
         asyncio.run(run_test())
 
+    def test_blob_compression_and_decompression(self):
+        import pickle
+        import zlib
+
+        data = {"large_text": "A" * 10000}
+        serialized = self.checkpointer._serialize_blob(data)
+        self.assertTrue(len(serialized) < len(pickle.dumps(data)))
+        
+        # Test modern decompression
+        recovered = self.checkpointer._deserialize_blob(serialized)
+        self.assertEqual(recovered, data)
+
+        # Test legacy uncompressed blob fallback
+        legacy_blob = pickle.dumps(data)
+        legacy_recovered = self.checkpointer._deserialize_blob(legacy_blob)
+        self.assertEqual(legacy_recovered, data)
+
+    def test_checkpoint_pruning(self):
+        config = {"configurable": {"thread_id": "prune_thread"}}
+        
+        # Put 15 checkpoints
+        for i in range(15):
+            self.checkpointer.put(config, {"id": f"cp_{i}"}, {"step": i}, {})
+
+        # Query direct SQLite row count for checkpoints
+        with self.checkpointer._get_connection() as conn:
+            cursor = conn.execute('SELECT count(*) as cnt FROM "ctx_prune_thread" WHERE entry_type = \'checkpoint\'')
+            cnt = cursor.fetchone()["cnt"]
+            self.assertEqual(cnt, 10)
+
+        # Verify that get_tuple still returns the latest
+        latest = self.checkpointer.get_tuple(config)
+        self.assertEqual(latest.checkpoint["id"], "cp_14")
+
+    def test_vacuum(self):
+        # Ensure vacuum method executes without errors
+        self.checkpointer.vacuum()
+
 if __name__ == "__main__":
     unittest.main()

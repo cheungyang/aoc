@@ -169,5 +169,35 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
         self.assertIn("<content>feedback content</content>", prompt)
 
+    def test_compress_image_bytes_valid(self):
+        from core.util import compress_image_bytes
+        import io
+        from PIL import Image
+
+        # Create a large dummy image (2000 x 2000 RGBA)
+        img = Image.new("RGBA", (2000, 2000), color=(255, 0, 0, 255))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        raw_bytes = buf.getvalue()
+
+        compressed, mime = compress_image_bytes(raw_bytes, max_dim=1000, quality=75)
+        self.assertEqual(mime, "image/jpeg")
+        self.assertTrue(len(compressed) > 0)
+        self.assertTrue(len(compressed) < len(raw_bytes))
+
+        # Check resized dimensions
+        with Image.open(io.BytesIO(compressed)) as res_img:
+            self.assertEqual(res_img.size, (1000, 1000))
+
+    def test_compress_image_bytes_empty_and_corrupt(self):
+        from core.util import compress_image_bytes
+        self.assertEqual(compress_image_bytes(b"")[0], b"")
+        self.assertEqual(compress_image_bytes(None)[0], None)
+        
+        # Corrupt data returns original bytes
+        corrupt = b"not_a_real_image"
+        out_bytes, mime = compress_image_bytes(corrupt)
+        self.assertEqual(out_bytes, corrupt)
+
 if __name__ == "__main__":
     unittest.main()

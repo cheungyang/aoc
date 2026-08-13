@@ -163,14 +163,6 @@ class BotRunner:
         content_payload = content
         
         attachments = list(message.attachments)
-        if not attachments:
-            # Look back in history to find the most recent image attachment if current has none
-            async for msg in message.channel.history(limit=2):
-                if msg.attachments:
-                    if any(a.content_type and a.content_type.startswith("image/") for a in msg.attachments):
-                        attachments = list(msg.attachments)
-                        break
-
         if attachments:
             content_parts = []
             if content:
@@ -179,14 +171,16 @@ class BotRunner:
             for attachment in attachments:
                 if attachment.content_type and attachment.content_type.startswith("image/"):
                     try:
+                        from core.util import compress_image_bytes
                         image_data = await attachment.read()
-                        base64_image = base64.b64encode(image_data).decode('utf-8')
+                        compressed_data, content_type = compress_image_bytes(image_data, max_dim=1560, quality=80)
+                        base64_image = base64.b64encode(compressed_data).decode('utf-8')
                         content_parts.append({
                             "type": "image_url",
-                            "image_url": {"url": f"data:{attachment.content_type};base64,{base64_image}"},
+                            "image_url": {"url": f"data:{content_type};base64,{base64_image}"},
                         })
                     except Exception as e:
-                        print(f"Error reading attachment: {e}")
+                        print(f"Error reading/compressing attachment: {e}")
             
             if content_parts:
                 content_payload = content_parts
