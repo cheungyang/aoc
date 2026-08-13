@@ -1,7 +1,7 @@
 {
   "agent_id": "knowledge-retriever",
   "channels": [
-    "*"
+    "day-planning"
   ],
   "name": "Rick",
   "emoji": "🔍",

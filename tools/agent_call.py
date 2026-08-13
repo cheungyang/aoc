@@ -16,10 +16,14 @@ async def agent_call(
     """
     Consolidated tool for interacting with agents.
 
+    CRITICAL CROSS-CHANNEL ROUTING RULE:
+    - Specifying a channel name via the `channel` parameter dispatches and posts messages to that specific Discord channel.
+    - If the target `channel` is DIFFERENT from your current conversation channel, you MUST ask and receive explicit user approval BEFORE calling this tool. Never send messages to another channel without user consent.
+
     Args:
         agent_id: The ID of the target agent to invoke.
         prompt: The prompt or task instructions for the target agent.
-        channel: The Discord channel name for routing and permissions.
+        channel: The Discord channel name for routing and permissions. If targeting another channel than the current one, you must obtain user approval first.
         run_async: If True, triggers the agent asynchronously in the background. Defaults to False.
         caller: The ID of the triggering agent (optional, automatically inferred from context if omitted).
     """

@@ -10,22 +10,58 @@ from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
 from core.agent.reaction_handler import ReactionCallbackHandler
 from core.util.config import Config
+from core.voice.voice_manager import VoiceManager
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):
         intents = discord.Intents.default()
         intents.message_content = True # Required to read message content
+        intents.voice_states = True # Required for voice channel tracking
         self.bot = commands.Bot(command_prefix="!", intents=intents)
         self.discord_token = discord_token
         self.agent_id = agent_id
+        self.voice_manager = VoiceManager(self)
         
         # Register events
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
+        
+        # Register voice commands
+        @self.bot.command(name="join")
+        async def cmd_join(ctx, *, channel_name: str = None):
+            target = channel_name
+            if not target and ctx.author.voice:
+                target = str(ctx.author.voice.channel.id)
+            success = await self.voice_manager.join_voice_channel(target, text_channel=ctx.channel)
+            if success:
+                ch_name = getattr(ctx.channel, "name", str(ctx.channel.id))
+                await ctx.send(f"Connected to voice channel: `{self.voice_manager.voice_client.channel.name}` (linked to #{ch_name}) 🎙️")
+            else:
+                await ctx.send("Could not join voice channel.")
+
+        @self.bot.command(name="leave")
+        async def cmd_leave(ctx):
+            await self.voice_manager.leave_voice_channel()
+            await ctx.send("Disconnected from voice channel. 👋")
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
+        
+        # Auto-join voice channel if configured
+        loader = AgentsLoader()
+        agent = loader.get_agent(self.agent_id)
+        if agent:
+            voice_config = agent.config.get("voice_config", {})
+            if voice_config.get("enabled") and voice_config.get("auto_join"):
+                vc_target = voice_config.get("voice_channel", "general-voice")
+                async def _auto_join():
+                    await self.bot.wait_until_ready()
+                    await asyncio.sleep(1.5) # Allow guild cache to populate
+                    print(f"Agent {self.agent_id} auto-joining voice channel '{vc_target}'...")
+                    await self.voice_manager.join_voice_channel(vc_target)
+                asyncio.create_task(_auto_join())
+
 
     async def on_message(self, message):
         # Ignore messages from other bots
@@ -61,7 +97,10 @@ class BotRunner:
         channel_name = message.channel.name if hasattr(message.channel, "name") else ""
         if isinstance(message.channel, discord.Thread) and message.channel.parent:
             channel_name = message.channel.parent.name
-        is_host = (channel_name in channel_hosts) or (channel_id in channel_hosts)
+            
+        # Check if channel or its normalized name matches channel_hosts (e.g. general-voice -> general)
+        normalized_name = self.voice_manager.normalize_channel_name(channel_name)
+        is_host = (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
         
         # Check mentions
         tagged_bots = [user for user in message.mentions if user.bot]

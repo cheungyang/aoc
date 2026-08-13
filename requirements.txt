@@ -13,3 +13,9 @@ python-dotenv
 lancedb
 tantivy
 pyarrow
+discord-ext-voice-recv
+pynacl
+faster-whisper
+edge-tts
+soundfile
+imageio-ffmpeg
