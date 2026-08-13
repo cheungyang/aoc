@@ -1,0 +1,9 @@
+{
+  "skill_id": "dalle_image_generator",
+  "name": "DALL-E Image Generator",
+  "description": "Executes API calls to DALL-E 3 for image generation.",
+  "emoji": "🖼️",
+  "tools": {
+    "dalle_image_generator": []
+  }
+}

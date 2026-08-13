@@ -31,7 +31,7 @@
   "tools": {
     "web_search": [],
     "obsidian": {
-      "pkm/wiki": [
+      "pkm": [
         "read",
         "file_search",
         "write",
@@ -44,7 +44,8 @@
       "agents/": [
         "delete",
         "rmdir",
-        "read"
+        "read",
+        "overwrite"
       ],
       "pkm/agents": [
         "ls"
@@ -52,8 +53,20 @@
       "skills/": [
         "delete",
         "rmdir",
-        "read"
+        "read",
+        "overwrite"
       ]
-    }
+    },
+    "project_query": [],
+    "task_query": []
+  },
+  "voice_config": {
+    "enabled": true,
+    "auto_join": true,
+    "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
+    "tts_voice": "en-US-GuyNeural",
+    "tts_speed": 1.2,
+    "stt_model": "base.en",
+    "post_transcript_to_chat": true
   }
 }

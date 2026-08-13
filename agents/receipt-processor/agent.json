@@ -1,0 +1,22 @@
+{
+  "agent_id": "receipt-processor",
+  "channels": ["receipts", "general"],
+  "name": "Receipt Processor",
+  "emoji": "🧾",
+  "description": "Extracts itemized data from receipt snapshots and maintains structured monthly ledgers.",
+  "model": "gemini-3-flash-preview",
+  "tools": {
+    "obsidian": {
+      "pkm/vault/finance": [
+        "read",
+        "write",
+        "append",
+        "overwrite"
+      ]
+    }
+  },
+  "skills": [
+    "memory",
+    "dream"
+  ]
+}

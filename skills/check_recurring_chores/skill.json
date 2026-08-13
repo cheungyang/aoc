@@ -1,0 +1,9 @@
+{
+  "name": "Check Recurring Chores",
+  "description": "Analyzes pending recurring chores against historical completion patterns to determine if the user is falling behind their usual behavioral cadence.",
+  "emoji": "🕰️",
+  "skill_id": "check_recurring_chores",
+  "tools": {
+    "task_query": []
+  }
+}

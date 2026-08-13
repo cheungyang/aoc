@@ -1,0 +1,16 @@
+{
+  "agent_id": "brand-editor",
+  "channels": ["media-studio"],
+  "name": "Brand Editor",
+  "emoji": "🧐",
+  "description": "Red Team QC agent enforcing Runway prompt rules, character consistency, and virality.",
+  "model": "gemini-3.1-pro-preview",
+  "skills": ["memory", "dream"],
+  "tools": {
+    "obsidian": {
+      "pkm/vault/projects/toddler-tales": [
+        "read"
+      ]
+    }
+  }
+}
