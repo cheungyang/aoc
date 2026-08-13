@@ -15,7 +15,7 @@
     "manage_kitchen_inventory",
     "recommend_meals"
   ],
-  "schedule": [
+  "schedules": [
     {
       "channel": "meal-planning",
       "cron": "0 6 * * *",
@@ -23,7 +23,7 @@
     },
     {
       "channel": "general",
-      "thread": "cronjobs",
+      "thread": "dreams",
       "cron": "0 23 * * *",
       "prompt": "Use the dream skill to refine your memory"
     }

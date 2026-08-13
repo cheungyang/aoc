@@ -1,10 +1,20 @@
 {
   "agent_id": "brand-editor",
-  "channels": ["media-studio"],
+  "channels": [
+    "content-creation"
+  ],
   "name": "Brand Editor",
   "emoji": "🧐",
   "description": "Red Team QC agent enforcing Runway prompt rules, character consistency, and virality.",
   "model": "gemini-3.1-pro-preview",
+  "schedules": [
+    {
+      "channel": "general",
+      "thread": "dreams",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "skills": ["memory", "dream"],
   "tools": {
     "obsidian": {

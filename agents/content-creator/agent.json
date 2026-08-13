@@ -1,10 +1,20 @@
 {
   "agent_id": "content-creator",
-  "channels": ["media-studio"],
+  "channels": [
+    "content-creation"
+  ],
   "name": "Content Creator",
   "emoji": "🎨",
   "description": "Creative engine that brainstorms concepts and executes DALL-E and Runway API generation.",
   "model": "gemini-3.1-pro-preview",
+  "schedules": [
+    {
+      "channel": "general",
+      "thread": "dreams",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    }
+  ],
   "skills": ["memory", "dream", "dalle_image_generator", "runway_video_animator"],
   "tools": {
     "obsidian": {

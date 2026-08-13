@@ -18,7 +18,7 @@
         },
         {
             "channel": "general",
-            "thread": "cronjobs",
+            "thread": "dreams",
             "cron": "0 23 * * *",
             "prompt": "Use the dream skill to refine your memory"
         },
