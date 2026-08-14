@@ -67,7 +67,13 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         if format_output_fn is not None:
             reply = format_output_fn(result)
         elif isinstance(result, dict) and "messages" in result and result["messages"]:
-            reply = result["messages"][-1].content
+            last_msg = result["messages"][-1]
+            if hasattr(last_msg, "content"):
+                reply = last_msg.content
+            elif isinstance(last_msg, dict) and "content" in last_msg:
+                reply = last_msg.get("content", str(last_msg))
+            else:
+                reply = str(last_msg)
         else:
             reply = str(result)
             

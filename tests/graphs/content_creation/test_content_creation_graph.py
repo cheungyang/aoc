@@ -87,17 +87,7 @@ class TestContentCreationGraph(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(graph_info["metadata"].get("name"), "content_creation")
         self.assertIsNotNone(graph_info["create_graph"])
 
-    @patch("core.loaders.agents_loader.AgentsLoader.get_agent")
-    @patch("graphs.content_creation.graph.generate_image")
-    @patch("graphs.content_creation.graph.generate_animation_runway")
-    @patch("graphs.content_creation.graph.extract_video_frames")
-    async def test_graph_two_hitl_gates_and_resume(
-        self,
-        mock_extract_frames,
-        mock_generate_animation,
-        mock_generate_image,
-        mock_get_agent
-    ):
+    async def test_graph_two_hitl_gates_and_resume(self):
         # Setup mock content-creator
         mock_creator = MagicMock()
         mock_creator.execute = AsyncMock(side_effect=[
@@ -131,62 +121,71 @@ class TestContentCreationGraph(unittest.IsolatedAsyncioTestCase):
                 return mock_creator
             return mock_editor
 
-        mock_get_agent.side_effect = agent_dispatcher
+        with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
+             patch("graphs.content_creation.graph.generate_image") as mock_img, \
+             patch("graphs.content_creation.graph.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.graph.extract_video_frames") as mock_frames:
 
-        # Mock tool calls
-        mock_generate_image.ainvoke = AsyncMock(
-            return_value='<generate_image_response><payload>assets/puppy/puppy_image.jpg</payload><errors>None</errors></generate_image_response>'
-        )
-        mock_generate_animation.ainvoke = AsyncMock(
-            return_value='<generate_animation_runway_response><payload>assets/puppy/puppy_video.mp4</payload><errors>None</errors></generate_animation_runway_response>'
-        )
-        mock_extract_frames.ainvoke = AsyncMock(
-            return_value='<extract_video_frames_response><payload>assets/puppy/frames/frame_001_1_000s.jpg\nassets/puppy/frames/frame_002_2_500s.jpg\nassets/puppy/frames/frame_003_4_000s.jpg</payload><errors>None</errors></extract_video_frames_response>'
-        )
+            mock_img.ainvoke = AsyncMock(
+                return_value='<generate_image_response><payload>assets/puppy/puppy_image.jpg</payload><errors>None</errors></generate_image_response>'
+            )
+            mock_anim.ainvoke = AsyncMock(
+                return_value='<generate_animation_runway_response><payload>assets/puppy/puppy_video.mp4</payload><errors>None</errors></generate_animation_runway_response>'
+            )
+            mock_frames.ainvoke = AsyncMock(
+                return_value='<extract_video_frames_response><payload>assets/puppy/frames/frame_001_1_000s.jpg\nassets/puppy/frames/frame_002_2_500s.jpg\nassets/puppy/frames/frame_003_4_000s.jpg</payload><errors>None</errors></extract_video_frames_response>'
+            )
 
-        # Create checkpointer
-        checkpointer = MemorySaver()
-        test_graph = create_graph(checkpointer=checkpointer)
+            # Get current module references from sys.modules in case GraphsLoader reloaded the module
+            import sys
+            import graphs.content_creation.graph as current_graph_mod
+            mod = sys.modules.get("graphs.content_creation.graph", current_graph_mod)
+            current_create_graph = getattr(mod, "create_graph")
+            current_prepare_input = getattr(mod, "prepare_input")
 
-        config = {"configurable": {"thread_id": "test_thread_generic_123"}}
-        initial_state = prepare_input(
-            "topic: puppy, project_dir: pkm/wiki/software/toddler-tales",
-            session_id="test_thread_generic_123"
-        )
+            # Create checkpointer
+            checkpointer = MemorySaver()
+            test_graph = current_create_graph(checkpointer=checkpointer)
 
-        # -------------------------------------------------------------
-        # Phase 1: Run graph until HITL Gate 1
-        # -------------------------------------------------------------
-        await test_graph.ainvoke(initial_state, config=config)
+            config = {"configurable": {"thread_id": "test_thread_generic_123"}}
+            initial_state = current_prepare_input(
+                "topic: puppy, project_dir: pkm/wiki/software/toddler-tales",
+                session_id="test_thread_generic_123"
+            )
 
-        state_gate1 = test_graph.get_state(config)
-        self.assertEqual(state_gate1.next, ("hitl_image_and_plot_approval",))
-        self.assertTrue(state_gate1.values["video_plot_qc_passed"])
-        self.assertTrue(state_gate1.values["image_path"].endswith("puppy_image.jpg"))
-        self.assertTrue(state_gate1.values["video_plot_path"].endswith("puppy_video_plot.md"))
+            # -------------------------------------------------------------
+            # Phase 1: Run graph until HITL Gate 1
+            # -------------------------------------------------------------
+            await test_graph.ainvoke(initial_state, config=config)
 
-        # -------------------------------------------------------------
-        # Phase 2: Resume from HITL Gate 1 -> runs until HITL Gate 2
-        # -------------------------------------------------------------
-        await test_graph.ainvoke(None, config=config)
+            state_gate1 = test_graph.get_state(config)
+            self.assertEqual(state_gate1.next, ("hitl_image_and_plot_approval",))
+            self.assertTrue(state_gate1.values["video_plot_qc_passed"])
+            self.assertTrue(state_gate1.values["image_path"].endswith("puppy_image.jpg"))
+            self.assertTrue(state_gate1.values["video_plot_path"].endswith("puppy_video_plot.md"))
 
-        state_gate2 = test_graph.get_state(config)
-        self.assertEqual(state_gate2.next, ("hitl_final_package_approval",))
-        self.assertTrue(state_gate2.values["video_qc_passed"])
-        self.assertTrue(state_gate2.values["video_path"].endswith("puppy_video.mp4"))
-        self.assertEqual(len(state_gate2.values["extracted_frames"]), 3)
-        self.assertIn("final_package", state_gate2.values)
-        self.assertEqual(state_gate2.values["final_package"]["topic"], "puppy")
+            # -------------------------------------------------------------
+            # Phase 2: Resume from HITL Gate 1 -> runs until HITL Gate 2
+            # -------------------------------------------------------------
+            await test_graph.ainvoke(None, config=config)
 
-        # -------------------------------------------------------------
-        # Phase 3: Resume from HITL Gate 2 -> reaches END
-        # -------------------------------------------------------------
-        final_state = await test_graph.ainvoke(None, config=config)
+            state_gate2 = test_graph.get_state(config)
+            self.assertEqual(state_gate2.next, ("hitl_final_package_approval",))
+            self.assertTrue(state_gate2.values["video_qc_passed"])
+            self.assertTrue(state_gate2.values["video_path"].endswith("puppy_video.mp4"))
+            self.assertEqual(len(state_gate2.values["extracted_frames"]), 3)
+            self.assertIn("final_package", state_gate2.values)
+            self.assertEqual(state_gate2.values["final_package"]["topic"], "puppy")
 
-        final_check = test_graph.get_state(config)
-        self.assertEqual(final_check.next, ())
-        self.assertIn("HITL GATE 2: Final Package Review & Approval", final_state["messages"][-1].content)
-        self.assertIn("puppy_video.mp4", final_state["messages"][-1].content)
+            # -------------------------------------------------------------
+            # Phase 3: Resume from HITL Gate 2 -> reaches END
+            # -------------------------------------------------------------
+            final_state = await test_graph.ainvoke(None, config=config)
+
+            final_check = test_graph.get_state(config)
+            self.assertEqual(final_check.next, ())
+            self.assertIn("HITL GATE 2: Final Package Review & Approval", final_state["messages"][-1].content)
+            self.assertIn("puppy_video.mp4", final_state["messages"][-1].content)
 
 
 if __name__ == "__main__":

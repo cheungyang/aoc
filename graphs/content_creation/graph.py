@@ -552,10 +552,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "copy_text": "",
         "final_package": {},
         "video_plot_attempts": 0,
-        "max_video_plot_reviews": kwargs.get("max_video_plot_reviews", 3),
-        "video_qc_attempts": 0,
-        "max_video_reviews": kwargs.get("max_video_reviews", 3),
-        "messages": [{"role": "user", "content": formatted_query}],
+        "messages": [HumanMessage(content=formatted_query)],
         "query": formatted_query,
         "session_id": session_id,
         "error_message": ""
@@ -565,11 +562,33 @@ def format_output(state: Dict[str, Any]) -> str:
     """Extracts final reply text from ContentCreationState."""
     if isinstance(state, dict):
         if "messages" in state and state["messages"]:
-            return state["messages"][-1].content
+            last_msg = state["messages"][-1]
+            if isinstance(last_msg, AIMessage):
+                return last_msg.content
+            elif isinstance(last_msg, dict) and last_msg.get("role") == "assistant":
+                return last_msg.get("content", "")
         if state.get("final_package") and "copy_text" in state["final_package"]:
             return state["final_package"]["copy_text"]
         if state.get("copy_text"):
             return state["copy_text"]
+        if state.get("video_plot_qc_passed") and state.get("image_path"):
+            topic = state.get("topic", "scene")
+            image_path = state.get("image_path", "")
+            video_plot_path = state.get("video_plot_path", "")
+            return (
+                f"🛑 **[HITL GATE 1: Image & Video Plot Approval Required]**\n\n"
+                f"- **Topic**: `{topic}`\n"
+                f"- **Base Image**: `{image_path}`\n"
+                f"- **Video Plot Doc**: `{video_plot_path}`\n\n"
+                f"Base image and video plot have passed QC and are ready for approval before generating video."
+            )
         if state.get("error_message"):
             return f"Content creation failed: {state['error_message']}"
+        if "messages" in state and state["messages"]:
+            last_msg = state["messages"][-1]
+            if hasattr(last_msg, "content"):
+                return last_msg.content
+            elif isinstance(last_msg, dict) and "content" in last_msg:
+                return last_msg["content"]
+            return str(last_msg)
     return str(state)

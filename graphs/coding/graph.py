@@ -251,7 +251,7 @@ def prepare_input(query: str, caller: str = None, **kwargs) -> Dict[str, Any]:
         formatted_query = query
 
     return {
-        "messages": [{"role": "user", "content": formatted_query}],
+        "messages": [HumanMessage(content=formatted_query)],
         "query": formatted_query,
         "repo_path": kwargs.get("repo_path", ""),
         "session_id": kwargs.get("session_id", "default_session"),
@@ -263,7 +263,12 @@ def format_output(state: Dict[str, Any]) -> str:
     """Formats final CodingState into response string."""
     if isinstance(state, dict):
         if "messages" in state and state["messages"]:
-            return state["messages"][-1].content
+            last_msg = state["messages"][-1]
+            if hasattr(last_msg, "content"):
+                return last_msg.content
+            elif isinstance(last_msg, dict) and "content" in last_msg:
+                return last_msg["content"]
+            return str(last_msg)
         if state.get("error_message"):
             return f"Coding failed: {state['error_message']}"
     return str(state)
