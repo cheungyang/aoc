@@ -62,9 +62,17 @@ class ContentCreationState(TypedDict, total=False):
     error_message: str
 
 
-def _resolve_asset_path(base_or_default_path: str, output_dir: str, topic: str, asset_type: str, version: int) -> str:
+def normalize_project_path(path: Optional[str]) -> str:
+    """Normalizes path by stripping extra slashes or relative components while keeping clean format."""
+    if not path:
+        return ""
+    return os.path.normpath(str(path))
+
+
+def _resolve_asset_path(base_or_default_path: Optional[str], output_dir: Optional[str], topic: str, asset_type: str, version: int) -> str:
     """Resolves deterministic versioned asset path."""
     topic = str(topic).strip().lower()
+    out_dir = str(output_dir) if output_dir is not None else ""
     ext_map = {
         "image": "jpg",
         "video_plot": "md",
@@ -78,12 +86,12 @@ def _resolve_asset_path(base_or_default_path: str, output_dir: str, topic: str, 
         dir_name = os.path.dirname(base_or_default_path)
         base_name, fext = os.path.splitext(os.path.basename(base_or_default_path))
         clean_name = re.sub(r'_v\d+$', '', base_name)
-        return os.path.join(dir_name or output_dir, f"{clean_name}{v_str}{fext or f'.{ext}'}")
-    return os.path.join(output_dir, f"{topic}_{asset_type}{v_str}.{ext}")
+        return os.path.join(dir_name or out_dir, f"{clean_name}{v_str}{fext or f'.{ext}'}")
+    return os.path.join(out_dir, f"{topic}_{asset_type}{v_str}.{ext}")
 
 
 def _append_execution_log(
-    output_dir: str,
+    output_dir: Optional[str],
     topic: str,
     actor: str,
     event_title: str,
@@ -92,9 +100,12 @@ def _append_execution_log(
 ):
     """Continuously appends timestamped markdown audit log entries to execution_log.md."""
     try:
-        topic_clean = str(topic).strip().lower()
-        os.makedirs(output_dir, exist_ok=True)
-        target_file = log_path or os.path.join(output_dir, "execution_log.md")
+        topic_clean = str(topic or "scene").strip().lower()
+        out_dir = str(output_dir) if output_dir is not None else ""
+        target_file = log_path or (os.path.join(out_dir, "execution_log.md") if out_dir else "execution_log.md")
+        target_dir = os.path.dirname(target_file)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
         is_new = not os.path.exists(target_file)
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         time_short = datetime.now(timezone.utc).strftime("%H:%M:%S")

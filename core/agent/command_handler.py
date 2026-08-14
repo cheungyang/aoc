@@ -39,6 +39,8 @@ class CommandHandler:
         return False
 
     async def _handle_new(self, session_id: Optional[str], channel: Optional[discord.TextChannel] = None):
+        if not session_id and channel is not None:
+            session_id = SessionManager().get_session_id("main", "discord", channel)
         archive_status = SessionManager().clear_session(session_id)
         if channel is not None:
             await channel.send(f"Session context cleared. {archive_status}")

@@ -6,7 +6,6 @@ from langgraph.graph import StateGraph, START, END
 # Import state and helper types
 from graphs.content_creation.state import (
     ContentCreationState,
-    get_default_project_dir,
     normalize_project_path,
     _resolve_asset_path,
     _append_execution_log,
@@ -154,28 +153,30 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         if m_pdir:
             project_dir = m_pdir.group(1).strip()
         else:
-            project_dir = get_default_project_dir()
-
-    if project_dir:
-        project_dir = normalize_project_path(project_dir)
+            project_dir = ""
 
     session_id = kwargs.get("session_id")
     thread_id = kwargs.get("thread_id") or session_id
 
     topic = kwargs.get("topic") or kwargs.get("word")
 
-    # Check if there is an active checkpointer thread with an existing topic
-    if not topic and thread_id:
+    # Check if there is an active checkpointer thread with an existing topic or project_dir
+    if thread_id:
         try:
             from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
             cp = SqliteCheckpointer()
             snap = cp.get_tuple({"configurable": {"thread_id": thread_id}})
             if snap and snap.checkpoint and "channel_values" in snap.checkpoint:
                 ch = snap.checkpoint["channel_values"]
-                if ch.get("topic"):
+                if not project_dir and ch.get("project_dir"):
+                    project_dir = ch["project_dir"]
+                if not topic and ch.get("topic"):
                     topic = ch["topic"]
         except Exception:
             pass
+
+    if project_dir:
+        project_dir = normalize_project_path(project_dir)
 
     if not topic:
         m_topic = re.search(r'(?:topic|word)[:=]\s*["\']?([a-zA-Z0-9_ -]+)["\']?', query, re.IGNORECASE)
@@ -201,11 +202,11 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     # Enforce lowercase for folder/asset uniformity
     topic = str(topic).strip().lower()
 
-    manifest_path = kwargs.get("manifest_path") or f"{project_dir}/01_Project_Manifest.md"
-    creator_instructions_path = kwargs.get("creator_instructions_path") or f"{project_dir}/02_Creator_Instructions.md"
-    qc_playbook_path = kwargs.get("qc_playbook_path") or f"{project_dir}/03_QC_Playbook.md"
+    manifest_path = kwargs.get("manifest_path") or (f"{project_dir}/01_Project_Manifest.md" if project_dir else "01_Project_Manifest.md")
+    creator_instructions_path = kwargs.get("creator_instructions_path") or (f"{project_dir}/02_Creator_Instructions.md" if project_dir else "02_Creator_Instructions.md")
+    qc_playbook_path = kwargs.get("qc_playbook_path") or (f"{project_dir}/03_QC_Playbook.md" if project_dir else "03_QC_Playbook.md")
 
-    output_dir = kwargs.get("output_dir") or f"{project_dir}/words/{topic}"
+    output_dir = normalize_project_path(kwargs.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
     execution_log_path = kwargs.get("execution_log_path") or f"{output_dir}/execution_log.md"
 
     image_version = kwargs.get("image_version", 1)

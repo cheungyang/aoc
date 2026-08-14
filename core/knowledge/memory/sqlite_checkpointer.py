@@ -319,6 +319,32 @@ class SqliteCheckpointer(BaseCheckpointSaver):
                 conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                 conn.commit()
 
+    def archive_thread(self, thread_id: str) -> str:
+        table_name = sanitize_table_name(thread_id)
+        ts = int(time.time())
+        archive_table_name = f"{table_name}_archived_{ts}"
+        with self._get_connection() as conn:
+            if self._table_exists(conn, table_name):
+                conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archive_table_name}"')
+                conn.commit()
+                return f"Thread {thread_id} archived to table {archive_table_name}"
+            return "No active thread table found to archive."
+
+    def archive_all(self) -> str:
+        ts = int(time.time())
+        responses = []
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%' AND name NOT LIKE '%_archived_%'"
+            )
+            tables = [row["name"] for row in cursor.fetchall()]
+            for table_name in tables:
+                archive_table_name = f"{table_name}_archived_{ts}"
+                conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archive_table_name}"')
+                responses.append(f"Archived {table_name} to {archive_table_name}")
+            conn.commit()
+        return "\n".join(responses) if responses else "No active threads found to archive."
+
     def vacuum(self) -> None:
         """Reclaims unused space in SQLite database."""
         conn = sqlite3.connect(self.db_path)

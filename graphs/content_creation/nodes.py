@@ -6,6 +6,7 @@ from tools.generate_animation_runway import generate_animation_runway
 from tools.extract_video_frames import extract_video_frames
 from graphs.content_creation.state import (
     ContentCreationState,
+    normalize_project_path,
     _resolve_asset_path,
     _append_execution_log,
     _extract_motion_prompt_from_plot
@@ -17,12 +18,12 @@ from graphs.content_creation.state import (
 # ==========================================
 async def setup_and_generate_image_node(state: ContentCreationState):
     """Step 1: Content Creator reads project manifest and creator instructions to generate 1-shot base image."""
-    project_dir = state.get("project_dir") or "pkm/wiki/software/ayla-first-words"
+    project_dir = normalize_project_path(state.get("project_dir", ""))
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    output_dir = state.get("output_dir") or f"{project_dir}/words/{topic}"
-    manifest_path = state.get("manifest_path") or f"{project_dir}/01_Project_Manifest.md"
-    creator_instructions_path = state.get("creator_instructions_path") or f"{project_dir}/02_Creator_Instructions.md"
-    qc_playbook_path = state.get("qc_playbook_path") or f"{project_dir}/03_QC_Playbook.md"
+    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
+    manifest_path = state.get("manifest_path") or (f"{project_dir}/01_Project_Manifest.md" if project_dir else "01_Project_Manifest.md")
+    creator_instructions_path = state.get("creator_instructions_path") or (f"{project_dir}/02_Creator_Instructions.md" if project_dir else "02_Creator_Instructions.md")
+    qc_playbook_path = state.get("qc_playbook_path") or (f"{project_dir}/03_QC_Playbook.md" if project_dir else "03_QC_Playbook.md")
     execution_log_path = state.get("execution_log_path") or f"{output_dir}/execution_log.md"
 
     image_version = state.get("image_version") or 1

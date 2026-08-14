@@ -99,16 +99,67 @@ class SqliteSessionStore:
         return f"Appended token usage to {session_id}"
 
     def archive_session(self, session_id: str) -> str:
+        if not session_id:
+            return "No active session table found to archive."
+
         table_name = sanitize_table_name(session_id)
         ts = int(time.time())
-        archive_table_name = f"{table_name}_archived_{ts}"
 
+        # Collect candidate tokens from session_id to identify graph tables in this session/channel
+        clean_session = table_name.removeprefix("ctx_") if table_name.startswith("ctx_") else table_name
+        postfix_candidates = set()
+
+        def _clean_token(s: str) -> str:
+            return "".join(c if c.isalnum() or c == "_" else "_" for c in s).strip("_")
+
+        if ":" in session_id:
+            parts = session_id.split(":")
+            if len(parts) >= 3:
+                postfix = ":".join(parts[2:])
+                clean_pf = _clean_token(postfix)
+                if clean_pf:
+                    postfix_candidates.add(clean_pf)
+                for p in parts[2:]:
+                    cp = _clean_token(p)
+                    if cp:
+                        postfix_candidates.add(cp)
+            elif len(parts) == 2:
+                clean_src = _clean_token(parts[1])
+                if clean_src:
+                    postfix_candidates.add(clean_src)
+        else:
+            cleaned = _clean_token(session_id)
+            if cleaned:
+                postfix_candidates.add(cleaned)
+
+        responses = []
         with self._get_connection() as conn:
-            if self._table_exists(conn, table_name):
-                conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archive_table_name}"')
-                conn.commit()
-                return f"Session {session_id} archived to table {archive_table_name}"
-            return "No active session table found to archive."
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%' AND name NOT LIKE '%_archived_%'"
+            )
+            active_tables = [row["name"] for row in cursor.fetchall()]
+
+            matched_tables = []
+            for t in active_tables:
+                if t == table_name:
+                    matched_tables.append(t)
+                elif t.startswith("ctx_graph_"):
+                    t_suffix = t.removeprefix("ctx_graph_")
+                    if t_suffix == clean_session or t.endswith(f"_{clean_session}"):
+                        matched_tables.append(t)
+                    elif any(cand and (t.endswith(f"_{cand}") or t_suffix == cand) for cand in postfix_candidates):
+                        matched_tables.append(t)
+
+            for t in matched_tables:
+                archive_table_name = f"{t}_archived_{ts}"
+                conn.execute(f'ALTER TABLE "{t}" RENAME TO "{archive_table_name}"')
+                if t == table_name:
+                    responses.append(f"Session {session_id} archived to table {archive_table_name}")
+                else:
+                    responses.append(f"Archived {t} to {archive_table_name}")
+            conn.commit()
+
+        return "\n".join(responses) if responses else "No active session table found to archive."
 
     def archive_all_sessions(self) -> str:
         ts = int(time.time())

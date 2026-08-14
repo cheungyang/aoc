@@ -6,7 +6,6 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END
 from graphs.content_creation.state import (
     ContentCreationState,
-    get_default_project_dir,
     normalize_project_path,
     _resolve_asset_path,
     _append_execution_log
@@ -110,10 +109,8 @@ def classify_gate2_intent(feedback: str) -> str:
 def format_gate1_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 1 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = state.get("project_dir") or get_default_project_dir()
-    project_dir = normalize_project_path(project_dir)
-    output_dir = state.get("output_dir") or f"{project_dir}/words/{topic}"
-    output_dir = normalize_project_path(output_dir)
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
 
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
@@ -141,10 +138,8 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
 def format_gate2_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 2 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = state.get("project_dir") or get_default_project_dir()
-    project_dir = normalize_project_path(project_dir)
-    output_dir = state.get("output_dir") or f"{project_dir}/words/{topic}"
-    output_dir = normalize_project_path(output_dir)
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
     video_v = state.get("video_version", 1)
@@ -180,8 +175,8 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
 async def hitl_image_and_plot_approval_node(state: ContentCreationState):
     """🛑 HITL GATE 1: Presents 1-shot base image and approved video plot for user review & approval."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = state.get("project_dir") or "pkm/wiki/software/ayla-first-words"
-    output_dir = state.get("output_dir") or f"{project_dir}/words/{topic}"
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
     execution_log_path = state.get("execution_log_path")
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
@@ -328,8 +323,8 @@ async def clarify_gate1_node(state: ContentCreationState):
 async def hitl_final_package_approval_node(state: ContentCreationState):
     """🎉 HITL GATE 2: Presents complete final package to user for 1-click final approval."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = state.get("project_dir") or "pkm/wiki/software/ayla-first-words"
-    output_dir = state.get("output_dir") or f"{project_dir}/words/{topic}"
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
     execution_log_path = state.get("execution_log_path")
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)

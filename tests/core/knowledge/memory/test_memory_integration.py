@@ -98,5 +98,42 @@ class TestMemoryIntegration(unittest.TestCase):
             cursor2 = conn.execute(f'SELECT count(*) as count FROM "{arch_table_name}" WHERE entry_type = \'message\'')
             self.assertEqual(cursor2.fetchone()["count"], 4)
 
+    def test_new_and_newall_archive_graph_sqlite_states(self):
+        session_id = "main:discord:general"
+        
+        # 1. Simulate agent session active
+        self.store.append_message(session_id, "user", "Run content creation")
+        
+        # 2. Simulate graph execution in this channel ("general")
+        graph_config_general = {"configurable": {"thread_id": "graph:content_creation:general"}}
+        self.checkpointer.put(graph_config_general, {"id": "cp_gen_1", "channel_values": {"topic": "scene1"}}, {"step": 1}, {})
+        
+        # 3. Simulate another graph execution in a different channel ("dev")
+        graph_config_dev = {"configurable": {"thread_id": "graph:content_creation:dev"}}
+        self.checkpointer.put(graph_config_dev, {"id": "cp_dev_1", "channel_values": {"topic": "scene2"}}, {"step": 1}, {})
+
+        # Verify all 3 tables are active
+        active = self.store.list_active_sessions()
+        self.assertIn("ctx_main_discord_general", active)
+        self.assertIn("ctx_graph_content_creation_general", active)
+        self.assertIn("ctx_graph_content_creation_dev", active)
+
+        # 4. Execute [new] for "main:discord:general"
+        archive_res = self.store.archive_session(session_id)
+        self.assertIn("ctx_main_discord_general_archived_", archive_res)
+        self.assertIn("Archived ctx_graph_content_creation_general to ctx_graph_content_creation_general_archived_", archive_res)
+
+        # 5. Verify that graph state in "general" is cleared, but "dev" remains active
+        self.assertIsNone(self.checkpointer.get_tuple(graph_config_general))
+        self.assertIsNotNone(self.checkpointer.get_tuple(graph_config_dev))
+
+        # 6. Execute [newall] to archive all remaining graph states
+        archive_all_res = self.store.archive_all_sessions()
+        self.assertIn("Archived ctx_graph_content_creation_dev to ctx_graph_content_creation_dev_archived_", archive_all_res)
+
+        # Verify all active states are empty
+        self.assertEqual(len(self.store.list_active_sessions()), 0)
+        self.assertIsNone(self.checkpointer.get_tuple(graph_config_dev))
+
 if __name__ == "__main__":
     unittest.main()

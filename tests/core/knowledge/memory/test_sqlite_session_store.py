@@ -81,6 +81,66 @@ class TestSqliteSessionStore(unittest.TestCase):
         active_after = self.store.list_active_sessions()
         self.assertEqual(len(active_after), 0)
 
+    def test_archive_session_with_graph_states(self):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        cp = SqliteCheckpointer(db_path=self.db_path)
+
+        # 1. Main session
+        session_id = "main:discord:general"
+        self.store.append_message(session_id, "user", "hello general")
+
+        # 2. Graph states in same session / channel
+        cp.put({"configurable": {"thread_id": "graph:content_creation:general"}}, {"id": "cp1"}, {"step": 1}, {})
+        cp.put({"configurable": {"thread_id": "graph:coding:general"}}, {"id": "cp2"}, {"step": 1}, {})
+
+        # 3. Graph state in another channel
+        cp.put({"configurable": {"thread_id": "graph:content_creation:otherchannel"}}, {"id": "cp3"}, {"step": 1}, {})
+
+        active = self.store.list_active_sessions()
+        self.assertIn("ctx_main_discord_general", active)
+        self.assertIn("ctx_graph_content_creation_general", active)
+        self.assertIn("ctx_graph_coding_general", active)
+        self.assertIn("ctx_graph_content_creation_otherchannel", active)
+
+        # Archive session "main:discord:general"
+        result = self.store.archive_session(session_id)
+        self.assertIn("ctx_main_discord_general_archived_", result)
+        self.assertIn("Archived ctx_graph_content_creation_general to ctx_graph_content_creation_general_archived_", result)
+        self.assertIn("Archived ctx_graph_coding_general to ctx_graph_coding_general_archived_", result)
+
+        # Verify active sessions
+        active_after = self.store.list_active_sessions()
+        self.assertNotIn("ctx_main_discord_general", active_after)
+        self.assertNotIn("ctx_graph_content_creation_general", active_after)
+        self.assertNotIn("ctx_graph_coding_general", active_after)
+        self.assertIn("ctx_graph_content_creation_otherchannel", active_after)
+
+        # Verify checkpointer tuple returns None for archived threads
+        self.assertIsNone(cp.get_tuple({"configurable": {"thread_id": "graph:content_creation:general"}}))
+        self.assertIsNone(cp.get_tuple({"configurable": {"thread_id": "graph:coding:general"}}))
+        self.assertIsNotNone(cp.get_tuple({"configurable": {"thread_id": "graph:content_creation:otherchannel"}}))
+
+    def test_archive_all_sessions_includes_all_graph_states(self):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        cp = SqliteCheckpointer(db_path=self.db_path)
+
+        self.store.append_message("main:discord:room1", "user", "msg 1")
+        cp.put({"configurable": {"thread_id": "graph:content_creation:room1"}}, {"id": "cp1"}, {"step": 1}, {})
+        cp.put({"configurable": {"thread_id": "graph:coding:room2"}}, {"id": "cp2"}, {"step": 1}, {})
+
+        active = self.store.list_active_sessions()
+        self.assertEqual(len(active), 3)
+
+        res = self.store.archive_all_sessions()
+        self.assertIn("Archived ctx_main_discord_room1 to ctx_main_discord_room1_archived_", res)
+        self.assertIn("Archived ctx_graph_content_creation_room1 to ctx_graph_content_creation_room1_archived_", res)
+        self.assertIn("Archived ctx_graph_coding_room2 to ctx_graph_coding_room2_archived_", res)
+
+        active_after = self.store.list_active_sessions()
+        self.assertEqual(len(active_after), 0)
+        self.assertIsNone(cp.get_tuple({"configurable": {"thread_id": "graph:content_creation:room1"}}))
+        self.assertIsNone(cp.get_tuple({"configurable": {"thread_id": "graph:coding:room2"}}))
+
     def test_append_list_and_dict_message(self):
         session_id = "session_structured"
         list_msg = [{"type": "text", "text": "hello"}]

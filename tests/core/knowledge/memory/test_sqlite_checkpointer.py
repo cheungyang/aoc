@@ -167,5 +167,25 @@ class TestSqliteCheckpointer(unittest.TestCase):
         # Ensure vacuum method executes without errors
         self.checkpointer.vacuum()
 
+    def test_archive_thread(self):
+        config = {"configurable": {"thread_id": "thread_to_archive"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+        
+        self.assertIsNotNone(self.checkpointer.get_tuple(config))
+        res = self.checkpointer.archive_thread("thread_to_archive")
+        self.assertIn("archived to table ctx_thread_to_archive_archived_", res)
+        self.assertIsNone(self.checkpointer.get_tuple(config))
+
+    def test_archive_all(self):
+        self.checkpointer.put({"configurable": {"thread_id": "t1"}}, {"id": "cp1"}, {"step": 1}, {})
+        self.checkpointer.put({"configurable": {"thread_id": "t2"}}, {"id": "cp2"}, {"step": 1}, {})
+        
+        res = self.checkpointer.archive_all()
+        self.assertIn("Archived ctx_t1 to ctx_t1_archived_", res)
+        self.assertIn("Archived ctx_t2 to ctx_t2_archived_", res)
+        
+        self.assertIsNone(self.checkpointer.get_tuple({"configurable": {"thread_id": "t1"}}))
+        self.assertIsNone(self.checkpointer.get_tuple({"configurable": {"thread_id": "t2"}}))
+
 if __name__ == "__main__":
     unittest.main()
