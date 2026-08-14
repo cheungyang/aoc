@@ -5,7 +5,6 @@ from core.agent.job_manager import current_job_id, current_agent_id
 import asyncio
 import os
 
-
 import json
 import ast
 from typing import Any, Dict
@@ -41,27 +40,15 @@ class Agent(BaseAgent):
         from core.agent.job_manager import JobManager
         from core.agent.session_manager import SessionManager
         from core.agent.logging_handler import LoggingHandler
+        from core.agent.command_handler import CommandHandler
         
         # Get the necessary ids
         session_id = SessionManager().get_session_id(self.agent_id, source, channel)
         if job_id is None:
             job_id = JobManager().new_job_id(self.agent_id)
 
-        # Handle [new] command to clear session context
-        if isinstance(content, str) and content.strip() == "[new]":    
-            archive_status = SessionManager().clear_session(session_id)
-            await channel.send(f"Session context cleared. {archive_status}")
-            return
-
-        # Handle [newall] command to clear all session contexts
-        if isinstance(content, str) and content.strip() == "[newall]":    
-            archive_status = SessionManager().clear_sessions()
-            full_msg = f"All session contexts cleared. {archive_status}"
-            chunks = split_message(full_msg)
-            for i, chunk in enumerate(chunks):
-                if i > 0:
-                    await asyncio.sleep(1)
-                await channel.send(chunk)
+        # Handle system commands ([new], [newall], [restart])
+        if await CommandHandler().handle_command(content, session_id=session_id, channel=channel):
             return
 
         # Lazy load langgraph graph object

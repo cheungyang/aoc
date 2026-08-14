@@ -351,6 +351,42 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply_discord, "Direct user response")
         mock_channel.send.assert_called_once_with("Direct user response")
 
+    @patch('core.agent.session_manager.SessionManager.clear_session')
+    async def test_execute_new_command(self, mock_clear_session):
+        mock_clear_session.return_value = "archived"
+        agent = Agent("test-agent", {})
+        mock_channel = AsyncMock()
+
+        await agent.execute("[new]", source="discord", channel=mock_channel)
+        mock_clear_session.assert_called_once()
+        mock_channel.send.assert_called_once_with("Session context cleared. archived")
+
+    @patch('core.agent.session_manager.SessionManager.clear_sessions')
+    async def test_execute_newall_command(self, mock_clear_sessions):
+        mock_clear_sessions.return_value = "all archived"
+        agent = Agent("test-agent", {})
+        mock_channel = AsyncMock()
+
+        await agent.execute("[newall]", source="discord", channel=mock_channel)
+        mock_clear_sessions.assert_called_once()
+        mock_channel.send.assert_called_once_with("All session contexts cleared. all archived")
+
+    @patch('os.execv')
+    async def test_execute_restart_command(self, mock_execv):
+        agent = Agent("test-agent", {})
+        mock_channel = AsyncMock()
+
+        await agent.execute("[restart]", source="discord", channel=mock_channel)
+        mock_channel.send.assert_called_once_with("System is restarting...")
+        mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
+
+    @patch('os.execv')
+    async def test_execute_restart_command_no_channel(self, mock_execv):
+        agent = Agent("test-agent", {})
+
+        await agent.execute("[restart]", source="discord", channel=None)
+        mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
+
 if __name__ == "__main__":
     unittest.main()
 
