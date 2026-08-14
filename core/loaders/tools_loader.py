@@ -76,13 +76,15 @@ class ToolsLoader:
         self._agent_permissions_cache[agent_id] = merged_tools
         return merged_tools
 
-    def check_permission(self, agent_id: str, tool_id: str, action_name: str, path: str = None, **kwargs) -> bool:
+    def check_permission(self, agent_id: str, tool_id: str, action_name: str = None, path: str = None, **kwargs) -> bool:
         import os
         merged = self._merge_tool_permissions(agent_id)
-        permissions = merged.get(tool_id, {})
-        
-        if not permissions:
+        if tool_id not in merged:
             return False
+            
+        permissions = merged[tool_id]
+        if not permissions or action_name is None:
+            return True
             
         if isinstance(permissions, dict):
             target_path_to_check = path
@@ -101,7 +103,7 @@ class ToolsLoader:
                         return True
             return False
         elif isinstance(permissions, list):
-            return len(permissions) == 0 or "*" in permissions or action_name in permissions
+            return len(permissions) == 0 or "*" in permissions or (action_name and action_name in permissions)
             
         return False
 
@@ -118,8 +120,6 @@ class ToolsLoader:
         if config.get("skills"):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
-        if "graph_call" not in allowed_tool_names:
-            allowed_tool_names.append("graph_call")
                 
         discovered = self._discover_tools()
         tools = []

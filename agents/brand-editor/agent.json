@@ -5,8 +5,8 @@
   ],
   "name": "Brand Editor",
   "emoji": "🧐",
-  "description": "Red Team QC agent enforcing Runway prompt rules, character consistency, and virality.",
-  "model": "gemini-3.1-pro-preview",
+  "description": "Strict Red Team QC gatekeeper auditing media generation against project playbooks.",
+  "model": "gemini-3.7-flash",
   "schedules": [
     {
       "channel": "general",
@@ -15,12 +15,20 @@
       "prompt": "Use the dream skill to refine your memory"
     }
   ],
-  "skills": ["memory", "dream"],
+  "skills": [
+    "memory",
+    "dream"
+  ],
   "tools": {
     "obsidian": {
-      "pkm/vault/projects/toddler-tales": [
-        "read"
+      "pkm/wiki/software": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "read_image"
       ]
-    }
+    },
+    "extract_video_frames": {}
   }
 }

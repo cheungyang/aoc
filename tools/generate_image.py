@@ -1,5 +1,6 @@
 import os
 import asyncio
+from typing import Optional
 from langchain_core.tools import tool
 from core.util import format_tool_response
 from core.util.config import Config
@@ -8,7 +9,13 @@ import base64
 from io import BytesIO
 
 @tool
-async def generate_image(prompt: str, output_path: str, image_base64: str = None, image_path: str = None) -> str:
+async def generate_image(
+    prompt: str,
+    output_path: str,
+    image_base64: str = None,
+    image_path: str = None,
+    agent_id: Optional[str] = None
+) -> str:
     """Generate an image using Gemini (Imagen) based on a text prompt.
 
     This tool sends a generation request to Gemini, extracts the generated image,

@@ -21,12 +21,16 @@ def job_status(job_id: str) -> str:
     """
     try:
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        return loop.run_until_complete(_job_status_async(job_id))
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, _job_status_async(job_id)).result()
+        else:
+            return asyncio.run(_job_status_async(job_id))
     except Exception as e:
         return format_tool_response("job_status", payload="", errors=f"Error performing job status action: {e}")
 

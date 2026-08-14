@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import os
 import sys
 import asyncio
@@ -35,6 +36,22 @@ class TestGraphsLoader(unittest.TestCase):
         self.assertIn("<subgraphs_list>", overview)
         self.assertIn("coding", overview)
         self.assertIn("</subgraphs_list>", overview)
+
+    @patch('core.loaders.tools_loader.ToolsLoader.check_permission')
+    def test_get_graphs_overview_agent_permission(self, mock_check_permission):
+        loader = GraphsLoader()
+        
+        # Agent with graph_call permission
+        mock_check_permission.return_value = True
+        overview = loader.get_graphs_overview(agent_id="main")
+        self.assertIn("<subgraphs_list>", overview)
+        self.assertIn("coding", overview)
+        mock_check_permission.assert_called_with("main", "graph_call")
+
+        # Agent without graph_call permission
+        mock_check_permission.return_value = False
+        overview_empty = loader.get_graphs_overview(agent_id="restricted_agent")
+        self.assertEqual(overview_empty, "")
 
     def test_graphs_hot_reloading(self):
         loader = GraphsLoader()

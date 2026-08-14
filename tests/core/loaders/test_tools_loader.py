@@ -121,6 +121,16 @@ class TestCheckPermission(unittest.TestCase):
         
         self.assertFalse(self.loader.check_permission("agent2", "obsidian", "read", path=target_agent1))
 
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_check_permission_tool_level(self, mock_merge):
+        mock_merge.return_value = {
+            "graph_call": {},
+            "agent_call": {}
+        }
+        self.assertTrue(self.loader.check_permission("agent1", "graph_call"))
+        self.assertTrue(self.loader.check_permission("agent1", "agent_call"))
+        self.assertFalse(self.loader.check_permission("agent1", "bash"))
+
 if __name__ == "__main__":
     unittest.main()
 

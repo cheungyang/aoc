@@ -28,7 +28,7 @@ class GraphBuilder:
             # 2.5. Subgraphs Prompt
             from core.loaders.graphs_loader import GraphsLoader
             graphs_loader = GraphsLoader()
-            subgraphs_prompt = graphs_loader.get_graphs_overview()
+            subgraphs_prompt = graphs_loader.get_graphs_overview(agent_id=agent_id)
 
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()
@@ -63,7 +63,7 @@ class GraphBuilder:
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
-        model_name = config.get("model", "gemini-3-flash-preview")
+        model_name = config.get("model", "gemini-3.7-flash")
         provider = config.get("provider", "google")
         
         loader = ToolsLoader()

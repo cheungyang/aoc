@@ -4,7 +4,7 @@
   "name": "Receipt Processor",
   "emoji": "🧾",
   "description": "Extracts itemized data from receipt snapshots and maintains structured monthly ledgers.",
-  "model": "gemini-3-flash-preview",
+  "model": "gemini-3.7-flash",
   "tools": {
     "obsidian": {
       "pkm/vault/finance": [

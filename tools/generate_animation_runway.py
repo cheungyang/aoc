@@ -11,7 +11,7 @@ RUNWAY_API_BASE = os.getenv("RUNWAY_API_BASE", "https://api.dev.runwayml.com")
 RUNWAY_API_VERSION = os.getenv("RUNWAY_API_VERSION", "2024-11-06")
 
 @tool
-async def runway_video_animator(
+async def generate_animation_runway(
     prompt_text: str,
     image_path: str,
     output_path: str,
@@ -45,28 +45,28 @@ async def runway_video_animator(
     api_key = Config().runway_api_key or os.getenv("RUNWAYML_API_SECRET") or os.getenv("RUNWAY_API_KEY")
     if not api_key:
         return format_tool_response(
-            "runway_video_animator",
+            "generate_animation_runway",
             payload="",
             errors="Error: RUNWAYML_API_SECRET environment variable not set. Please set it to use this tool."
         )
 
     if not prompt_text or not prompt_text.strip():
         return format_tool_response(
-            "runway_video_animator",
+            "generate_animation_runway",
             payload="",
             errors="Error: prompt_text cannot be empty."
         )
 
     if not image_path or not os.path.exists(image_path):
         return format_tool_response(
-            "runway_video_animator",
+            "generate_animation_runway",
             payload="",
             errors=f"Error: Image file not found at '{image_path}'."
         )
 
     if not output_path or not output_path.strip():
         return format_tool_response(
-            "runway_video_animator",
+            "generate_animation_runway",
             payload="",
             errors="Error: output_path cannot be empty."
         )
@@ -104,7 +104,7 @@ async def runway_video_animator(
             
             if create_res.status_code not in (200, 201):
                 return format_tool_response(
-                    "runway_video_animator",
+                    "generate_animation_runway",
                     payload="",
                     errors=f"Runway API error ({create_res.status_code}): {create_res.text}"
                 )
@@ -138,7 +138,7 @@ async def runway_video_animator(
                 elif status in ("FAILED", "CANCELLED"):
                     failure_msg = poll_data.get("failure", poll_data.get("failureCode", f"Task {status}"))
                     return format_tool_response(
-                        "runway_video_animator",
+                        "generate_animation_runway",
                         payload="",
                         errors=f"Runway video generation {status.lower()}: {failure_msg}"
                     )
@@ -146,7 +146,7 @@ async def runway_video_animator(
             if not video_url:
                 if elapsed >= max_wait_seconds:
                     return format_tool_response(
-                        "runway_video_animator",
+                        "generate_animation_runway",
                         payload="",
                         errors=f"Timeout waiting for Runway video generation after {max_wait_seconds}s."
                     )
@@ -169,7 +169,7 @@ async def runway_video_animator(
 
         await asyncio.to_thread(_write_video, abs_output_path, video_bytes)
 
-        return format_tool_response("runway_video_animator", payload=abs_output_path, errors="None")
+        return format_tool_response("generate_animation_runway", payload=abs_output_path, errors="None")
 
     except Exception as e:
-        return format_tool_response("runway_video_animator", payload="", errors=f"Error generating video with Runway: {e}")
+        return format_tool_response("generate_animation_runway", payload="", errors=f"Error generating video with Runway: {e}")

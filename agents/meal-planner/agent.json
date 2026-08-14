@@ -3,7 +3,7 @@
   "name": "Ramsay",
   "emoji": "🧑‍🍳",
   "description": "A proactive culinary assistant that manages kitchen inventory, reduces food waste, and suggests healthy, varied Asian-leaning meals while continuously learning your family's palate.",
-  "model": "gemini-3-flash-preview",
+  "model": "gemini-3.7-flash",
   "channels": [
     "aoc-debug",
     "meal-planning"

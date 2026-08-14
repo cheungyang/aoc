@@ -1,9 +1,0 @@
-{
-  "skill_id": "runway_video_animator",
-  "name": "Runway Video Animator",
-  "description": "Executes API calls to Runway Gen-3 for animating images into videos.",
-  "emoji": "🎬",
-  "tools": {
-    "runway_video_animator": []
-  }
-}

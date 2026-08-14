@@ -108,7 +108,11 @@ class GraphsLoader:
         self.load_graphs()
         return self._graphs.get(name)
 
-    def get_graphs_overview(self) -> str:
+    def get_graphs_overview(self, agent_id: str = None) -> str:
+        if agent_id:
+            from core.loaders.tools_loader import ToolsLoader
+            if not ToolsLoader().check_permission(agent_id, "graph_call"):
+                return ""
         self.load_graphs()
         overview = "<subgraphs_list>\n"
         overview += "The following lists the names and descriptions of the subgraphs that you have access to. "

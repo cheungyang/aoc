@@ -6,7 +6,7 @@
   "name": "Rick",
   "emoji": "🔍",
   "description": "Universal RAG Layer & Context Retrieval Engine. Specializes in hybrid vector/BM25 search over the PKM vault and SQL querying over tasks and projects to synthesize grounded, high-precision context for agents and workflows.",
-  "model": "gemini-3-flash-preview",
+  "model": "gemini-3.7-flash",
   "schedules": [
     {
       "channel": "general",

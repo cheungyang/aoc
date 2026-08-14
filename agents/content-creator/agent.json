@@ -5,8 +5,8 @@
   ],
   "name": "Content Creator",
   "emoji": "🎨",
-  "description": "Creative engine that brainstorms concepts and executes DALL-E and Runway API generation.",
-  "model": "gemini-3.1-pro-preview",
+  "description": "Creative engine that brainstorms concepts and executes asset generation based on project instructions.",
+  "model": "gemini-3.7-flash",
   "schedules": [
     {
       "channel": "general",
@@ -15,15 +15,22 @@
       "prompt": "Use the dream skill to refine your memory"
     }
   ],
-  "skills": ["memory", "dream", "dalle_image_generator", "runway_video_animator"],
+  "skills": [
+    "memory",
+    "dream"
+  ],
   "tools": {
     "obsidian": {
-      "pkm/vault/projects/toddler-tales": [
+      "pkm/wiki/software": [
         "read",
         "write",
         "overwrite",
-        "append"
+        "append",
+        "read_image"
       ]
-    }
+    },
+    "generate_image": {},
+    "generate_animation_runway": {},
+    "generate_animation_veo3": {}
   }
 }

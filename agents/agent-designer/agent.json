@@ -47,14 +47,14 @@
         "read",
         "overwrite"
       ],
-      "pkm/agents": [
-        "ls"
-      ],
       "skills/": [
         "delete",
         "rmdir",
         "read",
         "overwrite"
+      ],
+      "graphs/": [
+        "read"
       ]
     },
     "project_query": [],

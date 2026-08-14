@@ -47,18 +47,47 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
         mock_message.add_reaction.assert_called_once_with("🤖")
 
     @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_missing_agent_id(self, mock_agents_loader_class):
+    async def test_on_tool_start_dict_input(self, mock_agents_loader_class):
+        mock_agents_loader = MagicMock()
+        mock_agents_loader.get_agent.return_value.config = {"emoji": "🚀"}
+        mock_agents_loader_class.return_value = mock_agents_loader
+
         mock_message = MagicMock()
         mock_message.add_reaction = AsyncMock()
 
         handler = ReactionCallbackHandler(mock_message)
 
         serialized = {"name": "agent_call"}
-        input_str = '{"prompt": "hello"}'
+        input_dict = {"agent_id": "test-agent", "prompt": "hello"}
 
-        await handler.on_tool_start(serialized, input_str)
+        await handler.on_tool_start(serialized, input_dict)
 
-        mock_message.add_reaction.assert_not_called()
+        mock_message.add_reaction.assert_called_once_with("🚀")
+
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_on_tool_start_cross_loop(self, mock_agents_loader_class):
+        import asyncio
+        mock_agents_loader = MagicMock()
+        mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
+        mock_agents_loader_class.return_value = mock_agents_loader
+
+        # Create a mock message with a separate dummy running event loop
+        other_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        other_loop.is_running.return_value = True
+
+        mock_message = MagicMock()
+        mock_state = MagicMock()
+        mock_state.loop = other_loop
+        mock_message._state = mock_state
+        mock_message.add_reaction = MagicMock()
+
+        with patch('asyncio.run_coroutine_threadsafe') as mock_threadsafe:
+            handler = ReactionCallbackHandler(mock_message)
+            serialized = {"name": "agent_call"}
+            input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
+
+            await handler.on_tool_start(serialized, input_str)
+            mock_threadsafe.assert_called_once()
 
 
 if __name__ == "__main__":

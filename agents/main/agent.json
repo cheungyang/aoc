@@ -19,7 +19,7 @@
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
   "emoji": "🛎️",
-  "model": "gemini-3-flash-preview",
+  "model": "gemini-3.7-flash",
   "name": "Concierge",
   "schedules": [
     {
@@ -38,7 +38,8 @@
     "agent_list": {},
     "job_list": {},
     "job_kill": {},
-    "job_status": {}
+    "job_status": {},
+    "graph_call": {}
   },
   "voice_config": {
     "enabled": true,

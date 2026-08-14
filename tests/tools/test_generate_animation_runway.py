@@ -7,14 +7,14 @@ import base64
 # Inject root directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from tools.runway_video_animator import runway_video_animator
+from tools.generate_animation_runway import generate_animation_runway
 from core.util import format_tool_response
 
-class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
+class TestGenerateAnimationRunwayTool(unittest.IsolatedAsyncioTestCase):
 
     @patch.dict(os.environ, {}, clear=True)
     async def test_missing_api_key(self):
-        result = await runway_video_animator.ainvoke({
+        result = await generate_animation_runway.ainvoke({
             "prompt_text": "gentle camera push in",
             "image_path": "scene.png",
             "output_path": "video.mp4"
@@ -23,7 +23,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
 
     @patch.dict(os.environ, {"RUNWAYML_API_SECRET": "test_runway_key"})
     async def test_empty_prompt_text(self):
-        result = await runway_video_animator.ainvoke({
+        result = await generate_animation_runway.ainvoke({
             "prompt_text": "",
             "image_path": "scene.png",
             "output_path": "video.mp4"
@@ -33,7 +33,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
     @patch.dict(os.environ, {"RUNWAYML_API_SECRET": "test_runway_key"})
     @patch("os.path.exists", return_value=False)
     async def test_nonexistent_image_file(self, mock_exists):
-        result = await runway_video_animator.ainvoke({
+        result = await generate_animation_runway.ainvoke({
             "prompt_text": "gentle camera push in",
             "image_path": "nonexistent.png",
             "output_path": "video.mp4"
@@ -43,7 +43,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
     @patch.dict(os.environ, {"RUNWAYML_API_SECRET": "test_runway_key"})
     @patch("os.path.exists", return_value=True)
     async def test_empty_output_path(self, mock_exists):
-        result = await runway_video_animator.ainvoke({
+        result = await generate_animation_runway.ainvoke({
             "prompt_text": "gentle camera push in",
             "image_path": "scene.png",
             "output_path": ""
@@ -83,7 +83,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
             with patch("builtins.open", unittest.mock.mock_open(read_data=fake_img_bytes)) as mock_file:
                 with patch("os.makedirs"):
                     with patch("os.path.abspath", return_value="/mock/path/video.mp4"):
-                        result = await runway_video_animator.ainvoke({
+                        result = await generate_animation_runway.ainvoke({
                             "prompt_text": "subtle character smile, slow push in",
                             "image_path": "scene.png",
                             "output_path": "video.mp4",
@@ -91,7 +91,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
                             "max_wait_seconds": 5.0
                         })
 
-        expected = format_tool_response("runway_video_animator", payload="/mock/path/video.mp4", errors="None")
+        expected = format_tool_response("generate_animation_runway", payload="/mock/path/video.mp4", errors="None")
         self.assertEqual(result, expected)
 
     @patch.dict(os.environ, {"RUNWAYML_API_SECRET": "test_runway_key"})
@@ -118,7 +118,7 @@ class TestRunwayVideoAnimatorTool(unittest.IsolatedAsyncioTestCase):
 
         with patch("httpx.AsyncClient", return_value=mock_client):
             with patch("builtins.open", unittest.mock.mock_open(read_data=fake_img_bytes)):
-                result = await runway_video_animator.ainvoke({
+                result = await generate_animation_runway.ainvoke({
                     "prompt_text": "extreme rapid motion",
                     "image_path": "scene.png",
                     "output_path": "video.mp4",
