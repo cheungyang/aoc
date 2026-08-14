@@ -175,6 +175,63 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         mock_format.assert_called_once_with({"custom_result": "done"})
         self.assertEqual(result, format_tool_response("graph_call", payload="Custom Formatted Output", errors="None"))
 
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_resumes_interrupted_thread(self, mock_graphs_loader_class):
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+
+        mock_graph = MagicMock()
+        state_snap = MagicMock()
+        state_snap.next = ("hitl_image_and_plot_approval",)
+        mock_graph.get_state = MagicMock(return_value=state_snap)
+        mock_graph.aupdate_state = AsyncMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"resumed": True})
+
+        mock_loader.get_graph.return_value = {
+            "graph": mock_graph,
+            "metadata": {"name": "content_creation"}
+        }
+
+        result = await graph_call.ainvoke({"graph_name": "content_creation", "query": "approved"})
+
+        mock_graph.get_state.assert_called()
+        mock_graph.aupdate_state.assert_called_once()
+        self.assertEqual(mock_graph.aupdate_state.call_args[0][1]["latest_human_feedback"], "approved")
+        mock_graph.ainvoke.assert_called_once_with(None, config=mock_graph.aupdate_state.call_args[0][0])
+
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_resumes_interrupted_channel_thread(self, mock_graphs_loader_class):
+        from core.agent.job_manager import current_channel_name
+        token = current_channel_name.set("content-creation")
+
+        try:
+            mock_loader = MagicMock()
+            mock_graphs_loader_class.return_value = mock_loader
+
+            mock_graph = MagicMock()
+            state_snap = MagicMock()
+            state_snap.next = ("hitl_image_and_plot_approval",)
+            mock_graph.get_state = MagicMock(return_value=state_snap)
+            mock_graph.aupdate_state = AsyncMock()
+            mock_graph.ainvoke = AsyncMock(return_value={"resumed": True})
+
+            mock_loader.get_graph.return_value = {
+                "graph": mock_graph,
+                "metadata": {"name": "content_creation"}
+            }
+
+            feedback = "i am looking for ayla in a full fish mascot outfit, instead of wearing a jacket with fish icons."
+            result = await graph_call.ainvoke({"graph_name": "content_creation", "query": feedback})
+
+            mock_graph.aupdate_state.assert_called_once()
+            called_payload = mock_graph.aupdate_state.call_args[0][1]
+            self.assertEqual(called_payload["latest_human_feedback"], feedback)
+            called_config = mock_graph.aupdate_state.call_args[0][0]
+            self.assertEqual(called_config["configurable"]["thread_id"], "graph:content_creation:content-creation")
+            mock_graph.ainvoke.assert_called_once_with(None, config=called_config)
+        finally:
+            current_channel_name.reset(token)
+
 
 if __name__ == "__main__":
     unittest.main()

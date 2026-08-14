@@ -42,9 +42,12 @@ class TestSessionManager(unittest.TestCase):
     def test_get_session_id_thread(self):
         import discord
         message = MagicMock()
-        message.channel = MagicMock(spec=discord.Thread)
-        message.channel.id = 456
-        message.channel.parent.name = "general"
+        mock_thread = MagicMock()
+        mock_thread.__class__ = discord.Thread
+        mock_thread.id = 456
+        mock_thread.parent = MagicMock()
+        mock_thread.parent.name = "general"
+        message.channel = mock_thread
         
         session_id = SessionManager().get_session_id("agent1", "discord", message.channel)
         self.assertEqual(session_id, "agent1:discord:general:456")

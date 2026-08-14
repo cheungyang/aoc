@@ -1,4 +1,4 @@
-from core.util import split_message
+from core.util import split_message, Config
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
 from core.agent.job_manager import current_job_id, current_agent_id
@@ -161,9 +161,21 @@ class Agent(BaseAgent):
             files = []
             missing_files = []
             if image_paths and source == "discord":
+                pkm_dir = Config().pkm_dir
                 for path in image_paths:
-                    if os.path.exists(path):
-                        files.append(discord.File(path))
+                    resolved_path = path
+                    if not os.path.exists(resolved_path):
+                        candidates = [
+                            os.path.join(pkm_dir, path),
+                            os.path.expanduser(f"~/{path}"),
+                        ]
+                        for cand in candidates:
+                            if cand and os.path.exists(cand):
+                                resolved_path = cand
+                                break
+
+                    if os.path.exists(resolved_path):
+                        files.append(discord.File(resolved_path))
                     else:
                         missing_files.append(path)
             

@@ -1,57 +1,79 @@
 ---
 name: content_creation
-description: Generic instruction-driven media generation pipeline orchestrating content-creator and brand-editor to generate 1-shot base images, draft and audit video plots, gate with HITL approval, render visual plate video, extract and QC keyframes, draft and polish copy, and gate final package approval.
+description: Multi-turn instruction-driven media generation studio with Sqlite state persistence, asset versioning (_v1, _v2, ...), intelligent HITL revision routing, Red Team QC audits, and continuous execution_log.md logging.
 ---
 ## Overview
-This graph orchestrates a generic, instruction-driven media generation pipeline driven by project markdown documents (`manifest_path`, `creator_instructions_path`, `qc_playbook_path`):
-1. **Setup & 1-Shot Base Image (`setup_and_generate_image`)**: Content Creator reads the project manifest and creator instructions to generate the 1-shot base image directly to `{output_dir}/{topic}_image.jpg`.
-2. **Draft Video Plot (`draft_video_plot`)**: Content Creator drafts `{topic}_video_plot.md` strictly following the instructions and persists directly to `{output_dir}/{topic}_video_plot.md`.
-3. **Audit Video Plot (`audit_video_plot`)**: Brand Editor audits `{topic}_video_plot.md` against QC playbook rules. Loops back if non-compliant.
-4. 🛑 **HITL Gate 1: Image & Video Plot Approval (`hitl_image_and_plot_approval`)**: Pauses for user to review base image and approved video plot before video generation.
-5. **Generate Visual Plate (`generate_visual_plate`)**: Content Creator generates the video plate to `{output_dir}/{topic}_video.mp4` using the approved motion prompt.
-6. **Extract & QC Video Frames (`extract_and_qc_frames`)**: Brand Editor runs `extract_video_frames` at configurable timestamps (default `[1.0, 2.5, 4.0]s`) and audits keyframes against the QC playbook. Loops back if non-compliant.
-7. **Draft & Save Copy (`draft_and_save_copy`)**: Content Creator drafts publication copy, Brand Editor polishes for alignment with playbook, and writes to `{output_dir}/{topic}_copy.md`.
-8. 🎉 **HITL Gate 2: Final Package Review & Approval (`hitl_final_package_approval`)**: Final 1-click delivery review of base image, video plot, master visual plate, and publication copy.
+This graph orchestrates a multi-turn, instruction-driven media generation pipeline driven by project markdown documents (`manifest_path`, `creator_instructions_path`, `qc_playbook_path`):
+1. **Setup & 1-Shot Base Image (`setup_and_generate_image`)**: Content Creator reads the project manifest and creator instructions to generate the 1-shot base image to `{output_dir}/{topic}_image_v{N}.jpg`.
+2. **Draft Video Plot (`draft_video_plot`)**: Content Creator drafts `{topic}_video_plot_v{N}.md` strictly following the instructions and persists directly to disk.
+3. **Dual-Asset QC Audit (`audit_video_plot`)**: Brand Editor audits **BOTH** the Base Image and Video Plot against QC playbook rules:
+   - **Image Failure**: Increments `image_version` and loops back to Step 1 (`setup_and_generate_image`).
+   - **Plot Failure**: Increments `video_plot_version` and loops back to Step 2 (`draft_video_plot`).
+   - **Pass**: Transitions forward to Gate 1.
+4. 🛑 **HITL Gate 1: Image & Video Plot Approval (`hitl_image_and_plot_approval`)**: Pauses for user to review base image and approved video plot.
+   - **Approval** (`"approved"`, `"go"`): Proceeds to video generation.
+   - **Image Feedback** (`"make hair curlier"`): Increments `image_version` and loops back to Step 1.
+   - **Plot Feedback** (`"slower camera zoom"`): Increments `video_plot_version` and loops back to Step 2.
+   - **Ambiguous Feedback**: Prompts user for clarification without losing state.
+5. **Generate Visual Plate (`generate_visual_plate`)**: Content Creator generates the video plate to `{output_dir}/{topic}_video_v{N}.mp4` using the approved motion prompt.
+6. **Extract & QC Video Frames (`extract_and_qc_frames`)**: Brand Editor runs `extract_video_frames` at configurable timestamps (default `[1.0, 2.5, 4.0]s`) and audits keyframes against the QC playbook.
+7. **Draft & Save Copy (`draft_and_save_copy`)**: Content Creator drafts publication copy, Brand Editor polishes for alignment with playbook, and writes to `{output_dir}/{topic}_copy_v{N}.md`.
+8. 🎉 **HITL Gate 2: Final Package Review & Approval (`hitl_final_package_approval`)**: Final 1-click delivery review.
+   - **Approval** (`"approved"`): Completes delivery.
+   - **Copy Feedback**: Increments `copy_version` and loops back to Step 7.
+   - **Video Feedback**: Increments `video_version` and loops back to Step 5.
+9. **Continuous Audit Logging (`execution_log.md`)**: Full trace of prompts, QC audits, human feedback, and version progressions saved in `{output_dir}/execution_log.md`.
 
 ## Flowchart
 ```text
 [START]
    │
    ▼
-[1. setup_and_generate_image]   ──► (Content Creator: Reads manifest & instructions -> Base Image)
-   │
-   ▼
-[2. draft_video_plot]           ──► (Content Creator: Writes {topic}_video_plot.md)
-   │
-   ▼
-[3. audit_video_plot]           ──► (Brand Editor: Audits against QC playbook)
+[1. setup_and_generate_image]   ──► (Content Creator: Generates Image v{N})
    │          ▲
-   │ (Fail)   │
-   └──────────┘
+   │ (Pass)   │ (QC Fail: Image Issue)
+   ▼          │
+[2. draft_video_plot]           ──► (Content Creator: Writes Plot v{N})
+   │          ▲
+   │ (Pass)   │ (QC Fail: Plot Issue)
+   ▼          │
+[3. audit_video_plot]           ──► (Brand Editor: Audits BOTH Image & Plot)
+   │          │
+   ├──────────┴─────────────────► (Image Fail -> Step 1 / Plot Fail -> Step 2)
+   │
    │ (Pass)
    ▼
 ═══════════════════════════════════════════════════════════════════════
   🛑 [HITL GATE 1: Image & Video Plot Approval] (User reviews image & plot)
 ═══════════════════════════════════════════════════════════════════════
-   │ (Approved)
-   ▼
-[4. generate_visual_plate]      ──► (Content Creator: Generates video plate)
    │
-   ▼
-[5. extract_and_qc_frames]      ──► (Brand Editor: extract_video_frames + Playbook QC)
+   ├──► (Revise Image)  ──► [1. setup_and_generate_image] (v2, v3...)
+   ├──► (Revise Plot)   ──► [2. draft_video_plot] (v2, v3...)
+   ├──► (Clarify)       ──► [Clarification Prompt]
+   │
+   ▼ (Approved)
+[4. generate_visual_plate]      ──► (Content Creator: Generates video plate v{N})
    │          ▲
-   │ (Fail)   │
+   │ (Revise) │
+   ▼          │
+[5. extract_and_qc_frames]      ──► (Brand Editor: extract_video_frames + Playbook QC)
+   │          │ (Fail)
    └──────────┘
    │ (Pass)
    ▼
 [6. draft_and_save_copy]        ──► (Content Creator drafts -> Brand Editor polishes ->
-   │                                 Writes {topic}_copy.md)
-   ▼
+   │          ▲                      Writes Copy v{N})
+   │ (Revise) │
+   ▼          │
 ═══════════════════════════════════════════════════════════════════════
   🎉 [HITL GATE 2: Final Package Review & Approval] (User 1-click finalize)
 ═══════════════════════════════════════════════════════════════════════
    │
-   ▼
+   ├──► (Revise Copy)   ──► [6. draft_and_save_copy] (v2, v3...)
+   ├──► (Revise Video)  ──► [4. generate_visual_plate] (v2, v3...)
+   ├──► (Clarify)       ──► [Clarification Prompt]
+   │
+   ▼ (Approved)
  [END]
 ```
 
