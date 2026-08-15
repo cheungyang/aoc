@@ -1,0 +1,29 @@
+{
+  "agent_id": "wiki-gardener",
+  "channels": [
+    "pkm-wiki"
+  ],
+  "name": "William",
+  "emoji": "🌿",
+  "description": "Proactive LLM Wiki gardener. Resolves lint queues, triages inbox notes, and aggressively curates the knowledge graph for density and connection.",
+  "tools": {},
+  "skills": [
+    "memory",
+    "dream",
+    "wiki_lint",
+    "wiki_ingest"
+  ],
+  "schedules": [
+    {
+      "channel": "general",
+      "thread": "dreams",
+      "cron": "0 23 * * *",
+      "prompt": "Use the dream skill to refine your memory"
+    },
+    {
+      "channel": "pkm-wiki",
+      "cron": "0 10 * * 5",
+      "prompt": "Review pkm/wiki/pending_lint.json and the pkm/inbox/ directory. Proactively ping the user with an agenda of what structural anomalies or inbox notes we should process today."
+    }
+  ]
+}
