@@ -35,7 +35,7 @@ async def draft_video_plot_node(state: dict):
     human_feedback = state.get("latest_human_feedback", "")
 
     image_path = state.get("image_path", "")
-    audio_path = os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav"
+    audio_path = state.get("source_audio_path") or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
     
     # Read the instructions to inject into the prompt
     instructions_text = ""

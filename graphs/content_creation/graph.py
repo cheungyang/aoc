@@ -28,6 +28,7 @@ class OverallProjectState(TypedDict, total=False):
     error_message: str
     latest_human_feedback: str
     final_package: Dict[str, Any]
+    source_audio_path: str
 
 class ContentCreationState(OverallProjectState, AssetIdeationState, VideoProductionState, CopywritingState):
     revision_history: List[Dict[str, Any]]
@@ -43,7 +44,9 @@ from graphs.content_creation.nodes import (
     remix_video_node,
     extract_and_qc_frames_node,
     evaluate_video_qc_node,
-    draft_and_save_copy_node
+    draft_and_save_copy_node,
+    ask_for_audio_node,
+    receive_audio_node
 )
 
 # Import HITL nodes, classifiers, and routers
@@ -89,7 +92,7 @@ def create_graph(checkpointer=None, **kwargs):
 
     # Add the sub-graphs as adapter nodes for STRICT state isolation
     async def run_ideation(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "error_message", "image_path", "image_prompt", "video_plot_path", "video_plot_content", "video_plot_attempts", "max_video_plot_reviews", "video_plot_qc_passed", "video_plot_feedback", "gate1_decision", "clarification_question", "latest_human_feedback"]
+        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "error_message", "image_path", "image_prompt", "video_plot_path", "video_plot_content", "video_plot_attempts", "max_video_plot_reviews", "video_plot_qc_passed", "video_plot_feedback", "gate1_decision", "clarification_question", "latest_human_feedback", "source_audio_path", "audio_path", "overlay_text"]
         subset = {k: state.get(k) for k in keys if k in state}
         return await ideation_sg.ainvoke(subset)
 
@@ -112,8 +115,19 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("process_gate2_feedback", process_gate2_feedback_node)
     workflow.add_node("clarify_gate2", clarify_gate2_node)
 
-    # Orchestration edges
-    workflow.add_edge(START, "ideation")
+    # Audio input at the very start
+    workflow.add_node("ask_for_audio", ask_for_audio_node)
+    workflow.add_node("receive_audio", receive_audio_node)
+    
+    workflow.add_edge(START, "ask_for_audio")
+    workflow.add_edge("ask_for_audio", "receive_audio")
+    
+    def check_audio_router(state: ContentCreationState):
+        if state.get("source_audio_path"):
+            return "ideation"
+        return "ask_for_audio"
+        
+    workflow.add_conditional_edges("receive_audio", check_audio_router, ["ask_for_audio", "ideation"])
 
     def after_ideation_router(state: ContentCreationState):
         if state.get("error_message") or state.get("gate1_decision") != "approved":
@@ -151,7 +165,7 @@ def create_graph(checkpointer=None, **kwargs):
 
     return workflow.compile(
         checkpointer=checkpointer,
-        interrupt_after=["hitl_final_package_approval"]
+        interrupt_after=["hitl_final_package_approval", "ask_for_audio"]
     )
 
 # Default compiled instance

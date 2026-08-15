@@ -13,6 +13,9 @@ class AssetIdeationState(TypedDict, total=False):
     video_plot_feedback: str
     gate1_decision: str
     clarification_question: str
+    source_audio_path: str
+    audio_path: str
+    overlay_text: Any
 
 
 from typing import TypedDict, List, Dict, Any

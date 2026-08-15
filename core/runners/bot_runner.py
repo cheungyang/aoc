@@ -199,6 +199,8 @@ class BotRunner:
                         })
                     except Exception as e:
                         print(f"Error reading/compressing attachment: {e}")
+                else:
+                    content_parts.append({"type": "text", "text": f"\n[Attached file: {attachment.filename}]({attachment.url})"})
             
             if content_parts:
                 content_payload = content_parts
