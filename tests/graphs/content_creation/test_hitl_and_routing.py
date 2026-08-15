@@ -33,6 +33,8 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_gate2_intent("approved"), "approved")
         self.assertEqual(classify_gate2_intent("finalize delivery"), "approved")
         self.assertEqual(classify_gate2_intent("change the instagram hashtags and add question"), "revise_copy")
+        self.assertEqual(classify_gate2_intent("increase audio track volume and boost sound"), "revise_remix")
+        self.assertEqual(classify_gate2_intent("change text overlay font size"), "revise_remix")
         self.assertEqual(classify_gate2_intent("re-render the video animation with faster motion"), "revise_video")
         self.assertEqual(classify_gate2_intent("something seems off"), "clarify")
 
@@ -52,12 +54,15 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
 
         # Video QC routing
         self.assertEqual(should_continue_video_qc({"video_qc_passed": True}), "draft_and_save_copy")
-        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_attempts": 1, "max_video_reviews": 3}), "generate_visual_plate")
+        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_rejection_target": "visual_plate", "video_qc_attempts": 1, "max_video_reviews": 3}), "generate_visual_plate")
+        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_rejection_target": "remix", "video_qc_attempts": 1, "max_video_reviews": 3}), "remix_video")
+        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_rejection_target": "both", "video_qc_attempts": 1, "max_video_reviews": 3}), "generate_visual_plate")
         self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_attempts": 3, "max_video_reviews": 3}), "hitl_video_qc_failure_intervention")
 
         # Gate 2 Routing
         self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "approved"}), "__end__")
         self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "revise_copy"}), "draft_and_save_copy")
+        self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "revise_remix"}), "remix_video")
         self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "revise_video"}), "generate_visual_plate")
         self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "clarify"}), "clarify_gate2")
 
@@ -86,11 +91,13 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
 
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
-             patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.nodes.generate_animation_veo3") as mock_anim, \
+             patch("graphs.content_creation.nodes.remix_video") as mock_remix, \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
 
             mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path', 'assets/puppy.jpg')}</payload><errors>None</errors></generate_image_response>")
-            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_runway_response><payload>assets/puppy/puppy_video.mp4</payload><errors>None</errors></generate_animation_runway_response>')
+            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_veo3_response><payload>assets/puppy/puppy_raw_video.mp4</payload><errors>None</errors></generate_animation_veo3_response>')
+            mock_remix.ainvoke = AsyncMock(return_value='<remix_video_response><payload>assets/puppy/puppy_video.mp4</payload><errors>None</errors></remix_video_response>')
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload><errors>None</errors></extract_video_frames_response>')
 
             import sys
@@ -147,11 +154,13 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
 
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
-             patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.nodes.generate_animation_veo3") as mock_anim, \
+             patch("graphs.content_creation.nodes.remix_video") as mock_remix, \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
 
             mock_img.ainvoke = AsyncMock(return_value='<generate_image_response><payload>assets/puppy_v1.jpg</payload><errors>None</errors></generate_image_response>')
-            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_runway_response><payload>assets/puppy.mp4</payload><errors>None</errors></generate_animation_runway_response>')
+            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_veo3_response><payload>assets/puppy/puppy_raw_video.mp4</payload><errors>None</errors></generate_animation_veo3_response>')
+            mock_remix.ainvoke = AsyncMock(return_value='<remix_video_response><payload>assets/puppy.mp4</payload><errors>None</errors></remix_video_response>')
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload><errors>None</errors></extract_video_frames_response>')
 
             import sys
@@ -201,11 +210,13 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
 
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
-             patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.nodes.generate_animation_veo3") as mock_anim, \
+             patch("graphs.content_creation.nodes.remix_video") as mock_remix, \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
 
             mock_img.ainvoke = AsyncMock(return_value='<generate_image_response><payload>assets/puppy.jpg</payload></generate_image_response>')
-            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_runway_response><payload>assets/puppy.mp4</payload></generate_animation_runway_response>')
+            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_veo3_response><payload>assets/puppy/puppy_raw_video.mp4</payload></generate_animation_veo3_response>')
+            mock_remix.ainvoke = AsyncMock(return_value='<remix_video_response><payload>assets/puppy.mp4</payload></remix_video_response>')
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg</payload></extract_video_frames_response>')
 
             import sys
@@ -263,20 +274,30 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
         def agent_dispatcher(agent_id):
             return mock_creator if agent_id == "content-creator" else mock_editor
 
+        def fake_anim(args):
+            p = args.get('output_path', 'puppy_raw_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<generate_animation_veo3_response><payload>{p}</payload><errors>None</errors></generate_animation_veo3_response>"
+
+        def fake_remix(args):
+            p = args.get('output_path', 'puppy_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<remix_video_response><payload>{p}</payload><errors>None</errors></remix_video_response>"
+
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
-             patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.nodes.generate_animation_veo3") as mock_anim, \
+             patch("graphs.content_creation.nodes.remix_video") as mock_remix, \
+             patch("graphs.content_creation.nodes._has_audio_stream", return_value=True), \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
-
-            def fake_anim(args):
-                p = args.get('output_path', 'puppy_video.mp4')
-                os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
-                with open(p, "wb") as f:
-                    f.write(b"dummy_video_bytes")
-                return f"<generate_animation_runway_response><payload>{p}</payload><errors>None</errors></generate_animation_runway_response>"
 
             mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path')}</payload></generate_image_response>")
             mock_anim.ainvoke = AsyncMock(side_effect=fake_anim)
+            mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload></extract_video_frames_response>')
 
             import sys
@@ -314,6 +335,99 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(s_gate2_rev.values["copy_version"], 2)
             self.assertTrue(s_gate2_rev.values["copy_path"].endswith("puppy_copy_v2.md"))
             self.assertIn("What is your puppy's name?", s_gate2_rev.values["copy_text"])
+
+    async def test_gate2_remix_revision_loop(self):
+        """Test remix (text/audio) revision loop at Gate 2: increments video_version and routes to remix_video without re-generating visual plate."""
+        mock_creator = MagicMock()
+        mock_creator.execute = AsyncMock(side_effect=[
+            # Pass 1: Image, Plot, Copy v1
+            "Puppy in garden.",
+            "# Video Plot\n**Prompt:** > Puppy runs.",
+            "Draft caption v1 #Puppy",
+            # Pass 2: Copy v2 after remix revision
+            "Draft caption v2 #Puppy"
+        ])
+        mock_editor = MagicMock()
+        mock_editor.execute = AsyncMock(side_effect=[
+            # Audit plot
+            "VERDICT: APPROVED",
+            # QC frames v1
+            "VERDICT: APPROVED",
+            # Polish copy v1
+            "Polished copy v1 🐶",
+            # QC frames v2 (after remix)
+            "VERDICT: APPROVED",
+            # Polish copy v2
+            "Polished copy v2 🐶"
+        ])
+
+        def agent_dispatcher(agent_id):
+            return mock_creator if agent_id == "content-creator" else mock_editor
+
+        def fake_anim(args):
+            p = args.get('output_path', 'puppy_raw_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<generate_animation_veo3_response><payload>{p}</payload><errors>None</errors></generate_animation_veo3_response>"
+
+        def fake_remix(args):
+            p = args.get('output_path', 'puppy_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<remix_video_response><payload>{p}</payload><errors>None</errors></remix_video_response>"
+
+        with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
+             patch("graphs.content_creation.nodes.generate_image") as mock_img, \
+             patch("graphs.content_creation.nodes.generate_animation_veo3") as mock_anim, \
+             patch("graphs.content_creation.nodes.remix_video") as mock_remix, \
+             patch("graphs.content_creation.nodes._has_audio_stream", return_value=True), \
+             patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
+
+            mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path')}</payload></generate_image_response>")
+            mock_anim.ainvoke = AsyncMock(side_effect=fake_anim)
+            mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
+            mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload></extract_video_frames_response>')
+
+            import sys
+            import graphs.content_creation.graph as current_graph_mod
+            mod = sys.modules.get("graphs.content_creation.graph", current_graph_mod)
+            current_create_graph = getattr(mod, "create_graph")
+            current_prepare_input = getattr(mod, "prepare_input")
+
+            checkpointer = MemorySaver()
+            test_graph = current_create_graph(checkpointer=checkpointer)
+
+            config = {"configurable": {"thread_id": "test_thread_rev_remix_1"}}
+            initial_state = current_prepare_input(
+                "topic: puppy, project_dir: pkm/wiki/software/toddler-tales",
+                session_id="test_sess_rev_remix"
+            )
+
+            # Phase 1: Run to Gate 1
+            await test_graph.ainvoke(initial_state, config=config)
+
+            # Phase 2: Approve Gate 1 -> runs to Gate 2 (Video v1)
+            await test_graph.aupdate_state(config, {"latest_human_feedback": "approved"})
+            await test_graph.ainvoke(None, config=config)
+
+            s_gate2 = test_graph.get_state(config)
+            self.assertEqual(s_gate2.next, ("hitl_final_package_approval",))
+            self.assertEqual(s_gate2.values["video_version"], 1)
+
+            # Phase 3: Provide text overlay / audio feedback at Gate 2
+            await test_graph.aupdate_state(config, {"latest_human_feedback": "please adjust the text overlay font size and audio volume"})
+            await test_graph.ainvoke(None, config=config)
+
+            s_gate2_rev = test_graph.get_state(config)
+            self.assertEqual(s_gate2_rev.next, ("hitl_final_package_approval",))
+            # Animation was NOT called a second time
+            self.assertEqual(mock_anim.ainvoke.call_count, 1)
+            # Remix WAS called twice
+            self.assertEqual(mock_remix.ainvoke.call_count, 2)
+            self.assertEqual(s_gate2_rev.values["video_version"], 2)
+            self.assertTrue(s_gate2_rev.values["video_path"].endswith("puppy_video_v2.mp4"))
 
 
 if __name__ == "__main__":

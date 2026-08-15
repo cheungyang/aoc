@@ -8,12 +8,14 @@ class AgentResponse:
     text: str
     poll_data: Optional[Dict] = None
     image_paths: Optional[List[str]] = None
+    video_paths: Optional[List[str]] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text_content = reply_text
         poll_data = None
         image_paths = None
+        video_paths = None
         
         # Find the poll block
         poll_match = re.search(r'<poll(.*?)>(.*?)</poll>', reply_text, re.DOTALL)
@@ -57,5 +59,16 @@ class AgentResponse:
             images_content = images_match.group(1)
             for img_match in re.finditer(r'<image\s+path="(.*?)"\s*/>', images_content):
                 image_paths.append(img_match.group(1))
+
+        # Find the videos block
+        videos_match = re.search(r'<videos>(.*?)</videos>', reply_text, re.DOTALL)
+        if videos_match:
+            videos_xml = videos_match.group(0)
+            text_content = text_content.replace(videos_xml, "").strip()
+            
+            video_paths = []
+            videos_content = videos_match.group(1)
+            for vid_match in re.finditer(r'<video\s+path="(.*?)"\s*/>', videos_content):
+                video_paths.append(vid_match.group(1))
         
-        return cls(text=text_content, poll_data=poll_data, image_paths=image_paths)
+        return cls(text=text_content, poll_data=poll_data, image_paths=image_paths, video_paths=video_paths)

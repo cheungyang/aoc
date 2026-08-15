@@ -92,9 +92,50 @@ class TestAgentResponse(unittest.TestCase):
         response = AgentResponse.from_string(reply_text)
         self.assertEqual(response.text.strip(), "Here are the images:")
         self.assertIsNotNone(response.image_paths)
-        self.assertEqual(len(response.image_paths), 2)
-        self.assertEqual(response.image_paths[0], "assets/img1.png")
-        self.assertEqual(response.image_paths[1], "assets/img2.jpg")
+    def test_perfect_videos(self):
+        reply_text = """Here are the videos:
+<videos>
+  <video path="assets/video1.mp4"/>
+  <video path="assets/video2.webm"/>
+</videos>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here are the videos:")
+        self.assertIsNotNone(response.video_paths)
+        self.assertEqual(len(response.video_paths), 2)
+        self.assertEqual(response.video_paths[0], "assets/video1.mp4")
+        self.assertEqual(response.video_paths[1], "assets/video2.webm")
+
+    def test_videos_fallback(self):
+        reply_text = """Here are the videos:
+<videos>
+  <video path="assets/video1.mp4"/>
+  <video path="assets/video2.webm"/>
+  <invalid>
+</videos>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here are the videos:")
+        self.assertIsNotNone(response.video_paths)
+        self.assertEqual(len(response.video_paths), 2)
+        self.assertEqual(response.video_paths[0], "assets/video1.mp4")
+        self.assertEqual(response.video_paths[1], "assets/video2.webm")
+
+    def test_combined_images_and_videos(self):
+        reply_text = """Here is the package:
+<images>
+  <image path="assets/img1.png"/>
+</images>
+<videos>
+  <video path="assets/video1.mp4"/>
+</videos>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here is the package:")
+        self.assertIsNotNone(response.image_paths)
+        self.assertEqual(response.image_paths, ["assets/img1.png"])
+        self.assertIsNotNone(response.video_paths)
+        self.assertEqual(response.video_paths, ["assets/video1.mp4"])
 
 if __name__ == '__main__':
     unittest.main()

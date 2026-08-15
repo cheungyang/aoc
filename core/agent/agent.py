@@ -145,6 +145,7 @@ class Agent(BaseAgent):
         text_content = response.text
         poll_data = response.poll_data
         image_paths = response.image_paths
+        video_paths = response.video_paths
 
         # Send message to channel only for direct Discord or scheduled invocations
         if channel is not None and source in ["discord", "scheduled"]:
@@ -160,9 +161,17 @@ class Agent(BaseAgent):
             
             files = []
             missing_files = []
-            if image_paths and source == "discord":
+            if (image_paths or video_paths) and source == "discord":
                 pkm_dir = Config().pkm_dir
-                for path in image_paths:
+                media_items = []
+                if image_paths:
+                    for path in image_paths:
+                        media_items.append((path, "Image"))
+                if video_paths:
+                    for path in video_paths:
+                        media_items.append((path, "Video"))
+
+                for path, media_type in media_items:
                     resolved_path = path
                     if not os.path.exists(resolved_path):
                         candidates = [
@@ -177,7 +186,7 @@ class Agent(BaseAgent):
                     if os.path.exists(resolved_path):
                         files.append(discord.File(resolved_path))
                     else:
-                        missing_files.append(path)
+                        missing_files.append((path, media_type))
             
             # If no text content, but we have files or view, create an empty chunk to carry them
             if not chunks and (files or view):
@@ -198,8 +207,8 @@ class Agent(BaseAgent):
                         await channel.send(chunk)
             
             if missing_files:
-                for path in missing_files:
-                    await channel.send(f"Image file not found: {path}")
+                for path, media_type in missing_files:
+                    await channel.send(f"{media_type} file not found: {path}")
 
         # Return reponse regardless of channel
         return text_content

@@ -72,7 +72,7 @@ def classify_gate1_intent(feedback: str) -> str:
 
 
 def classify_gate2_intent(feedback: str) -> str:
-    """Classifies human feedback at Gate 2 into approval, copy revision, video revision, or clarification."""
+    """Classifies human feedback at Gate 2 into approval, copy revision, remix revision (text/audio), video plate revision, or clarification."""
     f = (feedback or "").strip().lower()
     if not f:
         return "approved"
@@ -82,22 +82,40 @@ def classify_gate2_intent(feedback: str) -> str:
     if f in approval_words or any(f.startswith(w) for w in ["approved", "approve", "go", "proceed", "looks good", "lgtm", "pass", "finalize"]):
         return "approved"
 
-    # 2. Copy vs Video keywords
-    copy_words = ["copy", "caption", "hashtag", "hook", "text", "wording", "post", "emoji", "title", "callout", "instagram", "words"]
-    video_words = ["video", "motion", "animation", "plate", "render", "re-render", "rerun", "clip", "mp4"]
+    # 2. Text/Audio Remix keywords (audio, sound, volume, track, overlay text, subtitle, font)
+    if any(phrase in f for phrase in ["text overlay", "overlay text", "video text", "text on video", "text in video", "audio track", "sound volume"]):
+        return "revise_remix"
 
+    remix_words = [
+        "audio", "sound", "volume", "track", "wav", "mp3", "music", "voice", "loud", "quiet",
+        "overlay", "font", "subtitle", "subtitles", "sync", "remix"
+    ]
+    has_remix = _matches_any_word(remix_words, f)
+
+    # 3. Copy keywords (caption, hashtags, emojis, post wording)
+    copy_words = ["copy", "caption", "hashtag", "hashtags", "hook", "wording", "post", "emoji", "emojis", "title", "callout", "instagram", "description", "words"]
     has_copy = _matches_any_word(copy_words, f)
+
+    # 4. Video plate keywords (motion, animation, visual plate, camera, movement, render)
+    video_words = ["video", "motion", "animation", "plate", "visual plate", "render", "re-render", "rerun", "clip", "mp4", "camera", "movement", "character", "face"]
     has_video = _matches_any_word(video_words, f)
 
-    if has_copy and not has_video:
+    if has_remix and not has_video:
+        return "revise_remix"
+    if has_remix and has_video and not any(w in f for w in ["motion", "animation", "camera", "re-render", "rerun", "character"]):
+        return "revise_remix"
+
+    if has_copy and not (has_video or has_remix):
         return "revise_copy"
-    if has_video and not has_copy:
+    if has_video and not (has_copy or has_remix):
         return "revise_video"
     if has_copy and has_video:
         return "revise_copy"
 
     action_words = ["change", "make", "fix", "update", "replace", "redo", "modify", "remove", "add", "adjust"]
     if _matches_any_word(action_words, f):
+        if has_remix:
+            return "revise_remix"
         return "revise_copy"
 
     return "clarify"
@@ -164,6 +182,8 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     copy_exists = bool(copy_path and os.path.isfile(copy_path) and os.path.getsize(copy_path) > 0)
     copy_tag = f"`{copy_path}`" if copy_exists else f"`{copy_path}` ⚠️ **[MISSING ON DISK]**"
 
+    video_xml = f"<videos>\n  <video path=\"{video_path}\"/>\n</videos>\n\n" if video_exists else ""
+
     return (
         f"🎉 **[HITL GATE 2: Final Package Review & Approval]**\n\n"
         f"**Topic**: `{topic}`\n\n"
@@ -173,9 +193,10 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
         f"- **Master Visual Plate (v{video_v})**: {video_tag}\n"
         f"- **Publication Copy File (v{copy_v})**: {copy_tag}\n\n"
         f"<images>\n  <image path=\"{image_path}\"/>\n</images>\n\n"
+        f"{video_xml}"
         f"### 📱 Publication Copy Preview\n"
         f"```markdown\n{copy_text}\n```\n\n"
-        f"Reply **'approved'** to finalize delivery, or specify changes for copy or video."
+        f"Reply **'approved'** to finalize delivery, or specify changes for copy, text/audio remix, or video animation."
     )
 
 
@@ -418,6 +439,17 @@ async def process_gate2_feedback_node(state: ContentCreationState):
             execution_log_path
         )
 
+    elif decision == "revise_remix":
+        video_v += 1
+        updates["video_version"] = video_v
+        updates["video_path"] = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_v)
+        _append_execution_log(
+            output_dir, topic, "🎉 Human-in-the-Loop",
+            f"Gate 2 Decision: REVISE_REMIX (v{video_v})",
+            {"Feedback": feedback, "New Video Path": updates["video_path"]},
+            execution_log_path
+        )
+
     elif decision == "revise_video":
         video_v += 1
         updates["video_version"] = video_v
@@ -449,12 +481,16 @@ async def process_gate2_feedback_node(state: ContentCreationState):
 
 
 def should_continue_video_qc(state: ContentCreationState):
-    """Router: proceeds to copywriting if video QC passed, else re-routes directly to generate_visual_plate, or hard blocks at HITL intervention if max reviews exhausted."""
+    """Router: proceeds to copywriting if video QC passed, else re-routes to remix_video or generate_visual_plate depending on rejection target, or hard blocks at HITL intervention if max reviews exhausted."""
     if state.get("video_qc_passed"):
         return "draft_and_save_copy"
     if state.get("video_qc_attempts", 0) >= state.get("max_video_reviews", 3):
         print("ContentCreationGraph: Max video QC reviews reached without passing QC. Hard blocking at HITL Video QC Intervention.")
         return "hitl_video_qc_failure_intervention"
+
+    target = state.get("video_qc_rejection_target", "visual_plate")
+    if target in ["remix", "audio_text", "text", "audio"]:
+        return "remix_video"
     return "generate_visual_plate"
 
 
@@ -539,20 +575,25 @@ async def process_video_qc_intervention_node(state: ContentCreationState):
 
 
 def should_continue_video_qc_intervention(state: ContentCreationState):
-    """Router: routes intervention decision to retry generation or abort."""
+    """Router: routes intervention decision to retry generation or remix or abort."""
     feedback = (state.get("latest_human_feedback") or state.get("query") or "").strip().lower()
     if any(w in feedback for w in ["abort", "cancel", "stop", "exit", "quit", "halt"]):
         return END
+    target = state.get("video_qc_rejection_target", "visual_plate")
+    if target in ["remix", "audio_text", "text", "audio"] or any(w in feedback for w in ["remix", "text", "audio", "font", "sound"]):
+        return "remix_video"
     return "generate_visual_plate"
 
 
 def should_continue_hitl_gate_2(state: ContentCreationState):
-    """Router: routes Gate 2 decision to completion, copy revision, video re-rendering, or clarification."""
+    """Router: routes Gate 2 decision to completion, copy revision, remix revision, video re-rendering, or clarification."""
     decision = state.get("gate2_decision", "approved")
     if decision == "approved":
         return END
     elif decision == "revise_copy":
         return "draft_and_save_copy"
+    elif decision == "revise_remix":
+        return "remix_video"
     elif decision == "revise_video":
         return "generate_visual_plate"
     elif decision == "clarify":
@@ -570,8 +611,9 @@ async def clarify_gate2_node(state: ContentCreationState):
         f"I received your feedback: *\"{feedback}\"*\n\n"
         f"Please clarify your desired action:\n"
         f"1. **Revise Publication Copy** (caption wording, hashtags, or emojis)\n"
-        f"2. **Re-render Visual Plate Video**\n"
-        f"3. **Final 1-Click Approval** to complete delivery"
+        f"2. **Revise Text/Audio Remix** (change text overlay, font size, audio track, volume, or timing)\n"
+        f"3. **Re-render Visual Plate Video** (change camera movement or character motion)\n"
+        f"4. **Final 1-Click Approval** to complete delivery"
     )
     return {
         "project_dir": project_dir,

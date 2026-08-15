@@ -20,6 +20,7 @@ from graphs.content_creation.nodes import (
     draft_video_plot_node,
     audit_video_plot_node,
     generate_visual_plate_node,
+    remix_video_node,
     extract_and_qc_frames_node,
     draft_and_save_copy_node
 )
@@ -76,6 +77,7 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("process_gate1_feedback", process_gate1_feedback_node)
     workflow.add_node("clarify_gate1", clarify_gate1_node)
     workflow.add_node("generate_visual_plate", generate_visual_plate_node)
+    workflow.add_node("remix_video", remix_video_node)
     workflow.add_node("extract_and_qc_frames", extract_and_qc_frames_node)
     workflow.add_node("hitl_video_qc_failure_intervention", hitl_video_qc_failure_intervention_node)
     workflow.add_node("process_video_qc_intervention", process_video_qc_intervention_node)
@@ -121,13 +123,15 @@ def create_graph(checkpointer=None, **kwargs):
 
     workflow.add_edge("clarify_gate1", "hitl_image_and_plot_approval")
 
-    workflow.add_edge("generate_visual_plate", "extract_and_qc_frames")
+    workflow.add_edge("generate_visual_plate", "remix_video")
+    workflow.add_edge("remix_video", "extract_and_qc_frames")
 
     workflow.add_conditional_edges(
         "extract_and_qc_frames",
         should_continue_video_qc,
         {
             "generate_visual_plate": "generate_visual_plate",
+            "remix_video": "remix_video",
             "draft_and_save_copy": "draft_and_save_copy",
             "hitl_video_qc_failure_intervention": "hitl_video_qc_failure_intervention"
         }
@@ -139,6 +143,7 @@ def create_graph(checkpointer=None, **kwargs):
         should_continue_video_qc_intervention,
         {
             "generate_visual_plate": "generate_visual_plate",
+            "remix_video": "remix_video",
             END: END
         }
     )
@@ -152,6 +157,7 @@ def create_graph(checkpointer=None, **kwargs):
         {
             END: END,
             "draft_and_save_copy": "draft_and_save_copy",
+            "remix_video": "remix_video",
             "generate_visual_plate": "generate_visual_plate",
             "clarify_gate2": "clarify_gate2"
         }
@@ -267,8 +273,11 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         execution_log_path = ""
         image_path = ""
         video_plot_path = ""
+        raw_video_path = ""
         video_path = ""
         copy_path = ""
+        audio_path = ""
+        overlay_text = ""
     else:
         error_msg = ""
         output_dir = normalize_project_path(output_dir_param)
@@ -280,8 +289,11 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
         image_path = _resolve_asset_path(kwargs.get("image_path"), output_dir, topic, "image", image_version)
         video_plot_path = _resolve_asset_path(kwargs.get("video_plot_path"), output_dir, topic, "video_plot", video_plot_version)
+        raw_video_path = _resolve_asset_path(kwargs.get("raw_video_path"), output_dir, topic, "raw_video", video_version)
         video_path = _resolve_asset_path(kwargs.get("video_path"), output_dir, topic, "video", video_version)
         copy_path = _resolve_asset_path(kwargs.get("copy_path"), output_dir, topic, "copy", copy_version)
+        audio_path = kwargs.get("audio_path") or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
+        overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
 
     return {
         "project_dir": project_dir,
@@ -299,8 +311,13 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "copy_version": copy_version,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
+        "raw_video_path": raw_video_path if output_dir else "",
         "video_path": video_path,
         "copy_path": copy_path,
+        "audio_path": audio_path,
+        "overlay_text": overlay_text,
+        "audio_verified": False,
+        "remix_actions": [],
         "image_prompt": "",
         "video_plot_content": "",
         "video_plot_qc_passed": False,
@@ -309,6 +326,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "qc_timestamps": qc_timestamps,
         "video_qc_passed": False,
         "video_qc_feedback": "",
+        "video_qc_rejection_target": "visual_plate",
         "copy_text": "",
         "final_package": {},
         "gate1_decision": "approved",

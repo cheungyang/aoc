@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 from core.loaders.agents_loader import AgentsLoader
 from tools.generate_image import generate_image
 from tools.generate_animation_veo3 import generate_animation_veo3
+from tools.remix_video import remix_video, _has_audio_stream, _get_ffmpeg_executable
 from tools.extract_video_frames import extract_video_frames
 from graphs.content_creation.state import (
     ContentCreationState,
@@ -11,7 +12,8 @@ from graphs.content_creation.state import (
     _resolve_project_doc_path,
     _resolve_asset_path,
     _append_execution_log,
-    _extract_motion_prompt_from_plot
+    _extract_motion_prompt_from_plot,
+    _extract_remix_actions_from_plot
 )
 
 
@@ -284,27 +286,27 @@ async def audit_video_plot_node(state: ContentCreationState):
 # 4. Node 4: generate_visual_plate
 # ==========================================
 async def generate_visual_plate_node(state: ContentCreationState):
-    """Step 4: Content Creator uses approved motion prompt to generate video visual plate."""
+    """Step 4: Content Creator uses approved motion prompt to generate raw video visual plate."""
     if state.get("error_message"):
         return {}
     topic = state.get("topic", "")
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
     video_version = state.get("video_version") or 1
-    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_version)
+    raw_video_path = _resolve_asset_path(state.get("raw_video_path", ""), output_dir, topic, "raw_video", video_version)
     image_path = _resolve_asset_path(state.get("image_path", ""), output_dir, topic, "image", state.get("image_version", 1))
     plot_content = state.get("video_plot_content", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     motion_prompt = _extract_motion_prompt_from_plot(plot_content, state)
-    print(f"ContentCreationGraph: Generating visual plate (v{video_version}) from {image_path} to {video_path}...")
+    print(f"ContentCreationGraph: Generating visual plate (v{video_version}) from {image_path} to {raw_video_path}...")
 
     gen_error = ""
     try:
         result = await generate_animation_veo3.ainvoke({
             "prompt_text": motion_prompt,
             "image_path": image_path,
-            "output_path": video_path,
+            "output_path": raw_video_path,
             "aspect_ratio": "9:16",
             "duration": 5,
             "agent_id": "content-creator"
@@ -316,15 +318,15 @@ async def generate_visual_plate_node(state: ContentCreationState):
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved:
-                video_path = saved
+                raw_video_path = saved
     except Exception as e:
         gen_error = str(e)
         print(f"ContentCreationGraph: Error generating visual plate: {e}")
 
     # Explicit Disk Persistence Invariant Check
-    file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    file_persisted = bool(raw_video_path and os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0)
     if not file_persisted and not gen_error:
-        gen_error = f"Video file not found or empty on disk at '{video_path}' after generation."
+        gen_error = f"Raw visual plate file not found or empty on disk at '{raw_video_path}' after generation."
 
     if file_persisted:
         _append_execution_log(
@@ -333,10 +335,10 @@ async def generate_visual_plate_node(state: ContentCreationState):
             actor="🎬 Content Creator",
             event_title=f"Visual Plate Video Generation (v{video_version})",
             details={
-                "Video Output Path": video_path,
+                "Visual Plate Path": raw_video_path,
                 "Motion Prompt": motion_prompt,
                 "Engine": "Google Veo 3",
-                "File Status": f"Verified on disk ({os.path.getsize(video_path)} bytes)"
+                "File Status": f"Verified on disk ({os.path.getsize(raw_video_path)} bytes)"
             },
             log_path=execution_log_path
         )
@@ -347,7 +349,7 @@ async def generate_visual_plate_node(state: ContentCreationState):
             actor="🎬 Content Creator",
             event_title=f"Visual Plate Video Generation Failed (v{video_version})",
             details={
-                "Target Video Path": video_path,
+                "Target Visual Plate Path": raw_video_path,
                 "Motion Prompt": motion_prompt,
                 "Engine": "Google Veo 3",
                 "Error": gen_error,
@@ -360,17 +362,112 @@ async def generate_visual_plate_node(state: ContentCreationState):
         "project_dir": project_dir,
         "output_dir": output_dir,
         "video_version": video_version,
-        "video_path": video_path,
+        "raw_video_path": raw_video_path,
         "video_persisted": file_persisted,
         "video_generation_error": gen_error if not file_persisted else ""
     }
 
 
 # ==========================================
-# 5. Node 5: extract_and_qc_frames
+# 5. Node 5: remix_video
+# ==========================================
+async def remix_video_node(state: ContentCreationState):
+    """Step 5: Content Creator overlays audio track and styled text onto visual plate using remix_video."""
+    if state.get("error_message"):
+        return {}
+    topic = state.get("topic", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    video_version = state.get("video_version") or 1
+    raw_video_path = _resolve_asset_path(state.get("raw_video_path", ""), output_dir, topic, "raw_video", video_version)
+    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_version)
+    plot_content = state.get("video_plot_content", "")
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+
+    # Fast-fail if raw visual plate is missing or failed generation
+    if not (raw_video_path and os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):
+        gen_err = state.get("video_generation_error") or f"Raw visual plate not found at '{raw_video_path}'."
+        return {
+            "project_dir": project_dir,
+            "output_dir": output_dir,
+            "raw_video_path": raw_video_path,
+            "video_path": video_path,
+            "video_persisted": False,
+            "video_generation_error": gen_err
+        }
+
+    actions = _extract_remix_actions_from_plot(plot_content, state)
+    print(f"ContentCreationGraph: Remixing video (v{video_version}) from {raw_video_path} to {video_path}...")
+
+    remix_err = ""
+    try:
+        result = await remix_video.ainvoke({
+            "video_path": raw_video_path,
+            "actions": actions,
+            "output_path": video_path,
+            "agent_id": "content-creator"
+        })
+        if "<errors>" in result and "</errors>" in result:
+            err_val = result.split("<errors>")[1].split("</errors>")[0].strip()
+            if err_val and err_val.lower() != "none":
+                remix_err = err_val
+        if "<payload>" in result and "</payload>" in result:
+            saved = result.split("<payload>")[1].split("</payload>")[0].strip()
+            if saved:
+                video_path = saved
+    except Exception as e:
+        remix_err = str(e)
+        print(f"ContentCreationGraph: Error remixing video: {e}")
+
+    file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    if not file_persisted and not remix_err:
+        remix_err = f"Remixed video file not found or empty on disk at '{video_path}'."
+
+    if file_persisted:
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🎬 Content Creator",
+            event_title=f"Video Remix & Assembly (v{video_version})",
+            details={
+                "Remixed Video Path": video_path,
+                "Source Plate": raw_video_path,
+                "Actions Applied": actions,
+                "File Status": f"Verified on disk ({os.path.getsize(video_path)} bytes)"
+            },
+            log_path=execution_log_path
+        )
+    else:
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🎬 Content Creator",
+            event_title=f"Video Remix Failed (v{video_version})",
+            details={
+                "Target Video Path": video_path,
+                "Source Plate": raw_video_path,
+                "Error": remix_err,
+                "File Status": "MISSING / 0 BYTES ON DISK"
+            },
+            log_path=execution_log_path
+        )
+
+    return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
+        "raw_video_path": raw_video_path,
+        "video_path": video_path,
+        "remix_actions": actions,
+        "video_persisted": file_persisted,
+        "video_generation_error": remix_err if not file_persisted else ""
+    }
+
+
+# ==========================================
+# 6. Node 6: extract_and_qc_frames (Dual Text & Audio QC)
 # ==========================================
 async def extract_and_qc_frames_node(state: ContentCreationState):
-    """Step 5: Brand Editor extracts video frames and performs QC based on QC playbook."""
+    """Step 6: Brand Editor checks audio stream, extracts video frames, and audits text overlay & visual fidelity."""
     if state.get("error_message"):
         return {}
     topic = state.get("topic", "")
@@ -380,21 +477,28 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
     video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_version)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
     execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
-    qc_timestamps = state.get("qc_timestamps") or [1.0, 2.5, 4.0]
+    qc_timestamps = state.get("qc_timestamps") or [1.0, 2.0, 2.5, 3.5, 4.0]
     frames_dir = os.path.join(output_dir, "frames") if output_dir else "frames"
     attempts = state.get("video_qc_attempts", 0) + 1
     max_reviews = state.get("max_video_reviews", 3)
 
-    # 1. Fast-Fail Diagnosis: Check if video exists and is non-empty on disk before extraction or LLM calls
+    # 1. Fast-Fail Diagnosis: Check if video exists and is non-empty on disk
     file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    raw_video_path = _resolve_asset_path(state.get("raw_video_path", ""), output_dir, topic, "raw_video", video_version)
+    raw_persisted = bool(raw_video_path and os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0)
+
     if not file_persisted:
-        gen_err = state.get("video_generation_error") or "Video file not found or 0 bytes on disk."
+        gen_err = state.get("video_generation_error") or "Remixed video file not found or 0 bytes on disk."
         root_cause = f"Video file missing or empty on disk at '{video_path}'. ({gen_err})"
         next_video_version = video_version + 1
+        rejection_target: Literal["visual_plate", "remix", "both"] = "remix" if raw_persisted else "visual_plate"
         action_taken = (
-            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
-            if attempts < max_reviews else
-            "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+            f"Re-routed to Remix Video for audio/text re-assembly (v{next_video_version})."
+            if (rejection_target == "remix" and attempts < max_reviews) else (
+                f"Re-routed to Content Creator for fresh visual plate render (v{next_video_version})."
+                if attempts < max_reviews else
+                "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+            )
         )
 
         _append_execution_log(
@@ -405,6 +509,7 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
             details={
                 "Verdict": "REJECTED",
                 "Extracted Frames Count": 0,
+                "Rejection Target": rejection_target.upper(),
                 "Specific Root Cause": root_cause,
                 "Action Taken": action_taken
             },
@@ -417,11 +522,17 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
             "extracted_frames": [],
             "video_qc_passed": False,
             "video_qc_feedback": root_cause,
+            "video_qc_rejection_target": rejection_target,
             "video_qc_attempts": attempts,
             "video_version": next_video_version
         }
 
-    # 2. Extract frames from verified video file
+    # 2. Automated Audio Stream Integrity Verification
+    ffmpeg_exe = _get_ffmpeg_executable()
+    audio_detected = _has_audio_stream(ffmpeg_exe, video_path) if (ffmpeg_exe and file_persisted) else False
+    audio_status_str = "Audio stream verified present in remixed video file." if audio_detected else "WARNING: No audio stream detected in remixed video file."
+
+    # 3. Extract frames from verified video file
     if output_dir:
         os.makedirs(frames_dir, exist_ok=True)
     extracted_frames = []
@@ -451,7 +562,7 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
         root_cause = f"Failed to extract keyframes from video at '{video_path}'."
         next_video_version = video_version + 1
         action_taken = (
-            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
+            f"Re-routed to Content Creator for fresh visual plate render (v{next_video_version})."
             if attempts < max_reviews else
             "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
         )
@@ -464,6 +575,8 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
             details={
                 "Verdict": "REJECTED",
                 "Extracted Frames Count": 0,
+                "Audio Stream": audio_status_str,
+                "Rejection Target": "VISUAL_PLATE",
                 "Specific Root Cause": root_cause,
                 "Action Taken": action_taken
             },
@@ -474,47 +587,88 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
             "project_dir": project_dir,
             "output_dir": output_dir,
             "extracted_frames": [],
+            "audio_verified": audio_detected,
             "video_qc_passed": False,
             "video_qc_feedback": root_cause,
+            "video_qc_rejection_target": "visual_plate",
             "video_qc_attempts": attempts,
             "video_version": next_video_version
         }
 
-    # 3. Perform Brand Editor LLM Visual Audit on Extracted Keyframes
+    # 4. Brand Editor LLM Multi-Modal Audit on Keyframes, Text Visibility, and Audio Status
     editor = AgentsLoader().get_agent("brand-editor")
     frames_list_str = "\n".join([f"- Frame {i+1} ({qc_timestamps[i] if i < len(qc_timestamps) else ''}s): {f}" for i, f in enumerate(extracted_frames)])
 
     prompt = (
         f"You are the Brand Editor. Read {qc_playbook_path}.\n"
-        f"Audit the extracted keyframes for the topic '{topic}'.\n"
+        f"Audit the remixed video deliverables for the topic '{topic}'.\n\n"
+        f"--- Video Deliverables ---\n"
         f"Video Path: {video_path}\n"
-        f"Extracted Frames:\n{frames_list_str}\n\n"
-        f"Reply VERDICT: APPROVED or VERDICT: REJECTED based strictly on the playbook criteria."
+        f"Audio Stream Verification: {audio_status_str}\n"
+        f"Extracted Keyframes:\n{frames_list_str}\n"
+        f"--------------------------\n\n"
+        f"QC Audit Requirements:\n"
+        f"1. Visual Plate Fidelity: Check for character consistency, smooth motion, and absence of visual artifacts or distortions.\n"
+        f"2. Text Overlay Verification: Verify whether the text overlay is clearly seen in the video keyframes, legible, and properly positioned.\n"
+        f"3. Audio Verification: Check that the external audio stream is verified and present ({audio_status_str}).\n\n"
+        f"Instructions:\n"
+        f"1. If all visual plate, text overlay, and audio criteria are met, reply 'VERDICT: APPROVED' on the first line.\n"
+        f"2. If the raw visual plate has motion or video generation defects (distortions, warping, anatomical defects, bad motion, character mismatch, prompt bleed), reply 'VERDICT: REJECTED TARGET: VISUAL_PLATE' with specific revision notes.\n"
+        f"3. If the visual plate is fine, but there is an audio or text overlay insertion defect (text missing, wrong font, misaligned/uncentered, audio missing, volume or sync issue), reply 'VERDICT: REJECTED TARGET: REMIX' with specific revision notes.\n"
+        f"4. If BOTH the visual plate and text/audio have defects, reply 'VERDICT: REJECTED TARGET: BOTH' with specific revision notes."
     )
 
     response = await editor.execute(prompt, source="subgraph")
-    is_approved = "VERDICT: APPROVED" in response.upper() or ("APPROVED" in response.upper() and "REJECTED" not in response.upper())
-    feedback = "" if is_approved else response.strip()
+    resp_upper = response.upper()
+    is_approved = ("VERDICT: APPROVED" in resp_upper or ("APPROVED" in resp_upper and "REJECTED" not in resp_upper)) and audio_detected
+
+    rejection_target: Literal["visual_plate", "remix", "both"] = "visual_plate"
+    if not is_approved:
+        if "TARGET: REMIX" in resp_upper or "TARGET: TEXT" in resp_upper or "TARGET: AUDIO" in resp_upper:
+            rejection_target = "remix"
+        elif "TARGET: BOTH" in resp_upper:
+            rejection_target = "both"
+        elif "TARGET: VISUAL_PLATE" in resp_upper or "TARGET: VIDEO" in resp_upper:
+            rejection_target = "visual_plate"
+        elif not audio_detected and "VERDICT: APPROVED" in resp_upper:
+            rejection_target = "remix"
+        else:
+            fb_lower = response.lower()
+            remix_keywords = ["text", "font", "overlay", "caption", "word", "audio", "sound", "volume", "track", "wav", "sync"]
+            video_keywords = ["motion", "plate", "render", "character", "distortion", "face", "body", "camera", "movement", "animation", "veo", "hallucination"]
+            if any(w in fb_lower for w in remix_keywords) and not any(w in fb_lower for w in video_keywords):
+                rejection_target = "remix"
+            else:
+                rejection_target = "visual_plate"
+
+    if not audio_detected and is_approved:
+        is_approved = False
+        rejection_target = "remix"
+        feedback = f"QC Rejection: No audio stream detected in remixed video '{video_path}'.\n{response.strip()}"
+    else:
+        feedback = "" if is_approved else response.strip()
 
     next_video_version = video_version if is_approved else video_version + 1
-    action_taken = (
-        "Proceeding to publication copywriting."
-        if is_approved else (
-            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
-            if attempts < max_reviews else
-            "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
-        )
-    )
+    if is_approved:
+        action_taken = "Proceeding to publication copywriting."
+    elif attempts >= max_reviews:
+        action_taken = "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+    elif rejection_target == "remix":
+        action_taken = f"Re-routed to Remix Video for audio/text re-assembly (v{next_video_version})."
+    else:
+        action_taken = f"Re-routed to Content Creator for fresh visual plate render (v{next_video_version})."
 
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
         actor="🧐 Brand Editor",
-        event_title=f"Video Keyframe QC Audit (Attempt {attempts})",
+        event_title=f"Video Dual Text/Audio Keyframe QC Audit (Attempt {attempts})",
         details={
             "Verdict": "APPROVED" if is_approved else "REJECTED",
             "Extracted Frames Count": len(extracted_frames),
-            "Specific Root Cause": response.strip() if not is_approved else "All QC playbook criteria satisfied.",
+            "Audio Stream Status": audio_status_str,
+            "Rejection Target": rejection_target.upper() if not is_approved else "NONE",
+            "Specific Root Cause": response.strip() if not is_approved else "All visual, text overlay, and audio criteria satisfied.",
             "Action Taken": action_taken
         },
         log_path=execution_log_path
@@ -524,8 +678,10 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
         "project_dir": project_dir,
         "output_dir": output_dir,
         "extracted_frames": extracted_frames,
+        "audio_verified": audio_detected,
         "video_qc_passed": is_approved,
         "video_qc_feedback": feedback,
+        "video_qc_rejection_target": rejection_target,
         "video_qc_attempts": attempts,
         "video_version": next_video_version
     }

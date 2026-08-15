@@ -58,6 +58,8 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<options>", prompt)
         self.assertIn("<images>", prompt)
         self.assertIn("<image path=", prompt)
+        self.assertIn("<videos>", prompt)
+        self.assertIn("<video path=", prompt)
         self.assertIn("<tool_execution_rules>", prompt)
         self.assertIn("Permission Restrictions", prompt)
         self.assertIn("Cross-Channel Communication", prompt)

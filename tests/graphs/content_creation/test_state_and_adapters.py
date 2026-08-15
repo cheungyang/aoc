@@ -10,7 +10,7 @@ from graphs.content_creation.graph import (
     prepare_input,
     format_output
 )
-from graphs.content_creation.state import _extract_motion_prompt_from_plot
+from graphs.content_creation.state import _extract_motion_prompt_from_plot, _extract_remix_actions_from_plot
 from core.loaders.graphs_loader import GraphsLoader
 
 class TestContentCreationStateAndAdapters(unittest.TestCase):
@@ -29,17 +29,37 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
         self.assertEqual(input_data["output_dir"], "pkm/wiki/software/toddler-tales/puppy")
         self.assertTrue(input_data["image_path"].endswith("puppy_image.jpg"))
         self.assertTrue(input_data["video_plot_path"].endswith("puppy_video_plot.md"))
+        self.assertTrue(input_data["raw_video_path"].endswith("puppy_raw_video.mp4"))
         self.assertTrue(input_data["video_path"].endswith("puppy_video.mp4"))
         self.assertTrue(input_data["copy_path"].endswith("puppy_copy.md"))
         self.assertEqual(input_data["image_version"], 1)
         self.assertEqual(input_data["video_plot_version"], 1)
         self.assertEqual(input_data["thread_id"], "test_sess_1")
-        self.assertEqual(input_data["qc_timestamps"], [1.0, 2.5, 4.0])
         self.assertFalse(input_data["video_plot_qc_passed"])
         self.assertFalse(input_data["video_qc_passed"])
         self.assertEqual(input_data["error_message"], "")
         self.assertIn("messages", input_data)
         self.assertEqual(len(input_data["messages"]), 1)
+
+    def test_extract_remix_actions_from_plot(self):
+        plot_md = (
+            "# Video Plot: Fish\n\n"
+            "## Data Binding\n"
+            "- Source Audio: `assets/fish/fish_wav.wav`\n"
+            "- Audio Start Time: `1.5s`\n"
+            "- Text Overlay: `魚`\n"
+            "- Text Start Time: `1.5s`\n"
+            "- Text End Time: `3.5s`\n\n"
+            "## Motion Prompt\n"
+            "> Fish swims happily.\n"
+        )
+        state = {"topic": "fish", "output_dir": "assets/fish"}
+        actions = _extract_remix_actions_from_plot(plot_md, state)
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0]["action"], "add_audio")
+        self.assertEqual(actions[0]["audio_path"], "assets/fish/fish_wav.wav")
+        self.assertEqual(actions[1]["action"], "add_text")
+        self.assertEqual(actions[1]["text"], "魚")
 
     def test_prepare_input_with_explicit_output_dir(self):
         input_data = prepare_input(

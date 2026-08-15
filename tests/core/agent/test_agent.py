@@ -247,6 +247,68 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_discord_file.assert_called_once_with("assets/test.png")
 
     @patch('core.agent.agent.LoggingHandler')
+    @patch('core.agent.agent.os.path.exists')
+    @patch('discord.File')
+    async def test_execute_sends_videos(self, mock_discord_file, mock_exists, mock_logging_handler_class):
+        mock_exists.return_value = True
+        mock_file_instance = MagicMock()
+        mock_discord_file.return_value = mock_file_instance
+
+        # Graph invoke result with <videos> tag
+        mock_graph = MagicMock()
+        reply_with_videos = """Here is a video.
+<videos>
+  <video path="assets/test.mp4"/>
+</videos>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_videos)]})
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        mock_channel = AsyncMock()
+        
+        # Run
+        reply = await agent.execute("hello", source="discord", channel=mock_channel)
+        
+        # Assertions
+        mock_graph.ainvoke.assert_called_once()
+        self.assertEqual(reply, "Here is a video.")
+        
+        # Verify channel.send was called with files
+        mock_channel.send.assert_called_once_with("Here is a video.", files=[mock_file_instance])
+        mock_discord_file.assert_called_once_with("assets/test.mp4")
+
+    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.agent.agent.os.path.exists')
+    async def test_execute_sends_missing_video_message(self, mock_exists, mock_logging_handler_class):
+        mock_exists.return_value = False
+
+        # Graph invoke result with <videos> tag
+        mock_graph = MagicMock()
+        reply_with_videos = """Here is a video.
+<videos>
+  <video path="assets/test.mp4"/>
+</videos>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_videos)]})
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+        
+        mock_channel = AsyncMock()
+        
+        # Run
+        reply = await agent.execute("hello", source="discord", channel=mock_channel)
+        
+        # Assertions
+        mock_graph.ainvoke.assert_called_once()
+        self.assertEqual(reply, "Here is a video.")
+        
+        # Verify channel.send was called twice: once for message, once for error
+        self.assertEqual(mock_channel.send.call_count, 2)
+        mock_channel.send.assert_any_call("Here is a video.")
+        mock_channel.send.assert_any_call("Video file not found: assets/test.mp4")
+
+    @patch('core.agent.agent.LoggingHandler')
     @patch('core.agent.agent.current_job_id')
     @patch('core.agent.job_manager.JobManager')
     async def test_execute_handles_killed_status(self, mock_job_manager_class, mock_current_job_id, mock_logging_handler_class):
