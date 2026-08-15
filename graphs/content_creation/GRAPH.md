@@ -19,10 +19,12 @@ This graph orchestrates a multi-turn, instruction-driven media generation pipeli
    - **Image Feedback** (`"make hair curlier"`): Increments `image_version` and loops back to Step 1.
    - **Plot Feedback** (`"slower camera zoom"`): Increments `video_plot_version` and loops back to Step 2.
    - **Ambiguous Feedback**: Prompts user for clarification without losing state.
-5. **Generate Visual Plate (`generate_visual_plate`)**: Content Creator generates the video plate to `{output_dir}/{topic}_video_v{N}.mp4` using the approved motion prompt.
-6. **Extract & QC Video Frames (`extract_and_qc_frames`)**: Brand Editor runs `extract_video_frames` at configurable timestamps (default `[1.0, 2.5, 4.0]s`) and audits keyframes against the QC playbook.
+5. **Generate Visual Plate (`generate_visual_plate`)**: Content Creator generates the video plate to `{output_dir}/{topic}_video_v{N}.mp4` using the approved motion prompt and explicitly verifies non-zero byte size on disk.
+6. **Extract & QC Video Frames (`extract_and_qc_frames`)**: Brand Editor checks disk persistence and runs `extract_video_frames` at configurable timestamps (default `[1.0, 2.5, 4.0]s`) and audits keyframes against the QC playbook.
+   - **Missing File / QC Rejection**: Directly re-routes to `generate_visual_plate` (Node 4) with incremented video version (e.g. `v2`, `v3`).
+   - **Retry Exhaustion**: If `video_qc_attempts >= max_video_reviews` without passing QC, hard blocks at `hitl_video_qc_failure_intervention` requiring manual intervention.
 7. **Draft & Save Copy (`draft_and_save_copy`)**: Content Creator drafts publication copy, Brand Editor polishes for alignment with playbook, and writes to `{output_dir}/{topic}_copy_v{N}.md`.
-8. 🎉 **HITL Gate 2: Final Package Review & Approval (`hitl_final_package_approval`)**: Final 1-click delivery review.
+8. 🎉 **HITL Gate 2: Final Package Review & Approval (`hitl_final_package_approval`)**: Final 1-click delivery review (verifies physical disk presence of all assets).
    - **Approval** (`"approved"`): Completes delivery.
    - **Copy Feedback**: Increments `copy_version` and loops back to Step 7.
    - **Video Feedback**: Increments `video_version` and loops back to Step 5.
@@ -56,17 +58,17 @@ This graph orchestrates a multi-turn, instruction-driven media generation pipeli
    ├──► (Clarify)       ──► [Clarification Prompt]
    │
    ▼ (Approved)
-[4. generate_visual_plate]      ──► (Content Creator: Generates video plate v{N})
+[4. generate_visual_plate]      ──► (Content Creator: Generates video plate v{N} + checks disk)
    │          ▲
-   │ (Revise) │
+   │          │ (Fail & attempts < max)
    ▼          │
-[5. extract_and_qc_frames]      ──► (Brand Editor: extract_video_frames + Playbook QC)
-   │          │ (Fail)
-   └──────────┘
-   │ (Pass)
-   ▼
-[6. draft_and_save_copy]        ──► (Content Creator drafts -> Brand Editor polishes ->
-   │          ▲                      Writes Copy v{N})
+[5. extract_and_qc_frames]      ──► (Brand Editor: verify file + extract_video_frames + QC)
+   │          │
+   │ (Pass)   ├─────────────────► [🛑 HITL Video QC Intervention] (Fail & attempts >= max)
+   │          │                               │
+   ▼          │ (Retry)                       ▼ (Abort)
+[6. draft_and_save_copy] ◄────────────────── [END]
+   │          ▲
    │ (Revise) │
    ▼          │
 ═══════════════════════════════════════════════════════════════════════

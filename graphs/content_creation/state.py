@@ -41,6 +41,8 @@ class ContentCreationState(TypedDict, total=False):
     qc_timestamps: List[float]        # Configurable list of timestamps, default [1.0, 2.5, 4.0]
     video_qc_passed: bool
     video_qc_feedback: str
+    video_persisted: bool
+    video_generation_error: str
 
     copy_text: str
     final_package: Dict[str, Any]

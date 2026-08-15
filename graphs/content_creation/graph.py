@@ -33,6 +33,9 @@ from graphs.content_creation.hitl import (
     hitl_image_and_plot_approval_node,
     process_gate1_feedback_node,
     clarify_gate1_node,
+    hitl_video_qc_failure_intervention_node,
+    process_video_qc_intervention_node,
+    should_continue_video_qc_intervention,
     hitl_final_package_approval_node,
     process_gate2_feedback_node,
     clarify_gate2_node,
@@ -54,7 +57,7 @@ def should_continue_setup(state: ContentCreationState):
 
 
 def create_graph(checkpointer=None, **kwargs):
-    """Compiles and returns the generic instruction-driven content-creation graph with Sqlite checkpointer & 2 HITL gates."""
+    """Compiles and returns the generic instruction-driven content-creation graph with Sqlite checkpointer & 3 HITL gates."""
     if checkpointer is None:
         try:
             from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
@@ -74,6 +77,8 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("clarify_gate1", clarify_gate1_node)
     workflow.add_node("generate_visual_plate", generate_visual_plate_node)
     workflow.add_node("extract_and_qc_frames", extract_and_qc_frames_node)
+    workflow.add_node("hitl_video_qc_failure_intervention", hitl_video_qc_failure_intervention_node)
+    workflow.add_node("process_video_qc_intervention", process_video_qc_intervention_node)
     workflow.add_node("draft_and_save_copy", draft_and_save_copy_node)
     workflow.add_node("hitl_final_package_approval", hitl_final_package_approval_node)
     workflow.add_node("process_gate2_feedback", process_gate2_feedback_node)
@@ -123,7 +128,18 @@ def create_graph(checkpointer=None, **kwargs):
         should_continue_video_qc,
         {
             "generate_visual_plate": "generate_visual_plate",
-            "draft_and_save_copy": "draft_and_save_copy"
+            "draft_and_save_copy": "draft_and_save_copy",
+            "hitl_video_qc_failure_intervention": "hitl_video_qc_failure_intervention"
+        }
+    )
+
+    workflow.add_edge("hitl_video_qc_failure_intervention", "process_video_qc_intervention")
+    workflow.add_conditional_edges(
+        "process_video_qc_intervention",
+        should_continue_video_qc_intervention,
+        {
+            "generate_visual_plate": "generate_visual_plate",
+            END: END
         }
     )
 
@@ -143,10 +159,14 @@ def create_graph(checkpointer=None, **kwargs):
 
     workflow.add_edge("clarify_gate2", "hitl_final_package_approval")
 
-    # Compile with interrupt_before at both HITL approval gates
+    # Compile with interrupt_before at HITL approval/intervention gates
     return workflow.compile(
         checkpointer=checkpointer,
-        interrupt_before=["hitl_image_and_plot_approval", "hitl_final_package_approval"]
+        interrupt_before=[
+            "hitl_image_and_plot_approval",
+            "hitl_video_qc_failure_intervention",
+            "hitl_final_package_approval"
+        ]
     )
 
 # Default compiled instance
@@ -234,9 +254,12 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     copy_version = kwargs.get("copy_version", 1)
     qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
 
-    # Validate presence of output_dir (NO default paths)
-    if not output_dir_param:
-        error_msg = "Missing required output_dir. You must explicitly define where assets should be saved (e.g., output_dir: 'path/to/project/words/topic')."
+    # Validate presence of project_dir or output_dir (NO default fallback paths)
+    if not output_dir_param and project_dir:
+        output_dir_param = os.path.join(project_dir, topic)
+
+    if not output_dir_param and not project_dir:
+        error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_dir: 'path/to/project' or output_dir: 'path/to/project/words/topic')."
         manifest_path = kwargs.get("manifest_path", "")
         creator_instructions_path = kwargs.get("creator_instructions_path", "")
         qc_playbook_path = kwargs.get("qc_playbook_path", "")
@@ -308,6 +331,22 @@ def format_output(state: Dict[str, Any]) -> str:
     if isinstance(state, dict):
         if state.get("clarification_question"):
             return state["clarification_question"]
+        if state.get("video_qc_attempts", 0) >= state.get("max_video_reviews", 3) and not state.get("video_qc_passed"):
+            topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
+            video_path = state.get("video_path", "")
+            feedback = state.get("video_qc_feedback") or state.get("video_generation_error") or "Video file missing or failed QC checks."
+            attempts = state.get("video_qc_attempts", 3)
+            return (
+                f"🛑 **[HITL INTERVENTION REQUIRED: Video Generation/QC Failed]**\n\n"
+                f"- **Topic**: `{topic}`\n"
+                f"- **Target Video Path**: `{video_path}`\n"
+                f"- **Failed Attempts**: `{attempts}`\n"
+                f"- **Root Cause**: {feedback}\n\n"
+                f"The workflow has hard-blocked delivery because valid video assets could not be verified on disk.\n\n"
+                f"Please choose an action:\n"
+                f"1. Reply **'retry'** (or provide updated motion prompt instructions) to attempt video generation again.\n"
+                f"2. Reply **'abort'** to stop the workflow."
+            )
         if state.get("final_package") and "copy_text" in state["final_package"]:
             return format_gate2_presentation(state)
         if state.get("copy_text"):

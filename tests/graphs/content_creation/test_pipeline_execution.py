@@ -100,6 +100,13 @@ class TestContentCreationPipelineExecution(unittest.IsolatedAsyncioTestCase):
                 return mock_creator
             return mock_editor
 
+        def fake_anim(args):
+            p = args.get('output_path', 'puppy_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<generate_animation_runway_response><payload>{p}</payload><errors>None</errors></generate_animation_runway_response>"
+
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
              patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
@@ -108,9 +115,7 @@ class TestContentCreationPipelineExecution(unittest.IsolatedAsyncioTestCase):
             mock_img.ainvoke = AsyncMock(
                 return_value='<generate_image_response><payload>assets/puppy/puppy_image.jpg</payload><errors>None</errors></generate_image_response>'
             )
-            mock_anim.ainvoke = AsyncMock(
-                return_value='<generate_animation_runway_response><payload>assets/puppy/puppy_video.mp4</payload><errors>None</errors></generate_animation_runway_response>'
-            )
+            mock_anim.ainvoke = AsyncMock(side_effect=fake_anim)
             mock_frames.ainvoke = AsyncMock(
                 return_value='<extract_video_frames_response><payload>assets/puppy/frames/frame_001_1_000s.jpg\nassets/puppy/frames/frame_002_2_500s.jpg\nassets/puppy/frames/frame_003_4_000s.jpg</payload><errors>None</errors></extract_video_frames_response>'
             )
@@ -204,13 +209,20 @@ class TestContentCreationPipelineExecution(unittest.IsolatedAsyncioTestCase):
         def agent_dispatcher(agent_id):
             return mock_creator if agent_id == "content-creator" else mock_editor
 
+        def fake_anim(args):
+            p = args.get('output_path', 'puppy_video.mp4')
+            os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"dummy_video_bytes")
+            return f"<generate_animation_runway_response><payload>{p}</payload><errors>None</errors></generate_animation_runway_response>"
+
         with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
              patch("graphs.content_creation.nodes.generate_image") as mock_img, \
              patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
 
             mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path')}</payload></generate_image_response>")
-            mock_anim.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_animation_runway_response><payload>{args.get('output_path')}</payload></generate_animation_runway_response>")
+            mock_anim.ainvoke = AsyncMock(side_effect=fake_anim)
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload></extract_video_frames_response>')
 
             import sys
@@ -243,6 +255,62 @@ class TestContentCreationPipelineExecution(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(s2.values["video_version"], 2)
             self.assertTrue(s2.values["video_qc_passed"])
             self.assertTrue(s2.values["video_path"].endswith("puppy_video_v2.mp4"))
+
+    async def test_video_qc_retry_exhaustion_hard_blocks_at_intervention(self):
+        """Test that exhausting max video QC retries hard-blocks at hitl_video_qc_failure_intervention and does NOT advance to copy or Gate 2."""
+        mock_creator = MagicMock()
+        mock_creator.execute = AsyncMock(side_effect=[
+            "A puppy.",
+            "# Video Plot\n**Prompt:** > Puppy runs."
+        ])
+
+        mock_editor = MagicMock()
+        mock_editor.execute = AsyncMock(return_value="VERDICT: APPROVED\nPlot is good.")
+
+        def agent_dispatcher(agent_id):
+            return mock_creator if agent_id == "content-creator" else mock_editor
+
+        with patch("core.loaders.agents_loader.AgentsLoader.get_agent", side_effect=agent_dispatcher), \
+             patch("graphs.content_creation.nodes.generate_image") as mock_img, \
+             patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
+             patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
+
+            mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path')}</payload></generate_image_response>")
+            # Simulate failure where no video is written to disk
+            mock_anim.ainvoke = AsyncMock(return_value='<generate_animation_runway_response><payload></payload><errors>Runway API timeout</errors></generate_animation_runway_response>')
+            mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload></payload><errors>File not found</errors></extract_video_frames_response>')
+
+            import sys
+            import graphs.content_creation.graph as current_graph_mod
+            mod = sys.modules.get("graphs.content_creation.graph", current_graph_mod)
+            current_create_graph = getattr(mod, "create_graph")
+            current_prepare_input = getattr(mod, "prepare_input")
+
+            checkpointer = MemorySaver()
+            test_graph = current_create_graph(checkpointer=checkpointer)
+
+            config = {"configurable": {"thread_id": "test_thread_video_qc_exhaustion"}}
+            initial_state = current_prepare_input(
+                "topic: puppy, project_dir: pkm/wiki/software/toddler-tales",
+                session_id="test_sess_video_qc_exhaust"
+            )
+
+            # Phase 1: Run to Gate 1
+            await test_graph.ainvoke(initial_state, config=config)
+            s1 = test_graph.get_state(config)
+            self.assertEqual(s1.next, ("hitl_image_and_plot_approval",))
+
+            # Phase 2: Approve Gate 1 -> Generation fails across max reviews -> Hard blocks at Intervention
+            await test_graph.aupdate_state(config, {"latest_human_feedback": "approved"})
+            await test_graph.ainvoke(None, config=config)
+
+            s2 = test_graph.get_state(config)
+            self.assertEqual(s2.next, ("hitl_video_qc_failure_intervention",))
+            self.assertFalse(s2.values["video_qc_passed"])
+            self.assertEqual(s2.values["video_qc_attempts"], 3)
+            current_format_output = getattr(mod, "format_output")
+            formatted = current_format_output(s2.values)
+            self.assertIn("HITL INTERVENTION REQUIRED", formatted)
 
     async def test_missing_project_and_output_dir_halts_graph(self):
         """Test that running graph without project_dir or output_dir immediately halts and returns error message."""

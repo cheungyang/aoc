@@ -138,12 +138,14 @@ async def draft_video_plot_node(state: ContentCreationState):
 
     creator = AgentsLoader().get_agent("content-creator")
     image_path = state.get("image_path", "")
+    audio_path = os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav"
     
     prompt = (
         f"You are the Content Creator. Read {creator_instructions_path}.\n"
         f"Draft the Video Plot Markdown for the topic '{topic}' strictly following the template and constraints defined in the instructions.\n\n"
         f"IMPORTANT DATA BINDING:\n"
         f"- Use this exact path for the Source Image field: `{image_path}`\n"
+        f"- Use this exact path for the Source Audio field: `{audio_path}`\n"
     )
     if feedback:
         prompt += f"\nPrevious Brand Editor Feedback to fix:\n{feedback}\n"
@@ -297,6 +299,7 @@ async def generate_visual_plate_node(state: ContentCreationState):
     motion_prompt = _extract_motion_prompt_from_plot(plot_content, state)
     print(f"ContentCreationGraph: Generating visual plate (v{video_version}) from {image_path} to {video_path}...")
 
+    gen_error = ""
     try:
         result = await generate_animation_runway.ainvoke({
             "prompt_text": motion_prompt,
@@ -306,30 +309,58 @@ async def generate_visual_plate_node(state: ContentCreationState):
             "duration": 5,
             "agent_id": "content-creator"
         })
+        if "<errors>" in result and "</errors>" in result:
+            err_val = result.split("<errors>")[1].split("</errors>")[0].strip()
+            if err_val and err_val.lower() != "none":
+                gen_error = err_val
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved:
                 video_path = saved
     except Exception as e:
+        gen_error = str(e)
         print(f"ContentCreationGraph: Error generating visual plate: {e}")
 
-    _append_execution_log(
-        output_dir=output_dir,
-        topic=topic,
-        actor="🎬 Content Creator",
-        event_title=f"Visual Plate Video Generation (v{video_version})",
-        details={
-            "Video Output Path": video_path,
-            "Motion Prompt": motion_prompt
-        },
-        log_path=execution_log_path
-    )
+    # Explicit Disk Persistence Invariant Check
+    file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    if not file_persisted and not gen_error:
+        gen_error = f"Video file not found or empty on disk at '{video_path}' after generation."
+
+    if file_persisted:
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🎬 Content Creator",
+            event_title=f"Visual Plate Video Generation (v{video_version})",
+            details={
+                "Video Output Path": video_path,
+                "Motion Prompt": motion_prompt,
+                "File Status": f"Verified on disk ({os.path.getsize(video_path)} bytes)"
+            },
+            log_path=execution_log_path
+        )
+    else:
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🎬 Content Creator",
+            event_title=f"Visual Plate Video Generation Failed (v{video_version})",
+            details={
+                "Target Video Path": video_path,
+                "Motion Prompt": motion_prompt,
+                "Error": gen_error,
+                "File Status": "MISSING / 0 BYTES ON DISK"
+            },
+            log_path=execution_log_path
+        )
 
     return {
         "project_dir": project_dir,
         "output_dir": output_dir,
         "video_version": video_version,
-        "video_path": video_path
+        "video_path": video_path,
+        "video_persisted": file_persisted,
+        "video_generation_error": gen_error if not file_persisted else ""
     }
 
 
@@ -343,14 +374,52 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
     topic = state.get("topic", "")
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
-    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", state.get("video_version", 1))
+    video_version = state.get("video_version", 1)
+    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_version)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
     execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
     qc_timestamps = state.get("qc_timestamps") or [1.0, 2.5, 4.0]
     frames_dir = os.path.join(output_dir, "frames") if output_dir else "frames"
     attempts = state.get("video_qc_attempts", 0) + 1
-    video_version = state.get("video_version", 1)
+    max_reviews = state.get("max_video_reviews", 3)
 
+    # 1. Fast-Fail Diagnosis: Check if video exists and is non-empty on disk before extraction or LLM calls
+    file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    if not file_persisted:
+        gen_err = state.get("video_generation_error") or "Video file not found or 0 bytes on disk."
+        root_cause = f"Video file missing or empty on disk at '{video_path}'. ({gen_err})"
+        next_video_version = video_version + 1
+        action_taken = (
+            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
+            if attempts < max_reviews else
+            "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+        )
+
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🧐 Brand Editor",
+            event_title=f"Video Keyframe QC Audit (Attempt {attempts})",
+            details={
+                "Verdict": "REJECTED",
+                "Extracted Frames Count": 0,
+                "Specific Root Cause": root_cause,
+                "Action Taken": action_taken
+            },
+            log_path=execution_log_path
+        )
+
+        return {
+            "project_dir": project_dir,
+            "output_dir": output_dir,
+            "extracted_frames": [],
+            "video_qc_passed": False,
+            "video_qc_feedback": root_cause,
+            "video_qc_attempts": attempts,
+            "video_version": next_video_version
+        }
+
+    # 2. Extract frames from verified video file
     if output_dir:
         os.makedirs(frames_dir, exist_ok=True)
     extracted_frames = []
@@ -375,6 +444,41 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
             if f.endswith((".jpg", ".png", ".jpeg"))
         ]
 
+    # Handle frame extraction failure
+    if not extracted_frames:
+        root_cause = f"Failed to extract keyframes from video at '{video_path}'."
+        next_video_version = video_version + 1
+        action_taken = (
+            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
+            if attempts < max_reviews else
+            "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+        )
+
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🧐 Brand Editor",
+            event_title=f"Video Keyframe QC Audit (Attempt {attempts})",
+            details={
+                "Verdict": "REJECTED",
+                "Extracted Frames Count": 0,
+                "Specific Root Cause": root_cause,
+                "Action Taken": action_taken
+            },
+            log_path=execution_log_path
+        )
+
+        return {
+            "project_dir": project_dir,
+            "output_dir": output_dir,
+            "extracted_frames": [],
+            "video_qc_passed": False,
+            "video_qc_feedback": root_cause,
+            "video_qc_attempts": attempts,
+            "video_version": next_video_version
+        }
+
+    # 3. Perform Brand Editor LLM Visual Audit on Extracted Keyframes
     editor = AgentsLoader().get_agent("brand-editor")
     frames_list_str = "\n".join([f"- Frame {i+1} ({qc_timestamps[i] if i < len(qc_timestamps) else ''}s): {f}" for i, f in enumerate(extracted_frames)])
 
@@ -388,10 +492,17 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
 
     response = await editor.execute(prompt, source="subgraph")
     is_approved = "VERDICT: APPROVED" in response.upper() or ("APPROVED" in response.upper() and "REJECTED" not in response.upper())
-    feedback = "" if is_approved else response
+    feedback = "" if is_approved else response.strip()
 
-    if not is_approved and attempts < state.get("max_video_reviews", 3):
-        video_version += 1
+    next_video_version = video_version if is_approved else video_version + 1
+    action_taken = (
+        "Proceeding to publication copywriting."
+        if is_approved else (
+            f"Re-routed to Content Creator for fresh video render (v{next_video_version})."
+            if attempts < max_reviews else
+            "Max retry attempts reached. Hard blocking at HITL Video QC Intervention."
+        )
+    )
 
     _append_execution_log(
         output_dir=output_dir,
@@ -401,8 +512,8 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
         details={
             "Verdict": "APPROVED" if is_approved else "REJECTED",
             "Extracted Frames Count": len(extracted_frames),
-            "Audit Notes": response.strip(),
-            "Next Video Version": f"v{video_version}" if not is_approved else f"v{state.get('video_version', 1)}"
+            "Specific Root Cause": response.strip() if not is_approved else "All QC playbook criteria satisfied.",
+            "Action Taken": action_taken
         },
         log_path=execution_log_path
     )
@@ -414,7 +525,7 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
         "video_qc_passed": is_approved,
         "video_qc_feedback": feedback,
         "video_qc_attempts": attempts,
-        "video_version": video_version
+        "video_version": next_video_version
     }
 
 

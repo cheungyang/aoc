@@ -157,14 +157,21 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
         except Exception:
             pass
 
+    video_exists = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
+    video_tag = f"`{video_path}`" if video_exists else f"`{video_path}` ⚠️ **[MISSING / 0 BYTES ON DISK - CANNOT FINALIZE]**"
+    image_exists = bool(image_path and os.path.isfile(image_path) and os.path.getsize(image_path) > 0)
+    image_tag = f"`{image_path}`" if image_exists else f"`{image_path}` ⚠️ **[MISSING ON DISK]**"
+    copy_exists = bool(copy_path and os.path.isfile(copy_path) and os.path.getsize(copy_path) > 0)
+    copy_tag = f"`{copy_path}`" if copy_exists else f"`{copy_path}` ⚠️ **[MISSING ON DISK]**"
+
     return (
         f"🎉 **[HITL GATE 2: Final Package Review & Approval]**\n\n"
         f"**Topic**: `{topic}`\n\n"
         f"### 📦 Deliverables Package\n"
-        f"- **Base Image (v{img_v})**: `{image_path}`\n"
+        f"- **Base Image (v{img_v})**: {image_tag}\n"
         f"- **Video Plot Doc (v{plot_v})**: `{video_plot_path}`\n"
-        f"- **Master Visual Plate (v{video_v})**: `{video_path}`\n"
-        f"- **Publication Copy File (v{copy_v})**: `{copy_path}`\n\n"
+        f"- **Master Visual Plate (v{video_v})**: {video_tag}\n"
+        f"- **Publication Copy File (v{copy_v})**: {copy_tag}\n\n"
         f"<images>\n  <image path=\"{image_path}\"/>\n</images>\n\n"
         f"### 📱 Publication Copy Preview\n"
         f"```markdown\n{copy_text}\n```\n\n"
@@ -442,12 +449,100 @@ async def process_gate2_feedback_node(state: ContentCreationState):
 
 
 def should_continue_video_qc(state: ContentCreationState):
-    """Router: proceeds to copywriting if video QC passed, else loops back to generate_visual_plate."""
+    """Router: proceeds to copywriting if video QC passed, else re-routes directly to generate_visual_plate, or hard blocks at HITL intervention if max reviews exhausted."""
     if state.get("video_qc_passed"):
         return "draft_and_save_copy"
     if state.get("video_qc_attempts", 0) >= state.get("max_video_reviews", 3):
-        print("ContentCreationGraph: Max video QC reviews reached. Proceeding to copywriting.")
-        return "draft_and_save_copy"
+        print("ContentCreationGraph: Max video QC reviews reached without passing QC. Hard blocking at HITL Video QC Intervention.")
+        return "hitl_video_qc_failure_intervention"
+    return "generate_visual_plate"
+
+
+async def hitl_video_qc_failure_intervention_node(state: ContentCreationState):
+    """🛑 HITL Intervention: Hard blocks execution when video generation/QC exhausts retry attempts."""
+    topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    attempts = state.get("video_qc_attempts", 0)
+    feedback = state.get("video_qc_feedback") or state.get("video_generation_error") or "Video file missing or failed QC checks."
+    video_path = state.get("video_path", "")
+
+    msg = (
+        f"🛑 **[HITL INTERVENTION REQUIRED: Video Generation/QC Failed]**\n\n"
+        f"- **Topic**: `{topic}`\n"
+        f"- **Target Video Path**: `{video_path}`\n"
+        f"- **Failed Attempts**: `{attempts}`\n"
+        f"- **Root Cause**: {feedback}\n\n"
+        f"The workflow has hard-blocked delivery because valid video assets could not be verified on disk.\n\n"
+        f"Please choose an action:\n"
+        f"1. Reply **'retry'** (or provide updated motion prompt instructions) to attempt video generation again.\n"
+        f"2. Reply **'abort'** to stop the workflow."
+    )
+
+    _append_execution_log(
+        output_dir=output_dir,
+        topic=topic,
+        actor="🛑 Human-in-the-Loop",
+        event_title="Video QC Retry Exhaustion — Manual Intervention Required",
+        details={
+            "Target Video Path": video_path,
+            "Failed Attempts": attempts,
+            "Root Cause": feedback,
+            "Status": "Awaiting Manual Intervention"
+        },
+        log_path=execution_log_path
+    )
+
+    return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
+        "clarification_question": msg,
+        "messages": [AIMessage(content=msg)]
+    }
+
+
+async def process_video_qc_intervention_node(state: ContentCreationState):
+    """Processes manual intervention decision after video QC failure."""
+    feedback = state.get("latest_human_feedback") or state.get("query") or ""
+    f = feedback.strip().lower()
+    if any(w in f for w in ["abort", "cancel", "stop", "exit", "quit", "halt"]):
+        decision = "abort"
+    else:
+        decision = "retry"
+
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    topic = state.get("topic", "")
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+
+    _append_execution_log(
+        output_dir=output_dir,
+        topic=topic,
+        actor="🛑 Human-in-the-Loop",
+        event_title=f"Video QC Intervention Decision: {decision.upper()}",
+        details={
+            "User Feedback": feedback,
+            "Decision": decision
+        },
+        log_path=execution_log_path
+    )
+
+    updates = {
+        "latest_human_feedback": feedback,
+        "video_qc_attempts": 0  # reset retry attempts counter for new cycle
+    }
+    if decision == "abort":
+        updates["error_message"] = f"Content creation aborted by user after video QC failure: {feedback}"
+
+    return updates
+
+
+def should_continue_video_qc_intervention(state: ContentCreationState):
+    """Router: routes intervention decision to retry generation or abort."""
+    feedback = (state.get("latest_human_feedback") or state.get("query") or "").strip().lower()
+    if any(w in feedback for w in ["abort", "cancel", "stop", "exit", "quit", "halt"]):
+        return END
     return "generate_visual_plate"
 
 

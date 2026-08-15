@@ -53,7 +53,7 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
         # Video QC routing
         self.assertEqual(should_continue_video_qc({"video_qc_passed": True}), "draft_and_save_copy")
         self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_attempts": 1, "max_video_reviews": 3}), "generate_visual_plate")
-        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_attempts": 3, "max_video_reviews": 3}), "draft_and_save_copy")
+        self.assertEqual(should_continue_video_qc({"video_qc_passed": False, "video_qc_attempts": 3, "max_video_reviews": 3}), "hitl_video_qc_failure_intervention")
 
         # Gate 2 Routing
         self.assertEqual(should_continue_hitl_gate_2({"gate2_decision": "approved"}), "__end__")
@@ -268,8 +268,15 @@ class TestContentCreationHITLAndRouting(unittest.IsolatedAsyncioTestCase):
              patch("graphs.content_creation.nodes.generate_animation_runway") as mock_anim, \
              patch("graphs.content_creation.nodes.extract_video_frames") as mock_frames:
 
+            def fake_anim(args):
+                p = args.get('output_path', 'puppy_video.mp4')
+                os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+                with open(p, "wb") as f:
+                    f.write(b"dummy_video_bytes")
+                return f"<generate_animation_runway_response><payload>{p}</payload><errors>None</errors></generate_animation_runway_response>"
+
             mock_img.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_image_response><payload>{args.get('output_path')}</payload></generate_image_response>")
-            mock_anim.ainvoke = AsyncMock(side_effect=lambda args: f"<generate_animation_runway_response><payload>{args.get('output_path')}</payload></generate_animation_runway_response>")
+            mock_anim.ainvoke = AsyncMock(side_effect=fake_anim)
             mock_frames.ainvoke = AsyncMock(return_value='<extract_video_frames_response><payload>f1.jpg\nf2.jpg</payload></extract_video_frames_response>')
 
             import sys
