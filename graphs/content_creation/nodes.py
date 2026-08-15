@@ -3,7 +3,7 @@ from typing import Dict, Any, Literal
 from langchain_core.messages import AIMessage
 from core.loaders.agents_loader import AgentsLoader
 from tools.generate_image import generate_image
-from tools.generate_animation_runway import generate_animation_runway
+from tools.generate_animation_veo3 import generate_animation_veo3
 from tools.extract_video_frames import extract_video_frames
 from graphs.content_creation.state import (
     ContentCreationState,
@@ -301,11 +301,11 @@ async def generate_visual_plate_node(state: ContentCreationState):
 
     gen_error = ""
     try:
-        result = await generate_animation_runway.ainvoke({
+        result = await generate_animation_veo3.ainvoke({
             "prompt_text": motion_prompt,
             "image_path": image_path,
             "output_path": video_path,
-            "ratio": "768:1280",  # 9:16 vertical
+            "aspect_ratio": "9:16",
             "duration": 5,
             "agent_id": "content-creator"
         })
@@ -335,6 +335,7 @@ async def generate_visual_plate_node(state: ContentCreationState):
             details={
                 "Video Output Path": video_path,
                 "Motion Prompt": motion_prompt,
+                "Engine": "Google Veo 3",
                 "File Status": f"Verified on disk ({os.path.getsize(video_path)} bytes)"
             },
             log_path=execution_log_path
@@ -348,6 +349,7 @@ async def generate_visual_plate_node(state: ContentCreationState):
             details={
                 "Target Video Path": video_path,
                 "Motion Prompt": motion_prompt,
+                "Engine": "Google Veo 3",
                 "Error": gen_error,
                 "File Status": "MISSING / 0 BYTES ON DISK"
             },
