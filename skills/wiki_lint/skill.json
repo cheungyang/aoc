@@ -1,18 +1,18 @@
 {
   "skill_id": "wiki_lint",
   "name": "Wiki Lint",
-  "description": "Automates wiki maintenance: fixes links, creates stubs, flags contradictions, and logs modifications.",
+  "description": "Interactively processes the pending_lint.json queue to resolve semantic duplicates and prune stale stubs.",
   "emoji": "🧹",
   "tools": {
     "obsidian": {
       "pkm/wiki": [
         "file_search",
         "read",
-        "read_image",
         "write",
         "overwrite",
-        "append"
+        "delete"
       ]
-    }
+    },
+    "vault_search": {}
   }
 }

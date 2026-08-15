@@ -1,71 +1,46 @@
 ---
 name: wiki_lint
-description: Automates wiki maintenance: fixes links, creates stubs, flags contradictions, logs modifications, and outputs IPC XML.
+description: Interactively processes the pending_lint.json queue to resolve semantic duplicates and prune stale stubs.
 ---
 
 ## Overview
-This skill acts as the automated gardener for the LLM Wiki. It ensures the knowledge graph remains healthy by autonomously fixing structural issues (broken links, index mismatches), creating placeholder stubs for frequently mentioned but undocumented concepts, and flagging semantic contradictions for human review. It records actions in a daily log and outputs a standardized IPC XML response.
+This skill operates as the interactive Editor-in-Chief for the LLM Wiki. It relies on a deterministic background script (`wiki_scanner.py`) to generate a queue of maintenance tasks (stored in `pkm/wiki/pending_lint.json`). When invoked, the agent reads this queue and walks the user through each flagged issue one by one, executing the user's decisions to merge, prune, or expand knowledge.
 
 ## Boundaries & Guardrails
-- **Auto-Fix Authority:** You MAY automatically fix minor markdown link typos, formatting errors, and missing `index.md` entries without asking.
-- **Stub Creation:** You MAY autonomously create stub pages for highly referenced missing concepts.
-- **Semantic Edits:** You MUST NOT automatically resolve semantic contradictions or delete established knowledge. Present these to the user for resolution.
-- **Logging Constraint:** EVERY modification or flagged opportunity must be recorded in the daily lint report.
+- **No Autonomous Destruction:** You MUST NEVER autonomously delete, merge, or rewrite knowledge without the user's explicit, item-by-item approval.
+- **One-by-One Pacing:** You MUST present only ONE queue item at a time. Do not overwhelm the user with a massive list.
+- **Source of Truth:** Markdown files in `pkm/` are the absolute source of truth.
 
 ## Workflow
 
-### 1. Scope & Discovery
-- If the user does not specify a scope, default to a **Recent Updates Audit**. Focus your reads on files recently added or modified, and their corresponding `index.md` files in `/concepts`, `/entities`, `/summaries`, and `/syntheses`.
-- Use the `obsidian` tool (`file_search` and `read`) to gather the necessary context.
+### 1. Queue Ingestion
+- Use the `obsidian` tool (`read`) to read `pkm/wiki/pending_lint.json`.
+- If the file does not exist or the `review_queue` array is empty, output a brief message stating: *"The wiki is clean! No pending lint items in the queue."* and terminate the skill.
 
-### 2. The Audit Phase
-Perform a dual-layer audit on the scoped files:
+### 2. The Interactive Loop (One Item at a Time)
+Pick the first unresolved item in the `review_queue` and evaluate its `type`:
 
-**A. Structural Audit:**
-- **Broken Links:** Find markdown links pointing to non-existent files.
-- **Orphans:** Find files that exist but are not documented in their directory's `index.md`.
-- **Formatting:** Check for valid YAML frontmatter and the required `## YYYY-MM-DD` section structure.
+**A. If `type` is `duplicate_candidate` (Semantic Overlap):**
+- Use `vault_search` or `obsidian` (`read`) to fetch the content of the flagged files.
+- **Present to User:** Briefly summarize both files and highlight the overlap. Ask the user how to resolve it.
+  - *Example:* "I found a 95% similarity between `Multi-Agent.md` and `Agent_Routing.md`. Would you like me to merge them, keep one, or keep both as distinct concepts?"
+- **Execute:** Based on the user's answer, use `obsidian` to `overwrite` the target file with the merged text and `delete` the redundant file.
 
-**B. Semantic Audit:**
-- **Contradictions:** Look for logical inconsistencies between linked files (e.g., a summary claims X, but the linked concept claims Y).
-- **Missing Concepts:** Identify terms or entities that are frequently mentioned across multiple files but lack their own dedicated page.
+**B. If `type` is `stale_stub` (Prune or Expand):**
+- Use `obsidian` (`read`) to check the stub's current content.
+- **Present to User:** "The stub `[STUB] Concept` hasn't been edited in 6 months. Should I delete it, or would you like me to use `vault_search` to gather context and draft a full page for it right now?"
+- **Execute:** Either `delete` the file or execute `vault_search` to synthesize a full page and `overwrite` the stub.
 
-### 3. Autonomous Fixes & Stub Creation
-Execute safe repairs immediately:
-- **Auto-Fixes:** Use `obsidian` (`overwrite`) to correct link typos, fix frontmatter, or append missing lines to `index.md`.
-- **Stub Creation:** 
-  - For missing concepts/entities, use `write` to create a new file.
-  - *Template:* Include standard frontmatter and a body of: `## TLDR: [STUB] Requires expansion.`
-  - *Index Entry:* Append to the respective `index.md` with a `[STUB]` tag in the description: 
-    `[YYYY-MM-DD] [<Name>](../../concepts/<Name>.md) [STUB] <Brief context from where it was mentioned>`
+### 3. State Management (Queue Update)
+- Immediately after you execute the user's decision for an item, use `obsidian` to `read` `pkm/wiki/pending_lint.json`.
+- Remove the resolved item from the `review_queue` array.
+- Use `obsidian` (`overwrite`) to save the updated JSON queue back to disk.
+- **Hold Point:** Ask the user if they would like to proceed to the next item in the queue, or stop for now. If they choose to continue, repeat Step 2.
 
-### 4. The Linting Log
-You must document every action and discovery in a daily log file.
-- **Path:** `pkm/wiki/lint_reports/YYYY-MM-DD.md` (Replace with current date).
-- **Format:** Each entry must be on a single new line:
-  `[<ACTION>] <file_path>: <description>`
-- **Valid Actions:** `[AUTO-FIX]`, `[STUB-CREATED]`, `[CONFLICT-FLAGGED]`, `[OPPORTUNITY-LOGGED]`, `[EDIT]`.
-- Use the `obsidian` tool (`write` if the file doesn't exist, or `append` if it does) to store these logs.
-
-### 5. Interactive Resolution & Agent-Friendly Output
-After executing auto-fixes and logging:
-- Present a conversational report to the user summarizing `[AUTO-FIX]` and `[STUB-CREATED]` actions.
-- Present any **Contradictions/Conflicts** and ask the user how to resolve them. Use `obsidian` to `overwrite` files based on user guidance and log the `[EDIT]`.
-- **Final IPC Output:** Once all interactive resolution is complete, output the final state using the strict XML structure below to ensure readability for routing agents.
-  ```xml
-  <wiki_lint_response>
-    <original_request>[The scope or request given to the linter]</original_request>
-    <triggering_agent>[Agent ID or 'User']</triggering_agent>
-    <payload>
-      <auto_fixes_applied>[Number/summary of structural fixes made]</auto_fixes_applied>
-      <stubs_created>[List of missing concept stubs created]</stubs_created>
-      <conflicts_resolved>[Summary of user-assisted semantic conflict resolutions]</conflicts_resolved>
-    </payload>
-    <errors>[Any files that couldn't be accessed/edited, or 'None']</errors>
-    <learnings>[Trends in broken links, common structural errors noted for future prevention]</learnings>
-  </wiki_lint_response>
-  ```
-- **Memory Trigger:** Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns to prevent these structural issues.
+### 4. Logging & Memory
+- If the user decides to stop, or the queue is fully cleared, use the `memory` skill to record the session. 
+- *Example Memory:* `[MEMORY] Task: Wiki Lint Session. Status: Success. Decisions: Merged 2 duplicate concepts, deleted 1 stale stub.`
 
 ## Required Tools
-- `obsidian`: Required to `file_search`, `read`, `write`, `overwrite`, and `append` files within the `pkm` vault to audit the wiki, enact repairs, create stubs, and maintain the daily lint report.
+- `obsidian`: Required to read/update the JSON queue, read file contents, overwrite merged files, and delete pruned files. Requires access to `pkm/wiki/`.
+- `vault_search`: Required to pull additional context if the user asks you to expand a stale stub into a full page.

@@ -1,9 +1,13 @@
 {
   "skill_id": "wiki_query",
   "name": "Wiki Query",
-  "description": "Traverses the LLM Wiki (up to 10 hops) to answer queries, outputs XML, and archives syntheses.",
+  "description": "Synthesizes answers by querying the vault via vector search and structured DBs, outputs XML, and archives syntheses.",
   "emoji": "🧠",
   "tools": {
+    "vault_search": {},
+    "task_query": {},
+    "project_query": {},
+    "web_search": {},
     "obsidian": {
       "pkm/wiki": [
         "read",
@@ -11,7 +15,6 @@
         "write",
         "overwrite"
       ]
-    },
-    "web_search": []
+    }
   }
 }

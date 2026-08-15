@@ -125,7 +125,7 @@ def _escape_drawtext_str(s: str) -> str:
 @tool
 def remix_video(
     video_path: str,
-    actions: Union[str, list],
+    actions: Union[str, List[Dict[str, Any]]],
     output_path: str,
     agent_id: Optional[str] = None,
 ) -> str:
