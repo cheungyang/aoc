@@ -234,9 +234,9 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     copy_version = kwargs.get("copy_version", 1)
     qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
 
-    # Validate presence of project_dir or output_dir (NO default paths)
-    if not project_dir and not output_dir_param:
-        error_msg = "Missing required project/output path. Please provide 'project_dir' (e.g., project_dir: 'path/to/project') or 'output_dir' to initialize the content creation flow."
+    # Validate presence of output_dir (NO default paths)
+    if not output_dir_param:
+        error_msg = "Missing required output_dir. You must explicitly define where assets should be saved (e.g., output_dir: 'path/to/project/words/topic')."
         manifest_path = kwargs.get("manifest_path", "")
         creator_instructions_path = kwargs.get("creator_instructions_path", "")
         qc_playbook_path = kwargs.get("qc_playbook_path", "")
@@ -248,10 +248,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         copy_path = ""
     else:
         error_msg = ""
-        if output_dir_param:
-            output_dir = normalize_project_path(output_dir_param)
-        else:
-            output_dir = normalize_project_path(os.path.join(project_dir, topic) if topic else project_dir)
+        output_dir = normalize_project_path(output_dir_param)
 
         manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_dir, "01_Project_Manifest.md")
         creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")

@@ -137,9 +137,13 @@ async def draft_video_plot_node(state: ContentCreationState):
     human_feedback = state.get("latest_human_feedback", "")
 
     creator = AgentsLoader().get_agent("content-creator")
+    image_path = state.get("image_path", "")
+    
     prompt = (
         f"You are the Content Creator. Read {creator_instructions_path}.\n"
-        f"Draft the Video Plot Markdown for the topic '{topic}' strictly following the template and constraints defined in the instructions."
+        f"Draft the Video Plot Markdown for the topic '{topic}' strictly following the template and constraints defined in the instructions.\n\n"
+        f"IMPORTANT DATA BINDING:\n"
+        f"- Use this exact path for the Source Image field: `{image_path}`\n"
     )
     if feedback:
         prompt += f"\nPrevious Brand Editor Feedback to fix:\n{feedback}\n"
