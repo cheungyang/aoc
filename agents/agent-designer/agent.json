@@ -45,16 +45,20 @@
         "delete",
         "rmdir",
         "read",
-        "overwrite"
+        "overwrite",
+        "ls"
       ],
       "skills/": [
         "delete",
         "rmdir",
         "read",
-        "overwrite"
+        "overwrite",
+        "ls"
       ],
       "graphs/": [
-        "read"
+        "read",
+        "ls",
+        "overwrite"
       ]
     },
     "project_query": [],

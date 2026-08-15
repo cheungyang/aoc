@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Dict, Any, Optional
 from langchain_core.messages import AIMessage, HumanMessage
@@ -7,6 +8,7 @@ from langgraph.graph import StateGraph, START, END
 from graphs.content_creation.state import (
     ContentCreationState,
     normalize_project_path,
+    _resolve_project_doc_path,
     _resolve_asset_path,
     _append_execution_log,
     _extract_motion_prompt_from_plot
@@ -44,6 +46,13 @@ from graphs.content_creation.hitl import (
 # ==========================================
 # Graph Compilation
 # ==========================================
+def should_continue_setup(state: ContentCreationState):
+    """Router: halts execution if error_message is present during setup, else advances to draft_video_plot."""
+    if state.get("error_message"):
+        return END
+    return "draft_video_plot"
+
+
 def create_graph(checkpointer=None, **kwargs):
     """Compiles and returns the generic instruction-driven content-creation graph with Sqlite checkpointer & 2 HITL gates."""
     if checkpointer is None:
@@ -72,7 +81,14 @@ def create_graph(checkpointer=None, **kwargs):
 
     # 2. Add edges & conditional branching
     workflow.add_edge(START, "setup_and_generate_image")
-    workflow.add_edge("setup_and_generate_image", "draft_video_plot")
+    workflow.add_conditional_edges(
+        "setup_and_generate_image",
+        should_continue_setup,
+        {
+            "draft_video_plot": "draft_video_plot",
+            END: END
+        }
+    )
     workflow.add_edge("draft_video_plot", "audit_video_plot")
 
     workflow.add_conditional_edges(
@@ -147,13 +163,21 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     else:
         formatted_query = query
 
-    project_dir = kwargs.get("project_dir")
+    project_dir = kwargs.get("project_dir") or kwargs.get("project_path") or kwargs.get("project")
     if not project_dir:
-        m_pdir = re.search(r'project_dir[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+        m_pdir = re.search(r'(?:project_dir|project_path|project)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
         if m_pdir:
             project_dir = m_pdir.group(1).strip()
         else:
             project_dir = ""
+
+    output_dir_param = kwargs.get("output_dir") or kwargs.get("output_path") or kwargs.get("output")
+    if not output_dir_param:
+        m_outdir = re.search(r'(?:output_dir|output_path|output)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+        if m_outdir:
+            output_dir_param = m_outdir.group(1).strip()
+        else:
+            output_dir_param = ""
 
     session_id = kwargs.get("session_id")
     thread_id = kwargs.get("thread_id") or session_id
@@ -170,6 +194,8 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
                 ch = snap.checkpoint["channel_values"]
                 if not project_dir and ch.get("project_dir"):
                     project_dir = ch["project_dir"]
+                if not output_dir_param and ch.get("output_dir"):
+                    output_dir_param = ch["output_dir"]
                 if not topic and ch.get("topic"):
                     topic = ch["topic"]
         except Exception:
@@ -202,23 +228,40 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     # Enforce lowercase for folder/asset uniformity
     topic = str(topic).strip().lower()
 
-    manifest_path = kwargs.get("manifest_path") or (f"{project_dir}/01_Project_Manifest.md" if project_dir else "01_Project_Manifest.md")
-    creator_instructions_path = kwargs.get("creator_instructions_path") or (f"{project_dir}/02_Creator_Instructions.md" if project_dir else "02_Creator_Instructions.md")
-    qc_playbook_path = kwargs.get("qc_playbook_path") or (f"{project_dir}/03_QC_Playbook.md" if project_dir else "03_QC_Playbook.md")
-
-    output_dir = normalize_project_path(kwargs.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
-    execution_log_path = kwargs.get("execution_log_path") or f"{output_dir}/execution_log.md"
-
     image_version = kwargs.get("image_version", 1)
     video_plot_version = kwargs.get("video_plot_version", 1)
     video_version = kwargs.get("video_version", 1)
     copy_version = kwargs.get("copy_version", 1)
-
-    image_path = kwargs.get("image_path") or _resolve_asset_path("", output_dir, topic, "image", image_version)
-    video_plot_path = kwargs.get("video_plot_path") or _resolve_asset_path("", output_dir, topic, "video_plot", video_plot_version)
-    video_path = kwargs.get("video_path") or _resolve_asset_path("", output_dir, topic, "video", video_version)
-    copy_path = kwargs.get("copy_path") or _resolve_asset_path("", output_dir, topic, "copy", copy_version)
     qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
+
+    # Validate presence of project_dir or output_dir (NO default paths)
+    if not project_dir and not output_dir_param:
+        error_msg = "Missing required project/output path. Please provide 'project_dir' (e.g., project_dir: 'path/to/project') or 'output_dir' to initialize the content creation flow."
+        manifest_path = kwargs.get("manifest_path", "")
+        creator_instructions_path = kwargs.get("creator_instructions_path", "")
+        qc_playbook_path = kwargs.get("qc_playbook_path", "")
+        output_dir = ""
+        execution_log_path = ""
+        image_path = ""
+        video_plot_path = ""
+        video_path = ""
+        copy_path = ""
+    else:
+        error_msg = ""
+        if output_dir_param:
+            output_dir = normalize_project_path(output_dir_param)
+        else:
+            output_dir = normalize_project_path(os.path.join(project_dir, topic) if topic else project_dir)
+
+        manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_dir, "01_Project_Manifest.md")
+        creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
+        qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
+        execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+
+        image_path = _resolve_asset_path(kwargs.get("image_path"), output_dir, topic, "image", image_version)
+        video_plot_path = _resolve_asset_path(kwargs.get("video_plot_path"), output_dir, topic, "video_plot", video_plot_version)
+        video_path = _resolve_asset_path(kwargs.get("video_path"), output_dir, topic, "video", video_version)
+        copy_path = _resolve_asset_path(kwargs.get("copy_path"), output_dir, topic, "copy", copy_version)
 
     return {
         "project_dir": project_dir,
@@ -259,7 +302,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "max_video_reviews": kwargs.get("max_video_reviews", 3),
         "messages": [HumanMessage(content=formatted_query)],
         "query": formatted_query,
-        "error_message": ""
+        "error_message": error_msg
     }
 
 
@@ -275,7 +318,8 @@ def format_output(state: Dict[str, Any]) -> str:
         if state.get("video_plot_qc_passed") or (state.get("image_path") and state.get("video_plot_content")):
             return format_gate1_presentation(state)
         if state.get("error_message"):
-            return f"Content creation failed: {state['error_message']}"
+            err = state["error_message"]
+            return err if err.startswith("Content creation failed:") else f"Content creation failed: {err}"
         if "messages" in state and state["messages"]:
             last_msg = state["messages"][-1]
             if hasattr(last_msg, "content"):

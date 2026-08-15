@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Any, Literal
+from langchain_core.messages import AIMessage
 from core.loaders.agents_loader import AgentsLoader
 from tools.generate_image import generate_image
 from tools.generate_animation_runway import generate_animation_runway
@@ -7,6 +8,7 @@ from tools.extract_video_frames import extract_video_frames
 from graphs.content_creation.state import (
     ContentCreationState,
     normalize_project_path,
+    _resolve_project_doc_path,
     _resolve_asset_path,
     _append_execution_log,
     _extract_motion_prompt_from_plot
@@ -18,13 +20,30 @@ from graphs.content_creation.state import (
 # ==========================================
 async def setup_and_generate_image_node(state: ContentCreationState):
     """Step 1: Content Creator reads project manifest and creator instructions to generate 1-shot base image."""
+    if state.get("error_message"):
+        return {
+            "error_message": state["error_message"],
+            "messages": [AIMessage(content=state["error_message"])]
+        }
+
     project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
-    manifest_path = state.get("manifest_path") or (f"{project_dir}/01_Project_Manifest.md" if project_dir else "01_Project_Manifest.md")
-    creator_instructions_path = state.get("creator_instructions_path") or (f"{project_dir}/02_Creator_Instructions.md" if project_dir else "02_Creator_Instructions.md")
-    qc_playbook_path = state.get("qc_playbook_path") or (f"{project_dir}/03_QC_Playbook.md" if project_dir else "03_QC_Playbook.md")
-    execution_log_path = state.get("execution_log_path") or f"{output_dir}/execution_log.md"
+
+    if not project_dir and not output_dir:
+        err = "Missing required project_dir or output_dir. Please provide the project or output path (e.g., project_dir: 'pkm/wiki/software/your-project') to initialize the content creation flow."
+        return {
+            "error_message": err,
+            "messages": [AIMessage(content=err)]
+        }
+
+    if not output_dir and project_dir:
+        output_dir = normalize_project_path(os.path.join(project_dir, topic))
+
+    manifest_path = _resolve_project_doc_path(state.get("manifest_path"), project_dir, "01_Project_Manifest.md")
+    creator_instructions_path = _resolve_project_doc_path(state.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
+    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
+    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
 
     image_version = state.get("image_version") or 1
     video_plot_version = state.get("video_plot_version") or 1
@@ -105,12 +124,15 @@ async def setup_and_generate_image_node(state: ContentCreationState):
 # ==========================================
 async def draft_video_plot_node(state: ContentCreationState):
     """Step 2: Content Creator drafts Video Plot Markdown following creator instructions."""
+    if state.get("error_message"):
+        return {}
     topic = state.get("topic", "scene")
-    creator_instructions_path = state.get("creator_instructions_path", "")
-    output_dir = state.get("output_dir", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    creator_instructions_path = _resolve_project_doc_path(state.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
     video_plot_version = state.get("video_plot_version") or 1
     video_plot_path = _resolve_asset_path(state.get("video_plot_path", ""), output_dir, topic, "video_plot", video_plot_version)
-    execution_log_path = state.get("execution_log_path")
+    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
     feedback = state.get("video_plot_feedback", "")
     human_feedback = state.get("latest_human_feedback", "")
 
@@ -150,6 +172,8 @@ async def draft_video_plot_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "video_plot_version": video_plot_version,
         "video_plot_content": video_plot_content,
         "video_plot_path": video_plot_path,
@@ -162,14 +186,17 @@ async def draft_video_plot_node(state: ContentCreationState):
 # ==========================================
 async def audit_video_plot_node(state: ContentCreationState):
     """Step 3: Brand Editor audits BOTH the generated Base Image and Video Plot against QC playbook rules."""
+    if state.get("error_message"):
+        return {}
     topic = state.get("topic", "")
-    qc_playbook_path = state.get("qc_playbook_path", "")
-    image_path = state.get("image_path", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
+    image_path = _resolve_asset_path(state.get("image_path", ""), output_dir, topic, "image", state.get("image_version", 1))
     image_prompt = state.get("image_prompt", "")
     plot_content = state.get("video_plot_content", "")
-    video_plot_path = state.get("video_plot_path", "")
-    output_dir = state.get("output_dir", "")
-    execution_log_path = state.get("execution_log_path")
+    video_plot_path = _resolve_asset_path(state.get("video_plot_path", ""), output_dir, topic, "video_plot", state.get("video_plot_version", 1))
+    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
     attempts = state.get("video_plot_attempts", 0) + 1
     img_version = state.get("image_version", 1)
     plot_version = state.get("video_plot_version", 1)
@@ -252,13 +279,16 @@ async def audit_video_plot_node(state: ContentCreationState):
 # ==========================================
 async def generate_visual_plate_node(state: ContentCreationState):
     """Step 4: Content Creator uses approved motion prompt to generate video visual plate."""
-    image_path = state.get("image_path", "")
+    if state.get("error_message"):
+        return {}
     topic = state.get("topic", "")
-    output_dir = state.get("output_dir", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     video_version = state.get("video_version") or 1
     video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", video_version)
+    image_path = _resolve_asset_path(state.get("image_path", ""), output_dir, topic, "image", state.get("image_version", 1))
     plot_content = state.get("video_plot_content", "")
-    execution_log_path = state.get("execution_log_path")
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     motion_prompt = _extract_motion_prompt_from_plot(plot_content, state)
     print(f"ContentCreationGraph: Generating visual plate (v{video_version}) from {image_path} to {video_path}...")
@@ -292,6 +322,8 @@ async def generate_visual_plate_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "video_version": video_version,
         "video_path": video_path
     }
@@ -302,17 +334,21 @@ async def generate_visual_plate_node(state: ContentCreationState):
 # ==========================================
 async def extract_and_qc_frames_node(state: ContentCreationState):
     """Step 5: Brand Editor extracts video frames and performs QC based on QC playbook."""
+    if state.get("error_message"):
+        return {}
     topic = state.get("topic", "")
-    output_dir = state.get("output_dir", "")
-    video_path = state.get("video_path", "")
-    qc_playbook_path = state.get("qc_playbook_path", "")
-    execution_log_path = state.get("execution_log_path")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", state.get("video_version", 1))
+    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
+    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
     qc_timestamps = state.get("qc_timestamps") or [1.0, 2.5, 4.0]
-    frames_dir = os.path.join(output_dir, "frames")
+    frames_dir = os.path.join(output_dir, "frames") if output_dir else "frames"
     attempts = state.get("video_qc_attempts", 0) + 1
     video_version = state.get("video_version", 1)
 
-    os.makedirs(frames_dir, exist_ok=True)
+    if output_dir:
+        os.makedirs(frames_dir, exist_ok=True)
     extracted_frames = []
 
     try:
@@ -368,6 +404,8 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "extracted_frames": extracted_frames,
         "video_qc_passed": is_approved,
         "video_qc_feedback": feedback,
@@ -381,17 +419,20 @@ async def extract_and_qc_frames_node(state: ContentCreationState):
 # ==========================================
 async def draft_and_save_copy_node(state: ContentCreationState):
     """Step 6: Content Creator drafts copy, Brand Editor polishes, and saves to copy_path."""
+    if state.get("error_message"):
+        return {}
     topic = state.get("topic", "")
-    creator_instructions_path = state.get("creator_instructions_path", "")
-    qc_playbook_path = state.get("qc_playbook_path", "")
-    output_dir = state.get("output_dir", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    creator_instructions_path = _resolve_project_doc_path(state.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
+    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
     copy_version = state.get("copy_version") or 1
     copy_path = _resolve_asset_path(state.get("copy_path", ""), output_dir, topic, "copy", copy_version)
-    video_path = state.get("video_path", "")
-    image_path = state.get("image_path", "")
-    video_plot_path = state.get("video_plot_path", "")
+    video_path = _resolve_asset_path(state.get("video_path", ""), output_dir, topic, "video", state.get("video_version", 1))
+    image_path = _resolve_asset_path(state.get("image_path", ""), output_dir, topic, "image", state.get("image_version", 1))
+    video_plot_path = _resolve_asset_path(state.get("video_plot_path", ""), output_dir, topic, "video_plot", state.get("video_plot_version", 1))
     extracted_frames = state.get("extracted_frames", [])
-    execution_log_path = state.get("execution_log_path")
+    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
     human_feedback = state.get("latest_human_feedback", "")
 
     creator = AgentsLoader().get_agent("content-creator")
@@ -424,7 +465,7 @@ async def draft_and_save_copy_node(state: ContentCreationState):
         print(f"ContentCreationGraph: Error saving copy to {copy_path}: {e}")
 
     final_package = {
-        "project_dir": state.get("project_dir", ""),
+        "project_dir": project_dir,
         "topic": topic,
         "output_dir": output_dir,
         "image_path": image_path,
@@ -448,6 +489,8 @@ async def draft_and_save_copy_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "copy_version": copy_version,
         "copy_text": polished_copy,
         "final_package": final_package,

@@ -110,7 +110,7 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 1 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
 
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
@@ -139,7 +139,7 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 2 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
     video_v = state.get("video_version", 1)
@@ -176,7 +176,7 @@ async def hitl_image_and_plot_approval_node(state: ContentCreationState):
     """🛑 HITL GATE 1: Presents 1-shot base image and approved video plot for user review & approval."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
     execution_log_path = state.get("execution_log_path")
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
@@ -199,6 +199,8 @@ async def hitl_image_and_plot_approval_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
         "messages": [AIMessage(content=summary)]
@@ -209,9 +211,10 @@ async def process_gate1_feedback_node(state: ContentCreationState):
     """Processes human feedback at Gate 1, updates asset versioning, and prepares routing decision."""
     feedback = state.get("latest_human_feedback") or state.get("query") or ""
     decision = classify_gate1_intent(feedback)
-    output_dir = state.get("output_dir", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     topic = state.get("topic", "")
-    execution_log_path = state.get("execution_log_path")
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
@@ -224,6 +227,8 @@ async def process_gate1_feedback_node(state: ContentCreationState):
     })
 
     updates = {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "gate1_decision": decision,
         "revision_history": history
     }
@@ -303,6 +308,8 @@ def should_continue_hitl_gate_1(state: ContentCreationState):
 async def clarify_gate1_node(state: ContentCreationState):
     """Node: Prompts user for clarification when Gate 1 feedback is ambiguous."""
     feedback = state.get("latest_human_feedback", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     msg = (
         f"🛑 **[HITL Gate 1 Clarification Needed]**\n\n"
         f"I received your feedback: *\"{feedback}\"*\n\n"
@@ -312,6 +319,8 @@ async def clarify_gate1_node(state: ContentCreationState):
         f"3. **Approve & Proceed** to video generation"
     )
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "clarification_question": msg,
         "messages": [AIMessage(content=msg)]
     }
@@ -324,8 +333,8 @@ async def hitl_final_package_approval_node(state: ContentCreationState):
     """🎉 HITL GATE 2: Presents complete final package to user for 1-click final approval."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (f"{project_dir}/words/{topic}" if project_dir else f"words/{topic}"))
-    execution_log_path = state.get("execution_log_path")
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     img_v = state.get("image_version", 1)
     plot_v = state.get("video_plot_version", 1)
     video_v = state.get("video_version", 1)
@@ -354,6 +363,8 @@ async def hitl_final_package_approval_node(state: ContentCreationState):
     )
 
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "final_package": final_package,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
@@ -367,9 +378,10 @@ async def process_gate2_feedback_node(state: ContentCreationState):
     """Processes human feedback at Gate 2, updates versioning, and sets routing decision."""
     feedback = state.get("latest_human_feedback") or state.get("query") or ""
     decision = classify_gate2_intent(feedback)
-    output_dir = state.get("output_dir", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     topic = state.get("topic", "")
-    execution_log_path = state.get("execution_log_path")
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     copy_v = state.get("copy_version", 1)
     video_v = state.get("video_version", 1)
@@ -382,6 +394,8 @@ async def process_gate2_feedback_node(state: ContentCreationState):
     })
 
     updates = {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "gate2_decision": decision,
         "revision_history": history
     }
@@ -454,6 +468,8 @@ def should_continue_hitl_gate_2(state: ContentCreationState):
 async def clarify_gate2_node(state: ContentCreationState):
     """Node: Prompts user for clarification when Gate 2 feedback is ambiguous."""
     feedback = state.get("latest_human_feedback", "")
+    project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir", ""))
     msg = (
         f"🎉 **[HITL Gate 2 Clarification Needed]**\n\n"
         f"I received your feedback: *\"{feedback}\"*\n\n"
@@ -463,6 +479,8 @@ async def clarify_gate2_node(state: ContentCreationState):
         f"3. **Final 1-Click Approval** to complete delivery"
     )
     return {
+        "project_dir": project_dir,
+        "output_dir": output_dir,
         "clarification_question": msg,
         "messages": [AIMessage(content=msg)]
     }

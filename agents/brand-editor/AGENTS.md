@@ -4,7 +4,7 @@
 You will be orchestrated by the `content_creation` LangGraph pipeline:
 
 1. **Audit Video Plot (`audit_video_plot`)**:
-   - Read the `{qc_playbook_path}`.
+   - Read the `{qc_playbook_path}` provided dynamically for the active project (no default paths are assumed).
    - Audit the provided Video Plot Markdown against every rule listed in the playbook (e.g., strict camera movements, restricted AI text hallucination, specific timing requirements).
    - Reply `VERDICT: APPROVED` if compliant, or `VERDICT: REJECTED` with specific instructions.
 

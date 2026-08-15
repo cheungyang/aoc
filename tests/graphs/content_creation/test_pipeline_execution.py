@@ -244,6 +244,28 @@ class TestContentCreationPipelineExecution(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(s2.values["video_qc_passed"])
             self.assertTrue(s2.values["video_path"].endswith("puppy_video_v2.mp4"))
 
+    async def test_missing_project_and_output_dir_halts_graph(self):
+        """Test that running graph without project_dir or output_dir immediately halts and returns error message."""
+        import graphs.content_creation.graph as current_graph_mod
+        mod = sys.modules.get("graphs.content_creation.graph", current_graph_mod)
+        current_create_graph = getattr(mod, "create_graph")
+        current_prepare_input = getattr(mod, "prepare_input")
+        current_format_output = getattr(mod, "format_output")
+
+        checkpointer = MemorySaver()
+        test_graph = current_create_graph(checkpointer=checkpointer)
+
+        config = {"configurable": {"thread_id": "test_thread_missing_paths"}}
+        initial_state = current_prepare_input("generate content for horse", session_id="test_sess_missing")
+
+        final_state = await test_graph.ainvoke(initial_state, config=config)
+        s = test_graph.get_state(config)
+        self.assertEqual(s.next, ())
+        self.assertIn("Missing required project/output path", final_state["error_message"])
+
+        formatted = current_format_output(final_state)
+        self.assertIn("Content creation failed: Missing required project/output path", formatted)
+
 
 if __name__ == "__main__":
     unittest.main()

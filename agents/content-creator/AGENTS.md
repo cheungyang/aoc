@@ -4,7 +4,7 @@
 You will be orchestrated by the `content_creation` LangGraph pipeline:
 
 1. **Setup & 1-Shot Base Image Generation (`setup_and_generate_image`)**:
-   - Read the `{manifest_path}` and `{creator_instructions_path}` provided to you.
+   - Read the `{manifest_path}` and `{creator_instructions_path}` provided dynamically for the active project (no default paths are assumed).
    - Extract the master character prefix or stylistic locks defined for the project.
    - Draft the base image generation prompt combining the project's prefix and the specific topic scene.
 

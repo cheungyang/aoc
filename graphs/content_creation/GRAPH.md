@@ -3,8 +3,12 @@ name: content_creation
 description: Multi-turn instruction-driven media generation studio with Sqlite state persistence, asset versioning (_v1, _v2, ...), intelligent HITL revision routing, Red Team QC audits, and continuous execution_log.md logging.
 ---
 ## Overview
-This graph orchestrates a multi-turn, instruction-driven media generation pipeline driven by project markdown documents (`manifest_path`, `creator_instructions_path`, `qc_playbook_path`):
-1. **Setup & 1-Shot Base Image (`setup_and_generate_image`)**: Content Creator reads the project manifest and creator instructions to generate the 1-shot base image to `{output_dir}/{topic}_image_v{N}.jpg`.
+This graph orchestrates a multi-turn, instruction-driven media generation pipeline driven by project markdown documents (`manifest_path`, `creator_instructions_path`, `qc_playbook_path`).
+
+> [!IMPORTANT]
+> **No Default Paths:** All default root paths (e.g. `words/`) have been removed. The orchestrating agent or user **must** provide the project path (`project_dir`) and/or output path (`output_dir`) along with the `topic` to initialize the flow (e.g. `graph_call(graph_name="content_creation", query="topic: fish, project_dir: pkm/wiki/software/ayla-first-words")`). If neither is provided, initialization halts and requests the required path parameters.
+
+1. **Setup & 1-Shot Base Image (`setup_and_generate_image`)**: Content Creator reads the project manifest and creator instructions located dynamically in `{project_dir}` to generate the 1-shot base image to `{output_dir}/{topic}_image_v{N}.jpg`.
 2. **Draft Video Plot (`draft_video_plot`)**: Content Creator drafts `{topic}_video_plot_v{N}.md` strictly following the instructions and persists directly to disk.
 3. **Dual-Asset QC Audit (`audit_video_plot`)**: Brand Editor audits **BOTH** the Base Image and Video Plot against QC playbook rules:
    - **Image Failure**: Increments `image_version` and loops back to Step 1 (`setup_and_generate_image`).

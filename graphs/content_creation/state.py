@@ -69,10 +69,23 @@ def normalize_project_path(path: Optional[str]) -> str:
     return os.path.normpath(str(path))
 
 
+def _resolve_project_doc_path(doc_path: Optional[str], project_dir: Optional[str], default_filename: str) -> str:
+    """Resolves instruction document path strictly under project_dir."""
+    pdir = normalize_project_path(project_dir)
+    if not pdir:
+        return doc_path or ""
+    if doc_path:
+        norm_doc = normalize_project_path(doc_path)
+        if norm_doc.startswith(pdir):
+            return norm_doc
+        return os.path.join(pdir, os.path.basename(doc_path))
+    return os.path.join(pdir, default_filename)
+
+
 def _resolve_asset_path(base_or_default_path: Optional[str], output_dir: Optional[str], topic: str, asset_type: str, version: int) -> str:
-    """Resolves deterministic versioned asset path."""
+    """Resolves deterministic versioned asset path strictly under output_dir."""
     topic = str(topic).strip().lower()
-    out_dir = str(output_dir) if output_dir is not None else ""
+    out_dir = normalize_project_path(output_dir)
     ext_map = {
         "image": "jpg",
         "video_plot": "md",
@@ -82,12 +95,21 @@ def _resolve_asset_path(base_or_default_path: Optional[str], output_dir: Optiona
     ext = ext_map.get(asset_type, "dat")
     v_str = f"_v{version}" if version > 1 else ""
 
-    if base_or_default_path and not base_or_default_path.endswith(f"_{asset_type}.{ext}"):
-        dir_name = os.path.dirname(base_or_default_path)
-        base_name, fext = os.path.splitext(os.path.basename(base_or_default_path))
+    if base_or_default_path:
+        norm_path = normalize_project_path(base_or_default_path)
+        dir_name = os.path.dirname(norm_path)
+        base_name, fext = os.path.splitext(os.path.basename(norm_path))
         clean_name = re.sub(r'_v\d+$', '', base_name)
-        return os.path.join(dir_name or out_dir, f"{clean_name}{v_str}{fext or f'.{ext}'}")
-    return os.path.join(out_dir, f"{topic}_{asset_type}{v_str}.{ext}")
+        if out_dir and norm_path.startswith(out_dir):
+            return os.path.join(dir_name, f"{clean_name}{v_str}{fext or f'.{ext}'}")
+        resolved_dir = out_dir or dir_name
+        if resolved_dir:
+            return os.path.join(resolved_dir, f"{clean_name}{v_str}{fext or f'.{ext}'}")
+        return f"{clean_name}{v_str}{fext or f'.{ext}'}"
+
+    if out_dir:
+        return os.path.join(out_dir, f"{topic}_{asset_type}{v_str}.{ext}")
+    return f"{topic}_{asset_type}{v_str}.{ext}"
 
 
 def _append_execution_log(
@@ -102,7 +124,9 @@ def _append_execution_log(
     try:
         topic_clean = str(topic or "scene").strip().lower()
         out_dir = str(output_dir) if output_dir is not None else ""
-        target_file = log_path or (os.path.join(out_dir, "execution_log.md") if out_dir else "execution_log.md")
+        target_file = log_path or (os.path.join(out_dir, "execution_log.md") if out_dir else "")
+        if not target_file:
+            return
         target_dir = os.path.dirname(target_file)
         if target_dir:
             os.makedirs(target_dir, exist_ok=True)

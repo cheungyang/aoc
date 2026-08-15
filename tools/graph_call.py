@@ -11,10 +11,11 @@ from core.util import format_tool_response
 async def graph_call(graph_name: str = None, query: str = "", caller: Optional[str] = None, subgraph_name: Optional[str] = None) -> str:
     """
     Execute a compiled graph by its name with the given query.
-    Use this to run specialized multi-agent graphs (such as coding orchestration).
+    Use this to run specialized multi-agent graphs (such as coding orchestration or content_creation).
+    Note: For 'content_creation', all default paths have been removed; you must provide project_dir (e.g. project_dir: 'path/to/project') or output_dir to initialize the flow.
 
     Args:
-        graph_name: Name of the graph to execute.
+        graph_name: Name of the graph to execute (e.g. 'content_creation', 'coding').
         query: The prompt or task query for the graph.
         caller: The ID of the triggering agent (optional, automatically inferred from context if omitted).
     """
