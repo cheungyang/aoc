@@ -11,7 +11,7 @@ class CopywritingState(TypedDict, total=False):
 from typing import TypedDict, Literal
 
 
-def create_copywriting_subgraph():
+def create_copywriting_subgraph(checkpointer=None):
     from graphs.content_creation.graph import ContentCreationState
     from graphs.content_creation.nodes import (
         draft_and_save_copy_node
@@ -20,4 +20,4 @@ def create_copywriting_subgraph():
     workflow.add_node("draft_and_save_copy", draft_and_save_copy_node)
     workflow.add_edge(START, "draft_and_save_copy")
     workflow.add_edge("draft_and_save_copy", END)
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)

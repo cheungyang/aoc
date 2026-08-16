@@ -84,9 +84,9 @@ def create_graph(checkpointer=None, **kwargs):
             from langgraph.checkpoint.memory import MemorySaver
             checkpointer = MemorySaver()
 
-    ideation_sg = create_ideation_subgraph()
-    video_sg = create_video_production_subgraph()
-    copy_sg = create_copywriting_subgraph()
+    ideation_sg = create_ideation_subgraph(checkpointer=checkpointer)
+    video_sg = create_video_production_subgraph(checkpointer=checkpointer)
+    copy_sg = create_copywriting_subgraph(checkpointer=checkpointer)
 
     workflow = StateGraph(ContentCreationState)
 
@@ -97,7 +97,7 @@ def create_graph(checkpointer=None, **kwargs):
         return await ideation_sg.ainvoke(subset)
 
     async def run_video(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "raw_video_path", "video_path", "audio_path", "overlay_text", "remix_actions", "audio_verified", "extracted_frames", "qc_timestamps", "video_qc_passed", "video_qc_feedback", "video_qc_rejection_target", "video_persisted", "video_generation_error", "video_qc_attempts", "failed_node", "debugger_attempts", "max_video_reviews", "video_plot_content"]
+        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "raw_video_path", "video_path", "audio_path", "overlay_text", "remix_actions", "audio_verified", "extracted_frames", "qc_timestamps", "video_qc_passed", "video_qc_feedback", "video_qc_rejection_target", "video_persisted", "video_generation_error", "video_qc_attempts", "failed_node", "debugger_attempts", "max_video_reviews", "video_plot_content", "video_plot_path"]
         subset = {k: state.get(k) for k in keys if k in state}
         return await video_sg.ainvoke(subset)
         
@@ -138,12 +138,20 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_conditional_edges("ideation", after_ideation_router, ["video_production", "copywriting", END])
 
     # Fan-in from parallel branches
-    def wait_for_both(state: ContentCreationState):
-        # LangGraph automatically handles joining parallel branches if they both route to the same node
+    def join_production(state: dict):
+        # Empty node to sync parallel branches
+        return {}
+
+    workflow.add_node("join_production", join_production)
+    workflow.add_edge("video_production", "join_production")
+    workflow.add_edge("copywriting", "join_production")
+    
+    def after_production_router(state: ContentCreationState):
+        if state.get("error_message"):
+            return END
         return "hitl_final_package_approval"
 
-    workflow.add_edge("video_production", "hitl_final_package_approval")
-    workflow.add_edge("copywriting", "hitl_final_package_approval")
+    workflow.add_conditional_edges("join_production", after_production_router, {"hitl_final_package_approval": "hitl_final_package_approval", END: END})
 
     workflow.add_edge("hitl_final_package_approval", "process_gate2_feedback")
     

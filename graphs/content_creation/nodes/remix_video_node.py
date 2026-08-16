@@ -14,6 +14,7 @@ from graphs.content_creation.utils.logging import _append_execution_log
 from tools.extract_video_frames import extract_video_frames
 from tools.audio_stream_probe import audio_stream_probe
 from tools.video_ocr_validator import video_ocr_validator
+from tools.remix_video import remix_video
 
 from graphs.content_creation.schemas import PlotAudit, VideoPlot, FinalCopy
 
@@ -39,44 +40,50 @@ async def remix_video_node(state: dict):
             "video_generation_error": gen_err
         }
 
+    actions = []
+    audio_path = state.get("audio_path")
+    overlay_text = state.get("overlay_text", [])
+    
     try:
         plot_json_path = video_plot_path.replace(".md", ".json")
         with open(plot_json_path, "r") as pf:
             plot_data = json.load(pf)
-        actions = []
-        audio_path = state.get("audio_path")
-        if not audio_path and output_dir:
-            import glob
-            cands = glob.glob(os.path.join(output_dir, f"{topic}*.wav"))
-            audio_path = cands[0] if cands else os.path.join(output_dir, f"{topic}_wav.wav")
+            
         if plot_data.get("source_audio") and os.path.exists(plot_data["source_audio"]):
             audio_path = plot_data["source_audio"]
-            
-        if audio_path:
-            actions.append({
-                "action": "add_audio",
-                "audio_path": audio_path,
-                "start_time": 1.5,
-                "volume": 1.8,
-                "original_volume": 0.6,
-                "blend_mode": "blend"
-            })
-            
-        for text in plot_data.get("overlay_text", []):
-            actions.append({
-                "action": "add_text",
-                "text": text,
-                "start_time": 1.5,
-                "end_time": 3.5,
-                "font_size": 110,
-                "font_color": "white",
-                "border_color": "0x4A3B32",
-                "border_width": 8,
-                "x": "(w-text_w)/2",
-                "y": "h*0.22"
-            })
+        if plot_data.get("overlay_text"):
+            overlay_text = plot_data["overlay_text"]
     except Exception:
-        actions = [] 
+        pass
+
+    if not audio_path and output_dir:
+        import glob
+        cands = glob.glob(os.path.join(output_dir, f"{topic}*.wav"))
+        audio_path = cands[0] if cands else os.path.join(output_dir, f"{topic}_wav.wav")
+        
+    if audio_path:
+        actions.append({
+            "action": "add_audio",
+            "audio_path": audio_path,
+            "start_time": 1.5,
+            "volume": 1.8,
+            "original_volume": 0.6,
+            "blend_mode": "blend"
+        })
+        
+    for text in overlay_text:
+        actions.append({
+            "action": "add_text",
+            "text": text,
+            "start_time": 1.5,
+            "end_time": 3.5,
+            "font_size": 110,
+            "font_color": "white",
+            "border_color": "0x4A3B32",
+            "border_width": 8,
+            "x": "(w-text_w)/2",
+            "y": "h*0.22"
+        }) 
     print(f"ContentCreationGraph: Remixing video from {raw_video_path} to {video_path}...")
 
     remix_err = ""

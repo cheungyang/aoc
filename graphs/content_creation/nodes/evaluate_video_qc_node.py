@@ -37,7 +37,7 @@ async def evaluate_video_qc_node(state: dict):
         _append_execution_log(
             output_dir=output_dir,
             topic=topic,
-            action="🧐 System (Deterministic)",
+            actor="🧐 System (Deterministic)",
             event_title=f"Video Dual Text/Audio Keyframe QC Audit (Attempt {attempts})",
             details={
                 "Verdict": "REJECTED",
@@ -109,7 +109,7 @@ async def evaluate_video_qc_node(state: dict):
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
-        action="🧐 System (Deterministic)",
+        actor="🧐 System (Deterministic)",
         event_title=f"Video Dual Text/Audio Keyframe QC Audit (Attempt {attempts})",
         details={
             "Verdict": "APPROVED" if is_approved else "REJECTED",

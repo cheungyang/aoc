@@ -21,7 +21,7 @@ class AssetIdeationState(TypedDict, total=False):
 
 
 
-def create_ideation_subgraph():
+def create_ideation_subgraph(checkpointer=None):
     from graphs.content_creation.graph import ContentCreationState
     from graphs.content_creation.nodes import (
         setup_and_generate_image_node,
@@ -72,5 +72,5 @@ def create_ideation_subgraph():
         }
     )
     workflow.add_edge("clarify_gate1", "hitl_image_and_plot_approval")
-    return workflow.compile(interrupt_after=["hitl_image_and_plot_approval"])
+    return workflow.compile(checkpointer=checkpointer, interrupt_after=["hitl_image_and_plot_approval"])
 

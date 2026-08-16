@@ -14,6 +14,7 @@ from graphs.content_creation.utils.logging import _append_execution_log
 from tools.extract_video_frames import extract_video_frames
 from tools.audio_stream_probe import audio_stream_probe
 from tools.video_ocr_validator import video_ocr_validator
+from tools.generate_animation_veo3 import generate_animation_veo3
 
 from graphs.content_creation.schemas import PlotAudit, VideoPlot, FinalCopy
 

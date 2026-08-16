@@ -97,8 +97,8 @@ class Agent(BaseAgent):
                 except Exception as e:
                     if "tool_calls that do not have a corresponding ToolMessage" in str(e):
                         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-                        SqliteCheckpointer().delete_thread(session_id)
-                        print(f"Deleted corrupt checkpointer thread for session: {session_id}, retrying...")
+                        SqliteCheckpointer().rollback_last_step(session_id)
+                        print(f"Rolled back corrupt checkpoint for session: {session_id}, retrying...")
                         result = await self.graph.ainvoke(inputs, config=config)
                     else:
                         raise e

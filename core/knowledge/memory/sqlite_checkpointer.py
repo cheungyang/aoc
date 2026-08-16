@@ -319,6 +319,17 @@ class SqliteCheckpointer(BaseCheckpointSaver):
                 conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                 conn.commit()
 
+    def rollback_last_step(self, thread_id: str) -> None:
+        table_name = sanitize_table_name(thread_id)
+        with self._get_connection() as conn:
+            if self._table_exists(conn, table_name):
+                cursor = conn.execute(f'SELECT checkpoint_id FROM "{table_name}" WHERE entry_type = \'checkpoint\' ORDER BY step DESC, id DESC LIMIT 1')
+                row = cursor.fetchone()
+                if row:
+                    cp_id = row["checkpoint_id"]
+                    conn.execute(f'DELETE FROM "{table_name}" WHERE checkpoint_id = ?', (cp_id,))
+                    conn.commit()
+
     def archive_thread(self, thread_id: str) -> str:
         table_name = sanitize_table_name(thread_id)
         ts = int(time.time())

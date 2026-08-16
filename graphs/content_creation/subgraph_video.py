@@ -26,7 +26,7 @@ class VideoProductionState(TypedDict, total=False):
 from typing import TypedDict, List, Dict, Any, Literal
 
 
-def create_video_production_subgraph():
+def create_video_production_subgraph(checkpointer=None):
     from graphs.content_creation.graph import ContentCreationState
     from graphs.content_creation.nodes import (
         generate_visual_plate_node,
@@ -89,5 +89,5 @@ def create_video_production_subgraph():
         "extract_and_qc_frames": "extract_and_qc_frames"
     })
     
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)
 

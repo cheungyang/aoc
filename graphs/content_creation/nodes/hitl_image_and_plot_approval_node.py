@@ -19,6 +19,10 @@ async def hitl_image_and_plot_approval_node(state: dict):
     image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
 
+    # Force update the state dictionary so the presentation adapter uses the resolved paths
+    state["image_path"] = image_path
+    state["video_plot_path"] = video_plot_path
+
     summary = format_gate1_presentation(state)
 
     _append_execution_log(
