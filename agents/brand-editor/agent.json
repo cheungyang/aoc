@@ -4,21 +4,10 @@
     "content-creation"
   ],
   "name": "Brand Editor",
-  "emoji": "🧐",
+  "emoji": "\ud83e\uddd0",
   "description": "Strict Red Team QC gatekeeper auditing media generation against project playbooks.",
   "model": "gemini-3.7-flash",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
-  "skills": [
-    "memory",
-    "dream"
-  ],
+  "skills": [],
   "tools": {
     "obsidian": {
       "pkm/wiki/software": [

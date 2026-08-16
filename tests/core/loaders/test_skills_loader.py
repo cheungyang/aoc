@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.loaders.skills_loader import SkillsLoader
+import core.loaders.agents_loader
 
 class TestSkillsLoader(unittest.TestCase):
 
@@ -88,6 +89,32 @@ Body content of skill.
             result = self.loader.get_skills_overview('agent_1')
 
         self.assertIn("- Dummy (id:skill1): Desc", result)
+
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_allowed_skills(self, mock_agents_loader):
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["skill1"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+        
+        allowed_skills = self.loader.get_allowed_skills('agent_1')
+        
+        self.assertIn("skill1", allowed_skills)
+        self.assertIn("dream", allowed_skills)
+        self.assertIn("memory", allowed_skills)
+        self.assertEqual(len(allowed_skills), 3)
+
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_allowed_skills_already_present(self, mock_agents_loader):
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["skill1", "dream"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+        
+        allowed_skills = self.loader.get_allowed_skills('agent_1')
+        
+        self.assertIn("skill1", allowed_skills)
+        self.assertIn("dream", allowed_skills)
+        self.assertIn("memory", allowed_skills)
+        self.assertEqual(len(allowed_skills), 3)
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,7 @@ class AgentsLoader:
                     try:
                         with open(config_path, "r") as f:
                             config = json.load(f)
+
                         # Ensure ID is set
                         if "id" not in config and "agent_id" not in config:
                             config["id"] = agent_name

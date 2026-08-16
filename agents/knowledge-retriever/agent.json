@@ -4,24 +4,13 @@
     "day-planning"
   ],
   "name": "Rick",
-  "emoji": "🔍",
+  "emoji": "\ud83d\udd0d",
   "description": "Universal RAG Layer & Context Retrieval Engine. Specializes in hybrid vector/BM25 search over the PKM vault and SQL querying over tasks and projects to synthesize grounded, high-precision context for agents and workflows.",
   "model": "gemini-3.7-flash",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
   "tools": {
     "vault_search": [],
     "task_query": [],
     "project_query": []
   },
-  "skills": [
-    "memory",
-    "dream"
-  ]
+  "skills": []
 }

@@ -4,21 +4,10 @@
     "content-creation"
   ],
   "name": "Content Creator",
-  "emoji": "🎨",
+  "emoji": "\ud83c\udfa8",
   "description": "Creative engine that brainstorms concepts and executes asset generation based on project instructions.",
   "model": "gemini-3.7-flash",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
-  "skills": [
-    "memory",
-    "dream"
-  ],
+  "skills": [],
   "tools": {
     "obsidian": {
       "pkm/wiki/software": [

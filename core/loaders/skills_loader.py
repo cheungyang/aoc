@@ -42,10 +42,18 @@ class SkillsLoader:
             return {}
         return info.get("tools", {})
 
-    def get_skills_overview(self, agent_id: str):
+    def get_allowed_skills(self, agent_id: str):
         from core.loaders.agents_loader import AgentsLoader
         agent = AgentsLoader().get_agent(agent_id)
-        allowed_skills = agent.config.get("skills", [])
+        allowed_skills = agent.config.get("skills", []).copy()
+        
+        for skill in ["dream", "memory"]:
+            if skill not in allowed_skills:
+                allowed_skills.append(skill)
+        return allowed_skills
+
+    def get_skills_overview(self, agent_id: str):
+        allowed_skills = self.get_allowed_skills(agent_id)
         
         self._load_skills(allowed_skills)
         overview = f"<skills_list>\nThe following lists the names and descriptions of the skills \n\
@@ -63,9 +71,7 @@ class SkillsLoader:
         return overview
 
     def get_skill_prompt(self, agent_id: str, skill_id: str):
-        from core.loaders.agents_loader import AgentsLoader
-        agent = AgentsLoader().get_agent(agent_id)
-        allowed_skills = agent.config.get("skills", [])
+        allowed_skills = self.get_allowed_skills(agent_id)
         
         if skill_id not in allowed_skills:
             return f"Error: Agent {agent_id} does not have access to skill {skill_id}."

@@ -1,33 +1,23 @@
 {
-    "agent_id": "goal-setter",
-    "channels": [
-        "project-planning",
-        "aoc-debug"
-    ],
-    "name": "Grace",
-    "emoji": "🚀",
-    "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
-    "schedules": [
-        {
-            "channel": "general",
-            "thread": "dreams",
-            "cron": "0 23 * * *",
-            "prompt": "Use the dream skill to refine your memory"
-        }
-    ],
-    "tools": {
-        "obsidian": {
-            "pkm/vault/projects": [
-                "write",
-                "overwrite",
-                "append"
-            ]
-        }
-    },
-    "skills": [
-        "memory",
-        "project_prep",
-        "wiki_query",
-        "dream"
-    ]
+  "agent_id": "goal-setter",
+  "channels": [
+    "project-planning",
+    "aoc-debug"
+  ],
+  "name": "Grace",
+  "emoji": "\ud83d\ude80",
+  "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
+  "tools": {
+    "obsidian": {
+      "pkm/vault/projects": [
+        "write",
+        "overwrite",
+        "append"
+      ]
+    }
+  },
+  "skills": [
+    "project_prep",
+    "wiki_query"
+  ]
 }

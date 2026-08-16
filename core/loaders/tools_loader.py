@@ -54,8 +54,8 @@ class ToolsLoader:
         merged_tools = config.get("tools", {}).copy()
         
         # Fetch allowed skills and merge their tools
-        allowed_skills = config.get("skills", [])
         skills_loader = SkillsLoader()
+        allowed_skills = skills_loader.get_allowed_skills(agent_id)
         
         for skill in allowed_skills:
             skill_tools = skills_loader.get_skill_tools(skill)
@@ -117,7 +117,8 @@ class ToolsLoader:
         allowed_tool_names = list(merged_tools.keys())
         
         # Auto-include load_skill if agent has skills
-        if config.get("skills"):
+        from core.loaders.skills_loader import SkillsLoader
+        if SkillsLoader().get_allowed_skills(agent_id):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
                 

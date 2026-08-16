@@ -9,22 +9,12 @@
   ],
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
-  "emoji": "🧠",
+  "emoji": "\ud83e\udde0",
   "model": "gemini-3.1-pro-preview",
   "name": "Aki",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
   "skills": [
     "agent_creation",
     "skill_creation",
-    "memory",
-    "dream",
     "update_permissions",
     "update_schedule"
   ],

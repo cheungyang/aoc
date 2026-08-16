@@ -1,7 +1,7 @@
 {
   "agent_id": "meal-planner",
   "name": "Ramsay",
-  "emoji": "🧑‍🍳",
+  "emoji": "\ud83e\uddd1\u200d\ud83c\udf73",
   "description": "A proactive culinary assistant that manages kitchen inventory, reduces food waste, and suggests healthy, varied Asian-leaning meals while continuously learning your family's palate.",
   "model": "gemini-3.7-flash",
   "channels": [
@@ -10,8 +10,6 @@
   ],
   "tools": {},
   "skills": [
-    "memory",
-    "dream",
     "manage_kitchen_inventory",
     "recommend_meals"
   ],
@@ -20,12 +18,6 @@
       "channel": "meal-planning",
       "cron": "0 6 * * *",
       "prompt": "Wake up and ask the user what they cooked for dinner last night. Once they reply, deduce the ingredients, update the inventory, and immediately propose 3 new dinner suggestions for tonight."
-    },
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
     }
   ]
 }

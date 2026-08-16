@@ -64,6 +64,24 @@ class TestToolsLoader(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].__name__, "git")
 
+    @patch('core.loaders.skills_loader.SkillsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_merge_tool_permissions(self, mock_agents_loader, mock_skills_loader):
+        mock_agent = MagicMock()
+        mock_agent.config = {"tools": {"git": {}}}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+
+        mock_skills_inst = mock_skills_loader.return_value
+        mock_skills_inst.get_allowed_skills.return_value = ["dream"]
+        mock_skills_inst.get_skill_tools.return_value = {"bash": {}}
+
+        loader = ToolsLoader()
+        merged = loader._merge_tool_permissions("agent1")
+        
+        self.assertIn("git", merged)
+        self.assertIn("bash", merged)
+        mock_skills_inst.get_allowed_skills.assert_called_once_with("agent1")
+
 class TestCheckPermission(unittest.TestCase):
     def setUp(self):
         ToolsLoader._instance = None

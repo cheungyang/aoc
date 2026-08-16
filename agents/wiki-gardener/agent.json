@@ -4,22 +4,14 @@
     "pkm-wiki"
   ],
   "name": "William",
-  "emoji": "🌿",
+  "emoji": "\ud83c\udf3f",
   "description": "Proactive LLM Wiki gardener. Resolves lint queues, triages inbox notes, and aggressively curates the knowledge graph for density and connection.",
   "tools": {},
   "skills": [
-    "memory",
-    "dream",
     "wiki_lint",
     "wiki_ingest"
   ],
   "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    },
     {
       "channel": "pkm-wiki",
       "cron": "0 10 * * 5",

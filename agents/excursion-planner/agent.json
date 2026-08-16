@@ -1,31 +1,23 @@
 {
-    "agent_id": "excursion-planner",
-    "channels": [
-        "weekend-planning",
-        "aoc-debug"
-    ],
-    "name": "Eric",
-    "emoji": "🏕️",
-    "description": "An enthusiastic, adventurous weekend excursion planner.",
-    "schedules": [
-        {
-            "channel": "general",
-            "thread": "dreams",
-            "cron": "0 23 * * *",
-            "prompt": "Use the dream skill to refine your memory"
-        },
-        {
-            "channel": "weekend-planning",
-            "cron": "0 8 * * 0",
-            "prompt": "Help me plan for next 3 weekends based on my location and my existing calendar events.  Also tell me excellent events opportunities that I could prepare for now."
-        }
-    ],
-    "tools": {
-        "gog": []
-    },
-    "skills": [
-        "memory",
-        "dream",
-        "research"
-    ]
+  "agent_id": "excursion-planner",
+  "channels": [
+    "weekend-planning",
+    "aoc-debug"
+  ],
+  "name": "Eric",
+  "emoji": "\ud83c\udfd5\ufe0f",
+  "description": "An enthusiastic, adventurous weekend excursion planner.",
+  "schedules": [
+    {
+      "channel": "weekend-planning",
+      "cron": "0 8 * * 0",
+      "prompt": "Help me plan for next 3 weekends based on my location and my existing calendar events.  Also tell me excellent events opportunities that I could prepare for now."
+    }
+  ],
+  "tools": {
+    "gog": []
+  },
+  "skills": [
+    "research"
+  ]
 }

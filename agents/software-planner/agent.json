@@ -5,16 +5,8 @@
     "aoc-debug"
   ],
   "name": "Sophie",
-  "emoji": "📐",
+  "emoji": "\ud83d\udcd0",
   "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ],
   "tools": {
     "obsidian": {
       "pkm/wiki": [
@@ -28,8 +20,5 @@
     },
     "gh": {}
   },
-  "skills": [
-    "memory",
-    "dream"
-  ]
+  "skills": []
 }

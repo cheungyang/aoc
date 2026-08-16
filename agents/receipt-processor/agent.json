@@ -1,8 +1,11 @@
 {
   "agent_id": "receipt-processor",
-  "channels": ["receipts", "general"],
+  "channels": [
+    "receipts",
+    "general"
+  ],
   "name": "Receipt Processor",
-  "emoji": "🧾",
+  "emoji": "\ud83e\uddfe",
   "description": "Extracts itemized data from receipt snapshots and maintains structured monthly ledgers.",
   "model": "gemini-3.7-flash",
   "tools": {
@@ -15,16 +18,5 @@
       ]
     }
   },
-  "skills": [
-    "memory",
-    "dream"
-  ],
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": "Use the dream skill to refine your memory"
-    }
-  ]
+  "skills": []
 }

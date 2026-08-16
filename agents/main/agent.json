@@ -18,7 +18,7 @@
   ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
-  "emoji": "🛎️",
+  "emoji": "\ud83d\udece\ufe0f",
   "model": "gemini-3.7-flash",
   "name": "Concierge",
   "schedules": [
@@ -26,13 +26,10 @@
       "channel": "general",
       "thread": "dreams",
       "cron": "0 23 * * *",
-      "prompt": "CENTRALIZED DREAM STANDUP: 1. Use the 'agent_list' tool to retrieve the list of all active agents. 2. Loop through every agent (excluding yourself and non-LLM scripts) and use the 'agent_call' tool (with the trigger 'Run your dream skill') to invoke their dream synthesis silently. 3. Parse the '<dream_response>' XML payloads they return. 4. Compile the results and output EXACTLY ONE final summary message to this thread using the format below. DO NOT output any XML yourself.\n\n**Nightly Dream Standup - [YYYY-MM-DD]**\n\n[EMOJI] [Agent Name] ([Description]) | 🌙 Dreamed\nKey Update: [Extraction from the <learnings> tag]\n\n[EMOJI] [Agent Name] ([Description]) | 💤 No new memories to process today.\n\n*(Exclude agents from the list if they returned an error indicating they failed to run at all)*."
+      "prompt": "CENTRALIZED DREAM STANDUP: 1. Use the 'agent_list' tool to retrieve the list of all active agents. 2. Loop through every agent (excluding yourself and non-LLM scripts) and use the 'agent_call' tool (with the trigger 'Run your dream skill') to invoke their dream synthesis silently. 3. Parse the '<dream_response>' XML payloads they return. 4. Compile the results and output EXACTLY ONE final summary message to this thread using the format below. DO NOT output any XML yourself.\n\n**Nightly Dream Standup - [YYYY-MM-DD]**\n\n[EMOJI] [Agent Name] ([Description]) | \ud83c\udf19 Dreamed\nKey Update: [Extraction from the <learnings> tag]\n\n[EMOJI] [Agent Name] ([Description]) | \ud83d\udca4 No new memories to process today.\n\n*(Exclude agents from the list if they returned an error indicating they failed to run at all)*."
     }
   ],
-  "skills": [
-    "memory",
-    "dream"
-  ],
+  "skills": [],
   "tools": {
     "agent_call": {},
     "agent_list": {},
