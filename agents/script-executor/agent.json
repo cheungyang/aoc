@@ -15,7 +15,8 @@
         "script sync_git.py",
         "script sync_tasks.py",
         "script sync_projects.py",
-        "script sync_knowledge.py"
+        "script sync_knowledge.py",
+        "script wiki_scanner.py"
       ]
     }
   ]
