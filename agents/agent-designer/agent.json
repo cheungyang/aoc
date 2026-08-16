@@ -2,14 +2,15 @@
   "agent_id": "agent-designer",
   "channels": [
     "agent-management",
-    "aoc-debug"
+    "aoc-debug",
+    "general"
   ],
   "channel_hosts": [
     "agent-management"
   ],
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
-  "emoji": "\ud83e\udde0",
+  "emoji": "🧠",
   "model": "gemini-3.1-pro-preview",
   "name": "Aki",
   "skills": [

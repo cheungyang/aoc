@@ -1,14 +1,15 @@
 {
-  "agent_id": "software-coder",
-  "channels": [
-    "software-dev",
-    "aoc-debug"
-  ],
-  "name": "Scott",
-  "emoji": "\ud83d\udcbb",
-  "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
-  "tools": {},
-  "skills": [
-    "tdd_execution"
-  ]
+    "agent_id": "software-coder",
+    "channels": [
+        "software-dev",
+        "aoc-debug",
+        "general"
+    ],
+    "name": "Scott",
+    "emoji": "💻",
+    "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
+    "tools": {},
+    "skills": [
+        "tdd_execution"
+    ]
 }

@@ -2,10 +2,11 @@
   "agent_id": "software-planner",
   "channels": [
     "software-dev",
-    "aoc-debug"
+    "aoc-debug",
+    "general"
   ],
   "name": "Sophie",
-  "emoji": "\ud83d\udcd0",
+  "emoji": "📐",
   "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
   "tools": {
     "obsidian": {

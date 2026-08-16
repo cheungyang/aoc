@@ -1,10 +1,11 @@
 {
   "agent_id": "knowledge-retriever",
   "channels": [
-    "day-planning"
+    "day-planning",
+    "general"
   ],
   "name": "Rick",
-  "emoji": "\ud83d\udd0d",
+  "emoji": "🔍",
   "description": "Universal RAG Layer & Context Retrieval Engine. Specializes in hybrid vector/BM25 search over the PKM vault and SQL querying over tasks and projects to synthesize grounded, high-precision context for agents and workflows.",
   "model": "gemini-3.7-flash",
   "tools": {

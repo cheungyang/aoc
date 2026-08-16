@@ -1,7 +1,7 @@
 {
   "agent_id": "script-executor",
   "channels": [
-    "*"
+    "general"
   ],
   "name": "Terminator",
   "description": "A special non-LLM agent responsible for executing scheduled cron scripts.",

@@ -1,10 +1,11 @@
 {
   "agent_id": "content-creator",
   "channels": [
-    "content-creation"
+    "content-creation",
+    "general"
   ],
   "name": "Content Creator",
-  "emoji": "\ud83c\udfa8",
+  "emoji": "🎨",
   "description": "Creative engine that brainstorms concepts and executes asset generation based on project instructions.",
   "model": "gemini-3.7-flash",
   "skills": [],

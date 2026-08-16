@@ -1,32 +1,33 @@
 {
-  "agent_id": "day-planner",
-  "channels": [
-    "day-planning",
-    "weekend-planning",
-    "weekly-planning",
-    "aoc-debug"
-  ],
-  "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
-  "emoji": "\ud83c\udf3c",
-  "model": "gemini-3.7-flash",
-  "name": "Daisy",
-  "schedules": [
-    {
-      "channel": "day-planning",
-      "cron": "0 6 * * *",
-      "prompt": "Provide your daily update"
-    },
-    {
-      "channel": "weekly-planning",
-      "cron": "0 8 * * 0",
-      "prompt": "Trigger the weekly_review skill to start the collaborative weekly review process."
-    }
-  ],
-  "skills": [
-    "list_impactful_actions",
-    "check_recurring_chores",
-    "write_daily_intention",
-    "weekly_review"
-  ],
-  "tools": {}
+    "agent_id": "day-planner",
+    "channels": [
+        "day-planning",
+        "weekend-planning",
+        "weekly-planning",
+        "aoc-debug",
+        "general"
+    ],
+    "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
+    "emoji": "🌼",
+    "model": "gemini-3.7-flash",
+    "name": "Daisy",
+    "schedules": [
+        {
+            "channel": "day-planning",
+            "cron": "0 6 * * *",
+            "prompt": "Provide your daily update"
+        },
+        {
+            "channel": "weekly-planning",
+            "cron": "0 8 * * 0",
+            "prompt": "Trigger the weekly_review skill to start the collaborative weekly review process."
+        }
+    ],
+    "skills": [
+        "list_impactful_actions",
+        "check_recurring_chores",
+        "write_daily_intention",
+        "weekly_review"
+    ],
+    "tools": {}
 }

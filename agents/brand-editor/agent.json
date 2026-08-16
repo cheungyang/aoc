@@ -1,10 +1,11 @@
 {
   "agent_id": "brand-editor",
   "channels": [
-    "content-creation"
+    "content-creation",
+    "general"
   ],
   "name": "Brand Editor",
-  "emoji": "\ud83e\uddd0",
+  "emoji": "🧐",
   "description": "Strict Red Team QC gatekeeper auditing media generation against project playbooks.",
   "model": "gemini-3.7-flash",
   "skills": [],

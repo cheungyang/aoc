@@ -1,12 +1,13 @@
 {
   "agent_id": "meal-planner",
   "name": "Ramsay",
-  "emoji": "\ud83e\uddd1\u200d\ud83c\udf73",
+  "emoji": "🧑‍🍳",
   "description": "A proactive culinary assistant that manages kitchen inventory, reduces food waste, and suggests healthy, varied Asian-leaning meals while continuously learning your family's palate.",
   "model": "gemini-3.7-flash",
   "channels": [
     "aoc-debug",
-    "meal-planning"
+    "meal-planning",
+    "general"
   ],
   "tools": {},
   "skills": [

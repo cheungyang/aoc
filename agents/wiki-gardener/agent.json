@@ -1,10 +1,11 @@
 {
   "agent_id": "wiki-gardener",
   "channels": [
-    "pkm-wiki"
+    "pkm-wiki",
+    "general"
   ],
   "name": "William",
-  "emoji": "\ud83c\udf3f",
+  "emoji": "🌿",
   "description": "Proactive LLM Wiki gardener. Resolves lint queues, triages inbox notes, and aggressively curates the knowledge graph for density and connection.",
   "tools": {},
   "skills": [
