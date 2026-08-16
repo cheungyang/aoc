@@ -29,7 +29,7 @@ async def audit_video_plot_node(state: dict):
     image_prompt = state.get("image_prompt", "")
     plot_content = state.get("video_plot_content", "")
     video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     attempts = state.get("video_plot_attempts", 0) + 1
     
     # Audit log paths
@@ -53,20 +53,46 @@ async def audit_video_plot_node(state: dict):
     prompt = (
         f"You are the Brand Editor.\n"
         f"--- QC PLAYBOOK ---\n{playbook_text}\n-------------------\n"
-        f"Audit BOTH the generated Base Image and the Video Plot against the playbook's rules:\n\n"
-        f"--- Base Image ---\n"
-        f"Path: {image_path}\n"
+        f"Audit the Video Plot against the playbook's rules:\n\n"
+        f"--- Base Image Context ---\n"
         f"Prompt: {image_prompt}\n"
+        f"(The actual image will be audited by a human. Do not audit the visual content, but use this prompt to ensure the plot aligns with the intended concept.)\n"
         f"------------------\n\n"
         f"--- Video Plot ---\n{plot_content}\n------------------\n\n"
         f"Instructions:\n"
-        f"1. Evaluate if BOTH the Base Image and Video Plot comply with the QC playbook.\n"
-        f"2. If the Base Image violates rules (style inconsistency, anatomical defects, wrong visual concept), set rejection_target to 'image'.\n"
-        f"3. If the Video Plot violates rules (pacing, camera movement, forbidden effects), set rejection_target to 'plot'.\n"
-        f"4. If BOTH violate rules, set rejection_target to 'both'.\n"
-        f"5. Set is_approved to true ONLY if there are no violations.\n"
-        f"6. Provide a detailed markdown_report with your findings."
+        f"1. Evaluate if the Video Plot complies with the QC playbook.\n"
+        f"2. If the Video Plot violates rules (pacing, camera movement, forbidden effects, missing elements), set rejection_target to 'plot'.\n"
+        f"3. Set is_approved to true ONLY if there are no violations in the Video Plot.\n"
+        f"4. Provide a detailed markdown_report with your findings."
     )
+
+    if not image_path or not os.path.exists(image_path):
+        is_approved = False
+        rejection_target = "image"
+        feedback = f"Error: Base Image does not exist at path: {image_path}"
+        
+        # Dual Publish Audit Report
+        if audit_md_path:
+            with open(audit_md_path, "w", encoding="utf-8") as f:
+                f.write(f"# Plot Audit\n\n{feedback}")
+        
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🧐 Brand Editor",
+            event_title=f"Video Plot QC Audit (Attempt {attempts})",
+            details={
+                "Verdict": f"REJECTED (Target: IMAGE)",
+                "Audit Notes": feedback
+            },
+            log_path=execution_log_path
+        )
+        return {
+            "video_plot_qc_passed": is_approved,
+            "video_plot_feedback": feedback,
+            "qc_rejection_target": rejection_target,
+            "video_plot_attempts": attempts
+        }
 
     try:
         from core.loaders.agents_loader import AgentsLoader
@@ -104,7 +130,7 @@ async def audit_video_plot_node(state: dict):
         output_dir=output_dir,
         topic=topic,
         actor="🧐 Brand Editor",
-        event_title=f"Dual-Asset QC Audit (Attempt {attempts})",
+        event_title=f"Video Plot QC Audit (Attempt {attempts})",
         details={
             "Verdict": "APPROVED" if is_approved else f"REJECTED (Target: {rejection_target.upper()})",
             "Audit Notes": feedback

@@ -14,6 +14,7 @@ from graphs.content_creation.utils.logging import _append_execution_log
 from tools.extract_video_frames import extract_video_frames
 from tools.audio_stream_probe import audio_stream_probe
 from tools.video_ocr_validator import video_ocr_validator
+from tools.generate_image import generate_image
 
 from graphs.content_creation.schemas import PlotAudit, VideoPlot, FinalCopy
 
@@ -42,15 +43,33 @@ async def setup_and_generate_image_node(state: dict):
     manifest_path = _resolve_project_doc_path(state.get("manifest_path"), project_dir, "01_Project_Manifest.md")
     creator_instructions_path = _resolve_project_doc_path(state.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     image_path = _resolve_asset_path(output_dir, topic, "image", next_version=True)
     
     os.makedirs(output_dir, exist_ok=True)
 
+    manifest_text = ""
+    try:
+        if os.path.exists(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest_text = f.read()
+    except Exception:
+        pass
+        
+    instructions_text = ""
+    try:
+        if os.path.exists(creator_instructions_path):
+            with open(creator_instructions_path, "r", encoding="utf-8") as f:
+                instructions_text = f.read()
+    except Exception:
+        pass
+
     creator = AgentsLoader().get_agent("content-creator")
     prompt = (
-        f"You are the Content Creator. Read the project manifest at {manifest_path} and the creator instructions at {creator_instructions_path}.\n"
+        f"You are the Content Creator.\n"
+        f"--- PROJECT MANIFEST ---\n{manifest_text}\n----------------------------\n"
+        f"--- CREATOR INSTRUCTIONS ---\n{instructions_text}\n----------------------------\n"
         f"Generate the 1-shot base image prompt for the topic: '{topic}'.\n"
     )
 
@@ -73,7 +92,14 @@ async def setup_and_generate_image_node(state: dict):
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved:
-                image_path = saved
+                # Convert absolute paths to relative paths from codebase_dir
+                # so the state remains consistent for Obsidian agents (pkm/...)
+                from core.util.config import Config
+                codebase_dir = Config().codebase_dir
+                if saved.startswith(codebase_dir):
+                    image_path = os.path.relpath(saved, codebase_dir)
+                else:
+                    image_path = saved
     except Exception as e:
         print(f"ContentCreationGraph: Error generating image: {e}")
 

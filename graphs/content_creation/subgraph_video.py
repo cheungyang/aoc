@@ -3,10 +3,11 @@ from langgraph.graph import StateGraph, START, END
 from typing_extensions import TypedDict, List, Dict, Any, Literal
 
 class VideoProductionState(TypedDict, total=False):
+    image_path: str
     raw_video_path: str
     video_path: str
     audio_path: str
-    overlay_text: str
+    overlay_text: List[str]
     remix_actions: List[Dict[str, Any]]
     audio_verified: bool
     extracted_frames: List[str]

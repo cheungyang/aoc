@@ -2,6 +2,8 @@ from langgraph.graph import StateGraph, START, END
 
 from typing_extensions import TypedDict
 
+from typing import List, Dict, Any
+
 class AssetIdeationState(TypedDict, total=False):
     image_path: str
     image_prompt: str
@@ -15,10 +17,7 @@ class AssetIdeationState(TypedDict, total=False):
     clarification_question: str
     source_audio_path: str
     audio_path: str
-    overlay_text: Any
-
-
-from typing import TypedDict, List, Dict, Any
+    overlay_text: List[str]
 
 
 

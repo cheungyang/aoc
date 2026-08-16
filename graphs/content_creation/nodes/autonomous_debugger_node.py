@@ -38,7 +38,7 @@ async def autonomous_debugger_node(state: dict):
             "Error Details": error,
             "Action": "Clearing error state and triggering retry." if attempts < 3 else "Failing graph permanently."
         },
-        log_path=os.path.join(output_dir, "execution_log.md") if output_dir else ""
+        log_path=state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     )
     
     if attempts >= 3:

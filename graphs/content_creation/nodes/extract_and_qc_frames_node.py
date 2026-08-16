@@ -9,6 +9,7 @@ from graphs.content_creation.utils.paths import normalize_project_path, _resolve
 from graphs.content_creation.utils.logging import _append_execution_log
 
 from tools.extract_video_frames import extract_video_frames
+from tools.audio_stream_probe import audio_stream_probe
 
 
 async def extract_and_qc_frames_node(state: dict):
@@ -20,7 +21,7 @@ async def extract_and_qc_frames_node(state: dict):
     output_dir = normalize_project_path(state.get("output_dir", ""))
     video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     qc_timestamps = state.get("qc_timestamps") or [1.0, 2.0, 2.5, 3.5, 4.0]
     frames_dir = os.path.join(output_dir, "frames") if output_dir else "frames"
     attempts = state.get("video_qc_attempts", 0) + 1

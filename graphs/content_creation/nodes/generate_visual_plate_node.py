@@ -25,7 +25,8 @@ async def generate_visual_plate_node(state: dict):
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
     raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=True)
-    image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     plot_content = state.get("video_plot_content", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
@@ -55,7 +56,12 @@ async def generate_visual_plate_node(state: dict):
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved:
-                raw_video_path = saved
+                from core.util.config import Config
+                codebase_dir = Config().codebase_dir
+                if saved.startswith(codebase_dir):
+                    raw_video_path = os.path.relpath(saved, codebase_dir)
+                else:
+                    raw_video_path = saved
     except Exception as e:
         print(f"ContentCreationGraph: Error generating video: {e}")
         return {"error_message": f"Veo 3 API Error: {e}", "failed_node": "generate_visual_plate"}

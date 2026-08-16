@@ -35,7 +35,7 @@ async def draft_and_save_copy_node(state: dict):
     image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     extracted_frames = state.get("extracted_frames", [])
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     human_feedback = state.get("latest_human_feedback", "")
 
     instructions_text = ""

@@ -100,9 +100,9 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_dir, "01_Project_Manifest.md")
         creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
         qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-        execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+        execution_log_path = kwargs.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
-        image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
+        image_path = kwargs.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
         video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
         raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
         video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
@@ -201,8 +201,8 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
 
-    image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
+    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     plot_content = state.get("video_plot_content", "")
     if not plot_content and video_plot_path and os.path.exists(video_plot_path):
         try:
@@ -229,10 +229,10 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
-    image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
-    copy_path = _resolve_asset_path(output_dir, topic, "copy", next_version=False)
+    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
+    video_path = state.get("video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    copy_path = state.get("copy_path") or _resolve_asset_path(output_dir, topic, "copy", next_version=False)
     copy_text = state.get("copy_text", "")
     if not copy_text and copy_path and os.path.exists(copy_path):
         try:

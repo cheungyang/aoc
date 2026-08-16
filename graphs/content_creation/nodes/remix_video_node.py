@@ -26,6 +26,7 @@ async def remix_video_node(state: dict):
     output_dir = normalize_project_path(state.get("output_dir", ""))
     raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
     video_path = _resolve_asset_path(output_dir, topic, "video", next_version=True)
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     plot_content = state.get("video_plot_content", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
@@ -93,7 +94,12 @@ async def remix_video_node(state: dict):
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved:
-                video_path = saved
+                from core.util.config import Config
+                codebase_dir = Config().codebase_dir
+                if saved.startswith(codebase_dir):
+                    video_path = os.path.relpath(saved, codebase_dir)
+                else:
+                    video_path = saved
     except Exception as e:
         print(f"ContentCreationGraph: Error remixing video: {e}")
         return {"error_message": f"FFmpeg Remix Error: {e}", "failed_node": "remix_video"}

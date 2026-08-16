@@ -92,17 +92,17 @@ def create_graph(checkpointer=None, **kwargs):
 
     # Add the sub-graphs as adapter nodes for STRICT state isolation
     async def run_ideation(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "error_message", "image_path", "image_prompt", "video_plot_path", "video_plot_content", "video_plot_attempts", "max_video_plot_reviews", "video_plot_qc_passed", "video_plot_feedback", "gate1_decision", "clarification_question", "latest_human_feedback", "source_audio_path", "audio_path", "overlay_text"]
+        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "image_prompt", "video_plot_path", "video_plot_content", "video_plot_attempts", "max_video_plot_reviews", "video_plot_qc_passed", "video_plot_feedback", "gate1_decision", "clarification_question", "latest_human_feedback", "source_audio_path", "audio_path", "overlay_text"]
         subset = {k: state.get(k) for k in keys if k in state}
         return await ideation_sg.ainvoke(subset)
 
     async def run_video(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "error_message", "raw_video_path", "video_path", "audio_path", "overlay_text", "remix_actions", "audio_verified", "extracted_frames", "qc_timestamps", "video_qc_passed", "video_qc_feedback", "video_qc_rejection_target", "video_persisted", "video_generation_error", "video_qc_attempts", "failed_node", "debugger_attempts", "max_video_reviews", "video_plot_content"]
+        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "raw_video_path", "video_path", "audio_path", "overlay_text", "remix_actions", "audio_verified", "extracted_frames", "qc_timestamps", "video_qc_passed", "video_qc_feedback", "video_qc_rejection_target", "video_persisted", "video_generation_error", "video_qc_attempts", "failed_node", "debugger_attempts", "max_video_reviews", "video_plot_content"]
         subset = {k: state.get(k) for k in keys if k in state}
         return await video_sg.ainvoke(subset)
         
     async def run_copy(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "error_message", "copy_path", "copy_text", "gate2_decision", "latest_human_feedback"]
+        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "copy_path", "copy_text", "gate2_decision", "latest_human_feedback"]
         subset = {k: state.get(k) for k in keys if k in state}
         return await copy_sg.ainvoke(subset)
 

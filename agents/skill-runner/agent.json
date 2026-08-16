@@ -21,10 +21,7 @@
         "memory",
         "dream",
         "web_browsing",
-        "research",
-        "wiki_ingest",
-        "wiki_query",
-        "wiki_lint"
+        "research"
     ],
     "tools": {
         "generate_image": [],

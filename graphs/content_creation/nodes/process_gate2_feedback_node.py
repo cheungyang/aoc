@@ -11,7 +11,7 @@ from graphs.content_creation.adapters import format_gate1_presentation, format_g
 
 async def process_gate2_feedback_node(state: dict):
     """Processes human feedback at Gate 2, updates versioning, and sets routing decision."""
-    feedback = state.get("latest_human_feedback") or state.get("query") or ""
+    feedback = state.get("latest_human_feedback") or ""
     decision = classify_gate2_intent(feedback)
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))

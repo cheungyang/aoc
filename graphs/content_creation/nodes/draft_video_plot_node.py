@@ -30,7 +30,7 @@ async def draft_video_plot_node(state: dict):
     video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=True)
     video_plot_json_path = video_plot_path.replace(".md", ".json")
     
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     feedback = state.get("video_plot_feedback", "")
     human_feedback = state.get("latest_human_feedback", "")
 

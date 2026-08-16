@@ -2,10 +2,29 @@ import os
 from typing import Optional
 
 def normalize_project_path(path: Optional[str]) -> str:
-    """Normalizes path by stripping extra slashes or relative components while keeping clean format."""
+    """Normalizes path by stripping extra slashes or relative components while keeping clean format.
+    Also ensures the path resolves correctly if it's missing the pkm_dir prefix."""
     if not path:
         return ""
-    return os.path.normpath(str(path))
+    norm = os.path.normpath(str(path))
+    if not os.path.exists(norm):
+        try:
+            from core.util.config import Config
+            pkm_dir = Config().pkm_dir
+            if pkm_dir:
+                cand = os.path.join(pkm_dir, norm)
+                if os.path.exists(cand):
+                    # We want to return a path relative to the workspace, 
+                    # utilizing the local 'pkm' symlink if possible, so that 
+                    # Obsidian tools (which expect pkm/...) and filesystem tools 
+                    # (which run from workspace root) both agree.
+                    local_pkm = "pkm"
+                    if os.path.exists(os.path.join(local_pkm, norm)):
+                        return os.path.join(local_pkm, norm)
+                    return cand
+        except Exception:
+            pass
+    return norm
 
 
 def _resolve_project_doc_path(doc_path: Optional[str], project_dir: Optional[str], default_filename: str) -> str:

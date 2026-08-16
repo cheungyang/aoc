@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path
 from graphs.content_creation.utils.logging import _append_execution_log
 
+from tools.video_ocr_validator import video_ocr_validator
+
 async def evaluate_video_qc_node(state: dict):
     """Step 6b: System evaluates video text OCR, audio, and visual fidelity deterministically."""
     if state.get("error_message"):
@@ -16,7 +18,7 @@ async def evaluate_video_qc_node(state: dict):
     output_dir = normalize_project_path(state.get("output_dir", ""))
     video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-    execution_log_path = os.path.join(output_dir, "execution_log.md") if output_dir else ""
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     attempts = state.get("video_qc_attempts", 0) + 1  # Note: Attempts bump happens here
     max_reviews = state.get("max_video_reviews", 3)
     
