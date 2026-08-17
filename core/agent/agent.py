@@ -174,8 +174,9 @@ class Agent(BaseAgent):
                 for path, media_type in media_items:
                     resolved_path = path
                     if not os.path.exists(resolved_path):
+                        clean_path = path[4:] if path.startswith("pkm/") else path
                         candidates = [
-                            os.path.join(pkm_dir, path),
+                            os.path.join(pkm_dir, clean_path),
                             os.path.expanduser(f"~/{path}"),
                         ]
                         for cand in candidates:

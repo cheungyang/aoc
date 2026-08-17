@@ -1,8 +1,11 @@
 import os
 import aiohttp
 import re
+from urllib.parse import urlparse, unquote
 from langchain_core.messages import AIMessage
 from graphs.content_creation.utils.paths import normalize_project_path
+
+AUDIO_EXTENSIONS = ('.m4a', '.wav', '.mp3', '.ogg', '.aac', '.flac')
 
 async def ask_for_audio_node(state: dict):
     """Asks the user for the audio clip of the new word."""
@@ -11,54 +14,99 @@ async def ask_for_audio_node(state: dict):
     }
 
 async def receive_audio_node(state: dict):
-    """Processes the user's response to extract and download the audio clip."""
+    """Processes incoming state, messages, attachments, or direct paths to extract and download the audio clip."""
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    
+    output_dir = normalize_project_path(state.get("output_dir", ""))
+    topic = str(state.get("topic") or state.get("word") or "").strip().lower()
+
+    # 1. If state already points to a valid audio file on disk, pass it through directly
+    for k in ["source_audio_path", "audio_path", "audio_file", "audio"]:
+        val = state.get(k)
+        if val and isinstance(val, str) and os.path.isfile(val) and val.lower().endswith(AUDIO_EXTENSIONS):
+            return {"source_audio_path": val, "audio_path": val}
+
+    # 2. Collect candidate text sources (query, latest messages)
+    candidate_texts = []
+    if state.get("query"):
+        candidate_texts.append(str(state["query"]))
+
     messages = state.get("messages", [])
-    if not messages:
-        return {}
-        
-    last_message = messages[-1]
-    
-    # We only care if the last message is from the user
-    if getattr(last_message, "type", "") != "human" and getattr(last_message, "role", "") != "user" and not (hasattr(last_message, "__class__") and last_message.__class__.__name__ == "HumanMessage"):
-        return {}
-        
-    content = last_message.content
-    if isinstance(content, list):
-        content = " ".join([c.get("text", "") for c in content if c.get("type") == "text"])
-    elif not isinstance(content, str):
-        content = str(content)
-        
-    # Look for Discord attachment URL pattern
-    match = re.search(r'\[Attached file: ([^\]]+)\]\((https?://[^\)]+)\)', content)
-    if match:
-        filename = match.group(1)
-        url = match.group(2)
-        
-        # Check if it's audio
-        if filename.lower().endswith(('.m4a', '.wav', '.mp3', '.ogg', '.aac')):
-            # Ensure project_dir exists
-            if project_dir and not os.path.exists(project_dir):
-                os.makedirs(project_dir, exist_ok=True)
-                
-            audio_path = os.path.join(project_dir, filename) if project_dir else filename
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            with open(audio_path, 'wb') as f:
-                                f.write(await response.read())
-                            
-                            return {"source_audio_path": audio_path}
-                        else:
-                            return {"error_message": f"Failed to download audio from Discord. Status: {response.status}"}
-            except Exception as e:
-                return {"error_message": f"Error downloading audio: {e}"}
-                
-    # If the user provided a local path directly
-    if content and os.path.exists(content.strip()) and content.strip().lower().endswith(('.m4a', '.wav', '.mp3', '.ogg', '.aac')):
-        return {"source_audio_path": content.strip()}
-        
-    # Not found
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            content = getattr(msg, "content", "")
+            if isinstance(content, list):
+                content = " ".join([c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"])
+            elif not isinstance(content, str):
+                content = str(content)
+            if content:
+                candidate_texts.append(content)
+
+    # 3. Search candidate texts for URLs or local paths
+    for text in candidate_texts:
+        # Pattern A: Markdown attachment [Attached file: filename.m4a](https://...)
+        m_attached = re.search(r'\[Attached file:\s*([^\]]+)\]\((https?://[^\)]+)\)', text, re.IGNORECASE)
+        if m_attached:
+            filename = m_attached.group(1).strip()
+            url = m_attached.group(2).strip()
+            if filename.lower().endswith(AUDIO_EXTENSIONS) or any(ext in url.lower() for ext in AUDIO_EXTENSIONS):
+                res = await _download_audio(url, filename, project_dir or output_dir)
+                if res:
+                    return res
+
+        # Pattern B: Direct URL containing audio extension (e.g. Discord CDN or web URL)
+        m_url = re.search(r'(https?://[^\s"\'<>]+(?:\.m4a|\.wav|\.mp3|\.ogg|\.aac|\.flac)(?:\?[^\s"\'<>]*)?)', text, re.IGNORECASE)
+        if m_url:
+            url = m_url.group(1).strip()
+            parsed_path = unquote(urlparse(url).path)
+            filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
+            res = await _download_audio(url, filename, project_dir or output_dir)
+            if res:
+                return res
+
+        # Pattern C: Key-value pattern: audio: /path/to/file or audio_file: https://...
+        m_kv = re.search(r'(?:source_audio_path|audio_path|audio_file|audio)[:=]\s*["\']?([^"\'\s,]+)["\']?', text, re.IGNORECASE)
+        if m_kv:
+            target = m_kv.group(1).strip()
+            if target.startswith("http://") or target.startswith("https://"):
+                parsed_path = unquote(urlparse(target).path)
+                filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
+                res = await _download_audio(target, filename, project_dir or output_dir)
+                if res:
+                    return res
+            elif os.path.isfile(target) and target.lower().endswith(AUDIO_EXTENSIONS):
+                return {"source_audio_path": target, "audio_path": target}
+
+        # Pattern D: Local file path mentioned in text
+        for line in text.splitlines():
+            cleaned_line = line.strip().strip("'\"`")
+            if cleaned_line.lower().endswith(AUDIO_EXTENSIONS) and os.path.isfile(cleaned_line):
+                return {"source_audio_path": cleaned_line, "audio_path": cleaned_line}
+
+    # 4. Check if an audio file already exists in project_dir or output_dir
+    target_dirs = [d for d in [project_dir, output_dir] if d and os.path.isdir(d)]
+    for d in target_dirs:
+        for fname in os.listdir(d):
+            if fname.lower().endswith(AUDIO_EXTENSIONS) and not fname.startswith("."):
+                fpath = os.path.join(d, fname)
+                if os.path.isfile(fpath) and os.path.getsize(fpath) > 0:
+                    return {"source_audio_path": fpath, "audio_path": fpath}
+
     return {}
+
+async def _download_audio(url: str, filename: str, target_dir: str) -> dict:
+    if target_dir and not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+    audio_path = os.path.join(target_dir, filename) if target_dir else filename
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.read()
+                    if data:
+                        with open(audio_path, 'wb') as f:
+                            f.write(data)
+                        return {"source_audio_path": audio_path, "audio_path": audio_path}
+    except Exception as e:
+        print(f"receive_audio_node: Error downloading audio from {url}: {e}")
+    return {}
+

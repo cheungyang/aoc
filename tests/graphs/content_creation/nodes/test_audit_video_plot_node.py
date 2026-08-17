@@ -4,6 +4,9 @@ import tempfile
 import os
 import json
 import asyncio
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from graphs.content_creation.nodes.audit_video_plot_node import audit_video_plot_node
 from graphs.content_creation.schemas import PlotAudit
@@ -23,6 +26,10 @@ class TestAuditVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             
             with open(test_state["qc_playbook_path"], "w") as f:
                 f.write("Fish must be cute.")
+            
+            # Create base image file
+            with open(os.path.join(temp_dir, "fish_image.jpg"), "wb") as f:
+                f.write(b"IMAGE_BYTES")
                 
             mock_audit = PlotAudit(
                 is_approved=True,
@@ -58,6 +65,10 @@ class TestAuditVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 "output_dir": temp_dir,
             }
             
+            # Create base image file so rejection comes from QC assessment
+            with open(os.path.join(temp_dir, "cat_image.jpg"), "wb") as f:
+                f.write(b"IMAGE_BYTES")
+                
             mock_audit = PlotAudit(
                 is_approved=False,
                 rejection_target="image",

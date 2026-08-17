@@ -102,7 +102,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
         execution_log_path = kwargs.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
-        image_path = kwargs.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+        image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
         video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
         raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
         video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)

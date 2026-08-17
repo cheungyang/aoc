@@ -17,6 +17,7 @@ async def evaluate_video_qc_node(state: dict):
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
     video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     attempts = state.get("video_qc_attempts", 0) + 1  # Note: Attempts bump happens here
@@ -83,8 +84,22 @@ async def evaluate_video_qc_node(state: dict):
     is_approved = False
     rejection_target = "visual_plate"
     
-    # If audio is missing, fail on remix
-    if not audio_detected:
+    # Check if audio was expected
+    has_expected_audio = bool(state.get("audio_path") or state.get("source_audio_path"))
+    if not has_expected_audio and video_plot_path:
+        try:
+            plot_json_path = video_plot_path.replace(".md", ".json")
+            if os.path.exists(plot_json_path):
+                with open(plot_json_path, "r") as pf:
+                    p_data = json.load(pf)
+                    src_aud = p_data.get("source_audio")
+                    if src_aud and (os.path.exists(src_aud) or os.path.exists(os.path.join(project_dir, os.path.basename(src_aud)))):
+                        has_expected_audio = True
+        except Exception:
+            pass
+
+    # If audio is missing and was expected, fail on remix
+    if has_expected_audio and not audio_detected:
         rejection_target = "remix"
         feedback = f"QC Rejection: No audio stream detected in remixed video '{video_path}'."
     # If text OCR fails, fail on remix

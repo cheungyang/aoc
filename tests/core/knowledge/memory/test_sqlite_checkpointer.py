@@ -187,5 +187,101 @@ class TestSqliteCheckpointer(unittest.TestCase):
         self.assertIsNone(self.checkpointer.get_tuple({"configurable": {"thread_id": "t1"}}))
         self.assertIsNone(self.checkpointer.get_tuple({"configurable": {"thread_id": "t2"}}))
 
+    def test_sanitize_dangling_tool_calls_on_get_tuple(self):
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        
+        config = {"configurable": {"thread_id": "dangling_tool_thread"}}
+        dangling_tc = {"name": "graph_call", "args": {"graph_name": "content_creation"}, "id": "call_abc_123"}
+        
+        # Checkpoint ends with an AIMessage requesting a tool call (no ToolMessage was emitted before interrupt/crash)
+        messages = [
+            HumanMessage(content="Create video"),
+            AIMessage(content="", tool_calls=[dangling_tc])
+        ]
+        checkpoint = {
+            "id": "cp_dangling",
+            "channel_values": {
+                "messages": messages
+            }
+        }
+        
+        self.checkpointer.put(config, checkpoint, {"step": 1}, {})
+        
+        # Retrieve checkpoint via get_tuple
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        retrieved_messages = cp_tuple.checkpoint["channel_values"]["messages"]
+        
+        # Verify a synthetic ToolMessage was appended to satisfy chat history validation invariants
+        self.assertEqual(len(retrieved_messages), 3)
+        self.assertEqual(retrieved_messages[0].content, "Create video")
+        self.assertEqual(retrieved_messages[1].tool_calls[0]["id"], "call_abc_123")
+        self.assertIsInstance(retrieved_messages[2], ToolMessage)
+        self.assertEqual(retrieved_messages[2].tool_call_id, "call_abc_123")
+        self.assertIn("interrupted", retrieved_messages[2].content)
+
+    def test_sanitize_interrupted_tool_calls_between_messages(self):
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        
+        config = {"configurable": {"thread_id": "interrupted_tool_thread"}}
+        dangling_tc = {"name": "search_tool", "args": {}, "id": "call_search_456"}
+        
+        # AIMessage with tool call immediately followed by a new HumanMessage without intermediate ToolMessage
+        messages = [
+            HumanMessage(content="Step 1"),
+            AIMessage(content="", tool_calls=[dangling_tc]),
+            HumanMessage(content="Step 2 user interjection")
+        ]
+        checkpoint = {
+            "id": "cp_interrupted",
+            "channel_values": {
+                "messages": messages
+            }
+        }
+        
+        self.checkpointer.put(config, checkpoint, {"step": 1}, {})
+        
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        retrieved_messages = cp_tuple.checkpoint["channel_values"]["messages"]
+        
+        # Must be 4 messages: Human -> AI (with tc) -> Synthetic ToolMessage -> Human
+        self.assertEqual(len(retrieved_messages), 4)
+        self.assertIsInstance(retrieved_messages[1], AIMessage)
+        self.assertIsInstance(retrieved_messages[2], ToolMessage)
+        self.assertEqual(retrieved_messages[2].tool_call_id, "call_search_456")
+        self.assertEqual(retrieved_messages[3].content, "Step 2 user interjection")
+
+    def test_sanitize_preserves_already_valid_tool_messages(self):
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        
+        config = {"configurable": {"thread_id": "valid_tool_thread"}}
+        tc = {"name": "calculator", "args": {}, "id": "call_calc_789"}
+        
+        # Already valid chat history
+        messages = [
+            HumanMessage(content="Calculate"),
+            AIMessage(content="", tool_calls=[tc]),
+            ToolMessage(content="42", tool_call_id="call_calc_789"),
+            AIMessage(content="The answer is 42.")
+        ]
+        checkpoint = {
+            "id": "cp_valid",
+            "channel_values": {
+                "messages": messages
+            }
+        }
+        
+        self.checkpointer.put(config, checkpoint, {"step": 1}, {})
+        
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        retrieved_messages = cp_tuple.checkpoint["channel_values"]["messages"]
+        
+        # Exactly 4 messages preserved without modification
+        self.assertEqual(len(retrieved_messages), 4)
+        self.assertEqual(retrieved_messages[2].content, "42")
+        self.assertEqual(retrieved_messages[3].content, "The answer is 42.")
+
 if __name__ == "__main__":
     unittest.main()

@@ -72,10 +72,10 @@ async def extract_and_qc_frames_node(state: dict):
     audio_detected = False
     try:
         audio_res = await audio_stream_probe.ainvoke({"video_path": video_path})
-        if "payload" in audio_res and "True" in audio_res["payload"]:
-            audio_detected = True
-        elif "<payload>True</payload>" in audio_res:
-            audio_detected = True
+        if isinstance(audio_res, dict):
+            audio_detected = bool(audio_res.get("payload") is True or "True" in str(audio_res.get("payload")))
+        elif isinstance(audio_res, str):
+            audio_detected = "<payload>True</payload>" in audio_res or "True" in audio_res
     except Exception as e:
         print(f"ContentCreationGraph: Error probing audio stream: {e}")
 

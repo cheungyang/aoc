@@ -119,8 +119,7 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("ask_for_audio", ask_for_audio_node)
     workflow.add_node("receive_audio", receive_audio_node)
     
-    workflow.add_edge(START, "ask_for_audio")
-    workflow.add_edge("ask_for_audio", "receive_audio")
+    workflow.add_edge(START, "receive_audio")
     
     def check_audio_router(state: ContentCreationState):
         if state.get("source_audio_path"):
@@ -128,6 +127,7 @@ def create_graph(checkpointer=None, **kwargs):
         return "ask_for_audio"
         
     workflow.add_conditional_edges("receive_audio", check_audio_router, ["ask_for_audio", "ideation"])
+    workflow.add_edge("ask_for_audio", "receive_audio")
 
     def after_ideation_router(state: ContentCreationState):
         if state.get("error_message") or state.get("gate1_decision") != "approved":

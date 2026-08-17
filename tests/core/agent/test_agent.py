@@ -66,8 +66,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             await agent.execute("hello", "session1")
 
     @patch('core.agent.agent.LoggingHandler')
-    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.delete_thread')
-    async def test_execute_retry_on_corrupt_checkpointer(self, mock_delete_thread, mock_logging_handler_class):
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.rollback_last_step')
+    async def test_execute_retry_on_corrupt_checkpointer(self, mock_rollback, mock_logging_handler_class):
         # Graph invoke throws corrupt checkpointer exception on first call, succeeds on second
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock()
@@ -84,7 +84,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         # Assertions
         self.assertEqual(mock_graph.ainvoke.call_count, 2)
-        mock_delete_thread.assert_called_once_with("test-agent:session1")
+        mock_rollback.assert_called_once_with("test-agent:session1")
         self.assertEqual(reply, "Success after retry")
 
     @patch('core.agent.agent.LoggingHandler')

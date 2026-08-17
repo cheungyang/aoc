@@ -26,6 +26,65 @@ def sanitize_table_name(thread_id: str) -> str:
     return f"ctx_{clean}"
 
 
+def _sanitize_checkpoint_messages(checkpoint: Any) -> Any:
+    """Ensures every AIMessage with tool_calls in checkpoint history is followed by matching ToolMessages."""
+    if not isinstance(checkpoint, dict):
+        return checkpoint
+    channel_values = checkpoint.get("channel_values")
+    if not isinstance(channel_values, dict) or "messages" not in channel_values:
+        return checkpoint
+
+    from langchain_core.messages import AIMessage, ToolMessage
+    messages = channel_values.get("messages", [])
+    if not isinstance(messages, list) or not messages:
+        return checkpoint
+
+    sanitized = []
+    pending_tool_calls = {}
+
+    for msg in messages:
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tc_id, name in list(pending_tool_calls.items()):
+                sanitized.append(ToolMessage(
+                    content=f"Tool '{name}' execution was interrupted.",
+                    tool_call_id=tc_id,
+                    name=name
+                ))
+            pending_tool_calls.clear()
+
+            sanitized.append(msg)
+            for tc in msg.tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "tool")
+                if tc_id:
+                    pending_tool_calls[tc_id] = tc_name
+        elif isinstance(msg, ToolMessage):
+            sanitized.append(msg)
+            tc_id = getattr(msg, "tool_call_id", None)
+            if tc_id in pending_tool_calls:
+                del pending_tool_calls[tc_id]
+        else:
+            for tc_id, name in list(pending_tool_calls.items()):
+                sanitized.append(ToolMessage(
+                    content=f"Tool '{name}' execution was interrupted.",
+                    tool_call_id=tc_id,
+                    name=name
+                ))
+            pending_tool_calls.clear()
+            sanitized.append(msg)
+
+    for tc_id, name in list(pending_tool_calls.items()):
+        sanitized.append(ToolMessage(
+            content=f"Tool '{name}' execution was interrupted.",
+            tool_call_id=tc_id,
+            name=name
+        ))
+
+    channel_values["messages"] = sanitized
+    return checkpoint
+
+
+
 class SqliteCheckpointer(BaseCheckpointSaver):
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
         super().__init__()
@@ -126,7 +185,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
                 return None
 
             checkpoint_data = self._deserialize_blob(row["data"])
-            checkpoint = checkpoint_data.get("checkpoint")
+            checkpoint = _sanitize_checkpoint_messages(checkpoint_data.get("checkpoint"))
             metadata = checkpoint_data.get("metadata", {})
             entry_config = checkpoint_data.get("config", {})
             parent_config = checkpoint_data.get("parent_config")

@@ -4,6 +4,9 @@ import tempfile
 import os
 import json
 import asyncio
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from graphs.content_creation.nodes.draft_and_save_copy_node import draft_and_save_copy_node
 from graphs.content_creation.schemas import FinalCopy

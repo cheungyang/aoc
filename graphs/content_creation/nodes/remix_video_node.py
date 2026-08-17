@@ -25,7 +25,7 @@ async def remix_video_node(state: dict):
     topic = state.get("topic", "")
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
-    raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
+    raw_video_path = state.get("raw_video_path") or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
     video_path = _resolve_asset_path(output_dir, topic, "video", next_version=True)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     plot_content = state.get("video_plot_content", "")
@@ -49,8 +49,19 @@ async def remix_video_node(state: dict):
         with open(plot_json_path, "r") as pf:
             plot_data = json.load(pf)
             
-        if plot_data.get("source_audio") and os.path.exists(plot_data["source_audio"]):
-            audio_path = plot_data["source_audio"]
+        src_aud = plot_data.get("source_audio")
+        if src_aud:
+            # Check candidate locations for source audio
+            aud_cands = [
+                src_aud,
+                os.path.join(project_dir, os.path.basename(src_aud)),
+                os.path.join(output_dir, os.path.basename(src_aud)),
+                os.path.join(project_dir, src_aud)
+            ]
+            for cand in aud_cands:
+                if cand and os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                    audio_path = cand
+                    break
         if plot_data.get("overlay_text"):
             overlay_text = plot_data["overlay_text"]
     except Exception:
@@ -58,10 +69,11 @@ async def remix_video_node(state: dict):
 
     if not audio_path and output_dir:
         import glob
-        cands = glob.glob(os.path.join(output_dir, f"{topic}*.wav"))
-        audio_path = cands[0] if cands else os.path.join(output_dir, f"{topic}_wav.wav")
+        cands = glob.glob(os.path.join(output_dir, f"{topic}*.wav")) + glob.glob(os.path.join(output_dir, f"{topic}*.m4a"))
+        if cands:
+            audio_path = cands[0]
         
-    if audio_path:
+    if audio_path and os.path.isfile(audio_path) and os.path.getsize(audio_path) > 0:
         actions.append({
             "action": "add_audio",
             "audio_path": audio_path,
@@ -70,6 +82,8 @@ async def remix_video_node(state: dict):
             "original_volume": 0.6,
             "blend_mode": "blend"
         })
+    elif audio_path:
+        print(f"ContentCreationGraph: Audio file not found at '{audio_path}', skipping audio track remix.")
         
     for text in overlay_text:
         actions.append({

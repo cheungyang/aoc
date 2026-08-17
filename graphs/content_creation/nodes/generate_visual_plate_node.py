@@ -47,7 +47,7 @@ async def generate_visual_plate_node(state: dict):
             "image_path": image_path,
             "output_path": raw_video_path,
             "aspect_ratio": "9:16",
-            "duration": 5,
+            "duration": 6,
             "agent_id": "content-creator"
         })
         if "<errors>" in result and "</errors>" in result:

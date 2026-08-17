@@ -8,8 +8,16 @@ def should_continue_setup(state: dict):
 def should_continue_video_plot_audit(state: dict):
     if state.get("video_plot_qc_passed"):
         return "hitl_image_and_plot_approval"
-    target = state.get("video_plot_feedback", "")
-    if "TARGET: IMAGE" in target:
+        
+    attempts = state.get("video_plot_attempts", 0)
+    max_reviews = state.get("max_video_plot_reviews", 3)
+    if attempts >= max_reviews:
+        # After max review attempts, stop looping and escalate to human at Gate 1
+        return "hitl_image_and_plot_approval"
+
+    rejection_target = str(state.get("qc_rejection_target") or "").lower()
+    feedback = str(state.get("video_plot_feedback") or "").upper()
+    if rejection_target == "image" or "TARGET: IMAGE" in feedback or "BASE IMAGE" in feedback:
         return "setup_and_generate_image"
     return "draft_video_plot"
 
