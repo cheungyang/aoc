@@ -8,12 +8,28 @@
       "agents": [
         "read",
         "write",
-        "overwrite"
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep",
+        "move",
+        "delete",
+        "rmdir"
       ],
       "pkm/agents": [
         "read",
         "write",
-        "overwrite"
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep",
+        "move",
+        "delete",
+        "rmdir"
       ]
     }
   }

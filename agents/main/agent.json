@@ -36,7 +36,8 @@
     "job_list": {},
     "job_kill": {},
     "job_status": {},
-    "graph_call": {}
+    "graph_call": {},
+    "graph_status": {}
   },
   "voice_config": {
     "enabled": true,

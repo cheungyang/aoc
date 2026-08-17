@@ -33,23 +33,43 @@
     },
     "filesystem": {
       "agents/": [
-        "delete",
-        "rmdir",
         "read",
+        "write",
         "overwrite",
-        "ls"
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep",
+        "move",
+        "delete",
+        "rmdir"
       ],
       "skills/": [
-        "delete",
-        "rmdir",
         "read",
+        "write",
         "overwrite",
-        "ls"
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep",
+        "move",
+        "delete",
+        "rmdir"
       ],
       "graphs/": [
         "read",
+        "write",
+        "overwrite",
+        "append",
+        "replace_block",
         "ls",
-        "overwrite"
+        "find",
+        "grep",
+        "move",
+        "delete",
+        "rmdir"
       ]
     },
     "project_query": [],

@@ -21,9 +21,14 @@
         "read",
         "write",
         "overwrite",
+        "append",
+        "replace_block",
         "delete",
         "ls",
-        "rmdir"
+        "rmdir",
+        "find",
+        "grep",
+        "move"
       ]
     }
   }

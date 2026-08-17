@@ -19,7 +19,9 @@
     "filesystem": {
       "pkm/agents/<agent_id>/workspace": [
         "read",
-        "ls"
+        "ls",
+        "find",
+        "grep"
       ]
     }
   }

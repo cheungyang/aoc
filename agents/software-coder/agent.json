@@ -8,7 +8,23 @@
     "name": "Scott",
     "emoji": "💻",
     "description": "Blind Code Implementer. Executes strict TDD based on Planner specifications.",
-    "tools": {},
+    "tools": {
+        "filesystem": {
+            "pkm/agents/<agent_id>/workspace": [
+                "read",
+                "write",
+                "overwrite",
+                "append",
+                "replace_block",
+                "ls",
+                "find",
+                "grep",
+                "move",
+                "delete",
+                "rmdir"
+            ]
+        }
+    },
     "skills": [
         "tdd_execution"
     ]
