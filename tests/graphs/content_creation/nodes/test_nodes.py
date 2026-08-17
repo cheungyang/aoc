@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from graphs.content_creation.nodes.audio_nodes import ask_for_audio_node, receive_audio_node
+from graphs.content_creation.nodes.ingestion import ask_for_audio_node, ingest_audio_node as receive_audio_node
 
 class MockResponse:
     def __init__(self, data=b"FAKE_AUDIO_DATA", status=200):
@@ -33,29 +33,31 @@ class MockSession:
         pass
 
 class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.project_dir = os.path.join(self.test_dir, "project")
         os.makedirs(self.project_dir, exist_ok=True)
 
     def tearDown(self):
-        shutil.rmtree(self.test_dir)
+        shutil.rmtree(self.test_dir, ignore_errors=True)
 
     async def test_ask_for_audio_node(self):
         state = {"topic": "cat"}
         res = await ask_for_audio_node(state)
         self.assertIn("messages", res)
         self.assertEqual(len(res["messages"]), 1)
-        self.assertIsInstance(res["messages"][0], AIMessage)
+        self.assertTrue(isinstance(res["messages"][0], AIMessage))
         self.assertIn("Please upload the audio clip", res["messages"][0].content)
 
-    @patch("graphs.content_creation.nodes.audio_nodes.aiohttp.ClientSession")
+    @patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.aiohttp.ClientSession")
     async def test_receive_audio_from_discord_attachment_markdown(self, mock_session_cls):
         mock_session_cls.return_value = MockSession(MockResponse(data=b"FAKE_AUDIO_DATA_M4A"))
 
         state = {
             "topic": "dog",
             "project_dir": self.project_dir,
+            "output_dir": os.path.join(self.project_dir, "dog"),
             "messages": [
                 HumanMessage(content="[Attached file: Dog_1.m4a](https://cdn.discordapp.com/attachments/123/456/Dog_1.m4a?ex=abc)")
             ]
@@ -63,13 +65,13 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
 
         res = await receive_audio_node(state)
         self.assertIn("source_audio_path", res)
-        expected_path = os.path.join(self.project_dir, "Dog_1.m4a")
+        expected_path = os.path.join(self.project_dir, "dog", "Dog_1.m4a")
         self.assertEqual(res["source_audio_path"], expected_path)
         self.assertTrue(os.path.isfile(expected_path))
         with open(expected_path, "rb") as f:
             self.assertEqual(f.read(), b"FAKE_AUDIO_DATA_M4A")
 
-    @patch("graphs.content_creation.nodes.audio_nodes.aiohttp.ClientSession")
+    @patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.aiohttp.ClientSession")
     async def test_receive_audio_from_raw_discord_url(self, mock_session_cls):
         mock_session_cls.return_value = MockSession(MockResponse(data=b"RAW_URL_AUDIO_BYTES"))
 
@@ -77,17 +79,18 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         state = {
             "topic": "cat",
             "project_dir": self.project_dir,
+            "output_dir": os.path.join(self.project_dir, "cat"),
             "query": raw_url,
             "messages": [HumanMessage(content=raw_url)]
         }
 
         res = await receive_audio_node(state)
         self.assertIn("source_audio_path", res)
-        expected_path = os.path.join(self.project_dir, "Cat_1.m4a")
+        expected_path = os.path.join(self.project_dir, "cat", "Cat_1.m4a")
         self.assertEqual(res["source_audio_path"], expected_path)
         self.assertTrue(os.path.isfile(expected_path))
 
-    @patch("graphs.content_creation.nodes.audio_nodes.aiohttp.ClientSession")
+    @patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.aiohttp.ClientSession")
     async def test_receive_audio_from_query_key_value(self, mock_session_cls):
         mock_session_cls.return_value = MockSession(MockResponse(data=b"HORSE_AUDIO_DATA"))
 
@@ -95,12 +98,13 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         state = {
             "topic": "horse",
             "project_dir": self.project_dir,
+            "output_dir": os.path.join(self.project_dir, "horse"),
             "query": query
         }
 
         res = await receive_audio_node(state)
         self.assertIn("source_audio_path", res)
-        expected_path = os.path.join(self.project_dir, "horse_audio.wav")
+        expected_path = os.path.join(self.project_dir, "horse", "horse_audio.wav")
         self.assertEqual(res["source_audio_path"], expected_path)
         self.assertTrue(os.path.isfile(expected_path))
 
@@ -132,6 +136,25 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         res = await receive_audio_node(state)
         self.assertEqual(res.get("source_audio_path"), existing_audio)
 
+    @patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.aiohttp.ClientSession")
+    async def test_receive_audio_downloads_to_inferred_output_dir_when_output_dir_omitted(self, mock_session_cls):
+        mock_session_cls.return_value = MockSession(MockResponse(data=b"INFERRED_OUTPUT_DIR_BYTES"))
+
+        state = {
+            "topic": "puppy",
+            "project_dir": self.project_dir,
+            "messages": [
+                HumanMessage(content="[Attached file: Puppy_Audio.m4a](https://cdn.discordapp.com/attachments/1/2/Puppy_Audio.m4a)")
+            ]
+        }
+
+        res = await receive_audio_node(state)
+        self.assertIn("source_audio_path", res)
+        expected_path = os.path.join(self.project_dir, "puppy", "Puppy_Audio.m4a")
+        self.assertEqual(res["source_audio_path"], expected_path)
+        self.assertTrue(os.path.isfile(expected_path))
+        self.assertFalse(os.path.exists(os.path.join(self.project_dir, "Puppy_Audio.m4a")))
+
     async def test_receive_audio_missing_returns_empty(self):
         state = {
             "topic": "bird",
@@ -140,7 +163,7 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         }
 
         res = await receive_audio_node(state)
-        self.assertEqual(res, {})
+        self.assertNotIn("source_audio_path", res)
 
 if __name__ == "__main__":
     unittest.main()

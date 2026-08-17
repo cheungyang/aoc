@@ -121,12 +121,30 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
                 "query": query,
                 "messages": [HumanMessage(content=query)]
             }
+            
+            # Determine as_node to preserve execution progression without resetting next to __start__
+            as_node = None
+            if hasattr(graph, "get_graph"):
+                try:
+                    drawable = graph.get_graph()
+                    snap_curr = graph.get_state(config)
+                    next_targets = getattr(snap_curr, "next", ())
+                    if next_targets and len(next_targets) > 0:
+                        tgt = next_targets[0]
+                        for edge in drawable.edges:
+                            if edge.target == tgt and edge.source != "__start__":
+                                as_node = edge.source
+                                break
+                except Exception:
+                    pass
+
+            kwargs_up = {"as_node": as_node} if as_node else {}
             if hasattr(graph, "aupdate_state") and callable(getattr(graph, "aupdate_state")):
-                res_up = graph.aupdate_state(config, update_payload)
+                res_up = graph.aupdate_state(config, update_payload, **kwargs_up)
                 if inspect.isawaitable(res_up):
                     await res_up
             elif hasattr(graph, "update_state") and callable(getattr(graph, "update_state")):
-                graph.update_state(config, update_payload)
+                graph.update_state(config, update_payload, **kwargs_up)
             result = await graph.ainvoke(None, config=config)
         else:
             result = await graph.ainvoke(inputs, config=config)

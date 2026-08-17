@@ -80,6 +80,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     if not output_dir_param and project_dir:
         output_dir_param = os.path.join(project_dir, topic)
 
+    source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
     if not output_dir_param and not project_dir:
         error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_dir: 'path/to/project' or output_dir: 'path/to/project/words/topic')."
         manifest_path = kwargs.get("manifest_path", "")
@@ -108,11 +109,13 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
         copy_path = _resolve_asset_path(output_dir, topic, "copy", next_version=False)
         
-        audio_path = kwargs.get("audio_path") or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
+        source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
+        audio_path = kwargs.get("audio_path") or source_audio or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
         overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
 
     return {
         "project_dir": project_dir,
+        "output_dir": output_dir,
         "topic": topic,
         "session_id": session_id,
         "thread_id": thread_id,
@@ -120,38 +123,23 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "creator_instructions_path": creator_instructions_path,
         "qc_playbook_path": qc_playbook_path,
         "execution_log_path": execution_log_path,
-        "output_dir": output_dir,
+        "source_audio_path": source_audio,
+        "overlay_text": overlay_text,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
         "raw_video_path": raw_video_path if output_dir else "",
-        "video_path": video_path,
+        "remixed_video_path": video_path,
+        "extracted_frames_path": [],
         "copy_path": copy_path,
-        "audio_path": audio_path,
-        "overlay_text": overlay_text,
-        "audio_verified": False,
-        "remix_actions": [],
-        "image_prompt": "",
-        "video_plot_content": "",
         "video_plot_qc_passed": False,
-        "video_plot_feedback": "",
-        "extracted_frames": [],
-        "qc_timestamps": qc_timestamps,
         "video_qc_passed": False,
+        "video_qc_attempts": 0,
         "video_qc_feedback": "",
-        "video_qc_rejection_target": "visual_plate",
-        "copy_text": "",
-        "final_package": {},
         "gate1_decision": "approved",
         "gate2_decision": "approved",
         "latest_human_feedback": "",
-        "revision_history": [],
-        "clarification_question": "",
-        "video_plot_attempts": 0,
-        "max_video_plot_reviews": kwargs.get("max_video_plot_reviews", 3),
-        "video_qc_attempts": 0,
-        "max_video_reviews": kwargs.get("max_video_reviews", 3),
+        "final_package": {},
         "messages": [HumanMessage(content=formatted_query)],
-        "query": formatted_query,
         "error_message": error_msg
     }
 
@@ -162,13 +150,13 @@ def format_output(state: Dict[str, Any]) -> str:
             return state["clarification_question"]
         if state.get("video_qc_attempts", 0) >= state.get("max_video_reviews", 3) and not state.get("video_qc_passed"):
             topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-            video_path = state.get("video_path", "")
+            remixed_video_path = state.get("remixed_video_path") or state.get("video_path", "")
             feedback = state.get("video_qc_feedback") or state.get("video_generation_error") or "Video file missing or failed QC checks."
             attempts = state.get("video_qc_attempts", 3)
             return (
                 f"🛑 **[HITL INTERVENTION REQUIRED: Video Generation/QC Failed]**\n\n"
                 f"- **Topic**: `{topic}`\n"
-                f"- **Target Video Path**: `{video_path}`\n"
+                f"- **Target Video Path**: `{remixed_video_path}`\n"
                 f"- **Failed Attempts**: `{attempts}`\n"
                 f"- **Root Cause**: {feedback}\n\n"
                 f"The workflow has hard-blocked delivery because valid video assets could not be verified on disk.\n\n"
@@ -176,22 +164,19 @@ def format_output(state: Dict[str, Any]) -> str:
                 f"1. Reply **'retry'** (or provide updated motion prompt instructions) to attempt video generation again.\n"
                 f"2. Reply **'abort'** to stop the workflow."
             )
-        if state.get("final_package") and "copy_text" in state["final_package"]:
-            return format_gate2_presentation(state)
-        if state.get("copy_text"):
-            return format_gate2_presentation(state)
-        if state.get("video_plot_qc_passed") or (state.get("image_path") and state.get("video_plot_content")):
-            return format_gate1_presentation(state)
         if state.get("error_message"):
             err = state["error_message"]
             return err if err.startswith("Content creation failed:") else f"Content creation failed: {err}"
         if "messages" in state and state["messages"]:
-            last_msg = state["messages"][-1]
-            if hasattr(last_msg, "content"):
-                return last_msg.content
-            elif isinstance(last_msg, dict) and "content" in last_msg:
-                return last_msg["content"]
-            return str(last_msg)
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, AIMessage):
+                    return msg.content
+                elif isinstance(msg, dict) and msg.get("role") == "assistant" and "content" in msg:
+                    return msg["content"]
+        if state.get("final_package") or state.get("copy_path"):
+            return format_gate2_presentation(state)
+        if state.get("video_plot_qc_passed") or state.get("video_plot_path"):
+            return format_gate1_presentation(state)
     return str(state)
 
 
@@ -203,8 +188,8 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
 
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    plot_content = state.get("video_plot_content", "")
-    if not plot_content and video_plot_path and os.path.exists(video_plot_path):
+    plot_content = ""
+    if video_plot_path and os.path.exists(video_plot_path):
         try:
             with open(video_plot_path, "r", encoding="utf-8") as f:
                 plot_content = f.read()
@@ -222,8 +207,6 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
     )
 
 
-
-
 def format_gate2_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 2 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
@@ -231,24 +214,25 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    video_path = state.get("video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    raw_video_path = state.get("raw_video_path") or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
+    remixed_video_path = state.get("remixed_video_path") or state.get("video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
     copy_path = state.get("copy_path") or _resolve_asset_path(output_dir, topic, "copy", next_version=False)
-    copy_text = state.get("copy_text", "")
-    if not copy_text and copy_path and os.path.exists(copy_path):
+    copy_text = ""
+    if copy_path and os.path.exists(copy_path):
         try:
             with open(copy_path, "r", encoding="utf-8") as f:
                 copy_text = f.read()
         except Exception:
             pass
 
-    video_exists = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
-    video_tag = f"`{video_path}`" if video_exists else f"`{video_path}` ⚠️ **[MISSING / 0 BYTES ON DISK - CANNOT FINALIZE]**"
+    video_exists = bool(remixed_video_path and os.path.isfile(remixed_video_path) and os.path.getsize(remixed_video_path) > 0)
+    video_tag = f"`{remixed_video_path}`" if video_exists else f"`{remixed_video_path}` ⚠️ **[MISSING / 0 BYTES ON DISK - CANNOT FINALIZE]**"
     image_exists = bool(image_path and os.path.isfile(image_path) and os.path.getsize(image_path) > 0)
     image_tag = f"`{image_path}`" if image_exists else f"`{image_path}` ⚠️ **[MISSING ON DISK]**"
     copy_exists = bool(copy_path and os.path.isfile(copy_path) and os.path.getsize(copy_path) > 0)
     copy_tag = f"`{copy_path}`" if copy_exists else f"`{copy_path}` ⚠️ **[MISSING ON DISK]**"
 
-    video_xml = f"<videos>\n  <video path=\"{video_path}\"/>\n</videos>\n\n" if video_exists else ""
+    video_xml = f"<videos>\n  <video path=\"{remixed_video_path}\"/>\n</videos>\n\n" if video_exists else ""
 
     return (
         f"🎉 **[HITL GATE 2: Final Package Review & Approval]**\n\n"
@@ -256,7 +240,7 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
         f"### 📦 Deliverables Package\n"
         f"- **Base Image**: {image_tag}\n"
         f"- **Video Plot Doc**: `{video_plot_path}`\n"
-        f"- **Master Visual Plate**: {video_tag}\n"
+        f"- **Master Remixed Video**: {video_tag}\n"
         f"- **Publication Copy File**: {copy_tag}\n\n"
         f"<images>\n  <image path=\"{image_path}\"/>\n</images>\n\n"
         f"{video_xml}"

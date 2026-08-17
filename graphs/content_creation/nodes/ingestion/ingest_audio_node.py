@@ -7,29 +7,33 @@ from graphs.content_creation.utils.paths import normalize_project_path
 
 AUDIO_EXTENSIONS = ('.m4a', '.wav', '.mp3', '.ogg', '.aac', '.flac')
 
-async def ask_for_audio_node(state: dict):
-    """Asks the user for the audio clip of the new word."""
+async def ask_for_audio_node(state: dict) -> dict:
+    """Asks the user to upload an audio clip."""
     return {
         "messages": [AIMessage(content="Please upload the audio clip (m4a or wav) for the new word.")]
     }
 
-async def receive_audio_node(state: dict):
-    """Processes incoming state, messages, attachments, or direct paths to extract and download the audio clip."""
+async def ingest_audio_node(state: dict) -> dict:
+    """Macro-Node 1: Ingests audio from message attachments, query parameters, or existing directory files."""
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir", ""))
     topic = str(state.get("topic") or state.get("word") or "").strip().lower()
 
+    if not output_dir and project_dir and topic:
+        output_dir = normalize_project_path(os.path.join(project_dir, topic))
+    elif not output_dir and project_dir:
+        output_dir = project_dir
+
     # 1. If state already points to a valid audio file on disk, pass it through directly
-    for k in ["source_audio_path", "audio_path", "audio_file", "audio"]:
+    for k in ["source_audio_path", "audio_file", "audio"]:
         val = state.get(k)
         if val and isinstance(val, str) and os.path.isfile(val) and val.lower().endswith(AUDIO_EXTENSIONS):
-            return {"source_audio_path": val, "audio_path": val}
+            return {"source_audio_path": val, "output_dir": output_dir}
 
     # 2. Collect candidate text sources (query, latest messages)
     candidate_texts = []
     if state.get("query"):
         candidate_texts.append(str(state["query"]))
-
     messages = state.get("messages", [])
     if isinstance(messages, list):
         for msg in reversed(messages):
@@ -49,8 +53,9 @@ async def receive_audio_node(state: dict):
             filename = m_attached.group(1).strip()
             url = m_attached.group(2).strip()
             if filename.lower().endswith(AUDIO_EXTENSIONS) or any(ext in url.lower() for ext in AUDIO_EXTENSIONS):
-                res = await _download_audio(url, filename, project_dir or output_dir)
+                res = await _download_audio(url, filename, output_dir)
                 if res:
+                    res["output_dir"] = output_dir
                     return res
 
         # Pattern B: Direct URL containing audio extension (e.g. Discord CDN or web URL)
@@ -59,39 +64,41 @@ async def receive_audio_node(state: dict):
             url = m_url.group(1).strip()
             parsed_path = unquote(urlparse(url).path)
             filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
-            res = await _download_audio(url, filename, project_dir or output_dir)
+            res = await _download_audio(url, filename, output_dir)
             if res:
+                res["output_dir"] = output_dir
                 return res
 
         # Pattern C: Key-value pattern: audio: /path/to/file or audio_file: https://...
-        m_kv = re.search(r'(?:source_audio_path|audio_path|audio_file|audio)[:=]\s*["\']?([^"\'\s,]+)["\']?', text, re.IGNORECASE)
+        m_kv = re.search(r'(?:source_audio_path|audio_file|audio)[:=]\s*["\']?([^"\'\s,]+)["\']?', text, re.IGNORECASE)
         if m_kv:
             target = m_kv.group(1).strip()
             if target.startswith("http://") or target.startswith("https://"):
                 parsed_path = unquote(urlparse(target).path)
                 filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
-                res = await _download_audio(target, filename, project_dir or output_dir)
+                res = await _download_audio(target, filename, output_dir)
                 if res:
+                    res["output_dir"] = output_dir
                     return res
             elif os.path.isfile(target) and target.lower().endswith(AUDIO_EXTENSIONS):
-                return {"source_audio_path": target, "audio_path": target}
+                return {"source_audio_path": target, "output_dir": output_dir}
 
         # Pattern D: Local file path mentioned in text
         for line in text.splitlines():
             cleaned_line = line.strip().strip("'\"`")
             if cleaned_line.lower().endswith(AUDIO_EXTENSIONS) and os.path.isfile(cleaned_line):
-                return {"source_audio_path": cleaned_line, "audio_path": cleaned_line}
+                return {"source_audio_path": cleaned_line, "output_dir": output_dir}
 
-    # 4. Check if an audio file already exists in project_dir or output_dir
-    target_dirs = [d for d in [project_dir, output_dir] if d and os.path.isdir(d)]
+    # 4. Check if an audio file already exists in output_dir (or project_dir)
+    target_dirs = [d for d in [output_dir, project_dir] if d and os.path.isdir(d)]
     for d in target_dirs:
         for fname in os.listdir(d):
             if fname.lower().endswith(AUDIO_EXTENSIONS) and not fname.startswith("."):
                 fpath = os.path.join(d, fname)
                 if os.path.isfile(fpath) and os.path.getsize(fpath) > 0:
-                    return {"source_audio_path": fpath, "audio_path": fpath}
+                    return {"source_audio_path": fpath, "output_dir": output_dir}
 
-    return {}
+    return {"output_dir": output_dir}
 
 async def _download_audio(url: str, filename: str, target_dir: str) -> dict:
     if target_dir and not os.path.exists(target_dir):
@@ -105,8 +112,7 @@ async def _download_audio(url: str, filename: str, target_dir: str) -> dict:
                     if data:
                         with open(audio_path, 'wb') as f:
                             f.write(data)
-                        return {"source_audio_path": audio_path, "audio_path": audio_path}
+                        return {"source_audio_path": audio_path}
     except Exception as e:
-        print(f"receive_audio_node: Error downloading audio from {url}: {e}")
+        print(f"ingest_audio_node: Error downloading audio from {url}: {e}")
     return {}
-

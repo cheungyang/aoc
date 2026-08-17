@@ -1,83 +1,55 @@
 import os
-import re
-from typing import Dict, Any, Optional
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import StateGraph, START, END
-
-# Import state and helper types
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional, List
 from typing_extensions import TypedDict
 from langchain_core.messages import AnyMessage
+from langgraph.graph import StateGraph, START, END
 
-from graphs.content_creation.subgraph_ideation import AssetIdeationState
-from graphs.content_creation.subgraph_video import VideoProductionState
-from graphs.content_creation.subgraph_copywriting import CopywritingState
-
-class OverallProjectState(TypedDict, total=False):
+# Lean & Unified State Schema
+class ContentCreationState(TypedDict, total=False):
+    # 1. Project Context & Guidelines
     project_dir: str
+    output_dir: str
     topic: str
     session_id: str
     thread_id: str
+    messages: List[AnyMessage]
+    error_message: str
     manifest_path: str
     creator_instructions_path: str
     qc_playbook_path: str
     execution_log_path: str
-    output_dir: str
-    messages: List[AnyMessage]
-    query: str
-    error_message: str
+
+    # 2. Asset File Inputs & Deliverable Paths
+    source_audio_path: str
+    overlay_text: str
+    image_path: str
+    video_plot_path: str
+    raw_video_path: str
+    remixed_video_path: str
+    extracted_frames_path: List[str]
+    copy_path: str
+
+    # 3. Execution Flags & HITL Decision Routing
+    video_plot_qc_passed: bool
+    video_qc_passed: bool
+    video_qc_attempts: int
+    video_qc_feedback: str
+    gate1_decision: str
+    gate2_decision: str
     latest_human_feedback: str
     final_package: Dict[str, Any]
-    source_audio_path: str
 
-class ContentCreationState(OverallProjectState, AssetIdeationState, VideoProductionState, CopywritingState):
-    revision_history: List[Dict[str, Any]]
+# Import the 3 Macro Nodes
+from graphs.content_creation.nodes.ingestion.ingest_audio_node import ingest_audio_node, ask_for_audio_node
+from graphs.content_creation.nodes.ideation.ideate_package_node import ideate_package_node
+from graphs.content_creation.nodes.production.produce_deliverables_node import produce_deliverables_node
 
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path
-
-# Import execution nodes
-from graphs.content_creation.nodes import (
-    setup_and_generate_image_node,
-    draft_video_plot_node,
-    audit_video_plot_node,
-    generate_visual_plate_node,
-    remix_video_node,
-    extract_and_qc_frames_node,
-    evaluate_video_qc_node,
-    draft_and_save_copy_node,
-    ask_for_audio_node,
-    receive_audio_node
-)
-
-# Import HITL nodes, classifiers, and routers
-from graphs.content_creation.nodes import (
-    process_gate1_feedback_node,
-    clarify_gate1_node,
-    hitl_final_package_approval_node,
-    process_gate2_feedback_node,
-    clarify_gate2_node
-)
-from graphs.content_creation.routers import (
-    should_continue_setup,
-    should_continue_video_plot_audit,
-    should_continue_hitl_gate_1,
-    should_continue_video_qc,
-    should_continue_hitl_gate_2
-)
-
-
-# ==========================================
-# Graph Compilation
-# ==========================================
-from graphs.content_creation.subgraph_ideation import create_ideation_subgraph
-from graphs.content_creation.subgraph_video import create_video_production_subgraph
-from graphs.content_creation.subgraph_copywriting import create_copywriting_subgraph
-
+from graphs.content_creation.utils.classifiers import classify_gate1_intent, classify_gate2_intent
 from graphs.content_creation.adapters import prepare_input, format_output
 
 
 def create_graph(checkpointer=None, **kwargs):
-    """Compiles the master content-creation graph orchestrating parallel sub-graphs."""
+    """Compiles the 3-macro-node content creation StateGraph."""
     if checkpointer is None:
         try:
             from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
@@ -86,112 +58,65 @@ def create_graph(checkpointer=None, **kwargs):
             from langgraph.checkpoint.memory import MemorySaver
             checkpointer = MemorySaver()
 
-    ideation_sg = create_ideation_subgraph(checkpointer=checkpointer)
-    video_sg = create_video_production_subgraph(checkpointer=checkpointer)
-    copy_sg = create_copywriting_subgraph(checkpointer=checkpointer)
-
     workflow = StateGraph(ContentCreationState)
 
-    # Add the sub-graphs as adapter nodes for STRICT state isolation
-    async def run_ideation(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "image_prompt", "video_plot_path", "video_plot_content", "video_plot_attempts", "max_video_plot_reviews", "video_plot_qc_passed", "video_plot_feedback", "gate1_decision", "clarification_question", "latest_human_feedback", "source_audio_path", "audio_path", "overlay_text"]
-        subset = {k: state.get(k) for k in keys if k in state}
-        return await ideation_sg.ainvoke(subset)
-
-    async def run_video(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "image_path", "raw_video_path", "video_path", "audio_path", "overlay_text", "remix_actions", "audio_verified", "extracted_frames", "qc_timestamps", "video_qc_passed", "video_qc_feedback", "video_qc_rejection_target", "video_persisted", "video_generation_error", "video_qc_attempts", "failed_node", "debugger_attempts", "max_video_reviews", "video_plot_content", "video_plot_path"]
-        subset = {k: state.get(k) for k in keys if k in state}
-        return await video_sg.ainvoke(subset)
-        
-    async def run_copy(state: dict):
-        keys = ["project_dir", "topic", "output_dir", "manifest_path", "creator_instructions_path", "qc_playbook_path", "execution_log_path", "error_message", "copy_path", "copy_text", "gate2_decision", "latest_human_feedback"]
-        subset = {k: state.get(k) for k in keys if k in state}
-        return await copy_sg.ainvoke(subset)
-
-    workflow.add_node("ideation", run_ideation)
-    workflow.add_node("video_production", run_video)
-    workflow.add_node("copywriting", run_copy)
-
-    # Add Gate 1 & Gate 2 HITL nodes and routers
-    workflow.add_node("process_gate1_feedback", process_gate1_feedback_node)
-    workflow.add_node("clarify_gate1", clarify_gate1_node)
-    workflow.add_node("hitl_final_package_approval", hitl_final_package_approval_node)
-    workflow.add_node("process_gate2_feedback", process_gate2_feedback_node)
-    workflow.add_node("clarify_gate2", clarify_gate2_node)
-
-    # Audio input at the very start
+    # 1. Register the Macro Nodes
+    workflow.add_node("ingest_audio", ingest_audio_node)
     workflow.add_node("ask_for_audio", ask_for_audio_node)
-    workflow.add_node("receive_audio", receive_audio_node)
-    
-    workflow.add_edge(START, "receive_audio")
-    
+    workflow.add_node("ideate_package", ideate_package_node)
+    workflow.add_node("produce_deliverables", produce_deliverables_node)
+
+    # 2. Graph Wiring
+    workflow.add_edge(START, "ingest_audio")
+
     def check_audio_router(state: ContentCreationState):
         if state.get("source_audio_path"):
-            return "ideation"
+            return "ideate_package"
         return "ask_for_audio"
-        
-    workflow.add_conditional_edges("receive_audio", check_audio_router, ["ask_for_audio", "ideation"])
-    workflow.add_edge("ask_for_audio", "receive_audio")
 
-    # Gate 1 Feedback Routing (runs after ideation pause when user responds)
-    workflow.add_edge("ideation", "process_gate1_feedback")
+    workflow.add_conditional_edges(
+        "ingest_audio",
+        check_audio_router,
+        ["ask_for_audio", "ideate_package"]
+    )
+    workflow.add_edge("ask_for_audio", "ingest_audio")
 
-    def after_gate1_router(state: ContentCreationState):
+    # HITL Gate 1 Router
+    def gate1_router(state: ContentCreationState):
         if state.get("error_message"):
             return END
-        decision = state.get("gate1_decision", "approved")
-        if decision == "approved":
-            # Advance to parallel video production and copywriting
-            return ["video_production", "copywriting"]
-        elif decision in ["revise_image", "revise_plot"]:
-            return "ideation"
-        elif decision == "clarify":
-            return "clarify_gate1"
-        return END
+        feedback = state.get("latest_human_feedback") or ""
+        decision = classify_gate1_intent(feedback) if feedback else state.get("gate1_decision", "approved")
+        if decision in ["revise_image", "revise_plot"]:
+            return "ideate_package"
+        return "produce_deliverables"
 
-    workflow.add_conditional_edges("process_gate1_feedback", after_gate1_router, ["video_production", "copywriting", "ideation", "clarify_gate1", END])
-    workflow.add_edge("clarify_gate1", "ideation")
+    workflow.add_conditional_edges(
+        "ideate_package",
+        gate1_router,
+        ["ideate_package", "produce_deliverables", END]
+    )
 
-    # Fan-in from parallel branches
-    def join_production(state: dict):
-        # Empty node to sync parallel branches
-        return {}
-
-    workflow.add_node("join_production", join_production)
-    workflow.add_edge("video_production", "join_production")
-    workflow.add_edge("copywriting", "join_production")
-    
-    def after_production_router(state: ContentCreationState):
+    # HITL Gate 2 Router (supports revise_video, revise_remix, and revise_copy)
+    def gate2_router(state: ContentCreationState):
         if state.get("error_message"):
             return END
-        return "hitl_final_package_approval"
-
-    workflow.add_conditional_edges("join_production", after_production_router, {"hitl_final_package_approval": "hitl_final_package_approval", END: END})
-
-    workflow.add_edge("hitl_final_package_approval", "process_gate2_feedback")
-    
-    # Gate 2 Feedback routing
-    def master_feedback_router(state: ContentCreationState):
-        decision = state.get("gate2_decision")
-        if decision == "approved":
-            return END
-        elif decision == "revise_copy":
-            return "copywriting"
-        elif decision == "revise_video":
-            return "video_production"
-        elif decision == "clarify":
-            return "clarify_gate2"
+        feedback = state.get("latest_human_feedback") or ""
+        decision = classify_gate2_intent(feedback) if feedback else state.get("gate2_decision", "approved")
+        if decision in ["revise_copy", "revise_video", "revise_remix"]:
+            return "produce_deliverables"
         return END
 
-    workflow.add_conditional_edges("process_gate2_feedback", master_feedback_router)
-    workflow.add_edge("clarify_gate2", "hitl_final_package_approval")
+    workflow.add_conditional_edges(
+        "produce_deliverables",
+        gate2_router,
+        ["produce_deliverables", END]
+    )
 
     return workflow.compile(
         checkpointer=checkpointer,
-        interrupt_after=["ideation", "hitl_final_package_approval", "ask_for_audio"]
+        interrupt_after=["ask_for_audio", "ideate_package", "produce_deliverables"]
     )
 
 # Default compiled instance
 graph = create_graph()
-
-

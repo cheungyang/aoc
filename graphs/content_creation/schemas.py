@@ -11,7 +11,7 @@ class VideoPlot(BaseModel):
     source_image: str = Field(description="Path to the source image")
     source_audio: str = Field(description="Path to the source audio")
     motion_prompt: str = Field(description="Motion prompt for Google Veo 3")
-    overlay_text: list[str] = Field(description="List of text overlays")
+    overlay_text: str = Field(description="Text overlay for the video")
     markdown_content: str = Field(description="The full human-readable markdown presentation")
 
 class FinalCopy(BaseModel):

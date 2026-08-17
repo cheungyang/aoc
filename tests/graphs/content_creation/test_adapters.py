@@ -29,7 +29,7 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
         self.assertTrue("puppy_image" in input_data["image_path"])
         self.assertTrue("puppy_video_plot" in input_data["video_plot_path"])
         self.assertTrue("puppy_raw_video" in input_data["raw_video_path"])
-        self.assertTrue("puppy_video" in input_data["video_path"])
+        self.assertTrue("puppy_video" in input_data["remixed_video_path"])
         self.assertTrue("puppy_copy" in input_data["copy_path"])
         self.assertEqual(input_data["thread_id"], "test_sess_1")
         self.assertFalse(input_data["video_plot_qc_passed"])
@@ -79,7 +79,6 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
             "video_plot_version": 2,
             "image_path": "pkm/wiki/software/ayla-first-words/words/fish/fish_image.jpg",
             "video_plot_path": "pkm/wiki/software/ayla-first-words/words/fish/fish_video_plot.md",
-            "video_plot_content": "## Motion Prompt\n> Ayla in mascot suit.",
             "video_plot_qc_passed": True
         }
         out_g1 = format_output(state_gate1_v2)
@@ -90,12 +89,11 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
         state_with_copy = {
             "topic": "fish",
             "output_dir": "pkm/wiki/software/ayla-first-words/words/fish",
-            "copy_version": 2,
-            "copy_text": "Meet the cute puppy! #Stories"
+            "copy_path": "pkm/wiki/software/ayla-first-words/words/fish/fish_copy.md",
+            "remixed_video_path": "pkm/wiki/software/ayla-first-words/words/fish/fish_video.mp4"
         }
         out_g2 = format_output(state_with_copy)
         self.assertIn("- **Publication Copy File**: `pkm/wiki/software/ayla-first-words/words/fish/fish_copy.md`", out_g2)
-        self.assertIn("Meet the cute puppy! #Stories", out_g2)
 
         state_with_clarify = {"clarification_question": "Please specify image or plot"}
         self.assertEqual(format_output(state_with_clarify), "Please specify image or plot")
@@ -131,7 +129,7 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
         self.assertTrue(input_data["execution_log_path"].startswith(output_dir))
         self.assertTrue(input_data["image_path"].startswith(output_dir))
         self.assertTrue(input_data["video_plot_path"].startswith(output_dir))
-        self.assertTrue(input_data["video_path"].startswith(output_dir))
+        self.assertTrue(input_data["remixed_video_path"].startswith(output_dir))
         self.assertTrue(input_data["copy_path"].startswith(output_dir))
 
     def test_custom_file_args_coerced_under_project_and_output_dirs(self):
