@@ -10,7 +10,7 @@ from tools.graph_status import graph_status
 from core.util import format_tool_response
 from core.agent.job_manager import current_channel_name, current_job_id, Job
 
-class TestGraphStatusTool(unittest.TestCase):
+class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_status.GraphsLoader')
     @patch('tools.graph_status.JobManager')
@@ -61,6 +61,34 @@ class TestGraphStatusTool(unittest.TestCase):
         self.assertIn("Topic: 'fish'", result)
         self.assertIn("Project: 'pkm/wiki/software/ayla-first-words'", result)
         self.assertIn("relay", result.lower())
+
+    @patch('tools.graph_status.GraphsLoader')
+    @patch('tools.graph_status.JobManager')
+    async def test_graph_status_ainvoke(self, mock_job_manager_class, mock_graphs_loader_class):
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+        mock_loader.list_graph_names.return_value = ["content_creation"]
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.next = ("hitl_image_and_plot_approval",)
+        mock_snapshot.values = {
+            "topic": "fish",
+            "project_dir": "pkm/wiki/software/ayla-first-words",
+            "image_path": "images/fish.png",
+            "video_plot_path": "plots/fish.md"
+        }
+
+        mock_graph = MagicMock()
+        mock_graph.get_state.return_value = mock_snapshot
+        mock_loader.get_graph.return_value = {"graph": mock_graph}
+
+        mock_jm = MagicMock()
+        mock_job_manager_class.return_value = mock_jm
+        mock_jm.get_jobs.return_value = []
+
+        result = await graph_status.ainvoke({"channel": "content-creation"})
+        self.assertIn("Active Graph: content_creation", result)
+        self.assertIn("hitl_image_and_plot_approval", result)
 
     @patch('tools.graph_status.GraphsLoader')
     @patch('tools.graph_status.JobManager')
