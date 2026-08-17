@@ -7,9 +7,16 @@ class PollButtonView(View):
         self.poll_data = poll_data
         self.channel = channel
         
-        for option in poll_data["options"]:
-            button = Button(label=option["text"], emoji=option["emoji"] if option["emoji"] else None)
-            button.callback = self.create_callback(option["response"])
+        options = (poll_data.get("options") or [])[:25]
+        for option in options:
+            label = option.get("text") or ""
+            if len(label) > 80:
+                label = label[:77] + "..."
+            emoji = option.get("emoji") if option.get("emoji") else None
+            if not label and not emoji:
+                label = "Select"
+            button = Button(label=label if label else None, emoji=emoji)
+            button.callback = self.create_callback(option.get("response", ""))
             self.add_item(button)
 
     def create_callback(self, response_text):
@@ -29,26 +36,33 @@ class PollSelectView(View):
         self.channel = channel
         
         options = []
-        for i, option in enumerate(poll_data["options"]):
+        raw_options = (poll_data.get("options") or [])[:25]
+        for i, option in enumerate(raw_options):
+            label = option.get("text") or ""
+            if len(label) > 100:
+                label = label[:97] + "..."
+            if not label:
+                label = f"Option {i + 1}"
             options.append(discord.SelectOption(
-                label=option["text"],
+                label=label,
                 value=str(i), # Use index as value
-                emoji=option["emoji"] if option["emoji"] else None
+                emoji=option.get("emoji") if option.get("emoji") else None
             ))
             
-        select = Select(
-            placeholder="Select options...",
-            min_values=1,
-            max_values=len(options),
-            options=options
-        )
-        select.callback = self.callback
-        self.add_item(select)
+        if options:
+            select = Select(
+                placeholder="Select options...",
+                min_values=1,
+                max_values=len(options),
+                options=options
+            )
+            select.callback = self.callback
+            self.add_item(select)
 
     async def callback(self, interaction: discord.Interaction):
         # Get selected options
         selected_indices = [int(val) for val in interaction.data["values"]]
-        responses = [self.poll_data["options"][i]["response"] for i in selected_indices]
+        responses = [self.poll_data["options"][i]["response"] for i in selected_indices if i < len(self.poll_data.get("options", []))]
         
         # Combine responses
         message_text = f"{interaction.user.mention}: " + ", ".join(responses)

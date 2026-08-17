@@ -54,12 +54,13 @@ def compress_image_bytes(image_bytes: bytes, max_dim: int = 1560, quality: int =
 def get_formatting_prompt():
     return """<formatting_rules>
 If you want to present options to the user, use the optional <poll> tag after your response, formatted below.
+Option text (<text>) MUST be concise and 80 or fewer characters in length (to meet Discord button limits).
 Do not include any xml response to the user except the <poll>, <images>, and <videos> blocks.
 <poll allow_multiple="{{true_or_false}}">
     <question>{{question to ask the user}}</question>
     <options>
         <option>
-            <text>{{first option}}</text>
+            <text>{{first option (max 80 characters)}}</text>
             <emoji>{{emoji to best represent the option}}</emoji>
             <response>{{text to send when this option is selected}}</response>
         </option>

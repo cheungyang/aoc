@@ -153,7 +153,7 @@ class Agent(BaseAgent):
             
             # If there is a poll, we attach the view to the last chunk
             view = None
-            if poll_data and source == "discord":
+            if poll_data and source == "discord" and poll_data.get("options"):
                 if poll_data["allow_multiple"]:
                     view = PollSelectView(poll_data, channel)
                 else:
@@ -203,7 +203,15 @@ class Agent(BaseAgent):
                             kwargs["view"] = view
                         if files:
                             kwargs["files"] = files
-                        await channel.send(chunk, **kwargs)
+                        try:
+                            await channel.send(chunk, **kwargs)
+                        except discord.HTTPException as e:
+                            if view:
+                                print(f"Warning: Failed to send message with view ({e}). Retrying without view.")
+                                kwargs.pop("view", None)
+                                await channel.send(chunk, **kwargs)
+                            else:
+                                raise
                     else:
                         await channel.send(chunk)
             

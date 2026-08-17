@@ -51,6 +51,8 @@ from graphs.content_creation.nodes import (
 
 # Import HITL nodes, classifiers, and routers
 from graphs.content_creation.nodes import (
+    process_gate1_feedback_node,
+    clarify_gate1_node,
     hitl_final_package_approval_node,
     process_gate2_feedback_node,
     clarify_gate2_node
@@ -110,7 +112,9 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("video_production", run_video)
     workflow.add_node("copywriting", run_copy)
 
-    # Add the final gate node and its routers
+    # Add Gate 1 & Gate 2 HITL nodes and routers
+    workflow.add_node("process_gate1_feedback", process_gate1_feedback_node)
+    workflow.add_node("clarify_gate1", clarify_gate1_node)
     workflow.add_node("hitl_final_package_approval", hitl_final_package_approval_node)
     workflow.add_node("process_gate2_feedback", process_gate2_feedback_node)
     workflow.add_node("clarify_gate2", clarify_gate2_node)
@@ -129,13 +133,24 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_conditional_edges("receive_audio", check_audio_router, ["ask_for_audio", "ideation"])
     workflow.add_edge("ask_for_audio", "receive_audio")
 
-    def after_ideation_router(state: ContentCreationState):
-        if state.get("error_message") or state.get("gate1_decision") != "approved":
+    # Gate 1 Feedback Routing (runs after ideation pause when user responds)
+    workflow.add_edge("ideation", "process_gate1_feedback")
+
+    def after_gate1_router(state: ContentCreationState):
+        if state.get("error_message"):
             return END
-        # Once ideation is done, fan-out to parallel production of video and copy
-        return ["video_production", "copywriting"]
-    
-    workflow.add_conditional_edges("ideation", after_ideation_router, ["video_production", "copywriting", END])
+        decision = state.get("gate1_decision", "approved")
+        if decision == "approved":
+            # Advance to parallel video production and copywriting
+            return ["video_production", "copywriting"]
+        elif decision in ["revise_image", "revise_plot"]:
+            return "ideation"
+        elif decision == "clarify":
+            return "clarify_gate1"
+        return END
+
+    workflow.add_conditional_edges("process_gate1_feedback", after_gate1_router, ["video_production", "copywriting", "ideation", "clarify_gate1", END])
+    workflow.add_edge("clarify_gate1", "ideation")
 
     # Fan-in from parallel branches
     def join_production(state: dict):
@@ -173,7 +188,7 @@ def create_graph(checkpointer=None, **kwargs):
 
     return workflow.compile(
         checkpointer=checkpointer,
-        interrupt_after=["hitl_final_package_approval", "ask_for_audio"]
+        interrupt_after=["ideation", "hitl_final_package_approval", "ask_for_audio"]
     )
 
 # Default compiled instance

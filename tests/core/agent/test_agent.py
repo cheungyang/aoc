@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+import discord
 from core.agent.agent import Agent
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
@@ -448,6 +449,65 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         await agent.execute("[restart]", source="discord", channel=None)
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
+
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_with_poll_view(self, mock_logging_handler_class):
+        mock_graph = MagicMock()
+        reply_with_poll = """Here are the options:
+<poll allow_multiple="false">
+    <question>Proceed?</question>
+    <options>
+        <option>
+            <text>Yes</text>
+            <emoji>👍</emoji>
+            <response>Approved</response>
+        </option>
+    </options>
+</poll>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_poll)]})
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+
+        mock_channel = AsyncMock()
+        reply = await agent.execute("run", source="discord", channel=mock_channel)
+
+        self.assertEqual(reply, "Here are the options:")
+        mock_channel.send.assert_called_once()
+        _, kwargs = mock_channel.send.call_args
+        self.assertIn("view", kwargs)
+
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_with_poll_view_http_exception_fallback(self, mock_logging_handler_class):
+        mock_graph = MagicMock()
+        reply_with_poll = """Here are the options:
+<poll allow_multiple="false">
+    <question>Proceed?</question>
+    <options>
+        <option>
+            <text>Long option label</text>
+            <emoji>👍</emoji>
+            <response>Approved</response>
+        </option>
+    </options>
+</poll>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_poll)]})
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+
+        mock_channel = AsyncMock()
+        # First call with view raises HTTPException, second call without view succeeds
+        mock_channel.send.side_effect = [
+            discord.HTTPException(response=MagicMock(status=400), message="Bad Request"),
+            None
+        ]
+
+        reply = await agent.execute("run", source="discord", channel=mock_channel)
+
+        self.assertEqual(reply, "Here are the options:")
+        self.assertEqual(mock_channel.send.call_count, 2)
+        # Second call should not have view
+        _, kwargs2 = mock_channel.send.call_args_list[1]
+        self.assertNotIn("view", kwargs2)
 
 if __name__ == "__main__":
     unittest.main()
