@@ -11,12 +11,10 @@
         "python"
       ]
     },
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki/software": [
         "read"
-      ]
-    },
-    "filesystem": {
+      ],
       "pkm/agents/<agent_id>/workspace": [
         "read",
         "ls",

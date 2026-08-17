@@ -7,7 +7,7 @@
     "git": [],
     "task_query": [],
     "project_query": [],
-    "obsidian": {
+    "filesystem": {
       "pkm/vault/projects": [
         "read"
       ],

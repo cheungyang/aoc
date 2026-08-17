@@ -17,7 +17,7 @@ Always ensure the local vault is up to date before making changes.
 
 ### Phase 1: Information Gathering
 1. Calculate the dates for the past 7 days.
-2. Use the `obsidian` tool to `read` the fleeting notes for those dates at `vault/journals/fleeting/YYYY-MM-DD.md`.
+2. Use the `filesystem` tool to `read` the fleeting notes for those dates at `pkm/vault/journals/fleeting/YYYY-MM-DD.md`.
 3. Use the `git` tool's `log` action on the `pkm` directory to review commit history over the past 7 days. This will objectively show where effort was spent.
 
 ### Phase 2: Synthesize Wins & HUMAN HOLD POINT
@@ -33,10 +33,10 @@ Always ensure the local vault is up to date before making changes.
 
 ### Phase 4: Write Weekly Journal (Template Resolution)
 1. Determine the ISO week number for the upcoming week (`YYYY-Www`).
-2. Use the `obsidian` tool to `read` the template at `templates/"Weekly Review".md` (or equivalent).
+2. Use the `filesystem` tool to `read` the template at `pkm/templates/"Weekly Review".md` (or equivalent).
 3. **Template Resolution**: Parse the template and replace ALL Obsidian Templater syntax (`<% tp... %>`) with the correct static text values (dates, titles).
 4. Append the finalized "Wins" and "Next week's focus" to the resolved template text.
-5. Use the `obsidian` tool to `write` the fully resolved text to `vault/journals/weekly/YYYY-Www.md`.
+5. Use the `filesystem` tool to `write` the fully resolved text to `pkm/vault/journals/weekly/YYYY-Www.md`.
 
 ### Phase 5: Post-Flight Sync
 1. Use the `git` tool to perform an `add` action on the newly created weekly journal.
@@ -63,4 +63,4 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
 ## Required Tools
 - `git`: Required to `pull`, `log`, `add`, and `push` the `pkm` repository.
 - `project_query`: Required to retrieve active projects.
-- `obsidian`: Required to `read` fleeting notes and templates, and `write` the new weekly journal in the vault.
+- `filesystem`: Required to `read` fleeting notes and templates, and `write` the new weekly journal in the vault.

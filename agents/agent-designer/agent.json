@@ -21,19 +21,19 @@
   ],
   "tools": {
     "web_search": [],
-    "obsidian": {
+    "filesystem": {
       "pkm": [
         "read",
-        "file_search",
+        "find",
+        "grep",
         "write",
         "overwrite",
         "append",
         "delete"
-      ]
-    },
-    "filesystem": {
+      ],
       "agents/": [
         "read",
+        "read_image",
         "write",
         "overwrite",
         "append",
@@ -47,6 +47,7 @@
       ],
       "skills/": [
         "read",
+        "read_image",
         "write",
         "overwrite",
         "append",
@@ -60,6 +61,7 @@
       ],
       "graphs/": [
         "read",
+        "read_image",
         "write",
         "overwrite",
         "append",

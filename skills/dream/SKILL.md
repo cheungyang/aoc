@@ -13,27 +13,27 @@ This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt
 - **Synthesis, Not Appending**: Do NOT simply append new facts to the long-term files. You must read the existing files, merge new information, resolve redundancies or conflicts (newer info overrides older info), and then overwrite the file.
 - **Actionable Extractions**: Only extract data that improves future decision-making or personalization. Ignore routine operations.
 - **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure. YOU MUST NOT OUTPUT CONVERSATIONAL TEXT outside the XML payload.
-- **Strict Tool Usage**: You MUST strictly use the `obsidian` tool for all file and directory actions (`file_search`, `read`, `write`, `append`, `delete`). You are strictly prohibited from using the `filesystem` tool for this routine.
+- **Strict Tool Usage**: You MUST strictly use the `filesystem` tool for all file and directory actions (`read`, `write`, `append`, `delete`).
 
 ## Workflow
 
 ### 1. The Backup Phase (Failsafe)
 Before altering long-term memory, back up the current state.
-- Use the `obsidian` tool to read the current contents of `agents/<agent_id>/MEMORY.md`, `FEEDBACK.md`, and `CONTEXT.md` (if they exist) from the `pkm` vault.
-- Use the `obsidian` tool's `write` action to save exact copies into the archive directory with today's date: 
+- Use the `filesystem` tool to read the current contents of `pkm/agents/<agent_id>/MEMORY.md`, `FEEDBACK.md`, and `CONTEXT.md` (if they exist).
+- Use the `filesystem` tool's `write` action to save exact copies into the archive directory with today's date: 
   - `agents/<agent_id>/memory_archive/MEMORY_YYYY-MM-DD_bak.md`
   - `agents/<agent_id>/memory_archive/FEEDBACK_YYYY-MM-DD_bak.md`
   - `agents/<agent_id>/memory_archive/CONTEXT_YYYY-MM-DD_bak.md`
 
 ### 2. The Discovery Phase
-- Use the `obsidian` tool's `file_search` action on the `agents/<agent_id>/memory_logs/` path to find active log files.
+- Use the `filesystem` tool's `ls` or `find` action on the `pkm/agents/<agent_id>/memory_logs/` path to find active log files.
 - Identify any daily log files present in this directory. If the directory is empty, the dream skill is complete. Proceed immediately to Step 5 (Output) and state "No new memories".
 
 ### 3. Processing & Consolidation Phase
 For every log file discovered in Step 2, process it one by one:
 
 **A. Read the Log:**
-Read the contents of the `YYYY-MM-DD.md` log file using the `obsidian` tool.
+Read the contents of the `YYYY-MM-DD.md` log file using the `filesystem` tool.
 
 **B. Extract & Synthesize:**
 Carefully parse the log for items worthy of long-term retention:
@@ -43,14 +43,14 @@ Carefully parse the log for items worthy of long-term retention:
 
 **C. Resolve & Overwrite:**
 - Merge these newly extracted insights with the data currently inside the root `MEMORY.md`, `FEEDBACK.md`, and `CONTEXT.md`. 
-- Overwrite the root files with the newly synthesized, optimized text using the `obsidian` tool.
+- Overwrite the root files with the newly synthesized, optimized text using the `filesystem` tool.
 
 ### 4. The Archiving Phase
 Once a log file has been fully processed and its contents synthesized into the root files:
-- Use the `obsidian` tool's `append` action to move the raw log file to the archive. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
+- Use the `filesystem` tool's `append` action to move the raw log file to the archive. Be sure to prepend the appended text with a markdown separator (e.g., `\n---\n`) to visually distinguish multiple appended entries within the same day.
   - **Vault**: `pkm`
   - **Path**: `agents/<agent_id>/memory_archive/YYYY-MM-DD.md` 
-- Use the `obsidian` tool's `delete` action to completely remove the original active log file `memory_logs/YYYY-MM-DD.md`.
+- Use the `filesystem` tool's `delete` action to completely remove the original active log file `pkm/agents/<agent_id>/memory_logs/YYYY-MM-DD.md`.
 
 ### 5. Agent-Friendly Output & Memory (IPC Format)
 Finalize the execution using the strict XML structure below to ensure readability for routing and monitoring agents. You must NOT include conversational text; only output the XML block.

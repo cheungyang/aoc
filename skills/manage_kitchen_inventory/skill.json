@@ -4,7 +4,7 @@
   "description": "Translates English grocery inputs into Traditional Chinese and smartly deduces/deducts ingredients for cooked meals in INVENTORY.md.",
   "emoji": "🗄️",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "wiki/kitchen": [
         "read",
         "overwrite",

@@ -8,7 +8,7 @@
     "task_query": {},
     "project_query": {},
     "web_search": {},
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki": [
         "read",
         "read_image",

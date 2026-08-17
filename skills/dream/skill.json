@@ -4,8 +4,8 @@
   "description": "Skill for synthesizing daily memory logs into long-term, token-efficient system context files (MEMORY.md, FEEDBACK.md, CONTEXT.md).",
   "emoji": "💭",
   "tools": {
-    "obsidian": {
-      "pkm/agents/<agent_id>": [
+    "filesystem": {
+      "pkm/agents/<agent_id>/memory": [
         "read",
         "write",
         "append",

@@ -10,7 +10,7 @@
   "model": "gemini-3.7-flash",
   "skills": [],
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki/software": [
         "read",
         "write",

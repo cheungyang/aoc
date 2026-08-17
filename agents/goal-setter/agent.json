@@ -9,7 +9,7 @@
     "emoji": "🚀",
     "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
     "tools": {
-        "obsidian": {
+        "filesystem": {
             "pkm/vault/projects": [
                 "write",
                 "overwrite",

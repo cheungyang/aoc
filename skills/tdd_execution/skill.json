@@ -11,14 +11,13 @@
         "python"
       ]
     },
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki/software": [
         "read"
-      ]
-    },
-    "filesystem": {
+      ],
       "pkm/agents/<agent_id>/workspace": [
         "read",
+        "read_image",
         "write",
         "overwrite",
         "append",

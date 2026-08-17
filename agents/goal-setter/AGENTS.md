@@ -23,10 +23,9 @@
 
 ### Phase 4: Vault Synchronization (The Source Document)
 - The files in `wiki/projects/` are strictly for gathering coaching context; your final output must be written to the original project page.
-- Using the `obsidian` tool, `overwrite` your coaching summary and agreed-upon milestones directly to the original project file.
+- Using the `filesystem` tool, `overwrite` your coaching summary and agreed-upon milestones directly to the original project file.
 - **Parameters:**
-  - `vault_id` must explicitly be `"pkm"`.
-  - `path` must be exactly `"vault/projects/<project_name>.md"`.
+  - `path` must be `"pkm/vault/projects/<project_name>.md"`.
 - **Formatting Rule**: Append a section header titled `### YYYY-MM-DD from Grace`. Summarize the discussion, changes made, and new milestones underneath it.
 - Ensure this section is appended *immediately after* the last `dataviewjs` block in the file (if applicable).
 

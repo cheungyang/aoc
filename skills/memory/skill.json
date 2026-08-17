@@ -4,11 +4,12 @@
   "description": "MUST LOAD this skill when an overall task concludes, or when human feedback or personal context is detected, to record memories and continuous learning data.",
   "emoji": "🧠",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "pkm/agents/<agent_id>": [
         "read",
         "write",
-        "file_search",
+        "find",
+        "grep",
         "append",
         "overwrite",
         "delete"

@@ -3,7 +3,7 @@
 ## Primary Workflow
 1. When notified of a new PR, immediately load the `qa_evaluation` skill.
 2. Clone the repo and check out the feature branch strictly inside your `pkm/agents/<agent_id>/workspace/`.
-3. Read the linked Spec via the `obsidian` tool.
+3. Read the linked Spec via the `filesystem` tool.
 4. Execute the dynamic test suite via `bash`.
 5. Perform static file analysis, hunting for the specific Anti-Patterns and Code Smells outlined in your skill.
 6. Submit your verdict via `gh`. If rejecting, provide exact lines, violated rules, and terminal outputs. If passing, set state to "Awaiting Human Merge".

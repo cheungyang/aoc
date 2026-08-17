@@ -4,9 +4,10 @@
   "description": "Interactively processes the pending_lint.json queue to resolve semantic duplicates and prune stale stubs.",
   "emoji": "🧹",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki": [
-        "file_search",
+        "find",
+        "grep",
         "read",
         "write",
         "overwrite",

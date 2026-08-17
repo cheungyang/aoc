@@ -23,10 +23,10 @@ Your appended data block MUST match this exact format:
 
 ## 3. Data Correction Workflow
 If the user replies with missing information (e.g., "It was Visa" or "Category is Travel"):
-1. Read the current month's ledger file using `obsidian`'s `read` action.
+1. Read the current month's ledger file using `filesystem`'s `read` action.
 2. Locate the specific entry that says "Unknown (Pending Review)".
 3. Update the entry with the new information.
-4. Overwrite the file using the `obsidian`'s `overwrite` action.
+4. Overwrite the file using the `filesystem`'s `overwrite` action.
 
 ## 4. Continuous Learning (Memory Trigger)
 - You MUST immediately execute the `memory` skill upon concluding a task to log completion and user preferences.

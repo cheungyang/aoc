@@ -14,6 +14,8 @@ def filesystem(agent_id: str, instructions: list[dict]) -> str:
     Supported Actions:
     - 'read': Reads the content of a file. Supports optional 'start_line' and 'end_line' (1-indexed) which prepends line numbers.
         Requires: 'path'. Optional: 'start_line', 'end_line'.
+    - 'read_image': Reads an image file and returns its content as a base64-encoded string (for multimodal comprehension).
+        Requires: 'path'.
     - 'write': Writes content to a NEW file. Fails if the file already exists.
         Requires: 'path', 'content'.
     - 'overwrite': Overwrites an existing file or creates a new one with the provided content.
@@ -94,6 +96,8 @@ def _execute_single_action(inst: dict) -> tuple[str, str]:
     try:
         if action == "read":
             return _read(path, inst.get("start_line"), inst.get("end_line"))
+        elif action == "read_image":
+            return _read_image(path)
         elif action == "write":
             return _write(path, inst.get("content", ""))
         elif action == "overwrite":
@@ -151,6 +155,35 @@ def _read(path: str, start_line: int | str | None = None, end_line: int | str | 
         return "\n".join(formatted), "None"
     else:
         return file_content, "None"
+
+
+def _read_image(path: str) -> tuple[str, str]:
+    if not os.path.exists(path):
+        return "", f"Error: File not found at {path}"
+    if not os.path.isfile(path):
+        return "", f"Error: Path {path} is not a file."
+
+    from PIL import Image
+    from io import BytesIO
+    import base64
+
+    try:
+        with Image.open(path) as img:
+            # Convert to RGB if necessary (JPEG doesn't support transparency)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+
+            # Resize image to a max of 1024x1024 maintaining aspect ratio
+            img.thumbnail((1024, 1024))
+
+            output_buffer = BytesIO()
+            # Compress using JPEG format with quality=60
+            img.save(output_buffer, format="JPEG", quality=60)
+
+            encoded_string = base64.b64encode(output_buffer.getvalue()).decode("utf-8")
+            return encoded_string, "None"
+    except Exception as e:
+        return "", f"Error reading or compressing image: {e}"
 
 
 def _write(path: str, content: str) -> tuple[str, str]:

@@ -6,8 +6,8 @@ description: Navigates the personal databases and vault to identify impactful ta
 This skill guides the agent to query the user's SQLite databases (`tasks.db`, `projects.db`) and PKM vault to identify the most impactful list of things to do for the day, week, or quarter. By synthesizing active projects, weekly goals, and urgent tasks without burning tokens on filesystem searches, the agent helps facilitate effective planning.
 
 ## Boundaries & Constraints
-- **Zero Filesystem Discovery**: You MUST NOT use `obsidian` tool for discovering tasks or projects. You must rely purely on `task_query` and `project_query`.
-- **Obsidian Call Limit**: You are permitted to use `obsidian.read` strictly to read the weekly journal or to investigate specific file paths retrieved from the DBs.
+- **Zero Filesystem Discovery**: You MUST NOT use `filesystem` tool for discovering tasks or projects. You must rely purely on `task_query` and `project_query`.
+- **Filesystem Call Limit**: You are permitted to use `filesystem.read` strictly to read the weekly journal or to investigate specific file paths retrieved from the DBs.
 - **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
 
 ## PKM Taxonomy Reference
@@ -28,7 +28,7 @@ Always ensure the local vault is up to date before analyzing priorities.
 
 ### Phase 1: Retrieve the Weekly Focus
 1. Use your internal knowledge of the current date to calculate the correct ISO week number (Format: `YYYY-Www`).
-2. Use the `obsidian` tool to `read` the previous week's journal located at `vault/journals/weekly/YYYY-Www.md` from vault_id `pkm` (Note: You are reading *last week's* journal to find the goals set for *this week*).
+2. Use the `filesystem` tool to `read` the previous week's journal located at `pkm/vault/journals/weekly/YYYY-Www.md` (Note: You are reading *last week's* journal to find the goals set for *this week*).
 3. Extract the items explicitly listed under the header `##🌱 Next week's focus`.
 
 ### Phase 2: Identify Active Projects (DB First)
@@ -69,4 +69,4 @@ Compile the findings and finalize the execution using the strict XML structure b
 - `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.
 - `project_query`: Required to query active projects efficiently.
 - `task_query`: Required to query pending tasks efficiently.
-- `obsidian`: Permitted ONLY to perform `read` actions on journals or specific target paths.
+- `filesystem`: Permitted ONLY to perform `read` actions on journals or specific target paths.

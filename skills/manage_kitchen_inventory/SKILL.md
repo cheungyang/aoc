@@ -26,4 +26,4 @@ This skill reads and updates the `INVENTORY.md` and `STAPLES.md` files in `pkm/w
 - Do not ask the user for granular ingredient lists for standard dishes. Trust your smart deduction based on their dish name.
 
 ## Required Tools
-- `obsidian`: Required to read and overwrite `wiki/kitchen/INVENTORY.md`, `wiki/kitchen/STAPLES.md`, and `wiki/kitchen/MEAL_LOGS.md`.
+- `filesystem`: Required to read and overwrite `pkm/wiki/kitchen/INVENTORY.md`, `pkm/wiki/kitchen/STAPLES.md`, and `pkm/wiki/kitchen/MEAL_LOGS.md`.

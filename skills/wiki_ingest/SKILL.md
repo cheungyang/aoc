@@ -15,13 +15,13 @@ This skill implements the "LLM Wiki" pattern. It systematically reads articles f
 ## Workflow
 
 ### 1. Discovery & Auto-Start Ingestion
-- Use the `obsidian` tool (`file_search`) to list files in the `pkm/inbox/` folder.
+- Use the `filesystem` tool (`find` or `ls`) to list files in the `pkm/inbox/` folder.
 - Select the first available article and immediately proceed to relocation and ingestion without asking for prior confirmation.
 
 ### 2. Relocation
-- Use the `obsidian` tool (`read`) to read the article into memory.
-- Use `obsidian` (`write`) to move the file to `pkm/wiki/raw/[Article Title]`.
-- Use `obsidian` (`delete`) to remove the original file from `pkm/inbox/`.
+- Use the `filesystem` tool (`read`) to read the article into memory.
+- Use `filesystem` (`write`) to move the file to `pkm/wiki/raw/[Article Title]`.
+- Use `filesystem` (`delete`) to remove the original file from `pkm/inbox/`.
 
 ### 3. Extraction & Discussion Loop
 - Read `pkm/wiki/entities/index.md` and `pkm/wiki/concepts/index.md` to establish context on existing knowledge.
@@ -145,5 +145,5 @@ Generate a strictly formatted XML response detailing the ingestion process. This
 - Ask the user: *"Ingestion complete. Would you like to process another article from your backlog?"* Repeat Step 1 if yes.
 
 ## Required Tools
-- `obsidian`: Required to perform `file_search`, `read`, `write`, `overwrite`, and `delete` operations within the `pkm` vault to manage the wiki lifecycle.
+- `filesystem`: Required to perform `find`, `read`, `write`, `overwrite`, and `delete` operations within the `pkm` vault to manage the wiki lifecycle.
 - `web_search`: Required during the discussion phase to resolve conflicts, fetch additional context, and solidify understanding of extracted entities and concepts.

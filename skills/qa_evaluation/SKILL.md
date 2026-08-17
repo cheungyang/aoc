@@ -15,7 +15,7 @@ All `git`, `bash`, and `filesystem` operations must take place inside your scope
 - Use `git` (clone) to pull the repo into your workspace.
 - Use `gh` to read the target Pull Request.
 - Use `git` (branch) to checkout the PR's feature branch.
-- Extract the linked Spec path from the PR and read it using `obsidian`.
+- Extract the linked Spec path from the PR and read it using `filesystem`.
 
 ### 2. Phase 1: Dynamic Execution (The Machine Test)
 - Execute the test suite via `bash` (e.g., `npm run test`, `pytest`).
@@ -54,5 +54,4 @@ Check the PR history. If you have rejected this specific PR 3 times:
 - `gh`: Read PRs, leave reviews, and assign statuses.
 - `git`: Clone repos and switch to feature branches.
 - `bash`: Run test suites dynamically.
-- `obsidian`: Read the Markdown specs.
-- `filesystem`: Scoped strictly to read the codebase in `pkm/agents/<agent_id>/workspace/`.
+- `filesystem`: Read the Markdown specs and the codebase in `pkm/agents/<agent_id>/workspace/`.

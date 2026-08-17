@@ -77,8 +77,65 @@ class TestFilesystemTool(unittest.TestCase):
         
         instructions = [{"action": "read", "path": "allowed_folder/file.txt", "start_line": 5, "end_line": 6}]
         result = filesystem.func(agent_id="software-coder", instructions=instructions)
-        
         self.assertIn("Error: Invalid line range", result)
+
+    # --- Read Image Tests ---
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    @patch('PIL.Image.open')
+    def test_read_image_success(self, mock_image_open, mock_isfile, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        mock_isfile.return_value = True
+        
+        mock_img = MagicMock()
+        mock_img.mode = "RGBA"
+        mock_rgb_img = MagicMock()
+        mock_img.convert.return_value = mock_rgb_img
+        
+        # Mock save to write bytes into BytesIO
+        def mock_save(buffer, format, quality):
+            buffer.write(b"fake_jpeg_data")
+        mock_rgb_img.save.side_effect = mock_save
+        mock_image_open.return_value.__enter__.return_value = mock_img
+        
+        instructions = [{"action": "read_image", "path": "images/photo.png"}]
+        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        
+        import base64
+        expected_base64 = base64.b64encode(b"fake_jpeg_data").decode("utf-8")
+        self.assertIn(expected_base64, result)
+        self.assertIn('<instruction_result action="read_image" path="images/photo.png">', result)
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    def test_read_image_not_found(self, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = False
+        
+        instructions = [{"action": "read_image", "path": "images/missing.png"}]
+        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        self.assertIn("Error: File not found at images/missing.png", result)
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    def test_read_image_not_a_file(self, mock_isfile, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        mock_isfile.return_value = False
+        
+        instructions = [{"action": "read_image", "path": "images/folder"}]
+        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        self.assertIn("Error: Path images/folder is not a file.", result)
 
     # --- Write, Overwrite, Append Tests ---
 
@@ -511,12 +568,11 @@ class TestFilesystemTool(unittest.TestCase):
         self.assertTrue(tools_loader.check_permission("software-coder", "filesystem", "replace_block", coder_path))
         self.assertTrue(tools_loader.check_permission("software-coder", "filesystem", "read", coder_path))
         
-        # software-qa only has read, ls, find, grep on pkm/agents/<agent_id>/workspace
-        qa_path = "pkm/agents/software-qa/workspace/main.py"
-        self.assertTrue(tools_loader.check_permission("software-qa", "filesystem", "read", qa_path))
-        self.assertTrue(tools_loader.check_permission("software-qa", "filesystem", "grep", qa_path))
-        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "write", qa_path))
-        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "delete", qa_path))
+        # software-qa only has read on pkm/wiki/software
+        qa_wiki_path = "pkm/wiki/software/spec.md"
+        self.assertTrue(tools_loader.check_permission("software-qa", "filesystem", "read", qa_wiki_path))
+        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "write", qa_wiki_path))
+        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "delete", qa_wiki_path))
 
 if __name__ == '__main__':
     unittest.main()

@@ -4,7 +4,7 @@
   "description": "Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.",
   "emoji": "🍱",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "wiki/kitchen": [
         "read",
         "append"

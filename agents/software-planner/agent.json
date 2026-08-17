@@ -9,7 +9,7 @@
   "emoji": "📐",
   "description": "Technical Lead & System Deconstructor for autonomous LLM agents.",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki": [
         "read",
         "read_image",

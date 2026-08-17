@@ -17,6 +17,7 @@ This skill acts as an intelligent "Second Brain" interface for the user's PKM. I
 - Receive the query from the user or another agent.
 - Analyze the prompt to determine the required context:
   - If the query seeks conceptual knowledge, past logs, or general information, use `vault_search` (with `category="wiki"` or `category="all"`) to retrieve highly relevant chunks.
+  - If the query seeks exact string matches, specific names, or code snippets, use the `filesystem` tool (`grep` action) to find precise occurrences.
   - If the query explicitly asks about active initiatives, statuses, or todos, execute `project_query` and/or `task_query`.
 - You may run multiple queries if a prompt spans multiple domains.
 
@@ -48,7 +49,7 @@ Generate the final response using the exact XML structure below to ensure readab
 
 ### 4. Archival (The Syntheses Directory)
 Save valuable conceptual syntheses back into the wiki to compound the knowledge graph. (Note: Do not archive purely task-oriented summaries, only knowledge/topic syntheses).
-- Use `obsidian` (`write`) to create `pkm/wiki/syntheses/[Topic_Name].md` (Ensure `Topic_Name` is concise and URL-safe).
+- Use `filesystem` (`write`) to create `pkm/wiki/syntheses/[Topic_Name].md` (Ensure `Topic_Name` is concise and URL-safe).
 - **Template:**
   ```markdown
   ---
@@ -64,12 +65,12 @@ Save valuable conceptual syntheses back into the wiki to compound the knowledge 
   ## Sources Retrieved
   <The list of sources from the <sources_retrieved> tag>
   ```
-- **Update Index:** Use `obsidian` to `read`, modify, and `overwrite` `pkm/wiki/syntheses/index.md` by appending the following to the list:
+- **Update Index:** Use `filesystem` (`append` action) to add the following to the bottom of `pkm/wiki/syntheses/index.md`:
   `[YYYY-MM-DD] [<Topic Name>](../../syntheses/<Topic_Name>.md) <one-line description of the synthesis>`
 
 ## Required Tools
 - `vault_search`: Required to retrieve unstructured knowledge chunks via vector search.
 - `task_query`: Required to retrieve structured task data.
 - `project_query`: Required to retrieve structured project data.
-- `obsidian`: Required to `read`, `write`, and `overwrite` synthesis files and indexes in the `pkm` vault.
+- `filesystem`: Required to `grep` for exact strings, `write` synthesis files, and `append` to index files in the `pkm` vault.
 - `web_search`: Required to fill knowledge gaps ONLY after explicit user approval.

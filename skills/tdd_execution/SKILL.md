@@ -21,7 +21,7 @@ Use this skill for every new software issue pulled from GitHub. This is the mand
 - Run `git checkout main` followed by `git pull` to get latest code.
 - Run `git checkout -b feature/<issue_id>` to create a working branch.
 - Use the `gh` tool to read the assigned GitHub issue.
-- Extract the exact spec path from the issue description and use the `obsidian` tool to read the Markdown spec.
+- Extract the exact spec path from the issue description and use the `filesystem` tool to read the Markdown spec.
 - **Strict Rule:** DO NOT browse the broader codebase. Rely ONLY on the Spec and the Issue.
 
 ### 2. The Red Phase (Write Failing Test)
@@ -52,5 +52,4 @@ If the test passes within the 3 attempts:
 - `gh`: Needed to configure git authentication, read the assigned issue, create PRs, or leave "Blocked" comments.
 - `bash`: Needed to run testing frameworks within your workspace.
 - `git`: Needed to run Git commands.
-- `obsidian`: Needed to read the specific Markdown spec file created by the Planner agent.
-- `filesystem`: Needed to write and modify the test and implementation files in your `pkm/agents/<agent_id>/workspace/`.
+- `filesystem`: Needed to write and modify the test and implementation files in your `pkm/agents/<agent_id>/workspace/` and read the spec file.

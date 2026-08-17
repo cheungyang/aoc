@@ -16,7 +16,7 @@ This skill acts as a dynamic project compiler and knowledge integrator. It pulls
 ## Workflow
 
 ### Phase 1: Gathering
-1. Use `project_query` to get the metadata for the requested project, or read the specified raw project file from `vault/projects/` using the `obsidian` tool (vault_id="pkm").
+1. Use `project_query` to get the metadata for the requested project, or read the specified raw project file from `vault/projects/` using the `filesystem` tool.
 2. Locate the YAML frontmatter and identify the `alias:` field value that begins with `#p/` (e.g., `#p/my-project`).
 3. Use the `task_query` tool to retrieve tasks associated with this project. Tasks belong to a project in two distinct forms:
    - **Form A (Internal Tasks):** Tasks that are located directly within the project's own markdown file. Retrieve these by using `task_query` with `source="<project_file_path>"`.
@@ -30,7 +30,7 @@ This skill acts as a dynamic project compiler and knowledge integrator. It pulls
 
 ### Phase 3: Compilation & Indexing (New Projects)
 7. Check if the project exists in `wiki/projects/index.md`. If it is **New**:
-   - Create `wiki/projects/<project_name>.md` using the `obsidian` tool.
+   - Create `wiki/projects/<project_name>.md` using the `filesystem` tool.
    - Use the following template:
      ```markdown
      ---
@@ -57,6 +57,6 @@ This skill acts as a dynamic project compiler and knowledge integrator. It pulls
    - Return a summary of the new concepts integrated and the task velocity to the calling agent.
 
 ## Required Tools
-- `obsidian`: Required to read raw files and create/overwrite wiki files.
+- `filesystem`: Required to read raw files and create/overwrite wiki files.
 - `git`: Required to use the `log-p` action for detecting project deltas.
 - `task_query` & `project_query`: Required for retrieving strict, stateful metadata and project tasks.

@@ -4,7 +4,7 @@
   "description": "Processes a reading backlog, extracts/discusses concepts, and compiles a linked LLM Wiki graph.",
   "emoji": "🕸️",
   "tools": {
-    "obsidian": {
+    "filesystem": {
       "pkm/wiki": [
         "read",
         "read_image",
@@ -14,7 +14,8 @@
       ],
       "pkm/inbox": [
         "read",
-        "file_search",
+        "find",
+        "grep",
         "delete"
       ]
     },

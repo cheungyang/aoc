@@ -27,4 +27,4 @@ Present the 3 options to the user.
 - Write the suggested meals (with date) to `pkm/wiki/kitchen/MEAL_LOGS.md` so the system knows what was proposed today.
 
 ## Required Tools
-- `obsidian`: Required to read inventory/logs and append suggestions to `wiki/kitchen/MEAL_LOGS.md`, and read `agents/meal-planner/` for context.
+- `filesystem`: Required to read inventory/logs and append suggestions to `pkm/wiki/kitchen/MEAL_LOGS.md`, and read `agents/meal-planner/` for context.

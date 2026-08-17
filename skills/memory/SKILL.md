@@ -44,9 +44,9 @@ Format the extracted information cleanly. Use the current timestamp and categori
 `- [HH:MM:SS] [CONTEXT] Evergreen: User has a golden retriever named Max.`
 
 ### Step 2: Store the Data
-Use the `obsidian` tool's `append` (or `write` if the file doesn't exist) action to save the formatted entry. 
+Use the `filesystem` tool's `append` (or `write` if the file doesn't exist) action to save the formatted entry. 
 - **Vault**: `pkm`
-- **Path**: `agents/<agent_id>/memory_logs/YYYY-MM-DD.md` (Replace with current date).
+- **Path**: `pkm/agents/<agent_id>/memory_logs/YYYY-MM-DD.md` (Replace with current date).
 - **Formatting Note**: Make sure to include a newline character at the end of your entry so that the next log starts on a fresh line.
 
 ### Step 3: Conversational Confirmation (Text Only)
@@ -55,4 +55,4 @@ Do NOT output any XML or IPC payloads (like `<memory_response>`) in your respons
 **User Feedback Acknowledgement**: If (and ONLY if) you recorded a **Feedback** item, you must explicitly acknowledge this in conversational text, proving to the user their feedback is integrated.
 
 ## Required Tools
-- `obsidian`: Required to use the `append` or `write` action on `agents/<agent_id>/memory_logs/YYYY-MM-DD.md` within the `pkm` vault. Requires `agent-scoped` permissions.
+- `filesystem`: Required to use the `append` or `write` action on `pkm/agents/<agent_id>/memory_logs/YYYY-MM-DD.md`. Requires `agent-scoped` permissions.

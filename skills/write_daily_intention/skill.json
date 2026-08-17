@@ -6,7 +6,7 @@
   "tools": {
     "git": [],
     "task_query": [],
-    "obsidian": {
+    "filesystem": {
       "pkm/vault/journals": [
         "read",
         "write",

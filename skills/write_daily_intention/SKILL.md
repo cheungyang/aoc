@@ -14,20 +14,20 @@ Always ensure the local vault is up to date before making changes.
 ### Step 1: Check & Initialize Daily Note
 Determine if today's note already exists.
 - **Target Path**: `vault/journals/fleeting/YYYY-MM-DD.md` (Replace YYYY-MM-DD with today's date).
-- Use the `obsidian` tool (`read` action) to check if the file exists.
+- Use the `filesystem` tool (`read` action) to check if the file exists.
 - **If the file does NOT exist:**
-  1. Use the `obsidian` tool (`read` action) to load the template located at `templates/"Fleeting Pages".md`.
+  1. Use the `filesystem` tool (`read` action) to load the template located at `pkm/templates/"Fleeting Pages".md`.
   2. **Templater Resolution**: You must manually parse the template text and replace ALL Obsidian Templater syntax (`<% tp... %>`) with the correct static values. 
      - *Example:* Replace `<% tp.date.now("w")-1 %>` with the integer representing last week's ISO week number.
      - Replace any date/title syntax with today's actual date.
-  3. Use the `obsidian` tool (`write` action) to save the fully resolved text into the target path (`vault/journals/fleeting/YYYY-MM-DD.md`).
+  3. Use the `filesystem` tool (`write` action) to save the fully resolved text into the target path (`pkm/vault/journals/fleeting/YYYY-MM-DD.md`).
 
 ### Step 2: Append Recommendations
 Add the day's plan to the journal.
 - Format the agreed-upon daily intention and the agent's top recommendations cleanly.
 - Prepend your formatted text with the header: `#### Agent's recommendation`. 
 - Ensure you include empty newlines before the header so it renders cleanly in markdown.
-- Use the `obsidian` tool (`append` action) to add this block to the very bottom of the `YYYY-MM-DD.md` file.
+- Use the `filesystem` tool (`append` action) to add this block to the very bottom of the `YYYY-MM-DD.md` file.
 
 ### Step 3: Sync Remote (Post-Flight)
 Upload the new journal entries back to the remote repository.
@@ -52,4 +52,4 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
 
 ## Required Tools
 - `git`: Required to `pull`, `add`, and `push` the `pkm` repository to maintain sync and prevent merge conflicts.
-- `obsidian`: Required to `read` templates, `write` new daily notes, and `append` recommendations within the `pkm` vault.
+- `filesystem`: Required to `read` templates, `write` new daily notes, and `append` recommendations within the `pkm` vault.
