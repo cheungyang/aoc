@@ -2,6 +2,7 @@ import os
 import json
 from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path
 from graphs.content_creation.utils.logging import _append_execution_log
+from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from tools.remix_video import remix_video
 
 async def remix_video_task(state: dict) -> dict:
@@ -13,7 +14,23 @@ async def remix_video_task(state: dict) -> dict:
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
     raw_video_path = state.get("raw_video_path") or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
-    video_path = _resolve_asset_path(output_dir, topic, "video", next_version=True)
+
+    human_feedback = state.get("latest_human_feedback", "")
+    gate2_decision = state.get("gate2_decision") or classify_gate2_intent(human_feedback)
+    needs_remix_revision = (
+        state.get("gate2_decision") in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"] or
+        bool(human_feedback and gate2_decision in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"]) or
+        bool(raw_video_path and "_v" in os.path.basename(raw_video_path))
+    )
+
+    existing_video = _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    if existing_video and os.path.isfile(existing_video) and os.path.getsize(existing_video) > 0 and not needs_remix_revision and state.get("video_qc_passed"):
+        return {
+            "remixed_video_path": existing_video,
+            "video_persisted": True
+        }
+
+    video_path = _resolve_asset_path(output_dir, topic, "video", next_version=needs_remix_revision)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 

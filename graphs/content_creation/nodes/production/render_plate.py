@@ -1,6 +1,7 @@
 import os
 from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path
 from graphs.content_creation.utils.logging import _append_execution_log
+from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from tools.generate_animation_veo3 import generate_animation_veo3
 
 async def render_plate_task(state: dict) -> dict:
@@ -14,11 +15,16 @@ async def render_plate_task(state: dict) -> dict:
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    human_feedback = state.get("latest_human_feedback")
+    gate2_decision = state.get("gate2_decision")
+    if human_feedback and (not gate2_decision or gate2_decision == "approved"):
+        gate2_decision = classify_gate2_intent(human_feedback)
 
     existing_plate = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
     needs_plate_revision = (
-        state.get("gate2_decision") == "revise_video" or
-        state.get("video_qc_rejection_target") == "visual_plate"
+        gate2_decision == "revise_video" or
+        state.get("video_qc_rejection_target") == "visual_plate" or
+        bool(human_feedback and gate2_decision == "revise_video")
     )
 
     if os.path.exists(existing_plate) and not needs_plate_revision and state.get("video_qc_passed"):

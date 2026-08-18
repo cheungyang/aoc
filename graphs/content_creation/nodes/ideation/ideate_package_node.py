@@ -21,6 +21,13 @@ async def ideate_package_node(state: dict) -> dict:
     working_state["project_dir"] = project_dir
     working_state["output_dir"] = output_dir
 
+    human_feedback = state.get("latest_human_feedback")
+    gate1_decision = state.get("gate1_decision")
+    if human_feedback and (not gate1_decision or gate1_decision == "approved"):
+        from graphs.content_creation.utils.classifiers import classify_gate1_intent
+        gate1_decision = classify_gate1_intent(human_feedback)
+        working_state["gate1_decision"] = gate1_decision
+
     # Step 2a: Generate or reuse Base Image
     img_res = await generate_image_task(working_state)
     working_state.update(img_res)
@@ -37,7 +44,11 @@ async def ideate_package_node(state: dict) -> dict:
         if working_state.get("video_plot_qc_passed"):
             break
 
-    # Step 2c: Format Gate 1 Presentation Card
+    # Step 2c: Assert Revision Invariants
+    from graphs.content_creation.utils.invariants import assert_gate1_revision_invariants
+    assert_gate1_revision_invariants(state, working_state)
+
+    # Step 2d: Format Gate 1 Presentation Card
     summary = format_gate1_presentation(working_state)
 
     _append_execution_log(
@@ -62,5 +73,6 @@ async def ideate_package_node(state: dict) -> dict:
         "video_plot_path": working_state.get("video_plot_path", ""),
         "overlay_text": working_state.get("overlay_text", ""),
         "video_plot_qc_passed": working_state.get("video_plot_qc_passed", True),
+        "gate1_decision": working_state.get("gate1_decision", "approved"),
         "messages": [AIMessage(content=summary)]
     }

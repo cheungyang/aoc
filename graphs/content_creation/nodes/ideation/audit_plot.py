@@ -41,20 +41,48 @@ async def audit_plot_task(state: dict) -> dict:
     )
 
     try:
-        from core.loaders.agents_loader import AgentsLoader
-        from langchain_google_genai import ChatGoogleGenerativeAI
+        from tools.agent_call import agent_call
+        import re
 
-        config = AgentsLoader()._agent_configs.get("brand-editor", {})
-        model_name = config.get("model", "gemini-3.7-flash")
+        channel = state.get("channel") or "content-creation"
+        tool_res = await agent_call.ainvoke({
+            "agent_id": "brand-editor",
+            "prompt": prompt,
+            "channel": channel
+        })
 
-        llm = ChatGoogleGenerativeAI(model=model_name).with_structured_output(PlotAudit)
-        audit_data: PlotAudit = await llm.ainvoke(prompt)
+        payload = ""
+        m = re.search(r"<payload>(.*?)</payload>", str(tool_res), re.DOTALL)
+        if m:
+            payload = m.group(1).strip()
+        else:
+            payload = str(tool_res).strip()
 
-        is_approved = audit_data.is_approved
-        feedback = audit_data.revision_notes or audit_data.markdown_report
-        rejection_target = (audit_data.rejection_target or "plot").lower()
+        is_approved = True
+        feedback = payload
+        rejection_target = "plot"
+
+        try:
+            data = json.loads(payload)
+            if isinstance(data, dict):
+                is_approved = bool(data.get("is_approved", True))
+                feedback = data.get("revision_notes") or data.get("markdown_report") or payload
+                rejection_target = (data.get("rejection_target") or "plot").lower()
+        except Exception:
+            if "VERDICT: REJECTED" in payload.upper() or "REJECTED" in payload.upper():
+                is_approved = False
+                if "REJECTED TARGET: IMAGE" in payload.upper() or "TARGET: IMAGE" in payload.upper():
+                    rejection_target = "image"
+                elif "REJECTED TARGET: BOTH" in payload.upper() or "TARGET: BOTH" in payload.upper():
+                    rejection_target = "both"
+                else:
+                    rejection_target = "plot"
+            elif "VERDICT: APPROVED" in payload.upper() or "APPROVED" in payload.upper():
+                is_approved = True
+                rejection_target = "none"
+
     except Exception as e:
-        print(f"audit_plot_task: Error in structured audit: {e}")
+        print(f"audit_plot_task: Error executing agent_call for brand-editor: {e}")
         is_approved = True
         feedback = "Auto-approved (Audit Exception Pass-through)"
         rejection_target = "plot"

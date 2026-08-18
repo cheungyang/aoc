@@ -76,7 +76,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
                 clean_q,
                 re.IGNORECASE
             )
-            if m_create and m_create.group(1).lower() not in ["content", "video", "image", "post", "a", "the", "ayla", "me", "this"]:
+            if m_create and m_create.group(1).lower() not in ["content", "video", "image", "post", "a", "the", "me", "this"]:
                 topic = m_create.group(1).strip()
             elif clean_q and len(clean_q.split()) <= 2 and not any(w in clean_q.lower() for w in [
                 "looking for", "instead of", "change", "revise", "make the", "fix", "update",

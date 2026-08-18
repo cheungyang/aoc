@@ -28,20 +28,15 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
             with open(test_state["qc_playbook_path"], "w") as f:
                 f.write("Must include hashtags.")
 
-            mock_final_copy = FinalCopy(
-                caption="Look at this cute puppy!",
-                hashtags=["#puppy", "#cute"],
-                markdown_content="**Caption:** Look at this cute puppy! \n **Hashtags:** #puppy #cute"
-            )
+            mock_payload = json.dumps({
+                "caption": "Look at this cute puppy!",
+                "hashtags": ["#puppy", "#cute"],
+                "markdown_content": "**Caption:** Look at this cute puppy! \n **Hashtags:** #puppy #cute"
+            })
+            mock_response = f"<payload>{mock_payload}</payload>"
 
-            with patch("core.loaders.agents_loader.AgentsLoader") as MockLoader, \
-                 patch("langchain_google_genai.ChatGoogleGenerativeAI") as MockLLM:
-                
-                mock_llm_instance = MagicMock()
-                mock_structured_llm = AsyncMock()
-                mock_structured_llm.ainvoke.return_value = mock_final_copy
-                mock_llm_instance.with_structured_output.return_value = mock_structured_llm
-                MockLLM.return_value = mock_llm_instance
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
 
                 result = await draft_copy_task(test_state)
 
@@ -51,13 +46,13 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
                 copy_md_path = result["copy_path"]
                 self.assertTrue(os.path.exists(copy_md_path))
                 with open(copy_md_path, "r", encoding="utf-8") as f:
-                    self.assertEqual(f.read(), mock_final_copy.markdown_content)
+                    self.assertEqual(f.read(), "**Caption:** Look at this cute puppy! \n **Hashtags:** #puppy #cute")
 
                 copy_json_path = copy_md_path.replace(".md", ".json")
                 self.assertTrue(os.path.exists(copy_json_path))
                 with open(copy_json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    self.assertEqual(data["caption"], mock_final_copy.caption)
+                    self.assertEqual(data["caption"], "Look at this cute puppy!")
 
     async def test_node_aborts_if_error_message_present(self):
         test_state = {

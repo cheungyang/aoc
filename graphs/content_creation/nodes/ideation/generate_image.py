@@ -1,11 +1,12 @@
 import os
-import glob
+import re
 from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path
 from graphs.content_creation.utils.logging import _append_execution_log
+from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from tools.generate_image import generate_image
 
 async def generate_image_task(state: dict) -> dict:
-    """Generates 1-shot base image using the style-specific character sheet (01_Character_Sheet_{style}.md) and guidelines."""
+    """Generates 1-shot base image using instructions and character sheets loaded dynamically from project_dir."""
     if state.get("error_message"):
         return {}
 
@@ -19,13 +20,17 @@ async def generate_image_task(state: dict) -> dict:
     creator_instructions_path = state.get("creator_instructions_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     human_feedback = state.get("latest_human_feedback")
+    gate1_decision = state.get("gate1_decision")
+    if human_feedback and (not gate1_decision or gate1_decision == "approved"):
+        gate1_decision = classify_gate1_intent(human_feedback)
 
     existing_image = _resolve_asset_path(output_dir, topic, "image", next_version=False)
     needs_image_revision = (
-        state.get("gate1_decision") == "revise_image" or
+        gate1_decision == "revise_image" or
         state.get("qc_rejection_target") == "image" or
         "TARGET: IMAGE" in str(state.get("video_plot_feedback") or "").upper() or
-        "BASE IMAGE" in str(state.get("video_plot_feedback") or "").upper()
+        "BASE IMAGE" in str(state.get("video_plot_feedback") or "").upper() or
+        bool(human_feedback and gate1_decision not in ["approved", "revise_plot"])
     )
 
     if os.path.exists(existing_image) and not needs_image_revision:
@@ -40,46 +45,51 @@ async def generate_image_task(state: dict) -> dict:
     else:
         image_path = existing_image
 
-    # 1. Discover Style-Specific Character Sheet and Reference Image
+    # 1. Load Style-Specific Character Sheet & Frontmatter Reference Image from project_dir
     char_dir = os.path.join(project_dir, "character") if project_dir else ""
-    ref_image_path = None
+    ref_image_path = state.get("reference_image_path")
     char_guidelines = ""
 
     if char_dir and os.path.isdir(char_dir):
-        # Look specifically for 01_Character_Sheet_{style}.md
-        target_sheet_name = f"01_Character_Sheet_{style_normalized}.md"
-        target_sheet_path = os.path.join(char_dir, target_sheet_name)
-        
-        # Check case-insensitive if exact match not found
-        if not os.path.exists(target_sheet_path):
-            for fname in os.listdir(char_dir):
-                if fname.lower() == target_sheet_name.lower() or fname.lower() == f"character_sheet_{style.lower()}.md":
-                    target_sheet_path = os.path.join(char_dir, fname)
+        for fname in sorted(os.listdir(char_dir)):
+            if fname.lower().endswith(".md") and style.lower() in fname.lower():
+                sheet_path = os.path.join(char_dir, fname)
+                try:
+                    with open(sheet_path, "r", encoding="utf-8") as f:
+                        raw_text = f.read()
+
+                    # Extract YAML frontmatter
+                    m_fm = re.match(r'^---\s*\n(.*?)\n---\s*\n', raw_text, re.DOTALL)
+                    if m_fm:
+                        fm_text = m_fm.group(1)
+                        m_ref = re.search(r'reference_image:\s*["\']?([^"\'\r\n]+)["\']?', fm_text, re.IGNORECASE)
+                        if m_ref and not ref_image_path:
+                            cand_ref = os.path.join(char_dir, os.path.basename(m_ref.group(1).strip()))
+                            if os.path.isfile(cand_ref):
+                                ref_image_path = cand_ref
+                        char_guidelines = raw_text[m_fm.end():].strip()
+                    else:
+                        char_guidelines = raw_text.strip()
+                    break
+                except Exception:
+                    pass
+
+    # Check if human feedback explicitly references a specific image file in char_dir or project_dir
+    if human_feedback:
+        m_custom_ref = re.search(r'(?:reference|ref|character)[^\w\n]*([\w\d_./-]+\.(?:jpg|jpeg|png|webp))', human_feedback, re.IGNORECASE)
+        if m_custom_ref:
+            custom_ref_file = m_custom_ref.group(1).strip()
+            cands = [
+                os.path.join(char_dir, os.path.basename(custom_ref_file)) if char_dir else "",
+                os.path.join(project_dir, custom_ref_file) if project_dir else "",
+                custom_ref_file
+            ]
+            for cand in cands:
+                if cand and os.path.isfile(cand):
+                    ref_image_path = cand
                     break
 
-        if os.path.exists(target_sheet_path):
-            try:
-                with open(target_sheet_path, "r", encoding="utf-8") as f:
-                    char_guidelines = f"\n--- {os.path.basename(target_sheet_path)} ---\n" + f.read()
-            except Exception:
-                pass
-
-        # Look for matching style reference image or real reference photo
-        image_candidates = glob.glob(os.path.join(char_dir, "*.jpg")) + \
-                           glob.glob(os.path.join(char_dir, "*.jpeg")) + \
-                           glob.glob(os.path.join(char_dir, "*.png"))
-        if image_candidates:
-            style_matches = [p for p in image_candidates if style.lower() in os.path.basename(p).lower()]
-            real_matches = [p for p in image_candidates if "real" in os.path.basename(p).lower() or "photo" in os.path.basename(p).lower()]
-            
-            if style_matches:
-                ref_image_path = style_matches[0]
-            elif real_matches:
-                ref_image_path = real_matches[0]
-            else:
-                ref_image_path = image_candidates[0]
-
-    # 2. Collect Project Guidelines
+    # 2. Load Project & Creator Instructions from project_dir
     project_guidelines = ""
     for path in [manifest_path, creator_instructions_path]:
         if path and os.path.exists(path):
@@ -89,28 +99,20 @@ async def generate_image_task(state: dict) -> dict:
             except Exception:
                 pass
 
-    # 3. Assemble Style-Accurate Prompt with Strict Aspect Ratio
-    prompt_sections = [
-        f"Generate a 9:16 vertical aspect ratio (1080x1920), high quality {style_normalized} style scene featuring '{topic}'.",
-        "The scene must be warm, vibrant, colorful, cinematic, and tailored for toddlers/children's educational media.",
-    ]
-
+    # 3. Assemble Dynamic Prompt Strictly from Loaded Project Instructions (No hardcoded prompts)
+    prompt_sections = []
     if char_guidelines:
-        prompt_sections.append(f"CHARACTER IDENTITY & APPEARANCE RULES ({style_normalized} Style):\n{char_guidelines}")
-    else:
-        prompt_sections.append("Ensure the main character is consistent, expressive, friendly, and visually engaging.")
-
+        prompt_sections.append(f"--- CHARACTER IDENTITY & APPEARANCE RULES ({style_normalized} Style) ---\n{char_guidelines}")
     if project_guidelines:
-        prompt_sections.append(f"PROJECT CREATIVE GUIDELINES:\n{project_guidelines}")
-
-    if human_feedback and state.get("gate1_decision") == "revise_image":
-        prompt_sections.append(f"USER REVISION INSTRUCTIONS (HIGHEST PRIORITY):\n{human_feedback}")
+        prompt_sections.append(f"--- PROJECT CREATIVE & CREATOR INSTRUCTIONS ---\n{project_guidelines}")
 
     prompt_sections.append(
-        f"Framing & Composition: Vertical 9:16 portrait orientation. "
-        f"The main character is joyfully interacting with '{topic}'. "
-        f"Clean background, soft studio lighting, ultra-detailed {style_normalized} textures."
+        f"TASK: Generate the 1-shot base image for topic: '{topic}', style: '{style_normalized}'.\n"
+        f"Strictly adhere to the character appearance rules, costume requirements, and scene composition instructions defined above."
     )
+
+    if human_feedback:
+        prompt_sections.append(f"--- HUMAN REVISION INSTRUCTIONS (HIGHEST PRIORITY) ---\n{human_feedback}")
 
     full_prompt = "\n\n".join(prompt_sections)
 

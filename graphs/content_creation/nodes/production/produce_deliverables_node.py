@@ -22,9 +22,25 @@ async def produce_deliverables_node(state: dict) -> dict:
     working_state["project_dir"] = project_dir
     working_state["output_dir"] = output_dir
 
+    human_feedback = state.get("latest_human_feedback")
+    gate2_decision = state.get("gate2_decision")
+    if human_feedback and (not gate2_decision or gate2_decision == "approved"):
+        from graphs.content_creation.utils.classifiers import classify_gate2_intent
+        gate2_decision = classify_gate2_intent(human_feedback)
+        working_state["gate2_decision"] = gate2_decision
+
     # Step 3a: Generate or reuse raw visual plate
     plate_res = await render_plate_task(working_state)
     working_state.update(plate_res)
+
+    if working_state.get("error_message"):
+        err_msg = working_state["error_message"]
+        return {
+            "project_dir": project_dir,
+            "output_dir": output_dir,
+            "error_message": err_msg,
+            "messages": [AIMessage(content=f"🛑 **[Video Generation Failed]**: {err_msg}")]
+        }
 
     # Step 3b: FFmpeg Remixing + Video QC Verification (up to 3 internal attempts)
     max_remix_attempts = 3
@@ -61,7 +77,11 @@ async def produce_deliverables_node(state: dict) -> dict:
     }
     working_state["final_package"] = final_package
 
-    # Step 3d: Format Gate 2 Presentation Card
+    # Step 3d: Assert Revision Invariants
+    from graphs.content_creation.utils.invariants import assert_gate2_revision_invariants
+    assert_gate2_revision_invariants(state, working_state)
+
+    # Step 3e: Format Gate 2 Presentation Card
     summary = format_gate2_presentation(working_state)
 
     _append_execution_log(
@@ -88,6 +108,7 @@ async def produce_deliverables_node(state: dict) -> dict:
         "video_qc_passed": working_state.get("video_qc_passed", False),
         "video_qc_attempts": working_state.get("video_qc_attempts", 1),
         "video_qc_feedback": working_state.get("video_qc_feedback", ""),
+        "gate2_decision": working_state.get("gate2_decision", "approved"),
         "final_package": final_package,
         "messages": [AIMessage(content=summary)]
     }
