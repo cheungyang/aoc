@@ -39,6 +39,7 @@ class ContentCreationState(TypedDict, total=False):
     gate1_decision: str
     gate2_decision: str
     latest_human_feedback: str
+    quota_exceeded: bool
     final_package: Dict[str, Any]
 
 # Import Macro Nodes and Gate Processor Nodes

@@ -180,6 +180,8 @@ def format_output(state: Dict[str, Any]) -> str:
     if isinstance(state, dict):
         if state.get("clarification_question"):
             return state["clarification_question"]
+        if state.get("quota_exceeded") or (state.get("error_message") and ("quota" in str(state.get("error_message")).lower() or "429" in str(state.get("error_message")))):
+            return state["error_message"]
         if state.get("video_qc_attempts", 0) >= state.get("max_video_reviews", 3) and not state.get("video_qc_passed"):
             topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
             remixed_video_path = state.get("remixed_video_path") or state.get("video_path", "")

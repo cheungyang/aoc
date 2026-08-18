@@ -80,23 +80,50 @@ async def generate_image_task(state: dict) -> dict:
         tool_args["image_path"] = ref_image_path
 
     res = await generate_image.ainvoke(tool_args)
+    tool_err = ""
+    if "<errors>" in str(res) and "</errors>" in str(res):
+        tool_err = str(res).split("<errors>")[1].split("</errors>")[0].strip()
+
     file_persisted = bool(image_path and os.path.isfile(image_path) and os.path.getsize(image_path) > 0)
+
+    log_details = {
+        "Style": style_normalized,
+        "Aspect Ratio": aspect_ratio,
+        "Image Path": image_path,
+        "Reference Image Used": ref_image_path or "None",
+        "File Status": "Verified on disk" if file_persisted else "FAILED / Missing",
+        "Tool Response": str(res)
+    }
+    if not file_persisted and tool_err and tool_err.lower() != "none":
+        log_details["Error Details"] = tool_err
 
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
         actor="🎨 Content Creator",
         event_title="Base Image Generation",
-        details={
-            "Style": style_normalized,
-            "Aspect Ratio": aspect_ratio,
-            "Image Path": image_path,
-            "Reference Image Used": ref_image_path or "None",
-            "File Status": "Verified on disk" if file_persisted else "FAILED / Missing",
-            "Tool Response": str(res)
-        },
+        details=log_details,
         log_path=execution_log_path
     )
+
+    if not file_persisted:
+        from graphs.content_creation.utils.errors import is_quota_exceeded_error, format_quota_exceeded_message
+        if is_quota_exceeded_error(tool_err):
+            err_msg = format_quota_exceeded_message("Google Imagen / Gemini", tool_err or "API Quota Exceeded (429)", topic)
+            return {
+                "project_dir": project_dir,
+                "output_dir": output_dir,
+                "error_message": err_msg,
+                "quota_exceeded": True,
+                "failed_node": "generate_image"
+            }
+        elif tool_err and tool_err.lower() != "none":
+            return {
+                "project_dir": project_dir,
+                "output_dir": output_dir,
+                "error_message": f"Image Generation Failed: {tool_err}",
+                "failed_node": "generate_image"
+            }
 
     return {
         "project_dir": project_dir,

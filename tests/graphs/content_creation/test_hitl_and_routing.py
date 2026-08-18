@@ -635,6 +635,65 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 snap = graph.get_state(config)
                 self.assertEqual(snap.next, ())
 
+    async def test_scenario_10_quota_exceeded_in_veo3_halts_and_preserves_state(self):
+        """Scenario 10: When Veo 3 hits a 429 / Quota Exceeded error, workflow halts cleanly and preserves state."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+
+            audio_path = os.path.join(output_dir, "cat.m4a")
+            with open(audio_path, "wb") as f: f.write(b"AUDIO")
+
+            checkpointer = MemorySaver()
+            graph = create_graph(checkpointer=checkpointer)
+            config = {"configurable": {"thread_id": "test_scenario_10"}}
+
+            initial_state = prepare_input(
+                f"topic: cat, project_dir: {temp_dir}, output_dir: {output_dir}",
+                session_id="test_scenario_10"
+            )
+
+            with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_img, \
+                 patch("graphs.content_creation.nodes.production.render_plate.generate_animation_veo3") as mock_veo, \
+                 patch("graphs.content_creation.nodes.production.remix_video.remix_video") as mock_remix, \
+                 patch("tools.agent_call.agent_call") as mock_agent_call:
+
+                async def fake_img(args):
+                    p = args["output_path"]
+                    with open(p, "wb") as f: f.write(b"IMG")
+                    return f"<payload>{p}</payload>"
+                mock_img.ainvoke = AsyncMock(side_effect=fake_img)
+
+                # Veo 3 fails with 429 Quota Exceeded
+                mock_veo.ainvoke = AsyncMock(return_value="<errors>Error generating video with Veo: 429 RESOURCE_EXHAUSTED: You exceeded your current quota</errors>")
+                mock_remix.ainvoke = AsyncMock()
+                mock_agent_call.ainvoke = AsyncMock(side_effect=_mock_agent_call_side_effect("# Cat Plot", {}))
+
+                # Turn 1: Run to Gate 1
+                state_turn1 = await graph.ainvoke(initial_state, config=config)
+                saved_img = state_turn1["image_path"]
+                saved_plot = state_turn1["video_plot_path"]
+
+                # Turn 2: Gate 1 Approved -> Executes produce_deliverables -> Hits Veo 3 429 Quota Error
+                graph.update_state(config, {
+                    "latest_human_feedback": "approve",
+                    "messages": [HumanMessage(content="approve")]
+                }, as_node="ideate_package")
+
+                state_turn2 = await graph.ainvoke(None, config=config)
+
+                # Assert that graph halted due to quota exceeded
+                self.assertTrue(state_turn2.get("quota_exceeded"))
+                self.assertIn("PIPELINE HALTED: API Quota Exceeded / Rate Limit (429)", state_turn2["error_message"])
+                self.assertIn("Google Veo 3", state_turn2["error_message"])
+
+                # Verify remix task was NOT called in a wasted loop
+                mock_remix.ainvoke.assert_not_called()
+
+                # Verify previous assets are safely preserved
+                self.assertEqual(state_turn2["image_path"], saved_img)
+                self.assertEqual(state_turn2["video_plot_path"], saved_plot)
+
 
 if __name__ == "__main__":
     unittest.main()

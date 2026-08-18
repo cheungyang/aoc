@@ -35,11 +35,23 @@ async def produce_deliverables_node(state: dict) -> dict:
 
     if working_state.get("error_message"):
         err_msg = working_state["error_message"]
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🛑 System",
+            event_title="Pipeline Halted: Visual Plate Generation Error",
+            details={
+                "Error": err_msg,
+                "Quota Exceeded": working_state.get("quota_exceeded", False)
+            },
+            log_path=execution_log_path
+        )
         return {
             "project_dir": project_dir,
             "output_dir": output_dir,
             "error_message": err_msg,
-            "messages": [AIMessage(content=f"🛑 **[Video Generation Failed]**: {err_msg}")]
+            "quota_exceeded": working_state.get("quota_exceeded", False),
+            "messages": [AIMessage(content=err_msg)]
         }
 
     # Step 3b: FFmpeg Remixing + Video QC Verification (up to 3 internal attempts)

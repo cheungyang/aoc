@@ -132,8 +132,15 @@ async def generate_animation_veo3(
                 errors=f"Veo video generation failed: {operation.error}"
             )
 
-        if not operation.response or not operation.response.generated_videos:
-            raise Exception("No generated video found in Veo operation response.")
+        if not operation.response or not getattr(operation.response, "generated_videos", None):
+            reasons = []
+            if operation.response:
+                if getattr(operation.response, "rai_media_filtered_reasons", None):
+                    reasons.extend(operation.response.rai_media_filtered_reasons)
+                if getattr(operation.response, "rai_media_filtered_count", None):
+                    reasons.append(f"Filtered count: {operation.response.rai_media_filtered_count}")
+            reason_str = f" Reasons: {', '.join(str(r) for r in reasons)}" if reasons else ""
+            raise Exception(f"No generated video found in Veo operation response.{reason_str}")
 
         generated_video = operation.response.generated_videos[0]
         abs_output_path = os.path.abspath(output_path)
@@ -142,8 +149,9 @@ async def generate_animation_veo3(
             await asyncio.to_thread(os.makedirs, dir_name, exist_ok=True)
 
         def _save_video():
-            client.files.download(file=generated_video.video)
-            generated_video.video.save(abs_output_path)
+            video_bytes = client.files.download(file=generated_video.video)
+            with open(abs_output_path, "wb") as f:
+                f.write(video_bytes)
 
         await asyncio.to_thread(_save_video)
 

@@ -67,7 +67,9 @@ class TestGenerateAnimationVeo3Tool(unittest.IsolatedAsyncioTestCase):
 
         mock_client.models.generate_videos.return_value = mock_operation
 
-        with patch("os.makedirs"):
+        mock_client.files.download.return_value = b"MOCK_MP4_BYTES"
+
+        with patch("os.makedirs"), patch("builtins.open", unittest.mock.mock_open()):
             with patch("os.path.abspath", return_value="/mock/path/veo_video.mp4"):
                 result = await generate_animation_veo3.ainvoke({
                     "prompt_text": "gentle camera push in, smiling baby",
@@ -80,7 +82,6 @@ class TestGenerateAnimationVeo3Tool(unittest.IsolatedAsyncioTestCase):
 
         mock_image_from_file.assert_called_once_with(location="scene.png")
         mock_client.files.download.assert_called_once_with(file=mock_video_file)
-        mock_video_file.save.assert_called_once_with("/mock/path/veo_video.mp4")
         expected = format_tool_response("generate_animation_veo3", payload="/mock/path/veo_video.mp4", errors="None")
         self.assertEqual(result, expected)
 
@@ -100,8 +101,9 @@ class TestGenerateAnimationVeo3Tool(unittest.IsolatedAsyncioTestCase):
         mock_operation.response.generated_videos = [mock_video_item]
 
         mock_client.models.generate_videos.return_value = mock_operation
+        mock_client.files.download.return_value = b"MOCK_MP4_BYTES"
 
-        with patch("os.makedirs"):
+        with patch("os.makedirs"), patch("builtins.open", unittest.mock.mock_open()):
             with patch("os.path.abspath", return_value="/mock/path/veo_video.mp4"):
                 result = await generate_animation_veo3.ainvoke({
                     "prompt_text": "calico kitten playing in sunshine with dialogue",
@@ -110,7 +112,6 @@ class TestGenerateAnimationVeo3Tool(unittest.IsolatedAsyncioTestCase):
                 })
 
         mock_client.files.download.assert_called_once_with(file=mock_video_file)
-        mock_video_file.save.assert_called_once_with("/mock/path/veo_video.mp4")
         expected = format_tool_response("generate_animation_veo3", payload="/mock/path/veo_video.mp4", errors="None")
         self.assertEqual(result, expected)
 

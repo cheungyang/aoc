@@ -32,6 +32,27 @@ async def ideate_package_node(state: dict) -> dict:
     img_res = await generate_image_task(working_state)
     working_state.update(img_res)
 
+    if working_state.get("error_message"):
+        err_msg = working_state["error_message"]
+        _append_execution_log(
+            output_dir=output_dir,
+            topic=topic,
+            actor="🛑 System",
+            event_title="Pipeline Halted: Base Image Generation Error",
+            details={
+                "Error": err_msg,
+                "Quota Exceeded": working_state.get("quota_exceeded", False)
+            },
+            log_path=execution_log_path
+        )
+        return {
+            "project_dir": project_dir,
+            "output_dir": output_dir,
+            "error_message": err_msg,
+            "quota_exceeded": working_state.get("quota_exceeded", False),
+            "messages": [AIMessage(content=err_msg)]
+        }
+
     # Step 2b: Draft Video Plot and run self-contained QC Audit (with up to 2 auto-corrections)
     max_qc_reviews = 2
     for attempt in range(max_qc_reviews):
