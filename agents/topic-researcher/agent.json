@@ -14,11 +14,9 @@
     "filesystem": {
       "pkm/wiki": [
         "read",
+        "write",
         "overwrite",
         "append"
-      ],
-      "pkm/inbox": [
-        "write"
       ]
     }
   },
@@ -36,7 +34,7 @@
         "If populated, pick the highest priority XML request.",
         "Execute deep dive research.",
         "Synthesize the findings into a new Markdown file.",
-        "Save the finalized article to `pkm/inbox/` so wiki-gardener can weave it."
+        "Save the finalized article to `pkm/wiki/topics/`."
       ]
     }
   ]
