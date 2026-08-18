@@ -4,17 +4,19 @@
     "*"
   ],
   "channel_hosts": [
-    "general",
-    "day-planning",
-    "weekend-planning",
-    "weekly-planning",
-    "project-planning",
-    "topic-research",
-    "software-dev",
     "aoc-debug",
-    "meal-planning",
     "content-creation",
-    "receipts"
+    "day-planning",
+    "general",
+    "goal-planning",
+    "meal-planning",
+    "pkm-wiki",
+    "project-planning",
+    "receipts",
+    "software-dev",
+    "topic-research",
+    "weekend-planning",
+    "weekly-planning"
   ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",

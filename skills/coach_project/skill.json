@@ -1,0 +1,24 @@
+{
+  "skill_id": "coach_project",
+  "name": "Coach Project",
+  "description": "Analyzes project metadata and tasks, connects knowledge via wiki_query, and maintains a strategic coaching dossier to facilitate proactive user coaching sessions.",
+  "emoji": "📋",
+  "tools": {
+    "filesystem": {
+      "pkm/vault/projects": [
+        "append"
+      ],
+      "pkm/wiki": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "find",
+        "grep"
+      ]
+    },
+    "git": [],
+    "task_query": [],
+    "project_query": []
+  }
+}
