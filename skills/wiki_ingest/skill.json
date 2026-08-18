@@ -15,7 +15,7 @@
       "pkm/inbox": [
         "read",
         "find",
-        "grep",
+        "ls",
         "delete"
       ]
     },

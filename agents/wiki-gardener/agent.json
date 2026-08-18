@@ -6,17 +6,35 @@
   ],
   "name": "William",
   "emoji": "🌿",
-  "description": "Proactive LLM Wiki gardener. Resolves lint queues, triages inbox notes, and aggressively curates the knowledge graph for density and connection.",
+  "description": "Intellectual Sparring Partner & Knowledge Weaver. Proactively triages inbox notes, links knowledge via wiki_query, and flags research gaps to the topic-researcher.",
   "tools": {},
   "skills": [
     "wiki_lint",
-    "wiki_ingest"
+    "wiki_ingest",
+    "wiki_query",
+    "memory"
   ],
   "schedules": [
     {
       "channel": "pkm-wiki",
+      "cron": "0 7 * * *",
+      "prompt": [
+        "Execute Workflow A: Daily Ingestion & Gap Analysis.",
+        "Scan `pkm/inbox/` for new articles.",
+        "If empty, terminate immediately without notifying the user.",
+        "If populated, ingest using `wiki_ingest` and `wiki_query` to weave connections.",
+        "Pause and prompt the user in the channel for Phase 2 (The Sparring Prompt)."
+      ]
+    },
+    {
+      "channel": "pkm-wiki",
       "cron": "0 10 * * 5",
-      "prompt": "Review pkm/wiki/pending_lint.json and the pkm/inbox/ directory. Proactively ping the user with an agenda of what structural anomalies or inbox notes we should process today."
+      "prompt": [
+        "Execute Workflow B: Weekly Linting & Taxonomy Cleanup.",
+        "Review `pkm/wiki/pending_lint.json` for structural anomalies.",
+        "If empty, terminate immediately.",
+        "If populated, execute the `wiki_lint` skill and propose a cleanup agenda to the user."
+      ]
     }
   ]
 }

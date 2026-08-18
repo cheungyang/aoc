@@ -1,19 +1,43 @@
 {
-    "agent_id": "topic-researcher",
-    "channels": [
-        "topic-research",
-        "aoc-debug",
-        "general"
-    ],
-    "name": "Ted",
-    "emoji": "🔬",
-    "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
-    "tools": {
-        "nlm": [],
-        "vault_search": []
-    },
-    "skills": [
-        "wiki_query",
-        "research"
-    ]
+  "agent_id": "topic-researcher",
+  "channels": [
+    "topic-research",
+    "aoc-debug",
+    "general"
+  ],
+  "name": "Ted",
+  "emoji": "🔬",
+  "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
+  "tools": {
+    "nlm": {},
+    "vault_search": {},
+    "filesystem": {
+      "pkm/wiki": [
+        "read",
+        "overwrite",
+        "append"
+      ],
+      "pkm/inbox": [
+        "write"
+      ]
+    }
+  },
+  "skills": [
+    "wiki_query",
+    "research"
+  ],
+  "schedules": [
+    {
+      "channel": "topic-research",
+      "cron": "0 8 * * *",
+      "prompt": [
+        "Check `pkm/wiki/research_requests.md`.",
+        "If empty, terminate immediately.",
+        "If populated, pick the highest priority XML request.",
+        "Execute deep dive research.",
+        "Synthesize the findings into a new Markdown file.",
+        "Save the finalized article to `pkm/inbox/` so wiki-gardener can weave it."
+      ]
+    }
+  ]
 }
