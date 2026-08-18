@@ -105,7 +105,7 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("3D_CHARACTER_TRAITS", call_prompt)
                 self.assertIn("Toddler girl should perform playful kitten paws.", call_prompt)
 
-    async def test_generates_v2_when_feedback_provided_even_if_gate1_decision_was_approved(self):
+    async def test_generates_v2_when_plot_feedback_provided_even_if_gate1_decision_was_approved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = os.path.join(temp_dir, "cat")
             os.makedirs(output_dir, exist_ok=True)
@@ -118,14 +118,14 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 "project_dir": temp_dir,
                 "output_dir": output_dir,
                 "gate1_decision": "approved",
-                "latest_human_feedback": "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image.",
+                "latest_human_feedback": "Change the video plot motion: add rapid zoom and camera pan.",
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
             }
 
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            mock_response = "<payload>V2 plot content with Ayla in cat costume crawling\nOverlay Text: CAT</payload>"
+            mock_response = "<payload>V2 plot content with rapid zoom\nOverlay Text: CAT</payload>"
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
@@ -136,7 +136,29 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["video_plot_path"], expected_v2)
                 self.assertTrue(os.path.exists(expected_v2))
                 with open(result["video_plot_path"], "r") as f:
-                    self.assertEqual(f.read(), "V2 plot content with Ayla in cat costume crawling\nOverlay Text: CAT")
+                    self.assertEqual(f.read(), "V2 plot content with rapid zoom\nOverlay Text: CAT")
+
+    async def test_reuses_existing_plot_when_image_specific_feedback_provided(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+            existing_plot_path = os.path.join(output_dir, "cat_video_plot.md")
+            with open(existing_plot_path, "w") as f:
+                f.write("Initial plot")
+
+            state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir,
+                "gate1_decision": "revise_image",
+                "video_plot_qc_passed": True,
+                "latest_human_feedback": "Change character costume to blue astronaut onesie.",
+                "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
+            }
+
+            result = await draft_plot_task(state)
+            self.assertEqual(result["video_plot_path"], existing_plot_path)
+
 
 if __name__ == "__main__":
     unittest.main()

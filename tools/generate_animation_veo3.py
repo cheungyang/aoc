@@ -74,6 +74,17 @@ async def generate_animation_veo3(
 
         client = genai.Client(api_key=api_key)
 
+        # Auto-detect aspect ratio from input image if present and aspect_ratio was not explicitly passed as 9:16
+        if image_path and os.path.exists(image_path) and aspect_ratio == "16:9":
+            try:
+                from PIL import Image
+                with Image.open(image_path) as img:
+                    w, h = img.size
+                    if h > w:
+                        aspect_ratio = "9:16"
+            except Exception:
+                pass
+
         video_config = types.GenerateVideosConfig(
             aspect_ratio=aspect_ratio,
             duration_seconds=duration,

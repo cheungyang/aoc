@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict, Any
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path
+from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_dir
 from graphs.content_creation.utils.logging import _append_execution_log
 from tools.extract_video_frames import extract_video_frames
 from tools.audio_stream_probe import audio_stream_probe
@@ -10,8 +10,21 @@ async def verify_video_task(state: dict) -> dict:
     """Extracts keyframes, probes audio streams, and validates subtitle OCR."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
-    video_path = state.get("remixed_video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
+    video_path = state.get("remixed_video_path")
+
+    # Resilient resolution of video_path under canonical output_dir
+    if not video_path or not (os.path.isfile(video_path) and os.path.getsize(video_path) > 0):
+        cand = _resolve_asset_path(output_dir, topic, "video", next_version=False)
+        if cand and os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            video_path = cand
+        elif video_path and output_dir:
+            cand2 = os.path.join(output_dir, os.path.basename(video_path))
+            if os.path.isfile(cand2) and os.path.getsize(cand2) > 0:
+                video_path = cand2
+        else:
+            video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
+
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     attempts = state.get("video_qc_attempts", 0) + 1
     max_reviews = state.get("max_video_reviews", 3)
@@ -57,7 +70,11 @@ async def verify_video_task(state: dict) -> dict:
             rejection_target = "none"
     else:
         is_approved = False
-        feedback = f"Target video file missing or 0 bytes at '{video_path}'."
+        gen_err = state.get("video_generation_error")
+        if gen_err:
+            feedback = f"Target video file missing or 0 bytes at '{video_path}'. Upstream error: {gen_err}"
+        else:
+            feedback = f"Target video file missing or 0 bytes at '{video_path}'."
         rejection_target = "visual_plate"
 
     _append_execution_log(

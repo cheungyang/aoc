@@ -11,6 +11,7 @@ class ContentCreationState(TypedDict, total=False):
     output_dir: str
     topic: str
     style: str
+    aspect_ratio: str
     session_id: str
     thread_id: str
     messages: List[AnyMessage]

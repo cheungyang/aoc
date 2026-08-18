@@ -9,8 +9,8 @@ class AssetInvariantError(RuntimeError):
 
 def assert_gate1_revision_invariants(initial_state: Dict[str, Any], result_state: Dict[str, Any]) -> None:
     """
-    Enforces that when a Gate 1 revision is requested, resulting assets are strictly fresh,
-    versioned, non-empty, and physically persisted on disk.
+    Enforces that when a Gate 1 revision is requested, targeted assets are strictly fresh,
+    versioned, non-empty, and physically persisted on disk, while untargeted assets are preserved.
     """
     decision = initial_state.get("gate1_decision") or result_state.get("gate1_decision")
     if not decision or decision == "approved":
@@ -30,8 +30,8 @@ def assert_gate1_revision_invariants(initial_state: Dict[str, Any], result_state
                 f"Still referencing old path {old_img}."
             )
 
-    # Invariant 2: If image or plot revision requested, video plot MUST be incremented and exist on disk
-    if decision in ["revise_image", "revise_plot"]:
+    # Invariant 2: If plot revision requested, video plot MUST be incremented and exist on disk
+    if decision == "revise_plot":
         new_plot = result_state.get("video_plot_path")
         old_plot = initial_state.get("video_plot_path")
         if not new_plot:
@@ -47,8 +47,8 @@ def assert_gate1_revision_invariants(initial_state: Dict[str, Any], result_state
 
 def assert_gate2_revision_invariants(initial_state: Dict[str, Any], result_state: Dict[str, Any]) -> None:
     """
-    Enforces that when a Gate 2 revision is requested, resulting deliverables are strictly fresh,
-    versioned, non-empty, and physically persisted on disk.
+    Enforces that when a Gate 2 revision is requested, targeted deliverables are strictly fresh,
+    versioned, non-empty, and physically persisted on disk, while untargeted deliverables are preserved.
     """
     decision = initial_state.get("gate2_decision") or result_state.get("gate2_decision")
     if not decision or decision == "approved":
@@ -81,5 +81,14 @@ def assert_gate2_revision_invariants(initial_state: Dict[str, Any], result_state
             raise AssetInvariantError(f"Gate 2 revision invariant failed: remixed video file {new_remix} missing or empty.")
         if old_raw and os.path.isfile(old_raw) and new_raw == old_raw:
             raise AssetInvariantError(f"Gate 2 revision invariant failed: raw_video_path not incremented from {old_raw}.")
+        if old_remix and os.path.isfile(old_remix) and new_remix == old_remix:
+            raise AssetInvariantError(f"Gate 2 revision invariant failed: remixed_video_path not incremented from {old_remix}.")
+
+    # Invariant 3: If remix/audio/subtitle revision requested, remixed video MUST be incremented while raw plate is preserved
+    if decision in ["revise_remix", "revise_audio", "revise_subtitles"]:
+        new_remix = result_state.get("remixed_video_path")
+        old_remix = initial_state.get("remixed_video_path")
+        if not new_remix or not (os.path.isfile(new_remix) and os.path.getsize(new_remix) > 0):
+            raise AssetInvariantError(f"Gate 2 revision invariant failed: remixed video file {new_remix} missing or empty.")
         if old_remix and os.path.isfile(old_remix) and new_remix == old_remix:
             raise AssetInvariantError(f"Gate 2 revision invariant failed: remixed_video_path not incremented from {old_remix}.")

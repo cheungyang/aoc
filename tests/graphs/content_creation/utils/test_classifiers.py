@@ -4,11 +4,15 @@ from graphs.content_creation.utils.classifiers import classify_gate1_intent, cla
 class TestClassifiers(unittest.TestCase):
     def test_classify_gate1_intent(self):
         # Approvals
+        self.assertEqual(classify_gate1_intent("approve"), "approved")
         self.assertEqual(classify_gate1_intent("approved"), "approved")
+        self.assertEqual(classify_gate1_intent("I approve"), "approved")
+        self.assertEqual(classify_gate1_intent("approve please"), "approved")
         self.assertEqual(classify_gate1_intent("looks good"), "approved")
         self.assertEqual(classify_gate1_intent("lgtm"), "approved")
         self.assertEqual(classify_gate1_intent("proceed"), "approved")
         self.assertEqual(classify_gate1_intent("yes"), "approved")
+        self.assertEqual(classify_gate1_intent("good to go"), "approved")
 
         # Plot-specific
         self.assertEqual(classify_gate1_intent("change camera movement in the plot"), "revise_plot")
@@ -20,7 +24,10 @@ class TestClassifiers(unittest.TestCase):
         self.assertEqual(classify_gate1_intent("make the outfit purple and add cat ears"), "revise_image")
 
     def test_classify_gate2_intent(self):
+        self.assertEqual(classify_gate2_intent("approve"), "approved")
         self.assertEqual(classify_gate2_intent("approved"), "approved")
+        self.assertEqual(classify_gate2_intent("I approve"), "approved")
+        self.assertEqual(classify_gate2_intent("looks great, proceed"), "approved")
         self.assertEqual(classify_gate2_intent("change the caption and hashtags"), "revise_copy")
         self.assertEqual(classify_gate2_intent("fix the audio overlay sync"), "revise_remix")
         self.assertEqual(classify_gate2_intent("re-render the video animation"), "revise_video")

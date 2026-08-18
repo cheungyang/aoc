@@ -1,6 +1,6 @@
 import os
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path
+from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_dir, validate_inter_node_paths
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.adapters import format_gate1_presentation
 from .generate_image import generate_image_task
@@ -14,7 +14,7 @@ async def ideate_package_node(state: dict) -> dict:
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     working_state = dict(state)
@@ -44,7 +44,8 @@ async def ideate_package_node(state: dict) -> dict:
         if working_state.get("video_plot_qc_passed"):
             break
 
-    # Step 2c: Assert Revision Invariants
+    # Step 2c: Validate Inter-node Path Invariants and Revision Invariants
+    validate_inter_node_paths(working_state, "ideate_package")
     from graphs.content_creation.utils.invariants import assert_gate1_revision_invariants
     assert_gate1_revision_invariants(state, working_state)
 
@@ -69,6 +70,7 @@ async def ideate_package_node(state: dict) -> dict:
         "project_dir": project_dir,
         "output_dir": output_dir,
         "style": working_state.get("style", "3D"),
+        "aspect_ratio": working_state.get("aspect_ratio", "16:9"),
         "image_path": working_state.get("image_path", ""),
         "video_plot_path": working_state.get("video_plot_path", ""),
         "overlay_text": working_state.get("overlay_text", ""),

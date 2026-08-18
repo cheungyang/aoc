@@ -1,6 +1,6 @@
 import os
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path
+from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_dir, validate_inter_node_paths
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.adapters import format_gate2_presentation
 from .render_plate import render_plate_task
@@ -15,7 +15,7 @@ async def produce_deliverables_node(state: dict) -> dict:
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
 
     working_state = dict(state)
@@ -77,7 +77,8 @@ async def produce_deliverables_node(state: dict) -> dict:
     }
     working_state["final_package"] = final_package
 
-    # Step 3d: Assert Revision Invariants
+    # Step 3d: Validate Inter-node Path Invariants and Revision Invariants
+    validate_inter_node_paths(working_state, "produce_deliverables")
     from graphs.content_creation.utils.invariants import assert_gate2_revision_invariants
     assert_gate2_revision_invariants(state, working_state)
 

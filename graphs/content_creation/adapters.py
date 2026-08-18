@@ -3,7 +3,12 @@ import re
 from typing import Dict, Any, Optional
 from langchain_core.messages import AIMessage, HumanMessage
 
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_project_doc_path, _resolve_asset_path
+from graphs.content_creation.utils.paths import (
+    normalize_project_path,
+    _resolve_project_doc_path,
+    _resolve_asset_path,
+    canonicalize_output_dir
+)
 
 def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """Translates incoming text query / kwargs into initial generic ContentCreationState."""
@@ -89,11 +94,10 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     topic = str(topic).strip().lower()
     qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
 
-    if not output_dir_param and project_dir:
-        output_dir_param = os.path.join(project_dir, topic)
+    output_dir = canonicalize_output_dir(project_dir, output_dir_param, topic) if (output_dir_param or project_dir) else ""
 
     source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
-    if not output_dir_param and not project_dir:
+    if not output_dir and not project_dir:
         error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_dir: 'path/to/project' or output_dir: 'path/to/project/words/topic')."
         manifest_path = kwargs.get("manifest_path", "")
         creator_instructions_path = kwargs.get("creator_instructions_path", "")
@@ -109,7 +113,6 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         overlay_text = ""
     else:
         error_msg = ""
-        output_dir = normalize_project_path(output_dir_param)
         manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_dir, "01_Project_Manifest.md")
         creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
         qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
@@ -125,11 +128,27 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         audio_path = kwargs.get("audio_path") or source_audio or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
         overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
 
+    aspect_ratio = kwargs.get("aspect_ratio")
+    if not aspect_ratio and (creator_instructions_path or manifest_path):
+        from graphs.content_creation.utils.paths import extract_aspect_ratio_from_instructions
+        instr_text = ""
+        for p in [manifest_path, creator_instructions_path]:
+            if p and os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        instr_text += "\n" + f.read()
+                except Exception:
+                    pass
+        if instr_text:
+            aspect_ratio = extract_aspect_ratio_from_instructions(instr_text)
+    aspect_ratio = aspect_ratio or "16:9"
+
     return {
         "project_dir": project_dir,
         "output_dir": output_dir,
         "topic": topic,
         "style": style,
+        "aspect_ratio": aspect_ratio,
         "session_id": session_id,
         "thread_id": thread_id,
         "manifest_path": manifest_path,
@@ -197,7 +216,7 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 1 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
 
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
@@ -224,7 +243,7 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 2 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     raw_video_path = state.get("raw_video_path") or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)

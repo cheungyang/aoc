@@ -1,9 +1,9 @@
 import os
+import re
 import json
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path
+from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
-from graphs.content_creation.schemas import FinalCopy
 
 async def draft_copy_task(state: dict) -> dict:
     """Drafts social copy, vocabulary breakdown, and hashtags, dual-publishing .md and .json."""
@@ -11,37 +11,29 @@ async def draft_copy_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
-    creator_instructions_path = state.get("creator_instructions_path", "")
+    project_dir = normalize_path(state.get("project_dir", ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
-    if human_feedback and (not gate2_decision or gate2_decision == "approved"):
-        gate2_decision = classify_gate2_intent(human_feedback)
-
-    existing_copy = _resolve_asset_path(output_dir, topic, "copy", next_version=False)
     needs_copy_revision = (gate2_decision == "revise_copy" or bool(human_feedback and gate2_decision == "revise_copy"))
 
-    if os.path.exists(existing_copy) and not needs_copy_revision:
+    copy_path, should_generate = resolve_task_asset(output_dir, topic, "copy", needs_revision=needs_copy_revision)
+    if not should_generate:
         return {
             "project_dir": project_dir,
             "output_dir": output_dir,
-            "copy_path": existing_copy
+            "copy_path": copy_path
         }
 
-    if os.path.exists(existing_copy) and needs_copy_revision:
-        copy_path = _resolve_asset_path(output_dir, topic, "copy", next_version=True)
-    else:
-        copy_path = existing_copy
     copy_json_path = copy_path.replace(".md", ".json")
 
-    instructions_text = ""
-    try:
-        with open(creator_instructions_path, "r", encoding="utf-8") as f:
-            instructions_text = f.read()
-    except Exception:
-        pass
+    ctx = load_project_context(
+        project_dir=project_dir,
+        manifest_path=state.get("manifest_path", ""),
+        creator_instructions_path=state.get("creator_instructions_path", "")
+    )
+    instructions_text = ctx["project_guidelines"]
 
     prompt = (
         f"You are the Content Creator drafting social media publication copy for the topic '{topic}'.\n"

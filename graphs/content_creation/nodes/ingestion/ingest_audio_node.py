@@ -3,7 +3,7 @@ import aiohttp
 import re
 from urllib.parse import urlparse, unquote
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path
+from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_dir
 
 AUDIO_EXTENSIONS = ('.m4a', '.wav', '.mp3', '.ogg', '.aac', '.flac')
 
@@ -16,13 +16,8 @@ async def ask_for_audio_node(state: dict) -> dict:
 async def ingest_audio_node(state: dict) -> dict:
     """Macro-Node 1: Ingests audio from message attachments, query parameters, or existing directory files."""
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir", ""))
     topic = str(state.get("topic") or state.get("word") or "").strip().lower()
-
-    if not output_dir and project_dir and topic:
-        output_dir = normalize_project_path(os.path.join(project_dir, topic))
-    elif not output_dir and project_dir:
-        output_dir = project_dir
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
 
     # 1. If state already points to a valid audio file on disk, pass it through directly
     for k in ["source_audio_path", "audio_file", "audio"]:

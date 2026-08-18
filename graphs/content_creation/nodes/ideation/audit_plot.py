@@ -1,5 +1,5 @@
 import os
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path
+from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_dir
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.schemas import PlotAudit
 
@@ -10,7 +10,7 @@ async def audit_plot_task(state: dict) -> dict:
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
+    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
     qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
     video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
