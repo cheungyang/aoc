@@ -18,9 +18,9 @@
     "tools": {
         "filesystem": {
             "pkm/vault/projects": [
-                "write",
-                "overwrite",
-                "append"
+                "append",
+                "read",
+                "replace_block"
             ]
         }
     },
