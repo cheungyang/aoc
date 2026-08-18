@@ -28,6 +28,14 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         else:
             output_dir_param = ""
 
+    style = kwargs.get("style")
+    if not style:
+        m_style = re.search(r'(?:style)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+        if m_style:
+            style = m_style.group(1).strip()
+        else:
+            style = ""
+
     session_id = kwargs.get("session_id")
     thread_id = kwargs.get("thread_id") or session_id
 
@@ -47,8 +55,12 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
                     output_dir_param = ch["output_dir"]
                 if not topic and ch.get("topic"):
                     topic = ch["topic"]
+                if not style and ch.get("style"):
+                    style = ch["style"]
         except Exception:
             pass
+
+    style = style or "3D"
 
     if project_dir:
         project_dir = normalize_project_path(project_dir)
@@ -117,6 +129,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "project_dir": project_dir,
         "output_dir": output_dir,
         "topic": topic,
+        "style": style,
         "session_id": session_id,
         "thread_id": thread_id,
         "manifest_path": manifest_path,

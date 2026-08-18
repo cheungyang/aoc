@@ -48,9 +48,33 @@ async def draft_plot_task(state: dict) -> dict:
     except Exception:
         pass
 
+    # Read Style-Specific Character Sheet
+    style = str(state.get("style") or "3D").strip()
+    style_normalized = style.upper() if style.lower() == "3d" else style.capitalize()
+    char_guidelines = ""
+    char_dir = os.path.join(project_dir, "character") if project_dir else ""
+    if char_dir and os.path.isdir(char_dir):
+        target_sheet_name = f"01_Character_Sheet_{style_normalized}.md"
+        target_sheet_path = os.path.join(char_dir, target_sheet_name)
+        if not os.path.exists(target_sheet_path):
+            for fname in os.listdir(char_dir):
+                if fname.lower() == target_sheet_name.lower() or fname.lower() == f"character_sheet_{style.lower()}.md":
+                    target_sheet_path = os.path.join(char_dir, fname)
+                    break
+        if os.path.exists(target_sheet_path):
+            try:
+                with open(target_sheet_path, "r", encoding="utf-8") as f:
+                    char_guidelines = f"\n--- {os.path.basename(target_sheet_path)} ---\n" + f.read()
+            except Exception:
+                pass
+
     prompt = (
         f"You are the Content Creator.\n"
         f"--- CREATOR INSTRUCTIONS ---\n{instructions_text}\n----------------------------\n"
+    )
+    if char_guidelines:
+        prompt += f"--- CHARACTER IDENTITY GUIDELINES ---\n{char_guidelines}\n-------------------------------------\n"
+    prompt += (
         f"Draft the Video Plot for the topic '{topic}' strictly following the template and constraints defined in the instructions.\n\n"
         f"IMPORTANT DATA BINDING:\n"
         f"- Use this exact path for the Source Image field: `{image_path}`\n"

@@ -47,7 +47,7 @@ async def render_plate_task(state: dict) -> dict:
     gen_error = ""
     try:
         result = await generate_animation_veo3.ainvoke({
-            "prompt": motion_prompt,
+            "prompt_text": motion_prompt,
             "image_path": image_path,
             "output_path": raw_video_path,
             "duration": 6,

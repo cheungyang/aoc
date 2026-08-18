@@ -56,5 +56,34 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 mock_gen.ainvoke.assert_called_once()
                 self.assertEqual(result["image_path"], target_path)
 
+    async def test_loads_style_specific_character_sheet(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            char_dir = os.path.join(temp_dir, "character")
+            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(char_dir, exist_ok=True)
+
+            # Create 3D and Ghibli character sheets
+            with open(os.path.join(char_dir, "01_Character_Sheet_3D.md"), "w") as f:
+                f.write("3D_PIXAR_RULES")
+            with open(os.path.join(char_dir, "01_Character_Sheet_Ghibli.md"), "w") as f:
+                f.write("GHIBLI_ANIME_RULES")
+
+            state = {
+                "topic": "cat",
+                "style": "Ghibli",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
+                mock_gen.ainvoke = AsyncMock(return_value="<payload>done</payload>")
+                await generate_image_task(state)
+
+                mock_gen.ainvoke.assert_called_once()
+                call_prompt = mock_gen.ainvoke.call_args[0][0]["prompt"]
+                self.assertIn("GHIBLI_ANIME_RULES", call_prompt)
+                self.assertNotIn("3D_PIXAR_RULES", call_prompt)
+
 if __name__ == "__main__":
     unittest.main()

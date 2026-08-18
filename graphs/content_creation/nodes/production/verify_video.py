@@ -10,6 +10,7 @@ async def verify_video_task(state: dict) -> dict:
     """Extracts keyframes, probes audio streams, and validates subtitle OCR."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
+    output_dir = normalize_project_path(state.get("output_dir") or (os.path.join(project_dir, topic) if project_dir else ""))
     video_path = state.get("remixed_video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
     attempts = state.get("video_qc_attempts", 0) + 1

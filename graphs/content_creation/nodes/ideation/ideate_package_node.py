@@ -57,6 +57,7 @@ async def ideate_package_node(state: dict) -> dict:
     return {
         "project_dir": project_dir,
         "output_dir": output_dir,
+        "style": working_state.get("style", "3D"),
         "image_path": working_state.get("image_path", ""),
         "video_plot_path": working_state.get("video_plot_path", ""),
         "overlay_text": working_state.get("overlay_text", ""),

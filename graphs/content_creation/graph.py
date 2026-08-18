@@ -10,6 +10,7 @@ class ContentCreationState(TypedDict, total=False):
     project_dir: str
     output_dir: str
     topic: str
+    style: str
     session_id: str
     thread_id: str
     messages: List[AnyMessage]
