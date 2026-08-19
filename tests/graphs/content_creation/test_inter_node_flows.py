@@ -110,7 +110,8 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
 
                 async def fake_agent_call(args):
                     agent_id = args.get("agent_id")
-                    if agent_id == "brand-editor":
+                    prompt = str(args.get("prompt", ""))
+                    if agent_id == "brand-editor" or "brand editor" in prompt.lower() or "qc playbook" in prompt.lower() or "audit" in prompt.lower():
                         return "<payload>VERDICT: APPROVED\nBrand checks passed.</payload>"
                     return "<payload># Horse Video Plot\nMotion prompt\nOverlay Text: 馬</payload>"
                 mock_agent_call.ainvoke = AsyncMock(side_effect=fake_agent_call)

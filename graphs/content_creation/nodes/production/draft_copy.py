@@ -4,6 +4,7 @@ import json
 from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
+from graphs.content_creation.prompts import build_draft_copy_prompt
 
 async def draft_copy_task(state: dict) -> dict:
     """Drafts social copy, vocabulary breakdown, and hashtags, dual-publishing .md and .json."""
@@ -35,13 +36,16 @@ async def draft_copy_task(state: dict) -> dict:
     )
     instructions_text = ctx["project_guidelines"]
 
-    prompt = (
-        f"You are the Content Creator drafting social media publication copy for the topic '{topic}'.\n"
-        f"--- CREATOR INSTRUCTIONS ---\n{instructions_text}\n----------------------------\n"
-        f"Draft the engaging social post title, caption, Cantonese/English vocabulary pronunciation tips, and hashtags."
+    prompt = build_draft_copy_prompt(
+        topic=topic,
+        project_dir=project_dir,
+        output_dir=output_dir,
+        copy_path=copy_path,
+        copy_json_path=copy_json_path,
+        instructions_text=instructions_text or "",
+        human_feedback=human_feedback or "",
+        is_revision=bool(gate2_decision == "revise_copy")
     )
-    if human_feedback and gate2_decision == "revise_copy":
-        prompt += f"\n\nHuman Revision Instructions for Copy:\n{human_feedback}"
 
     try:
         from tools.agent_call import agent_call
@@ -49,7 +53,7 @@ async def draft_copy_task(state: dict) -> dict:
 
         channel = state.get("channel") or "content-creation"
         tool_res = await agent_call.ainvoke({
-            "agent_id": "content-creator",
+            "agent_id": "graph-worker",
             "prompt": prompt,
             "channel": channel
         })
@@ -83,13 +87,13 @@ async def draft_copy_task(state: dict) -> dict:
             with open(copy_json_path, "w", encoding="utf-8") as f:
                 f.write(json.dumps(copy_dict, indent=2))
     except Exception as e:
-        print(f"draft_copy_task: Error executing agent_call for content-creator: {e}")
+        print(f"draft_copy_task: Error executing agent_call for graph-worker: {e}")
         polished_copy = ""
 
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
-        actor="📱 Content Creator",
+        actor="⚙️ Graph Worker (Copywriting)",
         event_title="Publication Copy Drafted",
         details={
             "Copy MD Path": copy_path,

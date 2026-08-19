@@ -2,6 +2,7 @@ import os
 from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_dir
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.schemas import PlotAudit
+from graphs.content_creation.prompts import build_audit_plot_prompt
 
 async def audit_plot_task(state: dict) -> dict:
     """Audits the drafted Video Plot against Brand Playbook guidelines."""
@@ -32,21 +33,24 @@ async def audit_plot_task(state: dict) -> dict:
         except Exception:
             pass
 
-    prompt = (
-        f"You are the Brand Editor auditing a Video Plot before presenting it at HITL Gate 1.\n\n"
-        f"--- QC PLAYBOOK ---\n{qc_playbook_content}\n-------------------\n\n"
-        f"--- DRAFTED VIDEO PLOT ---\n{plot_content}\n---------------------------\n\n"
-        f"Target Base Image File: {image_path}\n"
-        f"Evaluate the plot rigorously against all playbook criteria."
+    prompt = build_audit_plot_prompt(
+        topic=topic,
+        image_path=image_path,
+        video_plot_path=video_plot_path,
+        project_dir=project_dir,
+        output_dir=output_dir,
+        qc_playbook_content=qc_playbook_content,
+        plot_content=plot_content
     )
 
     try:
         from tools.agent_call import agent_call
         import re
+        import json
 
         channel = state.get("channel") or "content-creation"
         tool_res = await agent_call.ainvoke({
-            "agent_id": "brand-editor",
+            "agent_id": "graph-worker",
             "prompt": prompt,
             "channel": channel
         })
@@ -82,7 +86,7 @@ async def audit_plot_task(state: dict) -> dict:
                 rejection_target = "none"
 
     except Exception as e:
-        print(f"audit_plot_task: Error executing agent_call for brand-editor: {e}")
+        print(f"audit_plot_task: Error executing agent_call for graph-worker: {e}")
         is_approved = True
         feedback = "Auto-approved (Audit Exception Pass-through)"
         rejection_target = "plot"
@@ -90,7 +94,7 @@ async def audit_plot_task(state: dict) -> dict:
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
-        actor="🧐 Brand Editor",
+        actor="⚙️ Graph Worker (Brand QC Audit)",
         event_title="Video Plot Brand QC Audit",
         details={
             "Verdict": "APPROVED" if is_approved else "REJECTED",

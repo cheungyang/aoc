@@ -19,9 +19,9 @@ def _mock_agent_call_side_effect(plot_content, copy_dict, audit_response="VERDIC
     async def side_effect(args):
         agent_id = args.get("agent_id")
         prompt = str(args.get("prompt", ""))
-        if agent_id == "brand-editor":
+        if agent_id == "brand-editor" or "brand editor" in prompt.lower() or "qc playbook" in prompt.lower() or "audit" in prompt.lower():
             return f"<payload>{audit_response}</payload>"
-        elif agent_id == "content-creator":
+        elif agent_id in ["content-creator", "graph-worker"]:
             if "social media publication copy" in prompt.lower() or "copy" in prompt.lower():
                 return f"<payload>{json.dumps(copy_dict)}</payload>"
             else:

@@ -4,6 +4,7 @@ import json
 from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate1_intent
+from graphs.content_creation.prompts import build_draft_plot_prompt
 
 async def draft_plot_task(state: dict) -> dict:
     """Drafts Video Plot by delegating to LLM with instructions dynamically loaded from project_dir."""
@@ -49,29 +50,20 @@ async def draft_plot_task(state: dict) -> dict:
         creator_instructions_path=state.get("creator_instructions_path", "")
     )
     style_str = "3D Animation" if style.lower() == "3d" else ctx["style_normalized"]
-
-    prompt_sections = [
-        "You are the Content Creator. Draft the structured Video Plot strictly following the creator instructions and character guidelines below:\n"
-    ]
-    if ctx["project_guidelines"]:
-        prompt_sections.append(f"--- PROJECT CREATOR INSTRUCTIONS ---\n{ctx['project_guidelines']}\n")
-    if ctx["char_guidelines"]:
-        prompt_sections.append(f"--- CHARACTER IDENTITY GUIDELINES ({style_str}) ---\n{ctx['char_guidelines']}\n")
-
-    prompt_sections.append(
-        f"TASK & DATA BINDING:\n"
-        f"- Topic / Word: `{topic}`\n"
-        f"- Episode Style: `{style_str}`\n"
-        f"- Source Image: `{image_path}`\n"
-        f"- Source Audio: `{audio_path}`\n"
-        f"Strictly adhere to the motion prompt rules, phonetic mouth articulation, and standardized template in the instructions."
+    prompt = build_draft_plot_prompt(
+        topic=topic,
+        style_str=style_str,
+        image_path=image_path,
+        audio_path=audio_path,
+        project_dir=project_dir,
+        output_dir=output_dir,
+        video_plot_path=video_plot_path,
+        video_plot_json_path=video_plot_json_path,
+        project_guidelines=ctx.get("project_guidelines", ""),
+        char_guidelines=ctx.get("char_guidelines", ""),
+        feedback=feedback or "",
+        human_feedback=human_feedback or ""
     )
-    if feedback:
-        prompt_sections.append(f"--- BRAND QC FEEDBACK TO FIX ---\n{feedback}\n")
-    if human_feedback:
-        prompt_sections.append(f"--- HUMAN REVISION FEEDBACK (HIGHEST PRIORITY) ---\n{human_feedback}\n")
-
-    prompt = "\n".join(prompt_sections)
     overlay_text = ""
     video_plot_content = ""
 
@@ -79,7 +71,7 @@ async def draft_plot_task(state: dict) -> dict:
         from tools.agent_call import agent_call
         channel = state.get("channel") or "content-creation"
         tool_res = await agent_call.ainvoke({
-            "agent_id": "content-creator",
+            "agent_id": "graph-worker",
             "prompt": prompt,
             "channel": channel
         })
@@ -120,13 +112,13 @@ async def draft_plot_task(state: dict) -> dict:
                 f.write(json.dumps(plot_dict, indent=2))
 
     except Exception as e:
-        print(f"draft_plot_task: Error executing agent_call for content-creator: {e}")
+        print(f"draft_plot_task: Error executing agent_call for graph-worker: {e}")
         video_plot_content = ""
 
     _append_execution_log(
         output_dir=output_dir,
         topic=topic,
-        actor="📝 Content Creator",
+        actor="⚙️ Graph Worker (Video Plot Drafting)",
         event_title="Video Plot Drafting",
         details={
             "Video Plot MD Path": video_plot_path,

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 import tempfile
 import os
+import json
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
@@ -99,11 +100,64 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
                 mock_agent_call.ainvoke.assert_called_once()
                 call_args = mock_agent_call.ainvoke.call_args[0][0]
-                self.assertEqual(call_args["agent_id"], "content-creator")
+                self.assertEqual(call_args["agent_id"], "graph-worker")
                 call_prompt = call_args["prompt"]
+                self.assertIn("<playbook>", call_prompt)
+                self.assertIn("<current_state>", call_prompt)
+                self.assertIn("<assigned_task>", call_prompt)
                 self.assertIn("CREATOR_MOTION_STANDARDS", call_prompt)
                 self.assertIn("3D_CHARACTER_TRAITS", call_prompt)
                 self.assertIn("Toddler girl should perform playful kitten paws.", call_prompt)
+
+    async def test_draft_plot_parses_json_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+
+            state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            json_payload = json.dumps({
+                "title": "Cute Kitten",
+                "motion_prompt": "Kitten wiggling tail",
+                "overlay_text": "貓貓",
+                "markdown_content": "# Cat Plot\nCute motion\nOverlay Text: 貓貓"
+            })
+            mock_response = f"<payload>{json_payload}</payload>"
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
+
+                result = await draft_plot_task(state)
+
+                self.assertEqual(result["overlay_text"], "貓貓")
+                json_file = result["video_plot_path"].replace(".md", ".json")
+                self.assertTrue(os.path.exists(json_file))
+                with open(json_file, "r") as f:
+                    data = json.load(f)
+                    self.assertEqual(data["motion_prompt"], "Kitten wiggling tail")
+
+    async def test_draft_plot_handles_agent_call_exception_gracefully(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+
+            state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(side_effect=RuntimeError("Agent call timeout"))
+
+                result = await draft_plot_task(state)
+
+                self.assertIn("video_plot_path", result)
+                self.assertEqual(result["overlay_text"], "")
 
     async def test_generates_v2_when_plot_feedback_provided_even_if_gate1_decision_was_approved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -158,7 +212,6 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
             result = await draft_plot_task(state)
             self.assertEqual(result["video_plot_path"], existing_plot_path)
-
 
 if __name__ == "__main__":
     unittest.main()

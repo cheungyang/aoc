@@ -37,7 +37,7 @@ class TestRenderPlate(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("prompt_text", call_kwargs)
                 self.assertEqual(call_kwargs["image_path"], image_path)
                 self.assertEqual(call_kwargs["duration"], 6)
-                self.assertEqual(call_kwargs["agent_id"], "content-creator")
+                self.assertEqual(call_kwargs["agent_id"], "graph-worker")
                 self.assertEqual(res["raw_video_path"], target_video)
 
     async def test_render_plate_reuses_existing_when_qc_passed(self):

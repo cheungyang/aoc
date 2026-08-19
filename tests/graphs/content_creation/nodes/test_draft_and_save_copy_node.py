@@ -37,9 +37,15 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
-
                 result = await draft_copy_task(test_state)
 
+                mock_agent_call.ainvoke.assert_called_once()
+                call_args = mock_agent_call.ainvoke.call_args[0][0]
+                self.assertEqual(call_args["agent_id"], "graph-worker")
+                call_prompt = call_args["prompt"]
+                self.assertIn("<playbook>", call_prompt)
+                self.assertIn("<current_state>", call_prompt)
+                self.assertIn("<assigned_task>", call_prompt)
                 self.assertIn("copy_path", result)
                 self.assertIn("puppy_copy", result["copy_path"])
 
@@ -53,6 +59,42 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
                 with open(copy_json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     self.assertEqual(data["caption"], "Look at this cute puppy!")
+
+    async def test_node_generates_copy_from_plain_markdown_response(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+            test_state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            mock_response = "<payload># Cat Post\nAdorable kitten playing.\n#cats #kitten</payload>"
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
+                result = await draft_copy_task(test_state)
+
+                self.assertIn("copy_path", result)
+                with open(result["copy_path"], "r", encoding="utf-8") as f:
+                    self.assertEqual(f.read(), "# Cat Post\nAdorable kitten playing.\n#cats #kitten")
+
+    async def test_node_handles_agent_call_exception_gracefully(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+            test_state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(side_effect=RuntimeError("Connection failed"))
+                result = await draft_copy_task(test_state)
+
+                self.assertIn("copy_path", result)
 
     async def test_node_aborts_if_error_message_present(self):
         test_state = {

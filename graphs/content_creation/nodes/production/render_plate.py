@@ -88,7 +88,7 @@ async def render_plate_task(state: dict) -> dict:
             "output_path": raw_video_path,
             "duration": 6,
             "aspect_ratio": aspect_ratio,
-            "agent_id": "content-creator"
+            "agent_id": "graph-worker"
         })
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
