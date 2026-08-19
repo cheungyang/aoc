@@ -4,7 +4,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import current_agent_id, current_job_id, current_channel_name
+from core.agent.job_manager import current_agent_id, current_job_id, current_channel_name, current_graph_id
 from core.util import format_tool_response
 
 @tool
@@ -114,40 +114,44 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
                     except Exception:
                         pass
 
-        if is_interrupted:
-            # Resuming an existing thread from interrupt with user feedback
-            update_payload = {
-                "latest_human_feedback": query,
-                "query": query,
-                "messages": [HumanMessage(content=query)]
-            }
-            
-            # Determine as_node to preserve execution progression without resetting next to __start__
-            as_node = None
-            if hasattr(graph, "get_graph"):
-                try:
-                    drawable = graph.get_graph()
-                    snap_curr = graph.get_state(config)
-                    next_targets = getattr(snap_curr, "next", ())
-                    if next_targets and len(next_targets) > 0:
-                        tgt = next_targets[0]
-                        for edge in drawable.edges:
-                            if edge.target == tgt and edge.source != "__start__":
-                                as_node = edge.source
-                                break
-                except Exception:
-                    pass
+        graph_token = current_graph_id.set(target_graph)
+        try:
+            if is_interrupted:
+                # Resuming an existing thread from interrupt with user feedback
+                update_payload = {
+                    "latest_human_feedback": query,
+                    "query": query,
+                    "messages": [HumanMessage(content=query)]
+                }
+                
+                # Determine as_node to preserve execution progression without resetting next to __start__
+                as_node = None
+                if hasattr(graph, "get_graph"):
+                    try:
+                        drawable = graph.get_graph()
+                        snap_curr = graph.get_state(config)
+                        next_targets = getattr(snap_curr, "next", ())
+                        if next_targets and len(next_targets) > 0:
+                            tgt = next_targets[0]
+                            for edge in drawable.edges:
+                                if edge.target == tgt and edge.source != "__start__":
+                                    as_node = edge.source
+                                    break
+                    except Exception:
+                        pass
 
-            kwargs_up = {"as_node": as_node} if as_node else {}
-            if hasattr(graph, "aupdate_state") and callable(getattr(graph, "aupdate_state")):
-                res_up = graph.aupdate_state(config, update_payload, **kwargs_up)
-                if inspect.isawaitable(res_up):
-                    await res_up
-            elif hasattr(graph, "update_state") and callable(getattr(graph, "update_state")):
-                graph.update_state(config, update_payload, **kwargs_up)
-            result = await graph.ainvoke(None, config=config)
-        else:
-            result = await graph.ainvoke(inputs, config=config)
+                kwargs_up = {"as_node": as_node} if as_node else {}
+                if hasattr(graph, "aupdate_state") and callable(getattr(graph, "aupdate_state")):
+                    res_up = graph.aupdate_state(config, update_payload, **kwargs_up)
+                    if inspect.isawaitable(res_up):
+                        await res_up
+                elif hasattr(graph, "update_state") and callable(getattr(graph, "update_state")):
+                    graph.update_state(config, update_payload, **kwargs_up)
+                result = await graph.ainvoke(None, config=config)
+            else:
+                result = await graph.ainvoke(inputs, config=config)
+        finally:
+            current_graph_id.reset(graph_token)
         
         # 2. Adapt output
         format_output_fn = graph_info.get("format_output")

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 import os
 import sys
-import asyncio
+import json
 import time
 import shutil
 
@@ -21,13 +21,15 @@ class TestGraphsLoader(unittest.TestCase):
         
         info = loader.get_graph("coding")
         self.assertIsNotNone(info)
-        self.assertEqual(info["metadata"]["name"], "coding")
+        self.assertEqual(info["metadata"]["graph_id"], "coding")
         self.assertIn("description", info["metadata"])
+        self.assertIn("tools", info["metadata"])
+        self.assertIn("skills", info["metadata"])
         self.assertIsNotNone(info["create_graph"])
 
         main_info = loader.get_graph("main")
         self.assertIsNotNone(main_info)
-        self.assertEqual(main_info["metadata"]["name"], "main")
+        self.assertEqual(main_info["metadata"]["graph_id"], "main")
         self.assertIsNotNone(main_info["create_graph"])
 
     def test_get_graphs_overview(self):
@@ -60,12 +62,19 @@ class TestGraphsLoader(unittest.TestCase):
         temp_dir = os.path.join(graphs_dir, "temp_test_subgraph")
         os.makedirs(temp_dir, exist_ok=True)
         
-        temp_md_path = os.path.join(temp_dir, "GRAPH.md")
+        temp_json_path = os.path.join(temp_dir, "graph.json")
         temp_py_path = os.path.join(temp_dir, "graph.py")
         
         try:
-            with open(temp_md_path, "w") as f:
-                f.write("---\nname: temp_test_subgraph\ndescription: Temp subgraph description.\n---\n")
+            with open(temp_json_path, "w") as f:
+                json.dump({
+                    "graph_id": "temp_test_subgraph",
+                    "name": "temp_test_subgraph",
+                    "description": "Temp subgraph description.",
+                    "emoji": "🧪",
+                    "tools": {"git": {}},
+                    "skills": ["tdd_execution"]
+                }, f)
             with open(temp_py_path, "w") as f:
                 f.write("from langgraph.graph import StateGraph, START, END\nworkflow = StateGraph(dict)\nworkflow.add_node('dummy', lambda x: x)\nworkflow.add_edge(START, 'dummy')\nworkflow.add_edge('dummy', END)\ngraph = workflow.compile()\n")
                 
@@ -73,13 +82,24 @@ class TestGraphsLoader(unittest.TestCase):
             self.assertIn("temp_test_subgraph", names)
             info = loader.get_subgraph("temp_test_subgraph")
             self.assertEqual(info["metadata"]["description"], "Temp subgraph description.")
+            self.assertEqual(loader.get_graph_skills("temp_test_subgraph"), ["tdd_execution"])
+            self.assertEqual(loader.get_graph_tools("temp_test_subgraph"), {"git": {}})
             
             time.sleep(1.1)
-            with open(temp_md_path, "w") as f:
-                f.write("---\nname: temp_test_subgraph\ndescription: Updated description.\n---\n")
+            with open(temp_json_path, "w") as f:
+                json.dump({
+                    "graph_id": "temp_test_subgraph",
+                    "name": "temp_test_subgraph",
+                    "description": "Updated description.",
+                    "emoji": "🧪",
+                    "tools": {"bash": {}},
+                    "skills": ["qa_evaluation"]
+                }, f)
                 
             info = loader.get_subgraph("temp_test_subgraph")
             self.assertEqual(info["metadata"]["description"], "Updated description.")
+            self.assertEqual(loader.get_graph_skills("temp_test_subgraph"), ["qa_evaluation"])
+            self.assertEqual(loader.get_graph_tools("temp_test_subgraph"), {"bash": {}})
             
         finally:
             if os.path.exists(temp_dir):

@@ -8,6 +8,7 @@ import json
 current_job_id = contextvars.ContextVar("current_job_id", default=None)
 current_channel_name = contextvars.ContextVar("current_channel_name", default="")
 current_agent_id = contextvars.ContextVar("current_agent_id", default=None)
+current_graph_id = contextvars.ContextVar("current_graph_id", default=None)
 
 SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
 JOBS_FILE = os.path.join(SESSIONS_DIR, "jobs.json")

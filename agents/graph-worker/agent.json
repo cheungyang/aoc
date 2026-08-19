@@ -1,0 +1,22 @@
+{
+  "agent_id": "graph-worker",
+  "channels": [],
+  "name": "Graph Worker",
+  "emoji": "⚙️",
+  "description": "Stateless, system-aware backend execution node for LangGraph orchestrations.",
+  "tools": {
+    "filesystem": {
+      "pkm": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep"
+      ]
+    }
+  },
+  "skills": []
+}

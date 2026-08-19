@@ -232,6 +232,32 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         finally:
             current_channel_name.reset(token)
 
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_sets_current_graph_id_context(self, mock_graphs_loader_class):
+        from core.agent.job_manager import current_graph_id
+        
+        captured_graph_id = None
+        async def mock_ainvoke(*args, **kwargs):
+            nonlocal captured_graph_id
+            captured_graph_id = current_graph_id.get()
+            return {"messages": [MagicMock(content="Done")]}
+
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(side_effect=mock_ainvoke)
+
+        mock_loader.get_graph.return_value = {
+            "graph": mock_graph,
+            "metadata": {"name": "coding", "graph_id": "coding"}
+        }
+
+        self.assertIsNone(current_graph_id.get())
+        result = await graph_call.ainvoke({"graph_name": "coding", "query": "Build feature"})
+        self.assertEqual(captured_graph_id, "coding")
+        self.assertIsNone(current_graph_id.get())
+
 
 if __name__ == "__main__":
     unittest.main()

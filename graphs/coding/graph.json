@@ -1,0 +1,26 @@
+{
+  "graph_id": "coding",
+  "name": "coding",
+  "description": "Orchestrate software-planner, software-coder, and software-qa to plan, code, verify, and commit software development tasks.",
+  "emoji": "💻",
+  "tools": {
+    "git": {},
+    "filesystem": {
+      "pkm/wiki/software": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep"
+      ]
+    }
+  },
+  "skills": [
+    "tdd_execution",
+    "qa_evaluation",
+    "planning"
+  ]
+}

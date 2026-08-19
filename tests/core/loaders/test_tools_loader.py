@@ -149,6 +149,53 @@ class TestCheckPermission(unittest.TestCase):
         self.assertTrue(self.loader.check_permission("agent1", "agent_call"))
         self.assertFalse(self.loader.check_permission("agent1", "bash"))
 
+    @patch('core.loaders.graphs_loader.GraphsLoader.get_graph_tools')
+    @patch('core.loaders.graphs_loader.GraphsLoader.get_graph_skills')
+    @patch('core.loaders.skills_loader.SkillsLoader.get_skill_tools')
+    @patch('core.loaders.agents_loader.AgentsLoader.get_agent')
+    def test_merge_graph_tool_and_skill_permissions(self, mock_get_agent, mock_get_skill_tools, mock_get_graph_skills, mock_get_graph_tools):
+        from core.agent.job_manager import current_graph_id
+
+        # Mock agent base config
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "tools": {
+                "filesystem": {
+                    "pkm/agents/<agent_id>": ["read"]
+                }
+            },
+            "skills": []
+        }
+        mock_get_agent.return_value = mock_agent
+
+        # Mock graph tools and skills
+        mock_get_graph_tools.side_effect = lambda g: {
+            "git": {},
+            "filesystem": {
+                "sessions": ["read", "write"]
+            }
+        } if g == "test_graph" else {}
+        mock_get_graph_skills.side_effect = lambda g: ["custom_graph_skill"] if g == "test_graph" else []
+        mock_get_skill_tools.side_effect = lambda s: {"custom_tool": {}} if s == "custom_graph_skill" else {}
+
+        # 1. Without active graph
+        perms_no_graph = self.loader._merge_tool_permissions("agent1")
+        self.assertNotIn("git", perms_no_graph)
+        self.assertNotIn("custom_tool", perms_no_graph)
+
+        # 2. With active graph context
+        token = current_graph_id.set("test_graph")
+        try:
+            self.loader.clear_permissions_cache()
+            perms_with_graph = self.loader._merge_tool_permissions("agent1")
+            self.assertIn("git", perms_with_graph)
+            self.assertIn("custom_tool", perms_with_graph)
+            self.assertIn("filesystem", perms_with_graph)
+            self.assertIn("sessions", perms_with_graph["filesystem"])
+            self.assertEqual(perms_with_graph["filesystem"]["sessions"], ["read", "write"])
+        finally:
+            current_graph_id.reset(token)
+
 if __name__ == "__main__":
     unittest.main()
 

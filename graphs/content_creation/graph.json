@@ -1,0 +1,24 @@
+{
+  "graph_id": "content_creation",
+  "name": "content_creation",
+  "description": "Multi-turn instruction-driven media generation studio with 3 high-cohesion macro nodes, modular subpackage organization, lean state schema, and deterministic disk asset versioning.",
+  "emoji": "🎬",
+  "tools": {
+    "generate_image": {},
+    "generate_animation_veo3": {},
+    "remix_video": {},
+    "extract_video_frames": {},
+    "audio_stream_probe": {},
+    "video_ocr_validator": {},
+    "filesystem": {
+      "pkm/wiki/software": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "read_image"
+      ]
+    }
+  },
+  "skills": []
+}

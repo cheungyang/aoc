@@ -42,14 +42,21 @@ class SkillsLoader:
             return {}
         return info.get("tools", {})
 
-    def get_allowed_skills(self, agent_id: str):
+    def get_allowed_skills(self, agent_id: str, graph_id: str = None):
         from core.loaders.agents_loader import AgentsLoader
+        from core.agent.job_manager import current_graph_id
+        from core.loaders.graphs_loader import GraphsLoader
+
         agent = AgentsLoader().get_agent(agent_id)
         allowed_skills = agent.config.get("skills", []).copy()
-        
-        for skill in ["dream", "memory"]:
-            if skill not in allowed_skills:
-                allowed_skills.append(skill)
+
+        active_graph = graph_id or current_graph_id.get() or agent.config.get("graph", "main")
+        if active_graph:
+            graph_skills = GraphsLoader().get_graph_skills(active_graph)
+            for skill in graph_skills:
+                if skill not in allowed_skills:
+                    allowed_skills.append(skill)
+
         return allowed_skills
 
     def get_skills_overview(self, agent_id: str):
