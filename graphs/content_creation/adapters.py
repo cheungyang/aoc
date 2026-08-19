@@ -220,8 +220,8 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
 
-    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
+    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
     plot_content = ""
     if video_plot_path and os.path.exists(video_plot_path):
         try:
@@ -246,11 +246,11 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    raw_video_path = state.get("raw_video_path") or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
-    remixed_video_path = state.get("remixed_video_path") or state.get("video_path") or _resolve_asset_path(output_dir, topic, "video", next_version=False)
-    copy_path = state.get("copy_path") or _resolve_asset_path(output_dir, topic, "copy", next_version=False)
+    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_dir, topic, "image", next_version=False)
+    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
+    raw_video_path = normalize_project_path(state.get("raw_video_path")) or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
+    remixed_video_path = normalize_project_path(state.get("remixed_video_path") or state.get("video_path")) or _resolve_asset_path(output_dir, topic, "video", next_version=False)
+    copy_path = normalize_project_path(state.get("copy_path")) or _resolve_asset_path(output_dir, topic, "copy", next_version=False)
     copy_text = ""
     if copy_path and os.path.exists(copy_path):
         try:

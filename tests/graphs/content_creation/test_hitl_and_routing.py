@@ -230,7 +230,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIXED_VIDEO")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
@@ -296,7 +296,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIX")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
@@ -373,7 +373,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIX")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
@@ -454,7 +454,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIX")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
@@ -537,7 +537,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIX")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
@@ -605,7 +605,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 async def fake_remix(args):
-                    p = args["output_video_path"]
+                    p = args.get("output_path") or args.get("output_video_path")
                     with open(p, "wb") as f: f.write(b"REMIX")
                     return f"<payload>{p}</payload>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)

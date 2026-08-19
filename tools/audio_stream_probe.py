@@ -17,15 +17,25 @@ def _get_ffprobe_executable() -> Optional[str]:
         pass
     return shutil.which("ffprobe")
 
+def _get_ffmpeg_executable() -> Optional[str]:
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            return exe
+    except Exception:
+        pass
+    return shutil.which("ffmpeg")
+
 @tool
 def audio_stream_probe(
     video_path: str,
     agent_id: Optional[str] = None
 ) -> str:
-    """Probes a video file for the presence of an audio stream using ffprobe.
+    """Probes a video file for the presence of an audio stream using ffprobe or ffmpeg fallback.
     
     Args:
-        video_path: Absolute path to the video file.
+        video_path: Absolute or relative path to the video file.
         agent_id: Optional ID of the calling agent.
         
     Returns:
@@ -46,24 +56,35 @@ def audio_stream_probe(
         )
 
     ffprobe_exe = _get_ffprobe_executable()
-    if not ffprobe_exe:
+    ffmpeg_exe = _get_ffmpeg_executable()
+
+    if not ffprobe_exe and not ffmpeg_exe:
         return format_tool_response(
             "audio_stream_probe",
             payload="",
-            errors="Error: ffprobe executable not found."
+            errors="Error: Neither ffprobe nor ffmpeg executable found."
         )
 
     try:
-        cmd = [
-            ffprobe_exe,
-            "-v", "error",
-            "-select_streams", "a",
-            "-show_entries", "stream=codec_type",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        has_audio = bool(res.stdout.strip())
+        if ffprobe_exe:
+            cmd = [
+                ffprobe_exe,
+                "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=codec_type",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            has_audio = bool(res.stdout.strip())
+        else:
+            cmd = [ffmpeg_exe, "-i", video_path]
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            has_audio = False
+            for line in res.stderr.splitlines():
+                if "Stream #" in line and "Audio:" in line:
+                    has_audio = True
+                    break
         
         return format_tool_response(
             "audio_stream_probe",
@@ -74,5 +95,5 @@ def audio_stream_probe(
         return format_tool_response(
             "audio_stream_probe",
             payload="",
-            errors=f"Error running ffprobe: {e}"
+            errors=f"Error probing audio stream: {e}"
         )

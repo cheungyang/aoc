@@ -124,9 +124,11 @@ def _escape_drawtext_str(s: str) -> str:
 
 @tool
 def remix_video(
-    video_path: str,
-    actions: Union[str, List[Dict[str, Any]]],
-    output_path: str,
+    video_path: Optional[str] = None,
+    actions: Union[str, List[Dict[str, Any]]] = None,
+    output_path: Optional[str] = None,
+    input_video_path: Optional[str] = None,
+    output_video_path: Optional[str] = None,
     agent_id: Optional[str] = None,
 ) -> str:
     """Remix a video file by overlaying audio clips and text overlays using ffmpeg.
@@ -141,11 +143,17 @@ def remix_video(
             - {"action": "add_audio", "audio_path": str, "start_time": float|str, "volume": float, "blend_mode": "blend"|"replace", "original_volume": float}
             - {"action": "add_text", "text": str, "start_time": float|str, "end_time": float|str, "font_path": str, "font_size": int, "font_color": str, "border_color": str, "border_width": int, "x": str, "y": str}
         output_path: Destination file path for the remixed video output (e.g. "output.mp4").
+        input_video_path: Optional alias for video_path.
+        output_video_path: Optional alias for output_path.
         agent_id: Optional ID of the calling agent.
 
     Returns:
         The formatted tool response containing the absolute path to the remixed video file.
     """
+    video_path = video_path or input_video_path
+    output_path = output_path or output_video_path
+    actions = actions if actions is not None else []
+
     if not video_path or not str(video_path).strip():
         return format_tool_response(
             "remix_video",

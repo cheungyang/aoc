@@ -11,7 +11,7 @@ async def verify_video_task(state: dict) -> dict:
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    video_path = state.get("remixed_video_path")
+    video_path = normalize_project_path(state.get("remixed_video_path") or state.get("video_path"))
 
     # Resilient resolution of video_path under canonical output_dir
     if not video_path or not (os.path.isfile(video_path) and os.path.getsize(video_path) > 0):
@@ -36,21 +36,36 @@ async def verify_video_task(state: dict) -> dict:
     rejection_target = "visual_plate"
 
     if video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0:
+        frames_dir = os.path.join(output_dir, "frames") if output_dir else os.path.join(os.path.dirname(os.path.abspath(video_path)), "frames")
         # 1. Extract Keyframes
         try:
             frames_res = await extract_video_frames.ainvoke({
                 "video_path": video_path,
-                "timestamps": [1.0, 2.5, 4.0]
+                "timestamps": [1.0, 2.5, 4.0],
+                "output_dir": frames_dir
             })
-            if isinstance(frames_res, list):
+            if "<payload>" in str(frames_res) and "</payload>" in str(frames_res):
+                payload = str(frames_res).split("<payload>")[1].split("</payload>")[0].strip()
+                if payload:
+                    extracted_frames_path = [f.strip() for f in payload.splitlines() if f.strip()]
+            elif isinstance(frames_res, list):
                 extracted_frames_path = [str(f) for f in frames_res]
+            elif isinstance(frames_res, str) and frames_res.strip():
+                extracted_frames_path = [frames_res.strip()]
         except Exception:
             pass
 
         # 2. Probe Audio Stream
         try:
             probe_res = await audio_stream_probe.ainvoke({"video_path": video_path})
-            if isinstance(probe_res, dict) and probe_res.get("has_audio"):
+            if "<payload>" in str(probe_res) and "</payload>" in str(probe_res):
+                payload = str(probe_res).split("<payload>")[1].split("</payload>")[0].strip().lower()
+                audio_detected = (payload == "true")
+            elif isinstance(probe_res, dict) and probe_res.get("has_audio"):
+                audio_detected = True
+            elif isinstance(probe_res, bool):
+                audio_detected = probe_res
+            elif str(probe_res).strip().lower() == "true":
                 audio_detected = True
         except Exception:
             pass

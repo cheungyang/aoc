@@ -169,9 +169,9 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
             state.update(plate_res)
             with patch("graphs.content_creation.nodes.production.remix_video.remix_video") as mock_remix:
                 async def fake_remix(args):
-                    out = args["output_video_path"]
+                    out = args.get("output_path") or args.get("output_video_path")
                     with open(out, "wb") as f: f.write(b"REMIXED_VIDEO_DATA")
-                    return f"<payload>{out}</payload>"
+                    return f"<payload>{out}</payload><errors>None</errors>"
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
 
                 remix_res = await remix_video_task(state)
@@ -185,8 +185,8 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
             with patch("graphs.content_creation.nodes.production.verify_video.extract_video_frames") as mock_extract, \
                  patch("graphs.content_creation.nodes.production.verify_video.audio_stream_probe") as mock_probe:
 
-                mock_extract.ainvoke = AsyncMock(return_value=["frame1.jpg", "frame2.jpg"])
-                mock_probe.ainvoke = AsyncMock(return_value={"has_audio": True})
+                mock_extract.ainvoke = AsyncMock(return_value="<payload>frame1.jpg\nframe2.jpg</payload><errors>None</errors>")
+                mock_probe.ainvoke = AsyncMock(return_value="<payload>True</payload><errors>None</errors>")
 
                 verify_res = await verify_video_task(state)
                 self.assertTrue(verify_res["video_qc_passed"])

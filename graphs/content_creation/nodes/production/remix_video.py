@@ -14,7 +14,7 @@ async def remix_video_task(state: dict) -> dict:
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     project_dir = normalize_project_path(state.get("project_dir", ""))
     output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    raw_video_path = state.get("raw_video_path")
+    raw_video_path = normalize_project_path(state.get("raw_video_path"))
 
     # Resilient resolution of raw_video_path under canonical output_dir
     if not raw_video_path or not (os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):
@@ -110,11 +110,15 @@ async def remix_video_task(state: dict) -> dict:
 
     remix_err = ""
     try:
-        await remix_video.ainvoke({
-            "input_video_path": raw_video_path,
-            "output_video_path": video_path,
+        res = await remix_video.ainvoke({
+            "video_path": raw_video_path,
+            "output_path": video_path,
             "actions": actions
         })
+        if "<errors>" in str(res) and "</errors>" in str(res):
+            tool_err = str(res).split("<errors>")[1].split("</errors>")[0].strip()
+            if tool_err and tool_err.lower() != "none":
+                remix_err = tool_err
     except Exception as e:
         remix_err = str(e)
 
