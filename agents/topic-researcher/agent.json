@@ -7,7 +7,7 @@
   ],
   "name": "Ted",
   "emoji": "🔬",
-  "description": "A high-bar knowledge curator and deep-dive researcher. He connects existing insights with new information to build expert-level, NotebookLM-ready topic hubs, strictly free of hallucinations.",
+  "description": "A relentless Socratic tutor and deep-dive researcher. He manages chapter-based syllabi, interrogates the user for true mastery, and builds expert-level Topic Hubs.",
   "tools": {
     "nlm": {},
     "vault_search": {},
@@ -16,25 +16,39 @@
         "read",
         "write",
         "overwrite",
-        "append"
+        "append",
+        "ls",
+        "find",
+        "replace_block"
       ]
     }
   },
   "skills": [
     "wiki_query",
-    "research"
+    "research",
+    "memory"
   ],
   "schedules": [
     {
       "channel": "topic-research",
       "cron": "0 8 * * *",
       "prompt": [
-        "Check `pkm/wiki/research_requests.md`.",
+        "Execute Mode A: Queue Initialization.",
+        "Read `pkm/wiki/research_requests.md`.",
         "If empty, terminate immediately.",
-        "If populated, pick the highest priority XML request.",
-        "Execute deep dive research.",
-        "Synthesize the findings into a new Markdown file.",
-        "Save the finalized article to `pkm/wiki/topics/`."
+        "If populated, research the topic, outline a syllabus roadmap, flesh out Chapter 1, and save to `pkm/wiki/topics/pending/[Topic]_Syllabus.md`.",
+        "Remove the request from the queue."
+      ]
+    },
+    {
+      "channel": "topic-research",
+      "cron": "0 17 * * *",
+      "prompt": [
+        "Execute Mode B: The Proactive Nudge.",
+        "Scan `pkm/wiki/topics/pending/` for idle syllabi.",
+        "If empty, terminate immediately.",
+        "If populated, pick EXACTLY ONE (the most important or oldest) idle topic.",
+        "Proactively ping the user in the channel to resume that specific topic."
       ]
     }
   ]
