@@ -86,8 +86,43 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
             serialized = {"name": "agent_call"}
             input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
 
-            await handler.on_tool_start(serialized, input_str)
-            mock_threadsafe.assert_called_once()
+    @patch('core.loaders.graphs_loader.GraphsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_on_tool_start_graph_call_non_main(self, mock_agents_loader_class, mock_graphs_loader_class):
+        mock_graphs_loader = MagicMock()
+        mock_graphs_loader.get_graph_config.return_value = {"graph_id": "coding", "emoji": "💻"}
+        mock_graphs_loader_class.return_value = mock_graphs_loader
+
+        mock_message = MagicMock()
+        mock_message.add_reaction = AsyncMock()
+
+        handler = ReactionCallbackHandler(mock_message)
+
+        serialized = {"name": "graph_call"}
+        input_str = '{"graph_name": "coding", "query": "write tests"}'
+
+        await handler.on_tool_start(serialized, input_str)
+
+        mock_message.add_reaction.assert_called_once_with("💻")
+
+    @patch('core.loaders.graphs_loader.GraphsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_on_tool_start_graph_call_main_ignored(self, mock_agents_loader_class, mock_graphs_loader_class):
+        mock_graphs_loader = MagicMock()
+        mock_graphs_loader.get_graph_config.return_value = {"graph_id": "main", "emoji": "🧭"}
+        mock_graphs_loader_class.return_value = mock_graphs_loader
+
+        mock_message = MagicMock()
+        mock_message.add_reaction = AsyncMock()
+
+        handler = ReactionCallbackHandler(mock_message)
+
+        serialized = {"name": "graph_call"}
+        input_str = '{"graph_name": "main", "query": "hello"}'
+
+        await handler.on_tool_start(serialized, input_str)
+
+        mock_message.add_reaction.assert_not_called()
 
 
 if __name__ == "__main__":

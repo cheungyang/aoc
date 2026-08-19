@@ -105,13 +105,14 @@ class TestUtil(unittest.TestCase):
         mock_exists.return_value = True
         
         file_contents = [
-            "agents content",   # AGENTS.md
-            "identity content", # IDENTITY.md
-            "soul content",     # SOUL.md
-            "user content",     # USER.md
-            "context content",  # CONTEXT.md
-            "memory content",   # MEMORY.md
-            "feedback content"  # FEEDBACK.md
+            "agents content",        # AGENTS.md
+            "instructions content",  # INSTRUCTIONS.md
+            "identity content",      # IDENTITY.md
+            "soul content",          # SOUL.md
+            "user content",          # USER.md
+            "context content",       # CONTEXT.md
+            "memory content",        # MEMORY.md
+            "feedback content"       # FEEDBACK.md
         ]
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
@@ -121,7 +122,7 @@ class TestUtil(unittest.TestCase):
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
         self.assertIn("<description>Your purpose, specialization and workflow</description>", prompt)
-        self.assertIn("<content>agents content</content>", prompt)
+        self.assertIn("<content>agents content\n\ninstructions content</content>", prompt)
         
         self.assertIn("<PERSONA>", prompt)
         self.assertIn("<description>This is who you are and how you behave</description>", prompt)
@@ -142,13 +143,14 @@ class TestUtil(unittest.TestCase):
         mock_exists.return_value = True
         
         file_contents = [
-            "# AGENTS.md\n\nagents content",   # AGENTS.md
-            "# IDENTITY.md\nidentity content", # IDENTITY.md
-            "# SOUL.md\n\n\nsoul content",     # SOUL.md
-            "user content",     # USER.md
-            "context content",  # CONTEXT.md
-            "memory content",   # MEMORY.md
-            "feedback content"  # FEEDBACK.md
+            "# AGENTS.md\n\nagents content",             # AGENTS.md
+            "# INSTRUCTIONS.md\n\ninstructions content", # INSTRUCTIONS.md
+            "# IDENTITY.md\nidentity content",           # IDENTITY.md
+            "# SOUL.md\n\n\nsoul content",               # SOUL.md
+            "user content",                              # USER.md
+            "context content",                           # CONTEXT.md
+            "memory content",                            # MEMORY.md
+            "feedback content"                           # FEEDBACK.md
         ]
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
@@ -157,7 +159,7 @@ class TestUtil(unittest.TestCase):
         prompt = get_agent_prompt("test-agent")
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
-        self.assertIn("<content>agents content</content>", prompt)
+        self.assertIn("<content>agents content\n\ninstructions content</content>", prompt)
         
         self.assertIn("<PERSONA>", prompt)
         self.assertIn("<content>identity content\n\nsoul content</content>", prompt)
@@ -170,6 +172,29 @@ class TestUtil(unittest.TestCase):
         
         self.assertIn("<FEEDBACK_TO_ADHERE_TO>", prompt)
         self.assertIn("<content>feedback content</content>", prompt)
+
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_get_agent_prompt_with_only_instructions(self, mock_file, mock_exists):
+        def fake_exists(path):
+            return path.endswith("INSTRUCTIONS.md") or path.endswith("IDENTITY.md")
+        mock_exists.side_effect = fake_exists
+        
+        file_contents = [
+            "only instructions content", # INSTRUCTIONS.md
+            "identity content",          # IDENTITY.md
+        ]
+        mocks = [mock_open(read_data=c).return_value for c in file_contents]
+        mock_file.side_effect = mocks
+        
+        from core.util import get_agent_prompt
+        prompt = get_agent_prompt("test-agent")
+        
+        self.assertIn("<SYSTEM_PURPOSE>", prompt)
+        self.assertIn("<content>only instructions content</content>", prompt)
+        self.assertIn("<PERSONA>", prompt)
+        self.assertIn("<content>identity content</content>", prompt)
+        self.assertNotIn("<HUMAN_CONTEXT>", prompt)
 
     def test_compress_image_bytes_valid(self):
         from core.util import compress_image_bytes
@@ -200,6 +225,29 @@ class TestUtil(unittest.TestCase):
         corrupt = b"not_a_real_image"
         out_bytes, mime = compress_image_bytes(corrupt)
         self.assertEqual(out_bytes, corrupt)
+
+    def test_format_error_message(self):
+        from core.util import format_error_message
+
+        # Google 503 UNAVAILABLE format
+        err1 = Exception("503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}")
+        self.assertEqual(
+            format_error_message(err1),
+            "[503] This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        )
+
+        # JSON formatted 429 error
+        err2 = Exception('429 RESOURCE_EXHAUSTED. {"error": {"code": 429, "message": "Quota exceeded"}}')
+        self.assertEqual(format_error_message(err2), "[429] Quota exceeded")
+
+        # Plain Exception
+        err3 = Exception("Simple invoke failure")
+        self.assertEqual(format_error_message(err3), "Simple invoke failure")
+
+        # None / Empty
+        self.assertEqual(format_error_message(None), "Sorry, I encountered an error processing the request.")
+        self.assertEqual(format_error_message(""), "Sorry, I encountered an error processing the request.")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-from core.util import split_message, Config
+from core.util import split_message, Config, format_error_message
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
 from core.agent.job_manager import current_job_id, current_agent_id
@@ -119,7 +119,10 @@ class Agent(BaseAgent):
                 import traceback
                 traceback.print_exc()
                 print(f"Error invoking graph: {e}")
-                return "Sorry, I encountered an error processing the request."
+                err_msg = format_error_message(e)
+                if channel is not None and source in ["discord", "scheduled"]:
+                    await channel.send(err_msg)
+                return err_msg
         finally:
             current_job_id.reset(token)
             current_channel_name.reset(channel_token)

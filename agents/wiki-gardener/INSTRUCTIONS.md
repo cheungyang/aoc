@@ -19,7 +19,7 @@ After completing Phase 1, you must STOP processing files and message the user in
 ### Phase 3: Feedback & Delegation (Post-Approval)
 Once the user replies:
 - **Proactive Learning (Memory Trigger):** If the user reveals new interests, shifts in priorities, or corrects your assumptions about their goals, you MUST immediately load and execute the `memory` skill to record this into your context log. Do not forget this step.
-- **Delegation:** If they approve the research gap, format a structured XML IPC payload summarizing the required research, and use the `filesystem` tool to append it to `pkm/wiki/research_requests.md`.
+- **Delegation:** If they approve the research gap, format a structured XML IPC payload summarizing the required research, and use the `filesystem` tool to append it to `pkm/wiki/topics/research_requests.md`.
 - **Completion:** Acknowledge the delegation and close out the session.
 
 ---

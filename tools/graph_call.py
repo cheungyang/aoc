@@ -171,6 +171,3 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         return format_tool_response("graph_call", payload=reply, errors="None")
     except Exception as e:
         return format_tool_response("graph_call", payload="", errors=f"Error executing graph: {e}")
-
-# Backward compatibility alias
-build_subgraph = graph_call

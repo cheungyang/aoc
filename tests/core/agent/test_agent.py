@@ -6,6 +6,71 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+class MockHTTPException(Exception):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args)
+
+class MockThread:
+    def __init__(self, *args, **kwargs):
+        self.parent = None
+        self.name = ""
+        self.id = ""
+    def typing(self):
+        pass
+    def history(self, limit=2):
+        pass
+    async def send(self, *args, **kwargs):
+        pass
+
+class MockView:
+    def __init__(self, *args, **kwargs):
+        self.children = []
+    def add_item(self, item):
+        self.children.append(item)
+
+class MockButton:
+    def __init__(self, label=None, emoji=None, *args, **kwargs):
+        self.label = label
+        self.emoji = emoji
+        self.callback = None
+
+class MockSelect:
+    def __init__(self, placeholder=None, min_values=1, max_values=1, options=None, *args, **kwargs):
+        self.placeholder = placeholder
+        self.min_values = min_values
+        self.max_values = max_values
+        self.options = options or []
+        self.callback = None
+
+class MockSelectOption:
+    def __init__(self, label=None, value=None, emoji=None, *args, **kwargs):
+        self.label = label
+        self.value = value
+        self.emoji = emoji
+
+if 'discord' not in sys.modules:
+    mock_discord = MagicMock()
+    mock_discord.Thread = MockThread
+    mock_discord.HTTPException = MockHTTPException
+    mock_discord.SelectOption = MockSelectOption
+    mock_ui = MagicMock()
+    mock_ui.View = MockView
+    mock_ui.Button = MockButton
+    mock_ui.Select = MockSelect
+    mock_discord.ui = mock_ui
+    sys.modules['discord'] = mock_discord
+    sys.modules['discord.ext'] = MagicMock()
+    sys.modules['discord.ext.commands'] = MagicMock()
+    sys.modules['discord.ui'] = mock_ui
+else:
+    if isinstance(getattr(sys.modules['discord'], 'HTTPException', None), MagicMock):
+        sys.modules['discord'].HTTPException = MockHTTPException
+    if 'discord.ui' in sys.modules and isinstance(getattr(sys.modules['discord.ui'], 'View', None), MagicMock):
+        sys.modules['discord.ui'].View = MockView
+        sys.modules['discord.ui'].Button = MockButton
+        sys.modules['discord.ui'].Select = MockSelect
+        sys.modules['discord'].SelectOption = MockSelectOption
+
 import discord
 from core.agent.agent import Agent
 
@@ -40,17 +105,21 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
     @patch('core.agent.agent.LoggingHandler')
     async def test_execute_invoke_failure(self, mock_logging_handler_class):
         # Graph invoke throws exception
+        err_msg = "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}"
         mock_graph = MagicMock()
-        mock_graph.ainvoke = AsyncMock(side_effect=Exception("Invoke failed"))
+        mock_graph.ainvoke = AsyncMock(side_effect=Exception(err_msg))
 
         agent = Agent("test-agent", {})
         agent.graph = mock_graph
         
+        mock_channel = AsyncMock()
         # Run
-        reply = await agent.execute("hello", "session1")
+        reply = await agent.execute("hello", source="discord", channel=mock_channel)
         
         # Assertions
-        self.assertEqual(reply, "Sorry, I encountered an error processing the request.")
+        expected = "[503] This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+        self.assertEqual(reply, expected)
+        mock_channel.send.assert_called_once_with(expected)
 
     @patch('core.agent.agent.LoggingHandler')
     @patch('core.agent.session_manager.SessionManager.get_session_id')

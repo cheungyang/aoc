@@ -10,6 +10,7 @@ from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
 from core.agent.reaction_handler import ReactionCallbackHandler
 from core.util.config import Config
+from core.util import format_error_message
 from core.voice.voice_manager import VoiceManager
 
 class BotRunner:
@@ -213,7 +214,7 @@ class BotRunner:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")
             if not self.bot.is_closed():
                 try:
-                    await message.channel.send("Sorry, I encountered an error processing the request.")
+                    await message.channel.send(format_error_message(e))
                 except Exception as se:
                     print(f"Error sending failure message: {se}")
 

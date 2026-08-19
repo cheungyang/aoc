@@ -1,6 +1,10 @@
 import datetime
 import time
 import os
+import re
+import ast
+import json
+from typing import Any
 
 def split_message(text, limit=2000):
     """Splits a text into chunks of at most 'limit' characters."""
@@ -127,6 +131,78 @@ def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> 
 </{tool_name}_response>"""
 
 
+def format_error_message(error: Any) -> str:
+    """Formats an exception or error payload into a clean, informative error message."""
+    if not error:
+        return "Sorry, I encountered an error processing the request."
+
+    candidate_errors = [error]
+    if isinstance(error, BaseException):
+        if error.__cause__:
+            candidate_errors.append(error.__cause__)
+        if error.__context__:
+            candidate_errors.append(error.__context__)
+
+    for err in candidate_errors:
+        error_str = str(err).strip()
+        if not error_str or error_str == "None":
+            continue
+
+        code = None
+        message = None
+
+        if hasattr(err, "code") and getattr(err, "code"):
+            code = getattr(err, "code")
+        if hasattr(err, "status_code") and getattr(err, "status_code"):
+            code = getattr(err, "status_code")
+        if hasattr(err, "message") and getattr(err, "message") and isinstance(getattr(err, "message"), str):
+            message = getattr(err, "message")
+
+        # Try to parse dict/json from error_str
+        dict_match = re.search(r"(\{.*\})", error_str, re.DOTALL)
+        if dict_match:
+            dict_str = dict_match.group(1)
+            parsed_dict = None
+            try:
+                parsed_dict = json.loads(dict_str)
+            except Exception:
+                try:
+                    parsed_dict = ast.literal_eval(dict_str)
+                except Exception:
+                    pass
+
+            if isinstance(parsed_dict, dict):
+                err_obj = parsed_dict.get("error", parsed_dict)
+                if isinstance(err_obj, dict):
+                    if not code:
+                        code = err_obj.get("code") or err_obj.get("status_code")
+                    if not message:
+                        message = err_obj.get("message")
+                elif isinstance(err_obj, str) and not message:
+                    message = err_obj
+
+        if not code:
+            code_match = re.search(r"\b([45]\d{2})\b", error_str)
+            if code_match:
+                code = code_match.group(1)
+
+        if code and message:
+            return f"[{code}] {message}"
+        elif code and not message:
+            cleaned = re.sub(r"^(?:Error code:\s*)?" + re.escape(str(code)) + r"(?:\s+[A-Z_]+(?:\.|\:|\b))?\s*", "", error_str).strip()
+            if dict_match and dict_match.group(1) in cleaned:
+                cleaned = cleaned.replace(dict_match.group(1), "").strip().rstrip(".-: ")
+            if cleaned:
+                return f"[{code}] {cleaned}"
+            return f"[{code}] Error processing request."
+        elif message:
+            return message
+        elif error_str:
+            return error_str
+
+    return "Sorry, I encountered an error processing the request."
+
+
 def _load_prompt_from_file(file_inputs, tag, group_desc=None):
     combined_content = []
     for file_path, desc in file_inputs:
@@ -161,6 +237,7 @@ def get_agent_prompt(agent_id):
 
     files = {
         "AGENT": (os.path.join(agent_path, "AGENTS.md"), "Your specialization and workflow:"),
+        "INSTRUCTIONS": (os.path.join(agent_path, "INSTRUCTIONS.md"), "Your instructions and workflow:"),
         "IDENTITY": (os.path.join(agent_path, "IDENTITY.md"), "Short description of who you are:"),
         "SOUL": (os.path.join(agent_path, "SOUL.md"), "Your personality, behavior and guiding success in your tasks:"),
         "USER": (os.path.join(agent_path, "USER.md"), "Information about your human:"),
@@ -170,7 +247,7 @@ def get_agent_prompt(agent_id):
     }
     
     prompt_parts = [
-        _load_prompt_from_file([files["AGENT"]], "SYSTEM_PURPOSE", "Your purpose, specialization and workflow"),
+        _load_prompt_from_file([files["AGENT"], files["INSTRUCTIONS"]], "SYSTEM_PURPOSE", "Your purpose, specialization and workflow"),
         _load_prompt_from_file([files["IDENTITY"], files["SOUL"]], "PERSONA", "This is who you are and how you behave"),
         _load_prompt_from_file([files["USER"], files["CONTEXT"]], "HUMAN_CONTEXT", "Information about your human"),
         _load_prompt_from_file([files["MEMORY"]], "MEMORY_AND_PRECEDENTS", "Long term memory on key decisions and learnings to make your tasks successful."),
