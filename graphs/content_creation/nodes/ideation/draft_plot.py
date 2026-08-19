@@ -78,30 +78,69 @@ async def draft_plot_task(state: dict) -> dict:
 
         m = re.search(r"<payload>(.*?)</payload>", str(tool_res), re.DOTALL)
         payload = m.group(1).strip() if m else str(tool_res).strip()
-        video_plot_content = payload
+
+        # 1. Direct XML tag extraction for zero-overhead, certain parsing
+        status_m = re.search(r"<status>(.*?)</status>", payload, re.DOTALL)
+        status = status_m.group(1).strip() if status_m else "success"
+        error_m = re.search(r"<error>(.*?)</error>", payload, re.DOTALL)
+        error = error_m.group(1).strip() if error_m else ""
+
+        plot_path_m = re.search(r"<video_plot_path>(.*?)</video_plot_path>", payload, re.DOTALL)
+        if plot_path_m and plot_path_m.group(1).strip():
+            ret_path = plot_path_m.group(1).strip()
+            if not ret_path.startswith("{") and not ret_path.endswith("}"):
+                video_plot_path = ret_path
+                video_plot_json_path = video_plot_path.replace(".md", ".json")
+
+        motion_m = re.search(r"<motion_prompt>(.*?)</motion_prompt>", payload, re.DOTALL)
+        overlay_m = re.search(r"<overlay_text>(.*?)</overlay_text>", payload, re.DOTALL)
+        md_m = re.search(r"<markdown_content>(.*?)</markdown_content>", payload, re.DOTALL)
+        title_m = re.search(r"<title>(.*?)</title>", payload, re.DOTALL)
+
+        title_val = title_m.group(1).strip() if title_m else f"{topic.capitalize()} Video Plot"
+        if overlay_m:
+            overlay_text = overlay_m.group(1).strip(" `\"'")
+
+        motion_prompt = motion_m.group(1).strip() if motion_m else ""
+
+        if md_m:
+            video_plot_content = md_m.group(1).strip()
+        elif os.path.isfile(video_plot_path):
+            try:
+                with open(video_plot_path, "r", encoding="utf-8") as f:
+                    video_plot_content = f.read()
+            except Exception:
+                video_plot_content = ""
+
+        if not video_plot_content:
+            video_plot_content = f"# {title_val}\n\n- **Motion Prompt**: {motion_prompt}\n- **Overlay Text**: {overlay_text}\n"
 
         plot_dict = {
-            "title": f"{topic.capitalize()} Video Plot",
+            "title": title_val,
             "source_image": image_path,
             "source_audio": audio_path,
-            "motion_prompt": "",
-            "overlay_text": "",
-            "markdown_content": payload
+            "motion_prompt": motion_prompt,
+            "overlay_text": overlay_text,
+            "markdown_content": video_plot_content
         }
 
-        try:
-            data = json.loads(payload)
-            if isinstance(data, dict):
-                plot_dict.update(data)
-                video_plot_content = data.get("markdown_content") or payload
-                overlay_text = data.get("overlay_text", "")
-        except Exception:
-            pass
+        # 2. Fallback: JSON parsing
+        if not md_m and not motion_m and not plot_path_m:
+            try:
+                data = json.loads(payload)
+                if isinstance(data, dict):
+                    plot_dict.update(data)
+                    video_plot_content = data.get("markdown_content") or video_plot_content
+                    overlay_text = data.get("overlay_text", "") or overlay_text
+            except Exception:
+                pass
 
+        # 3. Fallback: Line-by-line search for overlay text
         if not overlay_text:
             for line in video_plot_content.splitlines():
                 if "overlay text:" in line.lower() or "text overlay:" in line.lower():
                     overlay_text = line.split(":", 1)[-1].strip(" `\"'")
+                    plot_dict["overlay_text"] = overlay_text
                     break
 
         if output_dir:

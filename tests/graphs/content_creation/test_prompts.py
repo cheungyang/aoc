@@ -6,7 +6,7 @@ from graphs.content_creation.prompts import (
 )
 
 class TestContentCreationPrompts(unittest.TestCase):
-    def test_build_draft_plot_prompt_full_fields(self):
+    def test_build_draft_plot_prompt_full_fields_and_path_output(self):
         prompt = build_draft_plot_prompt(
             topic="cat",
             style_str="3D Animation",
@@ -32,7 +32,15 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("Make cat jump", prompt)
         self.assertIn("</current_state>", prompt)
         self.assertIn("<assigned_task>", prompt)
-        self.assertIn("<payload>", prompt)
+        
+        # Path-based XML template schema tags
+        self.assertIn("<status>{success|error}</status>", prompt)
+        self.assertIn("<error>{error_details_if_any_else_empty}</error>", prompt)
+        self.assertIn("<title>{plot_title}</title>", prompt)
+        self.assertIn("<video_plot_path>{video_plot_path}</video_plot_path>", prompt)
+        self.assertIn("<motion_prompt>{exact_veo3_motion_prompt}</motion_prompt>", prompt)
+        self.assertIn("<overlay_text>{exact_chinese_or_word_overlay_text}</overlay_text>", prompt)
+        self.assertNotIn("<markdown_content>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
     def test_build_draft_plot_prompt_minimal_fields(self):
@@ -57,9 +65,11 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("Episode Style: `Ghibli`", prompt)
         self.assertNotIn("BRAND QC FEEDBACK", prompt)
         self.assertNotIn("HUMAN REVISION FEEDBACK", prompt)
+        self.assertIn("<status>{success|error}</status>", prompt)
+        self.assertIn("<video_plot_path>{video_plot_path}</video_plot_path>", prompt)
         self.assertIn("<assigned_task>", prompt)
 
-    def test_build_audit_plot_prompt_full_fields(self):
+    def test_build_audit_plot_prompt_full_fields_and_no_markdown_report(self):
         prompt = build_audit_plot_prompt(
             topic="cat",
             image_path="cat_image.jpg",
@@ -71,15 +81,20 @@ class TestContentCreationPrompts(unittest.TestCase):
         )
         self.assertIn("<playbook>", prompt)
         self.assertIn("QC_RULES", prompt)
-        self.assertIn("is_approved", prompt)
-        self.assertIn("rejection_target", prompt)
         self.assertIn("</playbook>", prompt)
         self.assertIn("<current_state>", prompt)
         self.assertIn("cat_image.jpg", prompt)
         self.assertIn("DRAFTED_PLOT_DATA", prompt)
         self.assertIn("</current_state>", prompt)
         self.assertIn("<assigned_task>", prompt)
-        self.assertIn("Audit the drafted Video Plot", prompt)
+        
+        # Streamlined verdict XML template schema tags
+        self.assertIn("<status>{success|error}</status>", prompt)
+        self.assertIn("<error>{error_details_if_any_else_empty}</error>", prompt)
+        self.assertIn("<verdict>{APPROVED|REJECTED}</verdict>", prompt)
+        self.assertIn("<rejection_target>{none|plot|image|both}</rejection_target>", prompt)
+        self.assertIn("<feedback>{detailed_actionable_qc_feedback_or_approval_summary}</feedback>", prompt)
+        self.assertNotIn("<markdown_report>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
     def test_build_audit_plot_prompt_minimal_fields(self):
@@ -95,9 +110,10 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("<current_state>", prompt)
         self.assertIn("bird.jpg", prompt)
         self.assertNotIn("DRAFTED VIDEO PLOT CONTENT", prompt)
+        self.assertIn("<status>{success|error}</status>", prompt)
         self.assertIn("<assigned_task>", prompt)
 
-    def test_build_draft_copy_prompt_with_revision(self):
+    def test_build_draft_copy_prompt_with_revision_and_path_output(self):
         prompt = build_draft_copy_prompt(
             topic="puppy",
             project_dir="/pkm/wiki/puppy",
@@ -110,13 +126,20 @@ class TestContentCreationPrompts(unittest.TestCase):
         )
         self.assertIn("<playbook>", prompt)
         self.assertIn("COPY_RULES", prompt)
-        self.assertIn("caption", prompt)
-        self.assertIn("hashtags", prompt)
         self.assertIn("</playbook>", prompt)
         self.assertIn("<current_state>", prompt)
         self.assertIn("Add more hashtags", prompt)
         self.assertIn("</current_state>", prompt)
         self.assertIn("<assigned_task>", prompt)
+        
+        # Path-based XML template schema tags
+        self.assertIn("<status>{success|error}</status>", prompt)
+        self.assertIn("<error>{error_details_if_any_else_empty}</error>", prompt)
+        self.assertIn("<copy_path>{copy_path}</copy_path>", prompt)
+        self.assertIn("<caption_text>{engaging_caption_content}</caption_text>", prompt)
+        self.assertIn("<hashtags>{space_separated_hashtags}</hashtags>", prompt)
+        self.assertIn("<vocabulary>{vocabulary_pronunciation_notes}</vocabulary>", prompt)
+        self.assertNotIn("<markdown_content>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
     def test_build_draft_copy_prompt_non_revision(self):
@@ -134,6 +157,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("<current_state>", prompt)
         self.assertNotIn("HUMAN REVISION INSTRUCTIONS", prompt)
         self.assertIn("<assigned_task>", prompt)
+        self.assertIn("<status>{success|error}</status>", prompt)
+        self.assertIn("<copy_path>{copy_path}</copy_path>", prompt)
 
     def test_prompt_xml_tag_nesting_and_closure(self):
         prompts = [

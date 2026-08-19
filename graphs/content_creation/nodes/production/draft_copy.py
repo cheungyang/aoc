@@ -65,20 +65,67 @@ async def draft_copy_task(state: dict) -> dict:
         else:
             payload = str(tool_res).strip()
 
-        polished_copy = payload
-        copy_dict = {
-            "caption": payload,
-            "hashtags": [],
-            "markdown_content": payload
-        }
+        # 1. Direct XML tag extraction for zero-overhead, certain parsing
+        status_m = re.search(r"<status>(.*?)</status>", payload, re.DOTALL)
+        copy_path_m = re.search(r"<copy_path>(.*?)</copy_path>", payload, re.DOTALL)
+        if copy_path_m and copy_path_m.group(1).strip():
+            ret_copy_path = copy_path_m.group(1).strip()
+            if not ret_copy_path.startswith("{") and not ret_copy_path.endswith("}"):
+                copy_path = ret_copy_path
+                copy_json_path = copy_path.replace(".md", ".json")
 
-        try:
-            data = json.loads(payload)
-            if isinstance(data, dict):
-                copy_dict.update(data)
-                polished_copy = data.get("markdown_content") or payload
-        except Exception:
-            pass
+        caption_m = re.search(r"<caption_text>(.*?)</caption_text>", payload, re.DOTALL)
+        hashtags_m = re.search(r"<hashtags>(.*?)</hashtags>", payload, re.DOTALL)
+        vocab_m = re.search(r"<vocabulary>(.*?)</vocabulary>", payload, re.DOTALL)
+        md_m = re.search(r"<markdown_content>(.*?)</markdown_content>", payload, re.DOTALL)
+
+        if md_m or caption_m or copy_path_m:
+            caption_val = caption_m.group(1).strip() if caption_m else ""
+            vocab_val = vocab_m.group(1).strip() if vocab_m else ""
+            tags_list = []
+            if hashtags_m:
+                raw_tags = hashtags_m.group(1).strip()
+                tags_list = [t.strip() for t in re.split(r'[\s,]+', raw_tags) if t.strip()]
+
+            if md_m:
+                polished_copy = md_m.group(1).strip()
+            elif os.path.isfile(copy_path):
+                try:
+                    with open(copy_path, "r", encoding="utf-8") as f:
+                        polished_copy = f.read()
+                except Exception:
+                    polished_copy = ""
+            else:
+                sections = []
+                if caption_val:
+                    sections.append(f"**Caption:** {caption_val}")
+                if vocab_val:
+                    sections.append(f"**Vocabulary:** {vocab_val}")
+                if tags_list:
+                    sections.append(f"**Hashtags:** {' '.join(tags_list)}")
+                polished_copy = "\n\n".join(sections) if sections else payload
+
+            copy_dict = {
+                "caption": caption_val or payload,
+                "hashtags": tags_list,
+                "vocabulary": vocab_val,
+                "markdown_content": polished_copy
+            }
+        else:
+            # 2. Fallback: JSON parsing
+            polished_copy = payload
+            copy_dict = {
+                "caption": payload,
+                "hashtags": [],
+                "markdown_content": payload
+            }
+            try:
+                data = json.loads(payload)
+                if isinstance(data, dict):
+                    copy_dict.update(data)
+                    polished_copy = data.get("markdown_content") or payload
+            except Exception:
+                pass
 
         if copy_path:
             os.makedirs(os.path.dirname(copy_path), exist_ok=True)

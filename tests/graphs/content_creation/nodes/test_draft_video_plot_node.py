@@ -54,18 +54,67 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            mock_response = "<payload>V2 plot content with faster motion\nOverlay Text: CAT</payload>"
+            expected_v2_path = os.path.join(output_dir, "cat_video_plot_v2.md")
+            mock_response = (
+                f"<payload>\n"
+                f"<status>success</status>\n"
+                f"<error></error>\n"
+                f"<title>Cat Video Plot V2</title>\n"
+                f"<video_plot_path>{expected_v2_path}</video_plot_path>\n"
+                f"<motion_prompt>Fast cat running</motion_prompt>\n"
+                f"<overlay_text>CAT</overlay_text>\n"
+                f"</payload>"
+            )
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
 
                 result = await draft_plot_task(state)
 
-                expected_v2 = os.path.join(output_dir, "cat_video_plot_v2.md")
-                self.assertEqual(result["video_plot_path"], expected_v2)
-                self.assertTrue(os.path.exists(expected_v2))
+                self.assertEqual(result["video_plot_path"], expected_v2_path)
+                self.assertTrue(os.path.exists(expected_v2_path))
                 with open(result["video_plot_path"], "r") as f:
-                    self.assertEqual(f.read(), "V2 plot content with faster motion\nOverlay Text: CAT")
+                    content = f.read()
+                    self.assertIn("Fast cat running", content)
+                    self.assertIn("CAT", content)
+
+    async def test_draft_plot_parses_reinforced_xml_path_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "cat")
+            os.makedirs(output_dir, exist_ok=True)
+            plot_md_path = os.path.join(output_dir, "cat_video_plot.md")
+
+            state = {
+                "topic": "cat",
+                "project_dir": temp_dir,
+                "output_dir": output_dir
+            }
+
+            mock_response = (
+                f"<payload>\n"
+                f"<status>success</status>\n"
+                f"<error></error>\n"
+                f"<title>Playful Cat</title>\n"
+                f"<video_plot_path>{plot_md_path}</video_plot_path>\n"
+                f"<motion_prompt>Cat jumping playful kitten paws motion</motion_prompt>\n"
+                f"<overlay_text>貓貓</overlay_text>\n"
+                f"</payload>"
+            )
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
+
+                result = await draft_plot_task(state)
+
+                self.assertEqual(result["overlay_text"], "貓貓")
+                self.assertEqual(result["video_plot_path"], plot_md_path)
+                json_file = plot_md_path.replace(".md", ".json")
+                self.assertTrue(os.path.exists(json_file))
+                with open(json_file, "r") as f:
+                    data = json.load(f)
+                    self.assertEqual(data["motion_prompt"], "Cat jumping playful kitten paws motion")
+                    self.assertEqual(data["overlay_text"], "貓貓")
+                    self.assertEqual(data["title"], "Playful Cat")
 
     async def test_draft_plot_dynamically_loads_instructions_and_feedback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -91,7 +140,17 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 "latest_human_feedback": "Toddler girl should perform playful kitten paws."
             }
 
-            mock_response = "<payload>Playful kitten paws plot content\nOverlay Text: CAT</payload>"
+            plot_md_path = os.path.join(output_dir, "cat_video_plot.md")
+            mock_response = (
+                f"<payload>\n"
+                f"<status>success</status>\n"
+                f"<error></error>\n"
+                f"<title>Cat</title>\n"
+                f"<video_plot_path>{plot_md_path}</video_plot_path>\n"
+                f"<motion_prompt>Kitten paws motion</motion_prompt>\n"
+                f"<overlay_text>CAT</overlay_text>\n"
+                f"</payload>"
+            )
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
@@ -105,11 +164,12 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("<playbook>", call_prompt)
                 self.assertIn("<current_state>", call_prompt)
                 self.assertIn("<assigned_task>", call_prompt)
+                self.assertIn("<video_plot_path>{video_plot_path}</video_plot_path>", call_prompt)
                 self.assertIn("CREATOR_MOTION_STANDARDS", call_prompt)
                 self.assertIn("3D_CHARACTER_TRAITS", call_prompt)
                 self.assertIn("Toddler girl should perform playful kitten paws.", call_prompt)
 
-    async def test_draft_plot_parses_json_payload(self):
+    async def test_draft_plot_parses_json_payload_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = os.path.join(temp_dir, "cat")
             os.makedirs(output_dir, exist_ok=True)
@@ -179,18 +239,18 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            mock_response = "<payload>V2 plot content with rapid zoom\nOverlay Text: CAT</payload>"
+            expected_v2 = os.path.join(output_dir, "cat_video_plot_v2.md")
+            mock_response = f"<payload><video_plot_path>{expected_v2}</video_plot_path><motion_prompt>rapid zoom and pan</motion_prompt><overlay_text>CAT</overlay_text></payload>"
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
 
                 result = await draft_plot_task(state)
 
-                expected_v2 = os.path.join(output_dir, "cat_video_plot_v2.md")
                 self.assertEqual(result["video_plot_path"], expected_v2)
                 self.assertTrue(os.path.exists(expected_v2))
                 with open(result["video_plot_path"], "r") as f:
-                    self.assertEqual(f.read(), "V2 plot content with rapid zoom\nOverlay Text: CAT")
+                    self.assertIn("rapid zoom and pan", f.read())
 
     async def test_reuses_existing_plot_when_image_specific_feedback_provided(self):
         with tempfile.TemporaryDirectory() as temp_dir:

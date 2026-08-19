@@ -66,24 +66,44 @@ async def audit_plot_task(state: dict) -> dict:
         feedback = payload
         rejection_target = "plot"
 
-        try:
-            data = json.loads(payload)
-            if isinstance(data, dict):
-                is_approved = bool(data.get("is_approved", True))
-                feedback = data.get("revision_notes") or data.get("markdown_report") or payload
-                rejection_target = (data.get("rejection_target") or "plot").lower()
-        except Exception:
-            if "VERDICT: REJECTED" in payload.upper() or "REJECTED" in payload.upper():
-                is_approved = False
-                if "REJECTED TARGET: IMAGE" in payload.upper() or "TARGET: IMAGE" in payload.upper():
-                    rejection_target = "image"
-                elif "REJECTED TARGET: BOTH" in payload.upper() or "TARGET: BOTH" in payload.upper():
-                    rejection_target = "both"
-                else:
-                    rejection_target = "plot"
-            elif "VERDICT: APPROVED" in payload.upper() or "APPROVED" in payload.upper():
-                is_approved = True
-                rejection_target = "none"
+        # 1. Direct XML tag extraction for zero-overhead, certain parsing
+        status_m = re.search(r"<status>(.*?)</status>", payload, re.DOTALL)
+        verdict_m = re.search(r"<verdict>(.*?)</verdict>", payload, re.DOTALL)
+        target_m = re.search(r"<rejection_target>(.*?)</rejection_target>", payload, re.DOTALL)
+        feedback_m = re.search(r"<feedback>(.*?)</feedback>", payload, re.DOTALL)
+        report_m = re.search(r"<markdown_report>(.*?)</markdown_report>", payload, re.DOTALL)
+
+        if verdict_m:
+            verdict_val = verdict_m.group(1).strip().upper()
+            is_approved = (verdict_val == "APPROVED" or "APPROV" in verdict_val)
+            rejection_target = target_m.group(1).strip().lower() if target_m else ("none" if is_approved else "plot")
+            feedback = feedback_m.group(1).strip() if feedback_m else (report_m.group(1).strip() if report_m else payload)
+        else:
+            # 2. Fallback: JSON parsing
+            parsed_json = False
+            try:
+                data = json.loads(payload)
+                if isinstance(data, dict):
+                    parsed_json = True
+                    is_approved = bool(data.get("is_approved", True))
+                    feedback = data.get("revision_notes") or data.get("markdown_report") or payload
+                    rejection_target = (data.get("rejection_target") or "plot").lower()
+            except Exception:
+                pass
+
+            # 3. Fallback: Substring matching
+            if not parsed_json:
+                if "VERDICT: REJECTED" in payload.upper() or "REJECTED" in payload.upper():
+                    is_approved = False
+                    if "REJECTED TARGET: IMAGE" in payload.upper() or "TARGET: IMAGE" in payload.upper():
+                        rejection_target = "image"
+                    elif "REJECTED TARGET: BOTH" in payload.upper() or "TARGET: BOTH" in payload.upper():
+                        rejection_target = "both"
+                    else:
+                        rejection_target = "plot"
+                elif "VERDICT: APPROVED" in payload.upper() or "APPROVED" in payload.upper():
+                    is_approved = True
+                    rejection_target = "none"
 
     except Exception as e:
         print(f"audit_plot_task: Error executing agent_call for graph-worker: {e}")
