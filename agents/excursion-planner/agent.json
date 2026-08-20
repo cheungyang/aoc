@@ -2,7 +2,6 @@
     "agent_id": "excursion-planner",
     "channels": [
         "weekend-planning",
-        "aoc-debug",
         "general"
     ],
     "name": "Eric",
@@ -16,7 +15,7 @@
         }
     ],
     "tools": {
-        "gog": []
+        "gog": {}
     },
     "skills": [
         "research"

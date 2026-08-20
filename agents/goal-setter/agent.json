@@ -2,7 +2,6 @@
     "agent_id": "goal-setter",
     "channels": [
         "project-planning",
-        "aoc-debug",
         "general"
     ],
     "name": "Grace",

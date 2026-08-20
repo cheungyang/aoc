@@ -4,7 +4,6 @@
         "day-planning",
         "weekend-planning",
         "weekly-planning",
-        "aoc-debug",
         "general"
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
