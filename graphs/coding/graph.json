@@ -1,12 +1,27 @@
 {
   "graph_id": "coding",
   "name": "coding",
-  "description": "Orchestrate software-planner, software-coder, and software-qa to plan, code, verify, and commit software development tasks.",
+  "description": "Orchestrates stateless Goldfish workers to execute tasks in isolated Git worktrees, run dynamic tests, audit anti-patterns, and submit PRs with HITL approval.",
   "emoji": "💻",
+  "max_concurrency": 1,
+  "timeout_seconds": 300,
+  "max_retries": 3,
   "tools": {
-    "git": {},
+    "bash": {
+      "pkm/workspaces/runs": ["execute"]
+    },
     "filesystem": {
       "pkm/wiki/software": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep"
+      ],
+      "pkm/workspaces/runs": [
         "read",
         "write",
         "overwrite",
@@ -18,9 +33,5 @@
       ]
     }
   },
-  "skills": [
-    "tdd_execution",
-    "qa_evaluation",
-    "planning"
-  ]
+  "skills": []
 }

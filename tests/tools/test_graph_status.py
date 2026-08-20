@@ -42,7 +42,7 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
         mock_snapshot.next = ("hitl_image_and_plot_approval",)
         mock_snapshot.values = {
             "topic": "fish",
-            "project_dir": "pkm/wiki/software/ayla-first-words",
+            "project_path": "pkm/wiki/software/ayla-first-words",
             "image_path": "images/fish.png",
             "video_plot_path": "plots/fish.md"
         }
@@ -73,7 +73,7 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
         mock_snapshot.next = ("hitl_image_and_plot_approval",)
         mock_snapshot.values = {
             "topic": "fish",
-            "project_dir": "pkm/wiki/software/ayla-first-words",
+            "project_path": "pkm/wiki/software/ayla-first-words",
             "image_path": "images/fish.png",
             "video_plot_path": "plots/fish.md"
         }

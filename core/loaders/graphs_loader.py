@@ -64,14 +64,18 @@ class GraphsLoader:
                             cached.get("py_mtime") != py_mtime or 
                             cached.get("json_mtime") != json_mtime):
                             
-                            # Load compiled graph from graph.py
-                            spec = importlib.util.spec_from_file_location(f"graphs.{item}.graph", graph_py_path)
-                            if spec is None or spec.loader is None:
-                                continue
+                            # Load/reload module cleanly using standard import mechanism
                             import sys
-                            module = importlib.util.module_from_spec(spec)
-                            sys.modules[f"graphs.{item}.graph"] = module
-                            spec.loader.exec_module(module)
+                            mod_name = f"graphs.{item}.graph"
+                            if cached is not None and mod_name in sys.modules:
+                                for sub in list(sys.modules.keys()):
+                                    if sub.startswith(f"graphs.{item}."):
+                                        del sys.modules[sub]
+                            
+                            import importlib
+                            module = importlib.import_module(mod_name)
+                            if cached is not None:
+                                module = importlib.reload(module)
                             
                             create_graph_fn = getattr(module, "create_graph", None)
                             prepare_input_fn = getattr(module, "prepare_input", None)

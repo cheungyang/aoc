@@ -562,17 +562,16 @@ class TestFilesystemTool(unittest.TestCase):
         tools_loader = ToolsLoader()
         tools_loader.clear_permissions_cache()
         
-        # software-coder has full permissions on pkm/agents/<agent_id>/workspace
-        coder_path = "pkm/agents/software-coder/workspace/main.py"
-        self.assertTrue(tools_loader.check_permission("software-coder", "filesystem", "write", coder_path))
-        self.assertTrue(tools_loader.check_permission("software-coder", "filesystem", "replace_block", coder_path))
-        self.assertTrue(tools_loader.check_permission("software-coder", "filesystem", "read", coder_path))
+        # software-planner has full permissions on pkm/wiki/software
+        planner_path = "pkm/wiki/software/spec.md"
+        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "write", planner_path))
+        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "read", planner_path))
+        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "ls", planner_path))
         
-        # software-qa only has read on pkm/wiki/software
-        qa_wiki_path = "pkm/wiki/software/spec.md"
-        self.assertTrue(tools_loader.check_permission("software-qa", "filesystem", "read", qa_wiki_path))
-        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "write", qa_wiki_path))
-        self.assertFalse(tools_loader.check_permission("software-qa", "filesystem", "delete", qa_wiki_path))
+        # software-planner only has read/find/grep/ls on root . (no write)
+        root_file = "README.md"
+        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "read", root_file))
+        self.assertFalse(tools_loader.check_permission("software-planner", "filesystem", "write", root_file))
 
 if __name__ == '__main__':
     unittest.main()

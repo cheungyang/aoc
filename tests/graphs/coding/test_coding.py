@@ -1,140 +1,150 @@
 import unittest
 import os
 import sys
-import asyncio
+import tempfile
 import json
-import shutil
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 # Add root directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.loaders.graphs_loader import GraphsLoader
-from tools.graph_call import graph_call
-from core.loaders.agents_loader import AgentsLoader
+from graphs.coding.graph import create_graph
+from graphs.coding.adapters import prepare_input, format_output
 
 class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.loader = AgentsLoader()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.manifest_path = os.path.join(self.temp_dir.name, "build_request.json")
+        self.spec_path = os.path.join(self.temp_dir.name, "specs", "math.md")
+        os.makedirs(os.path.dirname(self.spec_path), exist_ok=True)
         
-        # Backup original agents cache if any
-        self.original_cache = dict(self.loader._agents_cache)
-        
-        # Create mock agents
-        self.mock_planner = AsyncMock()
-        self.mock_coder = AsyncMock()
-        self.mock_qa = AsyncMock()
-        
-        self.loader._agents_cache["software-planner"] = self.mock_planner
-        self.loader._agents_cache["software-coder"] = self.mock_coder
-        self.loader._agents_cache["software-qa"] = self.mock_qa
+        with open(self.spec_path, "w") as f:
+            f.write("# Math Spec\nAllowed files: math_utils.py\nSchema: Int\nGiven add(1, 2) When called Then 3\nVerification: pytest")
 
-        # Workspace path
-        self.repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-        self.session_file = os.path.join(self.repo_path, "sessions", "breakdown_test_session.json")
+        self.manifest_data = {
+            "version": "1.0",
+            "project_name": "math_pkg",
+            "max_concurrency": 1,
+            "queue": [
+                {
+                    "task_id": "TASK-MATH-01",
+                    "project_name": "math_pkg",
+                    "feature_name": "add_func",
+                    "spec_path": self.spec_path,
+                    "dependencies": [],
+                    "allowed_files": ["math_utils.py"],
+                    "verification_command": "pytest",
+                    "acceptance_criteria": "add(1, 2) returns 3",
+                    "status": "pending"
+                }
+            ]
+        }
+        with open(self.manifest_path, "w") as f:
+            json.dump(self.manifest_data, f)
 
     def tearDown(self):
-        # Restore original agents cache
-        self.loader._agents_cache = self.original_cache
-        
-        # Clean up session file
-        if os.path.exists(self.session_file):
-            os.remove(self.session_file)
+        self.temp_dir.cleanup()
 
-    @patch('graphs.coding.graph.git')
-    async def test_coding_subgraph_success(self, mock_git):
-        # 1. Setup mock responses
-        # Planner returns a single task breakdown
-        tasks_json = json.dumps([
-            {
-                "id": 1,
-                "description": "Implement math functions",
-                "file_path": "src/math_utils.py",
-                "acceptance_criteria": "add(1, 2) returns 3"
-            }
-        ])
-        self.mock_planner.execute = AsyncMock(return_value=tasks_json)
-        self.mock_coder.execute = AsyncMock(return_value="Implemented add function.")
-        self.mock_qa.execute = AsyncMock(return_value="VERDICT: PASS - Tests passed.")
-        
-        mock_git.invoke = MagicMock(return_value="Git response")
+    @patch('graphs.coding.nodes.git_handoff.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
+    async def test_coding_subgraph_success(
+        self,
+        mock_diff,
+        mock_teardown,
+        mock_commit,
+        mock_pr
+    ):
+        mock_diff.return_value = "diff --git a/math_utils.py b/math_utils.py\n+ def add(a, b): return a + b"
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1")
+        mock_teardown.return_value = (True, "Cleaned")
 
-        # Load coding subgraph
-        graphs_loader = GraphsLoader()
-        subgraph_info = graphs_loader.get_graph("coding")
-        self.assertIsNotNone(subgraph_info)
-        
-        graph = subgraph_info["graph"]
-        
-        # Run graph with inputs
-        inputs = {
-            "messages": [],
-            "query": "Implement math functions",
-            "session_id": "test_session",
-            "repo_path": self.repo_path,
-            "max_retries": 2,
-            "max_concurrency": 1
-        }
-        
-        result = await graph.ainvoke(inputs)
-        
-        # Assertions
-        self.mock_planner.execute.assert_called_once()
-        self.mock_coder.execute.assert_called_once()
-        self.mock_qa.execute.assert_called_once()
-        
-        # Git add and commit should be invoked
-        self.assertEqual(mock_git.invoke.call_count, 2)
-        mock_git.invoke.assert_any_call({"command": "add .", "path": self.repo_path})
-        mock_git.invoke.assert_any_call({"command": 'commit -m "feat: implement Implement math functions"', "path": self.repo_path})
-        
-        # Final message should be success message
-        self.assertIn("Successfully implemented and verified all tasks", result["messages"][-1].content)
-        self.assertEqual(len(result["completed_tasks"]), 1)
-        self.assertEqual(len(result["failed_tasks"]), 0)
+        async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
+            os.makedirs(workspace_path, exist_ok=True)
+            return (True, "Worktree provisioned")
 
-    @patch('graphs.coding.graph.git')
-    async def test_coding_subgraph_retry_and_fail(self, mock_git):
-        # Planner returns a single task
-        tasks_json = json.dumps([
-            {
-                "id": 1,
-                "description": "Implement database connection",
-                "file_path": "src/db.py",
-                "acceptance_criteria": "connect() succeeds"
-            }
-        ])
-        self.mock_planner.execute = AsyncMock(return_value=tasks_json)
-        self.mock_coder.execute = AsyncMock(return_value="Attempted connection.")
-        # QA always fails
-        self.mock_qa.execute = AsyncMock(return_value="VERDICT: FAIL - connection refused.")
-        
-        mock_git.invoke = MagicMock(return_value="Git response")
+        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
+             patch("tools.agent_call.agent_call") as mock_agent:
 
-        graphs_loader = GraphsLoader()
-        graph = graphs_loader.get_graph("coding")["graph"]
-        
-        inputs = {
-            "messages": [],
-            "query": "Implement database connection",
-            "session_id": "test_session",
-            "repo_path": self.repo_path,
-            "max_retries": 2,
-            "max_concurrency": 1
-        }
-        
-        result = await graph.ainvoke(inputs)
-        
-        # With max_retries = 2, coder and QA should be called twice
-        self.assertEqual(self.mock_coder.execute.call_count, 2)
-        self.assertEqual(self.mock_qa.execute.call_count, 2)
-        mock_git.invoke.assert_not_called()
-        
-        # Final message should be abort error message
-        self.assertIn("Execution aborted due to task failure(s)", result["messages"][-1].content)
-        self.assertIn("QA failed after 2 attempts", result["messages"][-1].content)
-        self.assertEqual(len(result["completed_tasks"]), 0)
-        self.assertEqual(len(result["failed_tasks"]), 1)
+            mock_agent.ainvoke = AsyncMock(side_effect=[
+                "<worker_handoff><status>READY_FOR_TEST</status><modified_files><file>math_utils.py</file></modified_files><implementation_summary>Implemented add function.</implementation_summary></worker_handoff>",
+                "<critic_verdict><verdict>APPROVE</verdict><anti_patterns_detected></anti_patterns_detected><feedback_for_worker>Good.</feedback_for_worker></critic_verdict>"
+            ])
+
+            from langgraph.checkpoint.memory import MemorySaver
+            graph = create_graph(checkpointer=MemorySaver())
+
+            inputs = prepare_input(
+                query="Run build",
+                build_request_path=self.manifest_path,
+                project_path=self.temp_dir.name,
+                thread_id="test_thread_math"
+            )
+            config = {"configurable": {"thread_id": "test_thread_math"}}
+
+            # Mock tester passing
+            with patch('graphs.coding.nodes.tester_node.asyncio.create_subprocess_shell') as mock_subproc:
+                mock_proc = MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b"1 passed", b""))
+                mock_subproc.return_value = mock_proc
+
+                paused_state = await graph.ainvoke(inputs, config=config)
+
+            self.assertTrue(paused_state["test_run_passed"])
+            self.assertTrue(paused_state["critic_passed"])
+
+            # Resume with approval via aupdate_state
+            await graph.aupdate_state(config, {"latest_human_feedback": "Looks great, approve", "hitl_decision": "approved"})
+            final_state = await graph.ainvoke(None, config=config)
+
+            self.assertIn("TASK-MATH-01", final_state["completed_tasks"])
+            self.assertEqual(final_state["pr_url"], "https://github.com/org/repo/pull/1")
+
+    async def test_coding_subgraph_retry_and_fail(self):
+        async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
+            os.makedirs(workspace_path, exist_ok=True)
+            return (True, "Worktree provisioned")
+
+        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
+             patch("tools.agent_call.agent_call") as mock_agent:
+
+            mock_agent.ainvoke = AsyncMock(side_effect=[
+                # Worker Attempt 1
+                "<worker_handoff><status>READY_FOR_TEST</status><modified_files><file>math_utils.py</file></modified_files><implementation_summary>Attempt 1.</implementation_summary></worker_handoff>",
+                # Worker Attempt 2 (Retry)
+                "<worker_handoff><status>READY_FOR_TEST</status><modified_files><file>math_utils.py</file></modified_files><implementation_summary>Attempt 2.</implementation_summary></worker_handoff>",
+                # Worker Attempt 3 (Retry)
+                "<worker_handoff><status>READY_FOR_TEST</status><modified_files><file>math_utils.py</file></modified_files><implementation_summary>Attempt 3.</implementation_summary></worker_handoff>"
+            ])
+
+            from langgraph.checkpoint.memory import MemorySaver
+            graph = create_graph(checkpointer=MemorySaver())
+
+            inputs = prepare_input(
+                query="Run build",
+                build_request_path=self.manifest_path,
+                project_path=self.temp_dir.name,
+                max_retries=2,
+                thread_id="test_fail_thread"
+            )
+            config = {"configurable": {"thread_id": "test_fail_thread"}}
+
+            # Tester always fails (returncode = 1)
+            with patch('graphs.coding.nodes.tester_node.asyncio.create_subprocess_shell') as mock_subproc:
+                mock_proc = MagicMock()
+                mock_proc.returncode = 1
+                mock_proc.communicate = AsyncMock(return_value=(b"", b"AssertionError: 1 != 2"))
+                mock_subproc.return_value = mock_proc
+
+                failed_state = await graph.ainvoke(inputs, config=config)
+
+            self.assertFalse(failed_state["test_run_passed"])
+            self.assertGreaterEqual(failed_state["attempt_count"], 2)
+            self.assertNotIn("pr_url", failed_state)
 
 if __name__ == "__main__":
     unittest.main()

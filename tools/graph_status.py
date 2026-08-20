@@ -120,8 +120,8 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
                     context_details.append(f"Topic: '{vals['topic']}'")
                 elif vals.get("word"):
                     context_details.append(f"Topic: '{vals['word']}'")
-                if vals.get("project_dir"):
-                    context_details.append(f"Project: '{vals['project_dir']}'")
+                if vals.get("project_path"):
+                    context_details.append(f"Project: '{vals['project_path']}'")
                 if vals.get("output_dir"):
                     context_details.append(f"Output: '{vals['output_dir']}'")
                 if vals.get("image_path"):

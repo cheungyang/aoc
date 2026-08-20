@@ -21,7 +21,8 @@
         "grep",
         "ls"
       ]
-    }
+    },
+    "spec_validator": {}
   },
   "skills": [],
   "schedules": []
