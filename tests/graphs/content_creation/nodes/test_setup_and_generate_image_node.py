@@ -11,16 +11,16 @@ from graphs.content_creation.nodes.ideation import generate_image_task
 class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
     async def test_reuses_existing_image_when_no_revision_requested(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_image_path = os.path.join(output_dir, "cat_image.jpg")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_image_path = os.path.join(output_path, "cat_image.jpg")
             with open(existing_image_path, "w") as f:
                 f.write("existing_image_bytes")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "gate1_decision": "approved"
             }
 
@@ -32,21 +32,21 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_generates_v2_when_gate1_requests_revise_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_image_path = os.path.join(output_dir, "cat_image.jpg")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_image_path = os.path.join(output_path, "cat_image.jpg")
             with open(existing_image_path, "w") as f:
                 f.write("existing_image_bytes")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "gate1_decision": "revise_image",
                 "latest_human_feedback": "Make the eyes more expressive."
             }
 
-            target_path = os.path.join(output_dir, "cat_image_v2.jpg")
+            target_path = os.path.join(output_path, "cat_image_v2.jpg")
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
                 mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{target_path}</payload>")
 
@@ -57,9 +57,9 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_loads_style_specific_character_sheet(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
+            output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
-            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
 
             # Create 3D and Ghibli character sheets
@@ -71,8 +71,8 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "style": "Ghibli",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
@@ -86,9 +86,9 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_attaches_style_reference_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
+            output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
-            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
 
             ref_img_path = os.path.join(char_dir, "hero_3d.jpg")
@@ -101,8 +101,8 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "style": "3D",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
@@ -115,9 +115,9 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_prompt_dynamically_loaded_from_project_instructions_and_human_feedback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
+            output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
-            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
 
             instr_path = os.path.join(temp_dir, "02_Creator_Instructions.md")
@@ -131,8 +131,8 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "style": "3D",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "creator_instructions_path": instr_path,
                 "latest_human_feedback": "Ayla should wear a cozy kitten onesie."
             }
@@ -149,12 +149,12 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_generates_v2_when_feedback_provided_even_if_gate1_decision_was_approved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
+            output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
-            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
             
-            existing_image_path = os.path.join(output_dir, "cat_image.jpg")
+            existing_image_path = os.path.join(output_path, "cat_image.jpg")
             with open(existing_image_path, "w") as f:
                 f.write("existing_image_bytes")
 
@@ -166,13 +166,13 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "style": "3D",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "gate1_decision": "approved",
                 "latest_human_feedback": "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
             }
 
-            target_path = os.path.join(output_dir, "cat_image_v2.jpg")
+            target_path = os.path.join(output_path, "cat_image_v2.jpg")
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
                 mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{target_path}</payload>")
 

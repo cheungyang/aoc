@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, resolve_asset_path, load_project_context
+from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, resolve_asset_path, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from tools.generate_animation_veo3 import generate_animation_veo3
@@ -12,11 +12,11 @@ async def render_plate_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    image_path = state.get("image_path") or resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = state.get("video_plot_path") or resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path = normalize_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    image_path = state.get("image_path") or resolve_asset_path(output_path, topic, "image", next_version=False)
+    video_plot_path = state.get("video_plot_path") or resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
     if human_feedback and (not gate2_decision or gate2_decision == "approved"):
@@ -28,11 +28,11 @@ async def render_plate_task(state: dict) -> dict:
         bool(human_feedback and gate2_decision in ["revise_video", "revise_animation"])
     )
 
-    raw_video_path, should_generate = resolve_task_asset(output_dir, topic, "raw_video", needs_revision=needs_plate_revision)
+    raw_video_path, should_generate = resolve_task_asset(output_path, topic, "raw_video", needs_revision=needs_plate_revision)
     if not should_generate and state.get("video_qc_passed"):
         return {
-            "project_dir": project_dir,
-            "output_dir": output_dir,
+            "project_path": project_path,
+            "output_path": output_path,
             "raw_video_path": raw_video_path
         }
 
@@ -74,7 +74,7 @@ async def render_plate_task(state: dict) -> dict:
     aspect_ratio = state.get("aspect_ratio")
     if not aspect_ratio:
         ctx = load_project_context(
-            project_dir=project_dir,
+            project_path=project_path,
             manifest_path=state.get("manifest_path", ""),
             creator_instructions_path=state.get("creator_instructions_path", "")
         )
@@ -125,7 +125,7 @@ async def render_plate_task(state: dict) -> dict:
         log_details["Error Details"] = tool_err
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="🎬 Content Creator",
         event_title="Visual Plate Generation",
@@ -137,22 +137,22 @@ async def render_plate_task(state: dict) -> dict:
         if is_quota_exceeded_error(tool_err):
             err_msg = format_quota_exceeded_message("Google Veo 3", tool_err or "API Quota Exceeded (429)", topic)
             return {
-                "project_dir": project_dir,
-                "output_dir": output_dir,
+                "project_path": project_path,
+                "output_path": output_path,
                 "error_message": err_msg,
                 "quota_exceeded": True,
                 "failed_node": "generate_visual_plate"
             }
         elif tool_err and tool_err.lower() != "none":
             return {
-                "project_dir": project_dir,
-                "output_dir": output_dir,
+                "project_path": project_path,
+                "output_path": output_path,
                 "error_message": f"Veo 3 Visual Plate Generation Failed: {tool_err}",
                 "failed_node": "generate_visual_plate"
             }
 
     return {
-        "project_dir": project_dir,
-        "output_dir": output_dir,
+        "project_path": project_path,
+        "output_path": output_path,
         "raw_video_path": raw_video_path
     }

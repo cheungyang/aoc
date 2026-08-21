@@ -50,8 +50,8 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
             v2_plot = os.path.join(temp_dir, "cat_video_plot_v2.md")
 
             initial_state = {
-                "project_dir": temp_dir,
-                "output_dir": temp_dir,
+                "project_path": temp_dir,
+                "output_path": temp_dir,
                 "topic": "cat",
                 "style": "3D",
                 "source_audio_path": "tests/fake_audio.m4a",

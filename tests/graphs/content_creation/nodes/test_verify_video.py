@@ -13,9 +13,9 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
 
     async def test_verify_video_approves_when_audio_and_frames_present(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            video_path = os.path.join(output_dir, "cat_video.mp4")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            video_path = os.path.join(output_path, "cat_video.mp4")
             with open(video_path, "wb") as f:
                 f.write(b"REMIXED_VIDEO_BYTES")
 
@@ -30,8 +30,8 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
                 
                 state = {
                     "topic": "cat",
-                    "project_dir": temp_dir,
-                    "output_dir": output_dir,
+                    "project_path": temp_dir,
+                    "output_path": output_path,
                     "remixed_video_path": video_path
                 }
                 res = await verify_video_task(state)
@@ -42,9 +42,9 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
 
     async def test_verify_video_rejects_when_audio_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            video_path = os.path.join(output_dir, "cat_video.mp4")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            video_path = os.path.join(output_path, "cat_video.mp4")
             with open(video_path, "wb") as f:
                 f.write(b"REMIXED_VIDEO_BYTES")
 
@@ -59,8 +59,8 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
                 
                 state = {
                     "topic": "cat",
-                    "project_dir": temp_dir,
-                    "output_dir": output_dir,
+                    "project_path": temp_dir,
+                    "output_path": output_path,
                     "remixed_video_path": video_path
                 }
                 res = await verify_video_task(state)
@@ -71,9 +71,9 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
 
     async def test_verify_video_handles_dict_and_list_fallbacks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            video_path = os.path.join(output_dir, "cat_video.mp4")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            video_path = os.path.join(output_path, "cat_video.mp4")
             with open(video_path, "wb") as f:
                 f.write(b"REMIXED_VIDEO_BYTES")
 
@@ -88,8 +88,8 @@ class TestVerifyVideo(unittest.IsolatedAsyncioTestCase):
                 
                 state = {
                     "topic": "cat",
-                    "project_dir": temp_dir,
-                    "output_dir": output_dir,
+                    "project_path": temp_dir,
+                    "output_path": output_path,
                     "remixed_video_path": video_path
                 }
                 res = await verify_video_task(state)

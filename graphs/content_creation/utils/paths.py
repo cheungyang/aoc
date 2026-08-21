@@ -41,18 +41,18 @@ def normalize_path(path: Optional[str]) -> str:
 
 
 def resolve_under_project(
-    project_dir: Optional[str],
+    project_path: Optional[str],
     target_path: Optional[str],
     default_subpath: str = ""
 ) -> str:
     """
-    Unified parent-child path resolver. Anchors target_path under project_dir:
+    Unified parent-child path resolver. Anchors target_path under project_path:
     - Normalizes paths.
     - Prevents duplicate directory segments (e.g. parent '.../words' + child 'words/horse').
-    - If target_path is already absolute or prefixed with project_dir, returns it directly.
-    - If target_path is empty, falls back to default_subpath under project_dir.
+    - If target_path is already absolute or prefixed with project_path, returns it directly.
+    - If target_path is empty, falls back to default_subpath under project_path.
     """
-    pdir = normalize_path(project_dir) if project_dir else ""
+    pdir = normalize_path(project_path) if project_path else ""
     target = normalize_path(target_path) if target_path else ""
 
     if not pdir:
@@ -75,22 +75,23 @@ def resolve_under_project(
     return os.path.join(pdir, target)
 
 
-def canonicalize_output_dir(project_dir: Optional[str], output_dir: Optional[str], topic: str) -> str:
+def canonicalize_output_path(project_path: Optional[str], output_path: Optional[str], topic: str) -> str:
     """
-    Deterministically computes and canonicalizes output_dir under project_dir,
+    Deterministically computes and canonicalizes output_path under project_path,
     preventing path duplications (such as words/words/topic or pkm/pkm/) and ensuring
     all nodes in the graph target the exact same directory on disk.
     """
     topic = str(topic or "").strip().lower()
-    pdir = normalize_path(project_dir) if project_dir else ""
-    out_dir = normalize_path(output_dir) if output_dir else ""
+    pdir = normalize_path(project_path) if project_path else ""
+    out_dir = normalize_path(output_path) if output_path else ""
 
     if not pdir and not out_dir:
         return topic or ""
 
     if not out_dir and pdir:
         words_subdir = os.path.join(pdir, "words")
-        if os.path.isdir(words_subdir) and not pdir.endswith(os.sep + "words") and pdir != "words":
+        abs_words_subdir = os.path.abspath(words_subdir)
+        if (os.path.isdir(words_subdir) or os.path.isdir(abs_words_subdir)) and not pdir.endswith(os.sep + "words") and pdir != "words":
             return os.path.join(words_subdir, topic) if topic else words_subdir
         return os.path.join(pdir, topic) if topic else pdir
 
@@ -106,7 +107,6 @@ def canonicalize_output_dir(project_dir: Optional[str], output_dir: Optional[str
     pdir_base = os.path.basename(pdir)
     out_parts = out_dir.split(os.sep)
     if out_parts and out_parts[0] == pdir_base:
-        # e.g. pdir='.../words', out_dir='words/horse' -> join('.../words', 'horse')
         rest = os.sep.join(out_parts[1:])
         return os.path.join(pdir, rest) if rest else pdir
 
@@ -116,7 +116,8 @@ def canonicalize_output_dir(project_dir: Optional[str], output_dir: Optional[str
 
     if out_dir == topic:
         words_subdir = os.path.join(pdir, "words")
-        if os.path.isdir(words_subdir) and not pdir.endswith(os.sep + "words") and pdir != "words":
+        abs_words_subdir = os.path.abspath(words_subdir)
+        if (os.path.isdir(words_subdir) or os.path.isdir(abs_words_subdir)) and not pdir.endswith(os.sep + "words") and pdir != "words":
             return os.path.join(words_subdir, out_dir)
         return os.path.join(pdir, out_dir)
 
@@ -126,30 +127,61 @@ def canonicalize_output_dir(project_dir: Optional[str], output_dir: Optional[str
 
     # 5. Single segment custom folder:
     words_subdir = os.path.join(pdir, "words")
-    if os.path.isdir(words_subdir) and not pdir.endswith(os.sep + "words") and pdir != "words":
+    abs_words_subdir = os.path.abspath(words_subdir)
+    if (os.path.isdir(words_subdir) or os.path.isdir(abs_words_subdir)) and not pdir.endswith(os.sep + "words") and pdir != "words":
         return os.path.join(words_subdir, out_dir)
 
     return os.path.join(pdir, out_dir)
 
 
-def resolve_project_doc_path(doc_path: Optional[str], project_dir: Optional[str], default_filename: str) -> str:
-    """Resolves project documentation files (manifest, creator instructions, QC playbook) under project_dir."""
-    return resolve_under_project(project_dir, doc_path, default_filename)
+def infer_paths_from_state(state: dict) -> tuple[str, str]:
+    """
+    Infers and canonicalizes (project_path, output_path) from state,
+    ensuring that if project_path was omitted but asset paths exist in state,
+    the directory hierarchy is accurately recovered without mismatch.
+    """
+    topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
+    project_path = normalize_path(state.get("project_path", ""))
+    output_path = normalize_path(state.get("output_path", ""))
+
+    if not project_path:
+        for k in ["image_path", "video_plot_path", "raw_video_path", "remixed_video_path", "copy_path", "source_audio_path"]:
+            p = state.get(k)
+            if p and isinstance(p, str) and (os.sep in p or "/" in p):
+                asset_dir = os.path.dirname(normalize_path(p))
+                if asset_dir:
+                    if f"{os.sep}words{os.sep}" in asset_dir:
+                        project_path = asset_dir.split(f"{os.sep}words{os.sep}")[0]
+                    elif asset_dir.endswith(f"{os.sep}words"):
+                        project_path = os.path.dirname(asset_dir)
+                    elif f"{os.sep}{topic}" in asset_dir:
+                        project_path = asset_dir.split(f"{os.sep}{topic}")[0]
+                    if not output_path or output_path == topic:
+                        output_path = asset_dir
+                    break
+
+    canonical_out = canonicalize_output_path(project_path, output_path, topic)
+    return project_path, canonical_out
+
+
+def resolve_project_doc_path(doc_path: Optional[str], project_path: Optional[str], default_filename: str) -> str:
+    """Resolves project documentation files (manifest, creator instructions, QC playbook) under project_path."""
+    return resolve_under_project(project_path, doc_path, default_filename)
 
 
 def resolve_asset_path(
-    output_dir: Optional[str],
+    output_path: Optional[str],
     topic: str,
     asset_type: str,
     next_version: bool = False
 ) -> str:
     """
-    Resolves deterministic versioned asset path strictly under output_dir.
+    Resolves deterministic versioned asset path strictly under output_path.
     If next_version is True, it increments the version counter for a new file (guaranteed >= v2).
     If next_version is False, it returns the highest existing version (or v1 if none).
     """
     topic = str(topic).strip().lower()
-    out_dir = normalize_path(output_dir)
+    out_dir = normalize_path(output_path)
     ext = ASSET_EXTENSION_MAP.get(asset_type, "dat")
     if not out_dir:
         return f"{topic}_{asset_type}.{ext}" if not next_version else f"{topic}_{asset_type}_v2.{ext}"
@@ -224,7 +256,7 @@ def extract_aspect_ratio_from_instructions(
 
 
 def resolve_task_asset(
-    output_dir: Optional[str],
+    output_path: Optional[str],
     topic: str,
     asset_type: str,
     needs_revision: bool = False
@@ -237,7 +269,7 @@ def resolve_task_asset(
     returns (existing_path, False).
     Otherwise, returns (target_path, True).
     """
-    out_dir = normalize_path(output_dir)
+    out_dir = normalize_path(output_path)
     existing = resolve_asset_path(out_dir, topic, asset_type, next_version=False)
     if not needs_revision and os.path.isfile(existing) and os.path.getsize(existing) > 0:
         return existing, False
@@ -246,7 +278,7 @@ def resolve_task_asset(
 
 
 def load_project_context(
-    project_dir: Optional[str],
+    project_path: Optional[str],
     style: str = "3D",
     manifest_path: Optional[str] = "",
     creator_instructions_path: Optional[str] = ""
@@ -255,7 +287,7 @@ def load_project_context(
     Loads project guidelines, style-specific character sheet, reference image,
     and aspect ratio from the project directory.
     """
-    pdir = normalize_path(project_dir)
+    pdir = normalize_path(project_path)
     style_norm = style.upper() if style.lower() == "3d" else style.capitalize()
 
     project_guidelines = ""
@@ -312,14 +344,14 @@ def load_project_context(
 def validate_inter_node_paths(state: dict, node_name: str) -> None:
     """
     Validates inter-node invariant:
-    Ensures that output_dir and all asset paths in state are consistent,
+    Ensures that output_path and all asset paths in state are consistent,
     non-divergent, and mapped to the same canonical directory structure.
     """
-    output_dir = state.get("output_dir")
-    if not output_dir:
+    output_path = state.get("output_path")
+    if not output_path:
         return
 
-    norm_output = normalize_path(output_dir)
+    norm_output = normalize_path(output_path)
 
     path_keys = ["image_path", "video_plot_path", "raw_video_path", "remixed_video_path", "copy_path"]
     for k in path_keys:
@@ -332,7 +364,7 @@ def validate_inter_node_paths(state: dict, node_name: str) -> None:
                 from graphs.content_creation.utils.invariants import AssetInvariantError
                 raise AssetInvariantError(
                     f"Path mismatch between nodes at '{node_name}': "
-                    f"'{k}' ({p}) does not reside in output_dir ({output_dir})."
+                    f"'{k}' ({p}) does not reside in output_path ({output_path})."
                 )
 
 # Backwards compatibility aliases

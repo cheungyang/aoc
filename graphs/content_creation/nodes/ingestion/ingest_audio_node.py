@@ -3,7 +3,7 @@ import aiohttp
 import re
 from urllib.parse import urlparse, unquote
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_dir
+from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_path, infer_paths_from_state
 
 AUDIO_EXTENSIONS = ('.m4a', '.wav', '.mp3', '.ogg', '.aac', '.flac')
 
@@ -15,15 +15,14 @@ async def ask_for_audio_node(state: dict) -> dict:
 
 async def ingest_audio_node(state: dict) -> dict:
     """Macro-Node 1: Ingests audio from message attachments, query parameters, or existing directory files."""
-    project_dir = normalize_project_path(state.get("project_dir", ""))
+    project_path, output_path = infer_paths_from_state(state)
     topic = str(state.get("topic") or state.get("word") or "").strip().lower()
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
 
     # 1. If state already points to a valid audio file on disk, pass it through directly
     for k in ["source_audio_path", "audio_file", "audio"]:
         val = state.get(k)
         if val and isinstance(val, str) and os.path.isfile(val) and val.lower().endswith(AUDIO_EXTENSIONS):
-            return {"source_audio_path": val, "output_dir": output_dir}
+            return {"source_audio_path": val, "project_path": project_path, "output_path": output_path}
 
     # 2. Collect candidate text sources (query, latest messages)
     candidate_texts = []
@@ -48,9 +47,10 @@ async def ingest_audio_node(state: dict) -> dict:
             filename = m_attached.group(1).strip()
             url = m_attached.group(2).strip()
             if filename.lower().endswith(AUDIO_EXTENSIONS) or any(ext in url.lower() for ext in AUDIO_EXTENSIONS):
-                res = await _download_audio(url, filename, output_dir)
+                res = await _download_audio(url, filename, output_path)
                 if res:
-                    res["output_dir"] = output_dir
+                    res["project_path"] = project_path
+                    res["output_path"] = output_path
                     return res
 
         # Pattern B: Direct URL containing audio extension (e.g. Discord CDN or web URL)
@@ -59,9 +59,10 @@ async def ingest_audio_node(state: dict) -> dict:
             url = m_url.group(1).strip()
             parsed_path = unquote(urlparse(url).path)
             filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
-            res = await _download_audio(url, filename, output_dir)
+            res = await _download_audio(url, filename, output_path)
             if res:
-                res["output_dir"] = output_dir
+                res["project_path"] = project_path
+                res["output_path"] = output_path
                 return res
 
         # Pattern C: Key-value pattern: audio: /path/to/file or audio_file: https://...
@@ -71,29 +72,30 @@ async def ingest_audio_node(state: dict) -> dict:
             if target.startswith("http://") or target.startswith("https://"):
                 parsed_path = unquote(urlparse(target).path)
                 filename = os.path.basename(parsed_path) or f"{topic or 'audio'}_clip.m4a"
-                res = await _download_audio(target, filename, output_dir)
+                res = await _download_audio(target, filename, output_path)
                 if res:
-                    res["output_dir"] = output_dir
+                    res["project_path"] = project_path
+                    res["output_path"] = output_path
                     return res
             elif os.path.isfile(target) and target.lower().endswith(AUDIO_EXTENSIONS):
-                return {"source_audio_path": target, "output_dir": output_dir}
+                return {"source_audio_path": target, "project_path": project_path, "output_path": output_path}
 
         # Pattern D: Local file path mentioned in text
         for line in text.splitlines():
             cleaned_line = line.strip().strip("'\"`")
             if cleaned_line.lower().endswith(AUDIO_EXTENSIONS) and os.path.isfile(cleaned_line):
-                return {"source_audio_path": cleaned_line, "output_dir": output_dir}
+                return {"source_audio_path": cleaned_line, "project_path": project_path, "output_path": output_path}
 
-    # 4. Check if an audio file already exists in output_dir (or project_dir)
-    target_dirs = [d for d in [output_dir, project_dir] if d and os.path.isdir(d)]
+    # 4. Check if an audio file already exists in output_path (or project_path)
+    target_dirs = [d for d in [output_path, project_path] if d and os.path.isdir(d)]
     for d in target_dirs:
         for fname in os.listdir(d):
             if fname.lower().endswith(AUDIO_EXTENSIONS) and not fname.startswith("."):
                 fpath = os.path.join(d, fname)
                 if os.path.isfile(fpath) and os.path.getsize(fpath) > 0:
-                    return {"source_audio_path": fpath, "output_dir": output_dir}
+                    return {"source_audio_path": fpath, "project_path": project_path, "output_path": output_path}
 
-    return {"output_dir": output_dir}
+    return {"project_path": project_path, "output_path": output_path}
 
 async def _download_audio(url: str, filename: str, target_dir: str) -> dict:
     if target_dir and not os.path.exists(target_dir):

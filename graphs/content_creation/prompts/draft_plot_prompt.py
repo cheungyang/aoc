@@ -3,8 +3,8 @@ def build_draft_plot_prompt(
     style_str: str,
     image_path: str,
     audio_path: str,
-    project_dir: str,
-    output_dir: str,
+    project_path: str,
+    output_path: str,
     video_plot_path: str,
     video_plot_json_path: str,
     project_guidelines: str = "",
@@ -28,8 +28,8 @@ def build_draft_plot_prompt(
         f"Episode Style: `{style_str}`",
         f"Source Image: `{image_path}`",
         f"Source Audio: `{audio_path}`",
-        f"Project Directory: `{project_dir}`",
-        f"Output Directory: `{output_dir}`",
+        f"Project Path: `{project_path}`",
+        f"Output Path: `{output_path}`",
         f"Target Video Plot MD Path: `{video_plot_path}`",
         f"Target Video Plot JSON Path: `{video_plot_json_path}`"
     ]

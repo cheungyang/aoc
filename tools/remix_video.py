@@ -330,8 +330,19 @@ def remix_video(
             font_color = str(t_act.get("font_color") or t_act.get("fontcolor", "white"))
             border_color = str(t_act.get("border_color") or t_act.get("bordercolor", "0x4A3B32"))
             border_w = int(t_act.get("border_width") or t_act.get("borderwidth") or t_act.get("borderw", 8))
-            x_pos = str(t_act.get("x", "(w-text_w)/2"))
-            y_pos = str(t_act.get("y", "h*0.22"))
+
+            pos = str(t_act.get("position", "")).lower().strip()
+            x_pos = str(t_act.get("x") or "(w-text_w)/2")
+            if t_act.get("y"):
+                y_pos = str(t_act["y"])
+            elif pos == "top":
+                y_pos = "h*0.12"
+            elif pos in ["center", "middle"]:
+                y_pos = "(h-text_h)/2"
+            elif pos == "bottom":
+                y_pos = "h-text_h-h*0.10"
+            else:
+                y_pos = "h*0.22"
 
             drawtext_opts = []
             if font_path:

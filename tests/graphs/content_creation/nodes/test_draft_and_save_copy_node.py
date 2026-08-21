@@ -15,8 +15,8 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_state = {
                 "topic": "puppy",
-                "project_dir": temp_dir,
-                "output_dir": os.path.join(temp_dir, "puppy"),
+                "project_path": temp_dir,
+                "output_path": os.path.join(temp_dir, "puppy"),
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md"),
                 "qc_playbook_path": os.path.join(temp_dir, "03_QC_Playbook.md"),
                 "gate2_decision": "approved",
@@ -28,7 +28,7 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
             with open(test_state["qc_playbook_path"], "w") as f:
                 f.write("Must include hashtags.")
 
-            copy_file_path = os.path.join(test_state["output_dir"], "puppy_copy.md")
+            copy_file_path = os.path.join(test_state["output_path"], "puppy_copy.md")
             mock_response = (
                 f"<payload>\n"
                 f"<status>success</status>\n"
@@ -73,8 +73,8 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_state = {
                 "topic": "puppy",
-                "project_dir": temp_dir,
-                "output_dir": os.path.join(temp_dir, "puppy"),
+                "project_path": temp_dir,
+                "output_path": os.path.join(temp_dir, "puppy"),
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md"),
                 "qc_playbook_path": os.path.join(temp_dir, "03_QC_Playbook.md"),
                 "gate2_decision": "approved",
@@ -104,12 +104,12 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_node_generates_copy_from_plain_markdown_response(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
             test_state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             mock_response = "<payload># Cat Post\nAdorable kitten playing.\n#cats #kitten</payload>"
@@ -124,12 +124,12 @@ class TestDraftAndSaveCopyNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_node_handles_agent_call_exception_gracefully(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
             test_state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:

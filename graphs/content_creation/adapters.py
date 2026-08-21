@@ -7,7 +7,7 @@ from graphs.content_creation.utils.paths import (
     normalize_project_path,
     _resolve_project_doc_path,
     _resolve_asset_path,
-    canonicalize_output_dir
+    canonicalize_output_path
 )
 
 def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[str, Any]:
@@ -17,21 +17,21 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     else:
         formatted_query = query
 
-    project_dir = kwargs.get("project_dir") or kwargs.get("project_path") or kwargs.get("project")
-    if not project_dir:
-        m_pdir = re.search(r'(?:project_dir|project_path|project)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+    project_path = kwargs.get("project_path") or kwargs.get("project") or kwargs.get("project_dir")
+    if not project_path:
+        m_pdir = re.search(r'(?:project_path|project_dir|project)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
         if m_pdir:
-            project_dir = m_pdir.group(1).strip()
+            project_path = m_pdir.group(1).strip()
         else:
-            project_dir = ""
+            project_path = ""
 
-    output_dir_param = kwargs.get("output_dir") or kwargs.get("output_path") or kwargs.get("output")
-    if not output_dir_param:
-        m_outdir = re.search(r'(?:output_dir|output_path|output)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+    output_path_param = kwargs.get("output_path") or kwargs.get("output") or kwargs.get("output_dir")
+    if not output_path_param:
+        m_outdir = re.search(r'(?:output_path|output_dir|output)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
         if m_outdir:
-            output_dir_param = m_outdir.group(1).strip()
+            output_path_param = m_outdir.group(1).strip()
         else:
-            output_dir_param = ""
+            output_path_param = ""
 
     style = kwargs.get("style")
     if not style:
@@ -46,7 +46,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
     topic = kwargs.get("topic") or kwargs.get("word")
 
-    # Check if there is an active checkpointer thread with an existing topic or project_dir
+    # Check if there is an active checkpointer thread with an existing topic or project_path
     if thread_id:
         try:
             from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
@@ -54,10 +54,10 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
             snap = cp.get_tuple({"configurable": {"thread_id": thread_id}})
             if snap and snap.checkpoint and "channel_values" in snap.checkpoint:
                 ch = snap.checkpoint["channel_values"]
-                if not project_dir and ch.get("project_dir"):
-                    project_dir = ch["project_dir"]
-                if not output_dir_param and ch.get("output_dir"):
-                    output_dir_param = ch["output_dir"]
+                if not project_path and ch.get("project_path"):
+                    project_path = ch["project_path"]
+                if not output_path_param and ch.get("output_path"):
+                    output_path_param = ch["output_path"]
                 if not topic and ch.get("topic"):
                     topic = ch["topic"]
                 if not style and ch.get("style"):
@@ -67,8 +67,8 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
     style = style or "3D"
 
-    if project_dir:
-        project_dir = normalize_project_path(project_dir)
+    if project_path:
+        project_path = normalize_project_path(project_path)
 
     if not topic:
         m_topic = re.search(r'(?:topic|word)[:=]\s*["\']?([a-zA-Z0-9_ -]+)["\']?', query, re.IGNORECASE)
@@ -94,15 +94,15 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     topic = str(topic).strip().lower()
     qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
 
-    output_dir = canonicalize_output_dir(project_dir, output_dir_param, topic) if (output_dir_param or project_dir) else ""
+    output_path = canonicalize_output_path(project_path, output_path_param, topic) if (output_path_param or project_path) else ""
 
     source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
-    if not output_dir and not project_dir:
-        error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_dir: 'path/to/project' or output_dir: 'path/to/project/words/topic')."
+    if not output_path and not project_path:
+        error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_path: 'path/to/project' or output_path: 'path/to/project/words/topic')."
         manifest_path = kwargs.get("manifest_path", "")
         creator_instructions_path = kwargs.get("creator_instructions_path", "")
         qc_playbook_path = kwargs.get("qc_playbook_path", "")
-        output_dir = ""
+        output_path = ""
         execution_log_path = ""
         image_path = ""
         video_plot_path = ""
@@ -113,19 +113,19 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         overlay_text = ""
     else:
         error_msg = ""
-        manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_dir, "01_Project_Manifest.md")
-        creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_dir, "02_Creator_Instructions.md")
-        qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-        execution_log_path = kwargs.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+        manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_path, "01_Project_Manifest.md")
+        creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_path, "02_Creator_Instructions.md")
+        qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_path, "03_QC_Playbook.md")
+        execution_log_path = kwargs.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
-        image_path = _resolve_asset_path(output_dir, topic, "image", next_version=False)
-        video_plot_path = _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-        raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
-        video_path = _resolve_asset_path(output_dir, topic, "video", next_version=False)
-        copy_path = _resolve_asset_path(output_dir, topic, "copy", next_version=False)
+        image_path = _resolve_asset_path(output_path, topic, "image", next_version=False)
+        video_plot_path = _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+        raw_video_path = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
+        video_path = _resolve_asset_path(output_path, topic, "video", next_version=False)
+        copy_path = _resolve_asset_path(output_path, topic, "copy", next_version=False)
         
         source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
-        audio_path = kwargs.get("audio_path") or source_audio or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
+        audio_path = kwargs.get("audio_path") or source_audio or (os.path.join(output_path, f"{topic}_wav.wav") if output_path else f"{topic}_wav.wav")
         overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
 
     aspect_ratio = kwargs.get("aspect_ratio")
@@ -144,8 +144,8 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     aspect_ratio = aspect_ratio or "16:9"
 
     return {
-        "project_dir": project_dir,
-        "output_dir": output_dir,
+        "project_path": project_path,
+        "output_path": output_path,
         "topic": topic,
         "style": style,
         "aspect_ratio": aspect_ratio,
@@ -159,7 +159,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "overlay_text": overlay_text,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
-        "raw_video_path": raw_video_path if output_dir else "",
+        "raw_video_path": raw_video_path if output_path else "",
         "remixed_video_path": video_path,
         "extracted_frames_path": [],
         "copy_path": copy_path,
@@ -217,11 +217,11 @@ def format_output(state: Dict[str, Any]) -> str:
 def format_gate1_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 1 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
+    project_path = normalize_project_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
 
-    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
+    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_path, topic, "image", next_version=False)
+    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
     plot_content = ""
     if video_plot_path and os.path.exists(video_plot_path):
         try:
@@ -244,13 +244,13 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
 def format_gate2_presentation(state: Dict[str, Any]) -> str:
     """Generates the full markdown presentation string for HITL Gate 2 reading dynamic state paths."""
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    raw_video_path = normalize_project_path(state.get("raw_video_path")) or _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
-    remixed_video_path = normalize_project_path(state.get("remixed_video_path") or state.get("video_path")) or _resolve_asset_path(output_dir, topic, "video", next_version=False)
-    copy_path = normalize_project_path(state.get("copy_path")) or _resolve_asset_path(output_dir, topic, "copy", next_version=False)
+    project_path = normalize_project_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    image_path = normalize_project_path(state.get("image_path")) or _resolve_asset_path(output_path, topic, "image", next_version=False)
+    video_plot_path = normalize_project_path(state.get("video_plot_path")) or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    raw_video_path = normalize_project_path(state.get("raw_video_path")) or _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
+    remixed_video_path = normalize_project_path(state.get("remixed_video_path") or state.get("video_path")) or _resolve_asset_path(output_path, topic, "video", next_version=False)
+    copy_path = normalize_project_path(state.get("copy_path")) or _resolve_asset_path(output_path, topic, "copy", next_version=False)
     copy_text = ""
     if copy_path and os.path.exists(copy_path):
         try:

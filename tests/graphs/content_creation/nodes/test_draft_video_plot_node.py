@@ -13,16 +13,16 @@ from graphs.content_creation.schemas import VideoPlot
 class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
     async def test_reuses_existing_plot_when_qc_passed_and_no_revision_requested(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_plot_path = os.path.join(output_dir, "cat_video_plot.md")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_plot_path = os.path.join(output_path, "cat_video_plot.md")
             with open(existing_plot_path, "w") as f:
                 f.write("Existing approved video plot motion")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "video_plot_qc_passed": True
             }
 
@@ -33,20 +33,20 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["video_plot_path"], existing_plot_path)
                 with open(result["video_plot_path"], "r") as f:
                     self.assertEqual(f.read(), "Existing approved video plot motion")
-                self.assertFalse(os.path.exists(os.path.join(output_dir, "cat_video_plot_v2.md")))
+                self.assertFalse(os.path.exists(os.path.join(output_path, "cat_video_plot_v2.md")))
 
     async def test_generates_v2_when_feedback_provided(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_plot_path = os.path.join(output_dir, "cat_video_plot.md")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_plot_path = os.path.join(output_path, "cat_video_plot.md")
             with open(existing_plot_path, "w") as f:
                 f.write("Initial plot")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "video_plot_feedback": "Motion needs to be faster.",
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
             }
@@ -54,7 +54,7 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            expected_v2_path = os.path.join(output_dir, "cat_video_plot_v2.md")
+            expected_v2_path = os.path.join(output_path, "cat_video_plot_v2.md")
             mock_response = (
                 f"<payload>\n"
                 f"<status>success</status>\n"
@@ -80,14 +80,14 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_draft_plot_parses_reinforced_xml_path_payload(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            plot_md_path = os.path.join(output_dir, "cat_video_plot.md")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            plot_md_path = os.path.join(output_path, "cat_video_plot.md")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             mock_response = (
@@ -118,9 +118,9 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_draft_plot_dynamically_loads_instructions_and_feedback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
+            output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
-            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
 
             instr_path = os.path.join(temp_dir, "02_Creator_Instructions.md")
@@ -134,13 +134,13 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "style": "3D",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "creator_instructions_path": instr_path,
                 "latest_human_feedback": "Toddler girl should perform playful kitten paws."
             }
 
-            plot_md_path = os.path.join(output_dir, "cat_video_plot.md")
+            plot_md_path = os.path.join(output_path, "cat_video_plot.md")
             mock_response = (
                 f"<payload>\n"
                 f"<status>success</status>\n"
@@ -171,13 +171,13 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_draft_plot_parses_json_payload_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             json_payload = json.dumps({
@@ -202,13 +202,13 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_draft_plot_handles_agent_call_exception_gracefully(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir
+                "project_path": temp_dir,
+                "output_path": output_path
             }
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
@@ -221,16 +221,16 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_generates_v2_when_plot_feedback_provided_even_if_gate1_decision_was_approved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_plot_path = os.path.join(output_dir, "cat_video_plot.md")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_plot_path = os.path.join(output_path, "cat_video_plot.md")
             with open(existing_plot_path, "w") as f:
                 f.write("Initial plot")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "gate1_decision": "approved",
                 "latest_human_feedback": "Change the video plot motion: add rapid zoom and camera pan.",
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
@@ -239,7 +239,7 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            expected_v2 = os.path.join(output_dir, "cat_video_plot_v2.md")
+            expected_v2 = os.path.join(output_path, "cat_video_plot_v2.md")
             mock_response = f"<payload><video_plot_path>{expected_v2}</video_plot_path><motion_prompt>rapid zoom and pan</motion_prompt><overlay_text>CAT</overlay_text></payload>"
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
@@ -254,16 +254,16 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
     async def test_reuses_existing_plot_when_image_specific_feedback_provided(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
-            existing_plot_path = os.path.join(output_dir, "cat_video_plot.md")
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_plot_path = os.path.join(output_path, "cat_video_plot.md")
             with open(existing_plot_path, "w") as f:
                 f.write("Initial plot")
 
             state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "gate1_decision": "revise_image",
                 "video_plot_qc_passed": True,
                 "latest_human_feedback": "Change character costume to blue astronaut onesie.",

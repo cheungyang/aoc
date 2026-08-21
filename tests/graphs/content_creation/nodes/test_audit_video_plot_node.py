@@ -15,8 +15,8 @@ class TestAuditVideoPlotNode(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_state = {
                 "topic": "fish",
-                "project_dir": temp_dir,
-                "output_dir": temp_dir,
+                "project_path": temp_dir,
+                "output_path": temp_dir,
                 "qc_playbook_path": os.path.join(temp_dir, "03_QC_Playbook.md")
             }
 
@@ -51,8 +51,8 @@ class TestAuditVideoPlotNode(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_state = {
                 "topic": "cat",
-                "project_dir": temp_dir,
-                "output_dir": temp_dir,
+                "project_path": temp_dir,
+                "output_path": temp_dir,
             }
 
             mock_response = (
@@ -77,8 +77,8 @@ class TestAuditVideoPlotNode(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_state = {
                 "topic": "fish",
-                "project_dir": temp_dir,
-                "output_dir": temp_dir
+                "project_path": temp_dir,
+                "output_path": temp_dir
             }
 
             json_resp = json.dumps({

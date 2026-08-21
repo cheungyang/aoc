@@ -156,6 +156,43 @@ class TestRemixVideo(unittest.TestCase):
         self.assertTrue(os.path.exists(output_mp4))
         self.assertGreater(os.path.getsize(output_mp4), 0)
 
+    def test_subtitle_positioning_and_styling(self):
+        output_mp4 = os.path.join(self.test_dir, "output_positioned.mp4")
+        actions = [
+            {
+                "action": "add_audio",
+                "audio_path": self.audio_wav,
+                "start_time": "1.0s",
+                "volume": 1.5
+            },
+            {
+                "action": "add_text",
+                "text": "貓咪 Top",
+                "start_time": 1.0,
+                "end_time": 3.0,
+                "position": "top",
+                "font_size": 48,
+                "font_color": "yellow"
+            },
+            {
+                "action": "add_text",
+                "text": "貓咪 Bottom",
+                "start_time": 1.0,
+                "position": "bottom",
+                "font_size": 52
+            }
+        ]
+
+        res = remix_video.invoke({
+            "video_path": self.video_no_audio,
+            "actions": actions,
+            "output_path": output_mp4
+        })
+
+        self.assertIn("<errors>None</errors>", res)
+        self.assertTrue(os.path.exists(output_mp4))
+        self.assertGreater(os.path.getsize(output_mp4), 0)
+
     def test_validation_missing_video(self):
         res = remix_video.invoke({
             "video_path": os.path.join(self.test_dir, "nonexistent.mp4"),

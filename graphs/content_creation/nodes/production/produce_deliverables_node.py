@@ -1,6 +1,6 @@
 import os
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_dir, validate_inter_node_paths
+from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_path, infer_paths_from_state, validate_inter_node_paths
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.adapters import format_gate2_presentation
 from .render_plate import render_plate_task
@@ -14,13 +14,12 @@ async def produce_deliverables_node(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path, output_path = infer_paths_from_state(state)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     working_state = dict(state)
-    working_state["project_dir"] = project_dir
-    working_state["output_dir"] = output_dir
+    working_state["project_path"] = project_path
+    working_state["output_path"] = output_path
 
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
@@ -36,7 +35,7 @@ async def produce_deliverables_node(state: dict) -> dict:
     if working_state.get("error_message"):
         err_msg = working_state["error_message"]
         _append_execution_log(
-            output_dir=output_dir,
+            output_path=output_path,
             topic=topic,
             actor="🛑 System",
             event_title="Pipeline Halted: Visual Plate Generation Error",
@@ -47,8 +46,8 @@ async def produce_deliverables_node(state: dict) -> dict:
             log_path=execution_log_path
         )
         return {
-            "project_dir": project_dir,
-            "output_dir": output_dir,
+            "project_path": project_path,
+            "output_path": output_path,
             "error_message": err_msg,
             "quota_exceeded": working_state.get("quota_exceeded", False),
             "messages": [AIMessage(content=err_msg)]
@@ -77,9 +76,9 @@ async def produce_deliverables_node(state: dict) -> dict:
     extracted_frames_path = working_state.get("extracted_frames_path", [])
 
     final_package = {
-        "project_dir": project_dir,
+        "project_path": project_path,
         "topic": topic,
-        "output_dir": output_dir,
+        "output_path": output_path,
         "image_path": image_path,
         "video_plot_path": video_plot_path,
         "raw_video_path": working_state.get("raw_video_path", ""),
@@ -98,7 +97,7 @@ async def produce_deliverables_node(state: dict) -> dict:
     summary = format_gate2_presentation(working_state)
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="🎉 Human-in-the-Loop",
         event_title="Gate 2 Final Package Presented",
@@ -112,8 +111,8 @@ async def produce_deliverables_node(state: dict) -> dict:
     )
 
     return {
-        "project_dir": project_dir,
-        "output_dir": output_dir,
+        "project_path": project_path,
+        "output_path": output_path,
         "raw_video_path": working_state.get("raw_video_path", ""),
         "remixed_video_path": remixed_video_path,
         "copy_path": copy_path,

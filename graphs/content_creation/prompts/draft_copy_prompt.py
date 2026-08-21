@@ -1,7 +1,7 @@
 def build_draft_copy_prompt(
     topic: str,
-    project_dir: str,
-    output_dir: str,
+    project_path: str,
+    output_path: str,
     copy_path: str,
     copy_json_path: str,
     instructions_text: str = "",
@@ -19,8 +19,8 @@ def build_draft_copy_prompt(
 
     state_sections = [
         f"Topic / Word: `{topic}`",
-        f"Project Directory: `{project_dir}`",
-        f"Output Directory: `{output_dir}`",
+        f"Project Path: `{project_path}`",
+        f"Output Path: `{output_path}`",
         f"Target Copy MD Path: `{copy_path}`",
         f"Target Copy JSON Path: `{copy_json_path}`"
     ]

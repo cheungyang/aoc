@@ -3,17 +3,18 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 def _append_execution_log(
-    output_dir: Optional[str],
-    topic: str,
-    actor: str,
-    event_title: str,
-    details: Dict[str, Any],
+    output_path: Optional[str] = None,
+    topic: str = "scene",
+    actor: str = "",
+    event_title: str = "",
+    details: Dict[str, Any] = None,
     log_path: Optional[str] = None
 ):
     """Continuously appends timestamped markdown audit log entries to execution_log.md."""
     try:
+        details = details or {}
         topic_clean = str(topic or "scene").strip().lower()
-        out_dir = str(output_dir) if output_dir is not None else ""
+        out_dir = str(output_path or "")
         target_file = log_path or (os.path.join(out_dir, "execution_log.md") if out_dir else "")
         if not target_file:
             return
@@ -28,7 +29,7 @@ def _append_execution_log(
             if is_new:
                 f.write(f"# 📜 Content Creation Trajectory: {topic_clean}\n\n")
                 f.write(f"- **Topic**: `{topic_clean}`\n")
-                f.write(f"- **Output Directory**: `{output_dir}`\n")
+                f.write(f"- **Output Path**: `{out_dir}`\n")
                 f.write(f"- **Initiated At**: `{now_str}`\n\n")
                 f.write("---\n\n")
 

@@ -2,8 +2,8 @@ def build_audit_plot_prompt(
     topic: str,
     image_path: str,
     video_plot_path: str,
-    project_dir: str,
-    output_dir: str,
+    project_path: str,
+    output_path: str,
     qc_playbook_content: str = "",
     plot_content: str = ""
 ) -> str:
@@ -20,8 +20,8 @@ def build_audit_plot_prompt(
         f"Topic / Word: `{topic}`",
         f"Target Base Image File: `{image_path}`",
         f"Drafted Video Plot Path: `{video_plot_path}`",
-        f"Project Directory: `{project_dir}`",
-        f"Output Directory: `{output_dir}`"
+        f"Project Path: `{project_path}`",
+        f"Output Path: `{output_path}`"
     ]
     if plot_content:
         state_sections.append(f"--- DRAFTED VIDEO PLOT CONTENT ---\n{plot_content}")

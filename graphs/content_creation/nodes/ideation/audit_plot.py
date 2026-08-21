@@ -1,5 +1,5 @@
 import os
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_dir
+from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_path
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.schemas import PlotAudit
 from graphs.content_creation.prompts import build_audit_plot_prompt
@@ -10,12 +10,12 @@ async def audit_plot_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_dir, "03_QC_Playbook.md")
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    image_path = state.get("image_path") or _resolve_asset_path(output_dir, topic, "image", next_version=False)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path = normalize_project_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_path, "03_QC_Playbook.md")
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    image_path = state.get("image_path") or _resolve_asset_path(output_path, topic, "image", next_version=False)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     plot_content = ""
     if video_plot_path and os.path.exists(video_plot_path):
@@ -37,8 +37,8 @@ async def audit_plot_task(state: dict) -> dict:
         topic=topic,
         image_path=image_path,
         video_plot_path=video_plot_path,
-        project_dir=project_dir,
-        output_dir=output_dir,
+        project_path=project_path,
+        output_path=output_path,
         qc_playbook_content=qc_playbook_content,
         plot_content=plot_content
     )
@@ -112,7 +112,7 @@ async def audit_plot_task(state: dict) -> dict:
         rejection_target = "plot"
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="⚙️ Graph Worker (Brand QC Audit)",
         event_title="Video Plot Brand QC Audit",

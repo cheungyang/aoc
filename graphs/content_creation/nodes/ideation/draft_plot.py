@@ -1,21 +1,21 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from graphs.content_creation.prompts import build_draft_plot_prompt
 
 async def draft_plot_task(state: dict) -> dict:
-    """Drafts Video Plot by delegating to LLM with instructions dynamically loaded from project_dir."""
+    """Drafts Video Plot by delegating to LLM with instructions dynamically loaded from project_path."""
     if state.get("error_message"):
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     style = str(state.get("style") or "3D").strip()
-    project_dir = normalize_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path = normalize_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     feedback = state.get("video_plot_feedback")
     human_feedback = state.get("latest_human_feedback")
     gate1_decision = state.get("gate1_decision")
@@ -31,20 +31,20 @@ async def draft_plot_task(state: dict) -> dict:
         bool(human_feedback and gate1_decision == "revise_plot")
     )
 
-    video_plot_path, should_generate = resolve_task_asset(output_dir, topic, "video_plot", needs_revision=needs_plot_revision)
+    video_plot_path, should_generate = resolve_task_asset(output_path, topic, "video_plot", needs_revision=needs_plot_revision)
     if not should_generate and state.get("video_plot_qc_passed"):
         return {
-            "project_dir": project_dir,
-            "output_dir": output_dir,
+            "project_path": project_path,
+            "output_path": output_path,
             "video_plot_path": video_plot_path
         }
 
     video_plot_json_path = video_plot_path.replace(".md", ".json")
     image_path = state.get("image_path", "")
-    audio_path = state.get("source_audio_path") or (os.path.join(output_dir, f"{topic}_wav.wav") if output_dir else f"{topic}_wav.wav")
+    audio_path = state.get("source_audio_path") or (os.path.join(output_path, f"{topic}_wav.wav") if output_path else f"{topic}_wav.wav")
 
     ctx = load_project_context(
-        project_dir=project_dir,
+        project_path=project_path,
         style=style,
         manifest_path=state.get("manifest_path", ""),
         creator_instructions_path=state.get("creator_instructions_path", "")
@@ -55,8 +55,8 @@ async def draft_plot_task(state: dict) -> dict:
         style_str=style_str,
         image_path=image_path,
         audio_path=audio_path,
-        project_dir=project_dir,
-        output_dir=output_dir,
+        project_path=project_path,
+        output_path=output_path,
         video_plot_path=video_plot_path,
         video_plot_json_path=video_plot_json_path,
         project_guidelines=ctx.get("project_guidelines", ""),
@@ -143,8 +143,8 @@ async def draft_plot_task(state: dict) -> dict:
                     plot_dict["overlay_text"] = overlay_text
                     break
 
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
+        if output_path:
+            os.makedirs(output_path, exist_ok=True)
             with open(video_plot_path, "w", encoding="utf-8") as f:
                 f.write(video_plot_content)
             with open(video_plot_json_path, "w", encoding="utf-8") as f:
@@ -155,7 +155,7 @@ async def draft_plot_task(state: dict) -> dict:
         video_plot_content = ""
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="⚙️ Graph Worker (Video Plot Drafting)",
         event_title="Video Plot Drafting",

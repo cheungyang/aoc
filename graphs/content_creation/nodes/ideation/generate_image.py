@@ -1,20 +1,20 @@
 import os
 import re
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from tools.generate_image import generate_image
 
 async def generate_image_task(state: dict) -> dict:
-    """Generates 1-shot base image using instructions and character sheets loaded dynamically from project_dir."""
+    """Generates 1-shot base image using instructions and character sheets loaded dynamically from project_path."""
     if state.get("error_message"):
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     style = str(state.get("style") or "3D").strip()
-    project_dir = normalize_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path = normalize_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate1_decision = state.get("gate1_decision")
     if human_feedback and (not gate1_decision or gate1_decision == "approved"):
@@ -28,17 +28,17 @@ async def generate_image_task(state: dict) -> dict:
         bool(human_feedback and gate1_decision not in ["approved", "revise_plot"])
     )
 
-    image_path, should_generate = resolve_task_asset(output_dir, topic, "image", needs_revision=needs_image_revision)
+    image_path, should_generate = resolve_task_asset(output_path, topic, "image", needs_revision=needs_image_revision)
     if not should_generate:
         return {
-            "project_dir": project_dir,
-            "output_dir": output_dir,
+            "project_path": project_path,
+            "output_path": output_path,
             "image_path": image_path
         }
 
     # Load context, guidelines, character sheet, and aspect ratio
     ctx = load_project_context(
-        project_dir=project_dir,
+        project_path=project_path,
         style=style,
         manifest_path=state.get("manifest_path", ""),
         creator_instructions_path=state.get("creator_instructions_path", "")
@@ -52,10 +52,10 @@ async def generate_image_task(state: dict) -> dict:
         m_custom_ref = re.search(r'(?:reference|ref|character)[^\w\n]*([\w\d_./-]+\.(?:jpg|jpeg|png|webp))', human_feedback, re.IGNORECASE)
         if m_custom_ref:
             custom_ref_file = m_custom_ref.group(1).strip()
-            char_dir = os.path.join(project_dir, "character") if project_dir else ""
+            char_dir = os.path.join(project_path, "character") if project_path else ""
             cands = [
                 os.path.join(char_dir, os.path.basename(custom_ref_file)) if char_dir else "",
-                os.path.join(project_dir, custom_ref_file) if project_dir else "",
+                os.path.join(project_path, custom_ref_file) if project_path else "",
                 custom_ref_file
             ]
             for cand in cands:
@@ -98,7 +98,7 @@ async def generate_image_task(state: dict) -> dict:
         log_details["Error Details"] = tool_err
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="🎨 Content Creator",
         event_title="Base Image Generation",
@@ -111,23 +111,23 @@ async def generate_image_task(state: dict) -> dict:
         if is_quota_exceeded_error(tool_err):
             err_msg = format_quota_exceeded_message("Google Imagen / Gemini", tool_err or "API Quota Exceeded (429)", topic)
             return {
-                "project_dir": project_dir,
-                "output_dir": output_dir,
+                "project_path": project_path,
+                "output_path": output_path,
                 "error_message": err_msg,
                 "quota_exceeded": True,
                 "failed_node": "generate_image"
             }
         elif tool_err and tool_err.lower() != "none":
             return {
-                "project_dir": project_dir,
-                "output_dir": output_dir,
+                "project_path": project_path,
+                "output_path": output_path,
                 "error_message": f"Image Generation Failed: {tool_err}",
                 "failed_node": "generate_image"
             }
 
     return {
-        "project_dir": project_dir,
-        "output_dir": output_dir,
+        "project_path": project_path,
+        "output_path": output_path,
         "aspect_ratio": aspect_ratio,
         "image_path": image_path
     }

@@ -1,9 +1,9 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, canonicalize_output_dir, resolve_task_asset
+from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, canonicalize_output_path, resolve_task_asset
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate2_intent
+from graphs.content_creation.utils.classifiers import classify_gate2_intent, extract_remix_parameters
 from tools.remix_video import remix_video
 
 async def remix_video_task(state: dict) -> dict:
@@ -12,21 +12,21 @@ async def remix_video_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_project_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
+    project_path = normalize_project_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
     raw_video_path = normalize_project_path(state.get("raw_video_path"))
 
-    # Resilient resolution of raw_video_path under canonical output_dir
+    # Resilient resolution of raw_video_path under canonical output_path
     if not raw_video_path or not (os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):
-        cand = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
+        cand = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
         if cand and os.path.isfile(cand) and os.path.getsize(cand) > 0:
             raw_video_path = cand
-        elif raw_video_path and output_dir:
-            cand2 = os.path.join(output_dir, os.path.basename(raw_video_path))
+        elif raw_video_path and output_path:
+            cand2 = os.path.join(output_path, os.path.basename(raw_video_path))
             if os.path.isfile(cand2) and os.path.getsize(cand2) > 0:
                 raw_video_path = cand2
         else:
-            raw_video_path = _resolve_asset_path(output_dir, topic, "raw_video", next_version=False)
+            raw_video_path = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
 
     human_feedback = state.get("latest_human_feedback", "")
     gate2_decision = state.get("gate2_decision") or classify_gate2_intent(human_feedback)
@@ -36,15 +36,15 @@ async def remix_video_task(state: dict) -> dict:
         bool(raw_video_path and re.search(r'_v\d+', os.path.basename(raw_video_path)))
     )
 
-    video_path, should_generate = resolve_task_asset(output_dir, topic, "video", needs_revision=needs_remix_revision)
+    video_path, should_generate = resolve_task_asset(output_path, topic, "video", needs_revision=needs_remix_revision)
     if not should_generate and state.get("video_qc_passed"):
         return {
             "remixed_video_path": video_path,
             "video_persisted": True
         }
 
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_dir, topic, "video_plot", next_version=False)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     if not (raw_video_path and os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):
         return {
@@ -57,6 +57,7 @@ async def remix_video_task(state: dict) -> dict:
     audio_path = state.get("source_audio_path")
     overlay_text = state.get("overlay_text", [])
 
+    plot_data = {}
     try:
         plot_json_path = video_plot_path.replace(".md", ".json")
         with open(plot_json_path, "r") as pf:
@@ -66,9 +67,9 @@ async def remix_video_task(state: dict) -> dict:
         if src_aud:
             aud_cands = [
                 src_aud,
-                os.path.join(project_dir, os.path.basename(src_aud)),
-                os.path.join(output_dir, os.path.basename(src_aud)),
-                os.path.join(project_dir, src_aud)
+                os.path.join(project_path, os.path.basename(src_aud)),
+                os.path.join(output_path, os.path.basename(src_aud)),
+                os.path.join(project_path, src_aud)
             ]
             for cand in aud_cands:
                 if cand and os.path.isfile(cand) and os.path.getsize(cand) > 0:
@@ -79,34 +80,146 @@ async def remix_video_task(state: dict) -> dict:
     except Exception:
         pass
 
-    if not audio_path and output_dir:
+    if not audio_path and output_path:
         import glob
-        cands = glob.glob(os.path.join(output_dir, f"{topic}*.wav")) + glob.glob(os.path.join(output_dir, f"{topic}*.m4a"))
+        cands = glob.glob(os.path.join(output_path, f"{topic}*.wav")) + glob.glob(os.path.join(output_path, f"{topic}*.m4a"))
         if cands:
             audio_path = cands[0]
+
+    # Extract dynamic remix parameters from human feedback, state channels, and plot_data
+    remix_params = state.get("remix_params") or state.get("remix_parameters") or {}
+    feedback_params = extract_remix_parameters(human_feedback) if human_feedback else {}
+
+    # Audio Start Time (audio plays until its natural end)
+    audio_start = (
+        feedback_params.get("audio_start_time") if feedback_params.get("audio_start_time") is not None
+        else remix_params.get("audio_start_time") if remix_params.get("audio_start_time") is not None
+        else state.get("audio_start_time") if state.get("audio_start_time") is not None
+        else plot_data.get("audio_start_time") if plot_data.get("audio_start_time") is not None
+        else 1.5
+    )
+
+    # Subtitle / Text Start Time
+    text_start = (
+        feedback_params.get("text_start_time") if feedback_params.get("text_start_time") is not None
+        else remix_params.get("text_start_time") if remix_params.get("text_start_time") is not None
+        else state.get("text_start_time") if state.get("text_start_time") is not None
+        else plot_data.get("text_start_time") if plot_data.get("text_start_time") is not None
+        else audio_start
+    )
+
+    # Subtitle End Time (None allows text to display through remainder of video)
+    text_end = (
+        feedback_params.get("text_end_time") if feedback_params.get("text_end_time") is not None
+        else remix_params.get("text_end_time") if remix_params.get("text_end_time") is not None
+        else state.get("text_end_time") if state.get("text_end_time") is not None
+        else plot_data.get("text_end_time") if plot_data.get("text_end_time") is not None
+        else None
+    )
+
+    # Subtitle Coordinates & Style (matching tools/remix_video.py schema)
+    pos = str(
+        feedback_params.get("position") or
+        remix_params.get("position") or
+        state.get("position") or
+        plot_data.get("position") or
+        ""
+    ).lower().strip()
+
+    x = str(
+        feedback_params.get("x") or
+        remix_params.get("x") or
+        state.get("x") or
+        plot_data.get("x") or
+        "(w-text_w)/2"
+    )
+
+    explicit_y = (
+        feedback_params.get("y") or
+        remix_params.get("y") or
+        state.get("y") or
+        plot_data.get("y")
+    )
+    if explicit_y:
+        y = str(explicit_y)
+    elif pos == "top":
+        y = "h*0.12"
+    elif pos in ["center", "middle"]:
+        y = "(h-text_h)/2"
+    elif pos == "bottom":
+        y = "h-text_h-h*0.10"
+    else:
+        y = "h-text_h-h*0.10"
+
+    font_path = str(
+        feedback_params.get("font_path") or
+        remix_params.get("font_path") or
+        state.get("font_path") or
+        plot_data.get("font_path") or
+        ""
+    )
+
+    font_size = int(
+        feedback_params.get("font_size") or
+        remix_params.get("font_size") or
+        state.get("font_size") or
+        plot_data.get("font_size") or
+        48
+    )
+
+    font_color = str(
+        feedback_params.get("font_color") or
+        remix_params.get("font_color") or
+        state.get("font_color") or
+        plot_data.get("font_color") or
+        "yellow"
+    )
+
+    border_color = str(
+        feedback_params.get("border_color") or
+        remix_params.get("border_color") or
+        state.get("border_color") or
+        plot_data.get("border_color") or
+        "0x4A3B32"
+    )
+
+    border_width = int(
+        feedback_params.get("border_width") or
+        remix_params.get("border_width") or
+        state.get("border_width") or
+        plot_data.get("border_width") or
+        5
+    )
 
     if audio_path and os.path.isfile(audio_path) and os.path.getsize(audio_path) > 0:
         actions.append({
             "action": "add_audio",
             "audio_path": audio_path,
-            "start_time": 1.5,
-            "mix_mode": "replace"
+            "start_time": audio_start,
+            "blend_mode": "replace"
         })
 
     if overlay_text:
         text_str = overlay_text if isinstance(overlay_text, str) else "\n".join(overlay_text)
-        actions.append({
+        text_action = {
             "action": "add_text",
             "text": text_str,
-            "start_time": 1.5,
-            "end_time": 4.0,
-            "position": "bottom",
-            "font_size": 48,
-            "font_color": "yellow",
+            "start_time": text_start,
+            "x": x,
+            "y": y,
+            "font_size": font_size,
+            "font_color": font_color,
+            "border_color": border_color,
+            "border_width": border_width,
             "box": True,
             "box_color": "black@0.6",
             "box_border_width": 5
-        })
+        }
+        if font_path:
+            text_action["font_path"] = font_path
+        if text_end is not None:
+            text_action["end_time"] = text_end
+        actions.append(text_action)
 
     remix_err = ""
     try:
@@ -125,7 +238,7 @@ async def remix_video_task(state: dict) -> dict:
     file_persisted = bool(video_path and os.path.isfile(video_path) and os.path.getsize(video_path) > 0)
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="🎬 Content Creator",
         event_title="Video Remix & Audio Muxing",

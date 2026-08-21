@@ -45,10 +45,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_1_gate1_user_sees_image_in_response(self):
         """Scenario 1: At HITL Gate 1, the user sees an image preview and link in the presentation card."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "cat.m4a")
+            audio_path = os.path.join(output_path, "cat.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -56,12 +56,12 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_1"}}
 
             initial_state = prepare_input(
-                f"topic: cat, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: cat, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_1"
             )
 
-            expected_img = os.path.join(output_dir, "cat_image.jpg")
-            expected_plot = os.path.join(output_dir, "cat_video_plot.md")
+            expected_img = os.path.join(output_path, "cat_image.jpg")
+            expected_plot = os.path.join(output_path, "cat_video_plot.md")
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_img, \
                  patch("tools.agent_call.agent_call") as mock_agent_call:
@@ -89,10 +89,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_2_gate1_image_update_returns_new_image_with_same_plot(self):
         """Scenario 2: HITL Gate 1, user asks for image update -> Returns new image (v2) with same plot."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "cat.m4a")
+            audio_path = os.path.join(output_path, "cat.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -100,7 +100,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_2"}}
 
             initial_state = prepare_input(
-                f"topic: cat, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: cat, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_2"
             )
 
@@ -128,7 +128,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
 
                 state_turn2 = await graph.ainvoke(None, config=config)
 
-                v2_img = os.path.join(output_dir, "cat_image_v2.jpg")
+                v2_img = os.path.join(output_path, "cat_image_v2.jpg")
                 self.assertEqual(state_turn2["image_path"], v2_img)
                 self.assertTrue(os.path.isfile(v2_img))
 
@@ -141,10 +141,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_3_gate1_plot_update_returns_new_plot_with_same_image(self):
         """Scenario 3: HITL Gate 1, user asks for plot update -> Returns new plot (v2) with same image."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "dog")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "dog")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "dog.m4a")
+            audio_path = os.path.join(output_path, "dog.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -152,7 +152,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_3"}}
 
             initial_state = prepare_input(
-                f"topic: dog, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: dog, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_3"
             )
 
@@ -186,7 +186,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state_turn2["image_path"], v1_img)
 
                 # Video plot MUST be incremented to v2
-                v2_plot = os.path.join(output_dir, "dog_video_plot_v2.md")
+                v2_plot = os.path.join(output_path, "dog_video_plot_v2.md")
                 self.assertEqual(state_turn2["video_plot_path"], v2_plot)
                 self.assertTrue(os.path.isfile(v2_plot))
 
@@ -196,10 +196,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_4_gate2_user_sees_remixed_video(self):
         """Scenario 4: At HITL Gate 2, the user sees a remixed video deliverable with audio and overlay."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "horse")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "horse")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "horse.m4a")
+            audio_path = os.path.join(output_path, "horse.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -207,7 +207,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_4"}}
 
             initial_state = prepare_input(
-                f"topic: horse, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: horse, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_4"
             )
 
@@ -247,8 +247,8 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 }, as_node="ideate_package")
                 state_turn2 = await graph.ainvoke(None, config=config)
 
-                raw_video = os.path.join(output_dir, "horse_raw_video.mp4")
-                master_video = os.path.join(output_dir, "horse_video.mp4")
+                raw_video = os.path.join(output_path, "horse_raw_video.mp4")
+                master_video = os.path.join(output_path, "horse_video.mp4")
                 self.assertEqual(state_turn2["raw_video_path"], raw_video)
                 self.assertEqual(state_turn2["remixed_video_path"], master_video)
                 self.assertTrue(os.path.isfile(raw_video))
@@ -262,10 +262,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_5_gate2_video_update_returns_new_video_with_remix(self):
         """Scenario 5: HITL Gate 2, user asks for video update -> Returns new raw video (v2) and new remixed video (v2)."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "banana")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "banana")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "banana.m4a")
+            audio_path = os.path.join(output_path, "banana.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -273,7 +273,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_5"}}
 
             initial_state = prepare_input(
-                f"topic: banana, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: banana, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_5"
             )
 
@@ -322,8 +322,8 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 }, as_node="produce_deliverables")
                 state_turn3 = await graph.ainvoke(None, config=config)
 
-                raw_vid_v2 = os.path.join(output_dir, "banana_raw_video_v2.mp4")
-                video_path_v2 = os.path.join(output_dir, "banana_video_v2.mp4")
+                raw_vid_v2 = os.path.join(output_path, "banana_raw_video_v2.mp4")
+                video_path_v2 = os.path.join(output_path, "banana_video_v2.mp4")
 
                 self.assertEqual(state_turn3["raw_video_path"], raw_vid_v2)
                 self.assertEqual(state_turn3["remixed_video_path"], video_path_v2)
@@ -339,10 +339,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_6_gate2_remix_update_returns_same_raw_video_with_new_remix(self):
         """Scenario 6: HITL Gate 2, user asks for remix update -> Returns same raw video with new remixed video (v2)."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "panda")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "panda")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "panda.m4a")
+            audio_path = os.path.join(output_path, "panda.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -350,7 +350,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_6"}}
 
             initial_state = prepare_input(
-                f"topic: panda, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: panda, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_6"
             )
 
@@ -406,7 +406,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state_turn3["raw_video_path"], raw_vid_v1)
 
                 # Remixed video MUST be incremented to v2
-                video_path_v2 = os.path.join(output_dir, "panda_video_v2.mp4")
+                video_path_v2 = os.path.join(output_path, "panda_video_v2.mp4")
                 self.assertEqual(state_turn3["remixed_video_path"], video_path_v2)
                 self.assertTrue(os.path.isfile(video_path_v2))
 
@@ -416,10 +416,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_7_gate2_copy_update_returns_new_copy_with_same_video(self):
         """Scenario 7: HITL Gate 2, user asks for copy update -> Returns new copy (v2) with same video."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "apple")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "apple")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "apple.m4a")
+            audio_path = os.path.join(output_path, "apple.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -427,7 +427,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_7"}}
 
             initial_state = prepare_input(
-                f"topic: apple, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: apple, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_7"
             )
 
@@ -493,7 +493,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state_turn3["remixed_video_path"], remix_vid_v1)
 
                 # Copy MUST be incremented to v2
-                expected_v2_copy = os.path.join(output_dir, "apple_copy_v2.md")
+                expected_v2_copy = os.path.join(output_path, "apple_copy_v2.md")
                 self.assertEqual(state_turn3["copy_path"], expected_v2_copy)
                 self.assertTrue(os.path.isfile(expected_v2_copy))
 
@@ -503,10 +503,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_8_gate1_user_says_approve_moves_to_next_node(self):
         """Scenario 8: At HITL Gate 1, user says 'approve', workflow moves to next node (produce_deliverables / Gate 2)."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "orange")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "orange")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "orange.m4a")
+            audio_path = os.path.join(output_path, "orange.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -514,7 +514,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_8"}}
 
             initial_state = prepare_input(
-                f"topic: orange, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: orange, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_8"
             )
 
@@ -557,9 +557,9 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
 
                 # Assert that it transitioned past Gate 1 and executed produce_deliverables (Gate 2)
                 self.assertEqual(state_turn2.get("gate1_decision"), "approved")
-                raw_video = os.path.join(output_dir, "orange_raw_video.mp4")
-                remix_video = os.path.join(output_dir, "orange_video.mp4")
-                copy_path = os.path.join(output_dir, "orange_copy.md")
+                raw_video = os.path.join(output_path, "orange_raw_video.mp4")
+                remix_video = os.path.join(output_path, "orange_video.mp4")
+                copy_path = os.path.join(output_path, "orange_copy.md")
 
                 self.assertEqual(state_turn2["raw_video_path"], raw_video)
                 self.assertEqual(state_turn2["remixed_video_path"], remix_video)
@@ -571,10 +571,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_9_gate2_user_says_approve_completes_the_flow(self):
         """Scenario 9: At HITL Gate 2, user says 'approve', workflow completes the entire flow (transitions to END)."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "grape")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "grape")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "grape.m4a")
+            audio_path = os.path.join(output_path, "grape.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -582,7 +582,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_9"}}
 
             initial_state = prepare_input(
-                f"topic: grape, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: grape, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_9"
             )
 
@@ -638,10 +638,10 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_scenario_10_quota_exceeded_in_veo3_halts_and_preserves_state(self):
         """Scenario 10: When Veo 3 hits a 429 / Quota Exceeded error, workflow halts cleanly and preserves state."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "cat")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
 
-            audio_path = os.path.join(output_dir, "cat.m4a")
+            audio_path = os.path.join(output_path, "cat.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO")
 
             checkpointer = MemorySaver()
@@ -649,7 +649,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             config = {"configurable": {"thread_id": "test_scenario_10"}}
 
             initial_state = prepare_input(
-                f"topic: cat, project_dir: {temp_dir}, output_dir: {output_dir}",
+                f"topic: cat, project_path: {temp_dir}, output_path: {output_path}",
                 session_id="test_scenario_10"
             )
 

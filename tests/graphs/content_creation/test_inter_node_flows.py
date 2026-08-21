@@ -9,7 +9,7 @@ from PIL import Image
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from graphs.content_creation.utils.paths import (
-    canonicalize_output_dir,
+    canonicalize_output_path,
     validate_inter_node_paths,
     _resolve_asset_path,
     normalize_project_path
@@ -29,28 +29,28 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     """Integration test suite verifying path mapping, aspect ratio preservation,
     and asset flows BETWEEN nodes in the content_creation graph."""
 
-    def test_canonicalize_output_dir_deduplication(self):
-        """Tests that canonicalize_output_dir eliminates words/words duplication and handles varied path formats."""
-        # Case 1: project_dir has words/, output_dir is words/horse -> should NOT create words/words/horse
-        res1 = canonicalize_output_dir("pkm/wiki/software/ayla-first-words/words", "words/horse", "horse")
+    def test_canonicalize_output_path_deduplication(self):
+        """Tests that canonicalize_output_path eliminates words/words duplication and handles varied path formats."""
+        # Case 1: project_path has words/, output_path is words/horse -> should NOT create words/words/horse
+        res1 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "words/horse", "horse")
         self.assertEqual(res1, "pkm/wiki/software/ayla-first-words/words/horse")
 
-        # Case 2: project_dir is parent, output_dir is words/horse
-        res2 = canonicalize_output_dir("pkm/wiki/software/ayla-first-words", "words/horse", "horse")
+        # Case 2: project_path is parent, output_path is words/horse
+        res2 = canonicalize_output_path("pkm/wiki/software/ayla-first-words", "words/horse", "horse")
         self.assertEqual(res2, "pkm/wiki/software/ayla-first-words/words/horse")
 
-        # Case 3: project_dir has words/, output_dir is just horse
-        res3 = canonicalize_output_dir("pkm/wiki/software/ayla-first-words/words", "horse", "horse")
+        # Case 3: project_path has words/, output_path is just horse
+        res3 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "horse", "horse")
         self.assertEqual(res3, "pkm/wiki/software/ayla-first-words/words/horse")
 
-        # Case 4: output_dir already absolute / full
-        res4 = canonicalize_output_dir("pkm/wiki/software/ayla-first-words/words", "pkm/wiki/software/ayla-first-words/words/horse", "horse")
+        # Case 4: output_path already absolute / full
+        res4 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "pkm/wiki/software/ayla-first-words/words/horse", "horse")
         self.assertEqual(res4, "pkm/wiki/software/ayla-first-words/words/horse")
 
     def test_validate_inter_node_paths_fails_on_mismatch(self):
         """Tests that validate_inter_node_paths catches path divergence between nodes."""
         valid_state = {
-            "output_dir": "pkm/wiki/software/ayla-first-words/words/horse",
+            "output_path": "pkm/wiki/software/ayla-first-words/words/horse",
             "image_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_image.jpg",
             "raw_video_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_raw_video.mp4"
         }
@@ -59,7 +59,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
 
         # Divergent path (e.g. words/words/horse/horse_raw_video.mp4)
         invalid_state = {
-            "output_dir": "pkm/wiki/software/ayla-first-words/words/horse",
+            "output_path": "pkm/wiki/software/ayla-first-words/words/horse",
             "image_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_image.jpg",
             "raw_video_path": "words/words/horse/horse_raw_video.mp4"
         }
@@ -70,8 +70,8 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     async def test_audio_ingestion_to_ideation_path_flow(self):
         """Tests end-to-end path consistency from Audio Ingestion into Ideation."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            project_dir = os.path.join(temp_dir, "ayla-first-words")
-            words_dir = os.path.join(project_dir, "words")
+            project_path = os.path.join(temp_dir, "ayla-first-words")
+            words_dir = os.path.join(project_path, "words")
             horse_dir = os.path.join(words_dir, "horse")
             os.makedirs(horse_dir, exist_ok=True)
 
@@ -81,20 +81,20 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
 
             # Ingest Audio Node
             ingest_state = {
-                "project_dir": project_dir,
-                "output_dir": "words/horse",
+                "project_path": project_path,
+                "output_path": "words/horse",
                 "topic": "horse"
             }
             ingest_res = await ingest_audio_node(ingest_state)
             self.assertEqual(ingest_res.get("source_audio_path"), audio_file)
-            self.assertEqual(ingest_res.get("output_dir"), horse_dir)
+            self.assertEqual(ingest_res.get("output_path"), horse_dir)
 
             # Ideate Package Node
             ideate_state = {
                 **ingest_state,
                 **ingest_res,
                 "style": "3D",
-                "creator_instructions_path": os.path.join(project_dir, "02_Creator_Instructions.md")
+                "creator_instructions_path": os.path.join(project_path, "02_Creator_Instructions.md")
             }
             with open(ideate_state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
@@ -119,7 +119,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
                 ideate_res = await ideate_package_node(ideate_state)
 
                 # Verify all ideation assets are under canonical horse_dir
-                self.assertEqual(ideate_res["output_dir"], horse_dir)
+                self.assertEqual(ideate_res["output_path"], horse_dir)
                 self.assertEqual(ideate_res["image_path"], os.path.join(horse_dir, "horse_image.jpg"))
                 self.assertEqual(ideate_res["video_plot_path"], os.path.join(horse_dir, "horse_video_plot.md"))
                 self.assertTrue(os.path.isfile(ideate_res["image_path"]))
@@ -128,24 +128,24 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     async def test_ideation_to_production_plate_remix_verify_flow(self):
         """Tests that raw_video generated in render_plate is accurately mapped, remixed, and verified in downstream nodes."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "horse")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "horse")
+            os.makedirs(output_path, exist_ok=True)
 
-            img_path = os.path.join(output_dir, "horse_image.jpg")
+            img_path = os.path.join(output_path, "horse_image.jpg")
             with open(img_path, "wb") as f: f.write(b"IMG_BYTES")
 
-            plot_path = os.path.join(output_dir, "horse_video_plot.md")
+            plot_path = os.path.join(output_path, "horse_video_plot.md")
             with open(plot_path, "w") as f: f.write("# Horse Plot")
-            plot_json_path = os.path.join(output_dir, "horse_video_plot.json")
+            plot_json_path = os.path.join(output_path, "horse_video_plot.json")
             with open(plot_json_path, "w") as f:
                 json.dump({"title": "Horse", "overlay_text": "馬", "source_audio": "horse.m4a"}, f)
 
-            audio_path = os.path.join(output_dir, "horse.m4a")
+            audio_path = os.path.join(output_path, "horse.m4a")
             with open(audio_path, "wb") as f: f.write(b"AUDIO_BYTES")
 
             state = {
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "topic": "horse",
                 "image_path": img_path,
                 "video_plot_path": plot_path,
@@ -161,7 +161,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke = AsyncMock(side_effect=fake_veo)
 
                 plate_res = await render_plate_task(state)
-                expected_raw = os.path.join(output_dir, "horse_raw_video.mp4")
+                expected_raw = os.path.join(output_path, "horse_raw_video.mp4")
                 self.assertEqual(plate_res["raw_video_path"], expected_raw)
                 self.assertTrue(os.path.isfile(expected_raw))
 
@@ -175,7 +175,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
                 mock_remix.ainvoke = AsyncMock(side_effect=fake_remix)
 
                 remix_res = await remix_video_task(state)
-                expected_remix = os.path.join(output_dir, "horse_video.mp4")
+                expected_remix = os.path.join(output_path, "horse_video.mp4")
                 self.assertEqual(remix_res["remixed_video_path"], expected_remix)
                 self.assertTrue(remix_res["video_persisted"])
                 self.assertTrue(os.path.isfile(expected_remix))
@@ -195,22 +195,22 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     async def test_vertical_aspect_ratio_from_instructions(self):
         """Tests that aspect_ratio defined in creator instructions correctly propagates to video generation."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "horse")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "horse")
+            os.makedirs(output_path, exist_ok=True)
 
             instr_path = os.path.join(temp_dir, "02_Creator_Instructions.md")
             with open(instr_path, "w") as f:
                 f.write("# Creator Instructions\nVideo Format: 9:16 (Vertical Reels)\naspect_ratio: 9:16\n")
 
-            img_path = os.path.join(output_dir, "horse_image.jpg")
+            img_path = os.path.join(output_path, "horse_image.jpg")
             with open(img_path, "wb") as f: f.write(b"IMAGE_DATA")
 
-            plot_path = os.path.join(output_dir, "horse_video_plot.md")
+            plot_path = os.path.join(output_path, "horse_video_plot.md")
             with open(plot_path, "w") as f: f.write("# Horse Plot")
 
             state = {
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "topic": "horse",
                 "creator_instructions_path": instr_path,
                 "image_path": img_path,
@@ -233,24 +233,24 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     async def test_gate1_image_revision_invariant_incrementation(self):
         """Explicitly tests that Gate 1 image revision increments image_path to v2 and passes assert_gate1_revision_invariants."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_dir = os.path.join(temp_dir, "fish")
-            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, "fish")
+            os.makedirs(output_path, exist_ok=True)
 
-            v1_img = os.path.join(output_dir, "fish_image.jpg")
+            v1_img = os.path.join(output_path, "fish_image.jpg")
             with open(v1_img, "wb") as f:
                 f.write(b"FISH_V1_BYTES")
 
-            v1_plot = os.path.join(output_dir, "fish_video_plot.md")
+            v1_plot = os.path.join(output_path, "fish_video_plot.md")
             with open(v1_plot, "w") as f:
                 f.write("# Plot v1")
 
-            v2_plot = os.path.join(output_dir, "fish_video_plot_v2.md")
+            v2_plot = os.path.join(output_path, "fish_video_plot_v2.md")
             with open(v2_plot, "w") as f:
                 f.write("# Plot v2")
 
             state = {
-                "project_dir": temp_dir,
-                "output_dir": output_dir,
+                "project_path": temp_dir,
+                "output_path": output_path,
                 "topic": "fish",
                 "image_path": v1_img,
                 "video_plot_path": v1_plot,
@@ -270,7 +270,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
 
                 img_res = await generate_image_task(state)
 
-                expected_v2_img = os.path.join(output_dir, "fish_image_v2.jpg")
+                expected_v2_img = os.path.join(output_path, "fish_image_v2.jpg")
                 self.assertEqual(img_res["image_path"], expected_v2_img)
                 self.assertTrue(os.path.isfile(expected_v2_img))
 

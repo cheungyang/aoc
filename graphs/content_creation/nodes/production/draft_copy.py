@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_dir, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from graphs.content_creation.prompts import build_draft_copy_prompt
@@ -12,25 +12,25 @@ async def draft_copy_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_dir = normalize_path(state.get("project_dir", ""))
-    output_dir = canonicalize_output_dir(project_dir, state.get("output_dir"), topic)
-    execution_log_path = state.get("execution_log_path") or (os.path.join(output_dir, "execution_log.md") if output_dir else "")
+    project_path = normalize_path(state.get("project_path", ""))
+    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
     needs_copy_revision = (gate2_decision == "revise_copy" or bool(human_feedback and gate2_decision == "revise_copy"))
 
-    copy_path, should_generate = resolve_task_asset(output_dir, topic, "copy", needs_revision=needs_copy_revision)
+    copy_path, should_generate = resolve_task_asset(output_path, topic, "copy", needs_revision=needs_copy_revision)
     if not should_generate:
         return {
-            "project_dir": project_dir,
-            "output_dir": output_dir,
+            "project_path": project_path,
+            "output_path": output_path,
             "copy_path": copy_path
         }
 
     copy_json_path = copy_path.replace(".md", ".json")
 
     ctx = load_project_context(
-        project_dir=project_dir,
+        project_path=project_path,
         manifest_path=state.get("manifest_path", ""),
         creator_instructions_path=state.get("creator_instructions_path", "")
     )
@@ -38,8 +38,8 @@ async def draft_copy_task(state: dict) -> dict:
 
     prompt = build_draft_copy_prompt(
         topic=topic,
-        project_dir=project_dir,
-        output_dir=output_dir,
+        project_path=project_path,
+        output_path=output_path,
         copy_path=copy_path,
         copy_json_path=copy_json_path,
         instructions_text=instructions_text or "",
@@ -138,7 +138,7 @@ async def draft_copy_task(state: dict) -> dict:
         polished_copy = ""
 
     _append_execution_log(
-        output_dir=output_dir,
+        output_path=output_path,
         topic=topic,
         actor="⚙️ Graph Worker (Copywriting)",
         event_title="Publication Copy Drafted",
@@ -151,7 +151,7 @@ async def draft_copy_task(state: dict) -> dict:
     )
 
     return {
-        "project_dir": project_dir,
-        "output_dir": output_dir,
+        "project_path": project_path,
+        "output_path": output_path,
         "copy_path": copy_path
     }

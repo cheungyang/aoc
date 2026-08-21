@@ -8,7 +8,7 @@ from graphs.content_creation.utils.paths import (
     resolve_under_project,
     resolve_project_doc_path,
     resolve_asset_path,
-    canonicalize_output_dir,
+    canonicalize_output_path,
     extract_aspect_ratio_from_instructions,
     validate_inter_node_paths
 )
@@ -84,17 +84,17 @@ class TestPaths(unittest.TestCase):
             v2_path = resolve_asset_path(temp_dir, "horse", "image", next_version=True)
             self.assertEqual(v2_path, os.path.join(temp_dir, "horse_image_v2.jpg"))
 
-    def test_canonicalize_output_dir(self):
+    def test_canonicalize_output_path(self):
         self.assertEqual(
-            canonicalize_output_dir("pkm/wiki/ayla/words", "words/horse", "horse"),
+            canonicalize_output_path("pkm/wiki/ayla/words", "words/horse", "horse"),
             "pkm/wiki/ayla/words/horse"
         )
         self.assertEqual(
-            canonicalize_output_dir("pkm/wiki/ayla/words", "horse", "horse"),
+            canonicalize_output_path("pkm/wiki/ayla/words", "horse", "horse"),
             "pkm/wiki/ayla/words/horse"
         )
         self.assertEqual(
-            canonicalize_output_dir("pkm/wiki/ayla", "words/horse", "horse"),
+            canonicalize_output_path("pkm/wiki/ayla", "words/horse", "horse"),
             "pkm/wiki/ayla/words/horse"
         )
 
@@ -117,18 +117,35 @@ class TestPaths(unittest.TestCase):
 
     def test_validate_inter_node_paths(self):
         valid = {
-            "output_dir": "/tmp/project/horse",
+            "output_path": "/tmp/project/horse",
             "image_path": "/tmp/project/horse/horse_image.jpg",
             "video_plot_path": "/tmp/project/horse/horse_video_plot.md"
         }
         validate_inter_node_paths(valid, "node_test")
 
         invalid = {
-            "output_dir": "/tmp/project/horse",
+            "output_path": "/tmp/project/horse",
             "image_path": "/tmp/other_dir/horse_image.jpg"
         }
         with self.assertRaises(AssetInvariantError):
             validate_inter_node_paths(invalid, "node_test")
+
+    def test_infer_paths_from_state(self):
+        from graphs.content_creation.utils.paths import infer_paths_from_state
+        state = {
+            "topic": "cat",
+            "project_path": "",
+            "output_path": "cat",
+            "image_path": "pkm/wiki/software/ayla-first-words/words/cat/cat_image_v2.jpg"
+        }
+        p_path, out_path = infer_paths_from_state(state)
+        self.assertEqual(p_path, "pkm/wiki/software/ayla-first-words")
+        self.assertEqual(out_path, "pkm/wiki/software/ayla-first-words/words/cat")
+
+        # Invariants pass cleanly with inferred paths
+        state["project_path"] = p_path
+        state["output_path"] = out_path
+        validate_inter_node_paths(state, "produce_deliverables")
 
 
 if __name__ == "__main__":

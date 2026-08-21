@@ -12,8 +12,8 @@ class TestContentCreationPrompts(unittest.TestCase):
             style_str="3D Animation",
             image_path="cat_image.jpg",
             audio_path="cat.wav",
-            project_dir="/pkm/wiki/cat",
-            output_dir="/pkm/wiki/cat/output",
+            project_path="/pkm/wiki/cat",
+            output_path="/pkm/wiki/cat/output",
             video_plot_path="/pkm/wiki/cat/output/cat_video_plot.md",
             video_plot_json_path="/pkm/wiki/cat/output/cat_video_plot.json",
             project_guidelines="GUIDELINES_TXT",
@@ -49,8 +49,8 @@ class TestContentCreationPrompts(unittest.TestCase):
             style_str="Ghibli",
             image_path="",
             audio_path="",
-            project_dir="",
-            output_dir="",
+            project_path="",
+            output_path="",
             video_plot_path="",
             video_plot_json_path="",
             project_guidelines="",
@@ -74,8 +74,8 @@ class TestContentCreationPrompts(unittest.TestCase):
             topic="cat",
             image_path="cat_image.jpg",
             video_plot_path="cat_video_plot.md",
-            project_dir="/pkm/wiki/cat",
-            output_dir="/pkm/wiki/cat/output",
+            project_path="/pkm/wiki/cat",
+            output_path="/pkm/wiki/cat/output",
             qc_playbook_content="QC_RULES",
             plot_content="DRAFTED_PLOT_DATA"
         )
@@ -102,8 +102,8 @@ class TestContentCreationPrompts(unittest.TestCase):
             topic="bird",
             image_path="bird.jpg",
             video_plot_path="bird_plot.md",
-            project_dir="",
-            output_dir=""
+            project_path="",
+            output_path=""
         )
         self.assertIn("<playbook>", prompt)
         self.assertIn("</playbook>", prompt)
@@ -116,8 +116,8 @@ class TestContentCreationPrompts(unittest.TestCase):
     def test_build_draft_copy_prompt_with_revision_and_path_output(self):
         prompt = build_draft_copy_prompt(
             topic="puppy",
-            project_dir="/pkm/wiki/puppy",
-            output_dir="/pkm/wiki/puppy/output",
+            project_path="/pkm/wiki/puppy",
+            output_path="/pkm/wiki/puppy/output",
             copy_path="puppy_copy.md",
             copy_json_path="puppy_copy.json",
             instructions_text="COPY_RULES",
@@ -145,8 +145,8 @@ class TestContentCreationPrompts(unittest.TestCase):
     def test_build_draft_copy_prompt_non_revision(self):
         prompt = build_draft_copy_prompt(
             topic="puppy",
-            project_dir="/pkm/wiki/puppy",
-            output_dir="/pkm/wiki/puppy/output",
+            project_path="/pkm/wiki/puppy",
+            output_path="/pkm/wiki/puppy/output",
             copy_path="puppy_copy.md",
             copy_json_path="puppy_copy.json",
             instructions_text="COPY_RULES",

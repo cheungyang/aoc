@@ -7,8 +7,8 @@ from langgraph.graph import StateGraph, START, END
 # Lean & Unified State Schema
 class ContentCreationState(TypedDict, total=False):
     # 1. Project Context & Guidelines
-    project_dir: str
-    output_dir: str
+    project_path: str
+    output_path: str
     topic: str
     style: str
     aspect_ratio: str
@@ -39,6 +39,18 @@ class ContentCreationState(TypedDict, total=False):
     gate1_decision: str
     gate2_decision: str
     latest_human_feedback: str
+    remix_params: Dict[str, Any]
+    remix_actions: List[Dict[str, Any]]
+    audio_start_time: float
+    text_start_time: float
+    text_end_time: float
+    font_path: str
+    font_size: int
+    font_color: str
+    border_color: str
+    border_width: int
+    x: str
+    y: str
     quota_exceeded: bool
     final_package: Dict[str, Any]
 
