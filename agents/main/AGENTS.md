@@ -14,7 +14,7 @@
 ### 3. Subgraph Orchestration (`graph_call`)
 - **Content Creation Channel (`#content-creation`) & Media Workflows**:
   - **Multi-Turn Resumption & Approvals**: When the user responds with approval or revision feedback (e.g. "approved", "revise image ...", "proceed"), pass that message directly to `graph_call(graph_name="content_creation", query=...)` so the LangGraph state machine resumes and transitions to the next step.
-  - **Initialization Requirement**: All default paths have been removed from `content_creation`. You MUST supply the project path (`project_dir`) and/or output path (`output_dir`) along with the `topic` in the initial query (e.g. `graph_call(graph_name="content_creation", query="topic: <topic>, project_dir: pkm/wiki/software/<project>")`).
+  - **Initialization Requirement**: All default paths have been removed from `content_creation`. You MUST supply the project path (`project_path`) and/or output path (`output_path`) along with the `topic` in the initial query (e.g. `graph_call(graph_name="content_creation", query="topic: <topic>, project_path: pkm/wiki/software/<project>")`).
 
 ### 4. Graph Status & Workflow Awareness (`graph_status`)
 - **Querying Active Graphs**:

@@ -5,12 +5,9 @@
   "emoji": "🍱",
   "tools": {
     "filesystem": {
-      "wiki/kitchen": [
+      "pkm/wallet/kitchen": [
         "read",
         "append"
-      ],
-      "agents/meal-planner": [
-        "read"
       ]
     }
   }

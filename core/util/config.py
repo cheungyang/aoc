@@ -24,6 +24,7 @@ class Config:
             cls._instance._openai_api_key = None
             cls._instance._anthropic_api_key = None
             cls._instance._runway_api_key = None
+            cls._instance._seats_aero_api_key = None
             cls._instance._tasks_db_path = None
             cls._instance._projects_db_path = None
             cls._instance._projects_dir = None
@@ -49,6 +50,7 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._runway_api_key = None
+        self._seats_aero_api_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None
@@ -203,6 +205,16 @@ class Config:
     def runway_api_key(self, value):
         self._runway_api_key = str(value) if value is not None else None
 
+    @property
+    def seats_aero_api_key(self) -> str:
+        if self._seats_aero_api_key is not None:
+            return self._seats_aero_api_key
+        return os.getenv("SEATS_AERO_API_KEY", os.getenv("SEATSAERO_API_KEY", ""))
+
+    @seats_aero_api_key.setter
+    def seats_aero_api_key(self, value):
+        self._seats_aero_api_key = str(value) if value is not None else None
+
     # -------------------------------------------------------------------------
     # PKM & Tasks Storage Paths
     # -------------------------------------------------------------------------
@@ -351,6 +363,7 @@ class Config:
         self._openai_api_key = None
         self._anthropic_api_key = None
         self._runway_api_key = None
+        self._seats_aero_api_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None

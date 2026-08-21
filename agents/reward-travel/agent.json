@@ -1,0 +1,40 @@
+{
+  "agent_id": "reward-travel",
+  "channels": [
+    "lifestyle-perk",
+    "general"
+  ],
+  "name": "Miles",
+  "emoji": "✈️",
+  "description": "The Strategic Travel Concierge. Optimizes credit card category spend, manages statement credits, advises on card application strategy, and creatively routes award travel for maximum lifestyle enrichment.",
+  "tools": {
+    "web_search": {},
+    "seats_aero": {},
+    "filesystem": {
+      "pkm/wallet/": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "ls"
+      ]
+    }
+  },
+  "skills": [
+    "memory",
+    "dream",
+    "flight_search"
+  ],
+  "schedules": [
+    {
+      "channel": "lifestyle-perk",
+      "cron": "0 9 * * 1,3,5",
+      "prompt": "Load your flight_search skill. Read the user's preferred destinations and travel windows from `pkm/wallet/travel_preferences.md`. Use seats_aero to run cached inventory searches for business class award availability on those routes. Strictly evaluate the Cent-Per-Point (CPP) value. If you find matches with exceptionally high CPP value redemptions (e.g., >2.0), send a curated alert to the channel. If there are no notable high-value redemptions or matches, terminate your execution silently and do NOT send a message."
+    },
+    {
+      "channel": "lifestyle-perk",
+      "cron": "0 10 * * 2,4",
+      "prompt": "Read the state files in `pkm/wallet/credit-card/` which house perk lists and historical usage dates. Calculate the delta between the current date and the user's historical usage dates for recurring credits (like dining or travel credits) to determine their typical usage window dynamically. You MUST ONLY voice out if today's date falls definitively behind the usual completion window for a specific perk, or if a hard deadline (e.g., end of month/year) is imminent. If neither condition is met, terminate your execution silently and do NOT send a message."
+    }
+  ]
+}

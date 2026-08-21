@@ -28,7 +28,10 @@
         "write",
         "overwrite",
         "append",
-        "delete"
+        "delete",
+        "ls",
+        "move",
+        "rmdir"
       ],
       "agents/": [
         "read",

@@ -5,8 +5,9 @@
   "emoji": "🗄️",
   "tools": {
     "filesystem": {
-      "wiki/kitchen": [
+      "pkm/wallet/kitchen": [
         "read",
+        "write",
         "overwrite",
         "append"
       ]
