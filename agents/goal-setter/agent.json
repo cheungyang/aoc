@@ -11,7 +11,13 @@
         {
             "channel": "goal-planning",
             "cron": "0 9 * * 1,3,5",
-            "prompt": "Wake up. Use `project_query` to view all active executing projects. Pick the one that needs the most attention based on momentum or priority. Run the `coach_project` skill to update your strategy for it, and then proactively send one message to the user starting a coaching session for that specific project."
+            "prompt": [
+                "Wake up. Use `project_query` to view all active executing projects. Pick the",
+                "one that needs the most attention based on momentum or priority. Run the",
+                "`coach_project` skill to update your strategy for it, and then proactively",
+                "send one message to the user starting a coaching session for that specific",
+                "project."
+            ]
         }
     ],
     "tools": {

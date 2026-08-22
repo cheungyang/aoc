@@ -14,12 +14,17 @@
         {
             "channel": "day-planning",
             "cron": "0 6 * * *",
-            "prompt": "Provide your daily update"
+            "prompt": [
+                "Provide your daily update"
+            ]
         },
         {
             "channel": "weekly-planning",
             "cron": "0 8 * * 0",
-            "prompt": "Trigger the weekly_review skill to start the collaborative weekly review process."
+            "prompt": [
+                "Trigger the weekly_review skill to start the collaborative weekly",
+                "review process."
+            ]
         }
     ],
     "skills": [

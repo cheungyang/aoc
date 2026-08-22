@@ -10,7 +10,7 @@
     {
       "channel": "general",
       "thread": "cronjobs",
-      "cron": "0 * * * *",
+      "cron": "0 0 * * *",
       "prompt": [
         "script sync_tasks.py",
         "script sync_projects.py",

@@ -19,6 +19,9 @@
         "ls",
         "find",
         "replace_block"
+      ],
+      "pkm/inbox": [
+        "write"
       ]
     }
   },

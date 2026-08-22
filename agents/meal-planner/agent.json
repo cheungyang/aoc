@@ -17,7 +17,11 @@
     {
       "channel": "meal-planning",
       "cron": "0 6 * * *",
-      "prompt": "Wake up and ask the user what they cooked for dinner last night. Once they reply, deduce the ingredients, update the inventory, and immediately propose 3 new dinner suggestions for tonight."
+      "prompt": [
+        "Wake up and ask the user what they cooked for dinner last night. Once they",
+        "reply, deduce the ingredients, update the inventory, and immediately propose",
+        "3 new dinner suggestions for tonight."
+      ]
     }
   ]
 }
