@@ -46,20 +46,23 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    @patch('graphs.coding.nodes.git_handoff.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.git_handoff.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
     async def test_coding_subgraph_success(
         self,
         mock_diff,
         mock_teardown,
+        mock_merge,
         mock_commit,
         mock_pr
     ):
         mock_diff.return_value = "diff --git a/math_utils.py b/math_utils.py\n+ def add(a, b): return a + b"
         mock_commit.return_value = (True, "Committed")
-        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1", 1)
+        mock_merge.return_value = (True, "https://github.com/org/repo/commit/commit_abc123", "Merged")
         mock_teardown.return_value = (True, "Cleaned")
 
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
@@ -96,6 +99,8 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(paused_state["test_run_passed"])
             self.assertTrue(paused_state["critic_passed"])
+            # v2 Delta: PR is created BEFORE pausing at HITL gate
+            self.assertEqual(paused_state["pr_url"], "https://github.com/org/repo/pull/1")
 
             # Resume with approval via aupdate_state
             await graph.aupdate_state(config, {"latest_human_feedback": "Looks great, approve", "hitl_decision": "approved"})
@@ -103,6 +108,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("TASK-MATH-01", final_state["completed_tasks"])
             self.assertEqual(final_state["pr_url"], "https://github.com/org/repo/pull/1")
+            self.assertEqual(final_state["commit_url"], "https://github.com/org/repo/commit/commit_abc123")
 
     async def test_coding_subgraph_retry_and_fail(self):
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):

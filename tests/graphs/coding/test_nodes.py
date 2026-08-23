@@ -193,12 +193,21 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_hitl_intent("abort"), "abort")
         self.assertEqual(classify_hitl_intent("Add inline docstrings to line 30"), "revise")
 
-    async def test_hitl_gate_and_processor(self):
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    async def test_hitl_gate_and_processor(self, mock_commit, mock_pr):
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1", 1)
+
         state: CodingState = {
+            "workspace_path": "/tmp/ws",
+            "branch_name": "feat/proj/auth_run_1",
+            "current_task": {"task_id": "TASK-01"},
             "latest_human_feedback": "Approved, looks clean to merge"
         }
         res_pause = await hitl_gate_node(state)
         self.assertEqual(res_pause["hitl_decision"], "pending_review")
+        self.assertEqual(res_pause["pr_url"], "https://github.com/org/repo/pull/1")
 
         res_proc = await process_hitl_decision_node(state)
         self.assertEqual(res_proc["hitl_decision"], "approved")
@@ -210,13 +219,11 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_revise["hitl_decision"], "revise")
         self.assertEqual(res_revise["latest_human_feedback"], "Please fix typo on line 12")
 
-    @patch('graphs.coding.nodes.git_handoff.git_ops.commit_and_push', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.git_handoff.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.save_manifest')
-    async def test_git_handoff_node(self, mock_save, mock_teardown, mock_pr, mock_commit):
-        mock_commit.return_value = (True, "Committed")
-        mock_pr.return_value = (True, "https://github.com/org/repo/pull/42")
+    async def test_git_handoff_node(self, mock_save, mock_teardown, mock_merge):
+        mock_merge.return_value = (True, "https://github.com/org/repo/commit/sha_merged_42", "Merged")
         mock_teardown.return_value = (True, "Cleaned")
         mock_save.return_value = True
 
@@ -224,21 +231,24 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
             "workspace_path": "/tmp/ws",
             "branch_name": "feat/proj/auth_run_8F2A",
             "run_id": "run_8F2A",
+            "pr_url": "https://github.com/org/repo/pull/42",
             "current_task": {
                 "task_id": "TASK-01",
                 "feature_name": "auth",
                 "project_name": "proj",
                 "spec_path": "specs/auth.md",
-                "status": "in_progress"
+                "status": "in_review",
+                "pr_url": "https://github.com/org/repo/pull/42"
             },
             "queue": [
-                {"task_id": "TASK-01", "status": "in_progress"}
+                {"task_id": "TASK-01", "status": "in_review", "pr_url": "https://github.com/org/repo/pull/42"}
             ],
             "completed_tasks": []
         }
 
         res = await git_handoff_node(state)
         self.assertEqual(res["pr_url"], "https://github.com/org/repo/pull/42")
+        self.assertEqual(res["commit_url"], "https://github.com/org/repo/commit/sha_merged_42")
         self.assertIn("TASK-01", res["completed_tasks"])
         self.assertIsNone(res["current_task"])
 

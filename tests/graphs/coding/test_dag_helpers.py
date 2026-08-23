@@ -71,13 +71,43 @@ class TestDAGHelpers(unittest.TestCase):
         runnable = get_runnable_tasks(queue)
         self.assertEqual(len(runnable), 0)
 
+    def test_update_task_in_queue_v2_fields(self):
+        task: TaskEnvelope = {
+            "task_id": "TASK-01",
+            "status": "pending",
+            "dependencies": []
+        }
+        queue = [task]
+        
+        # 1. Update to in_review
+        queue = update_task_in_queue(
+            queue,
+            "TASK-01",
+            status="in_review",
+            run_id="run_123",
+            branch_name="feat/test/auth",
+            pr_url="https://github.com/org/repo/pull/1"
+        )
+        self.assertEqual(queue[0]["status"], "in_review")
+        self.assertEqual(queue[0]["pr_url"], "https://github.com/org/repo/pull/1")
+
+        # 2. Update to completed with commit_url
+        queue = update_task_in_queue(
+            queue,
+            "TASK-01",
+            status="completed",
+            commit_url="https://github.com/org/repo/commit/sha123"
+        )
+        self.assertEqual(queue[0]["status"], "completed")
+        self.assertEqual(queue[0]["commit_url"], "https://github.com/org/repo/commit/sha123")
+
     def test_manifest_load_and_save(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             path = tf.name
 
         try:
             data = {
-                "version": "1.0",
+                "version": "2.0",
                 "project_name": "test_manifest",
                 "max_concurrency": 2,
                 "queue": [
@@ -90,6 +120,7 @@ class TestDAGHelpers(unittest.TestCase):
             }
             save_manifest(path, data)
             loaded = load_manifest(path)
+            self.assertEqual(loaded["version"], "2.0")
             self.assertEqual(loaded["project_name"], "test_manifest")
             self.assertEqual(len(loaded["queue"]), 1)
             self.assertEqual(loaded["queue"][0]["task_id"], "TASK-01")

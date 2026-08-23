@@ -21,7 +21,7 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
     """Loads build request manifest from disk."""
     if not os.path.exists(manifest_path):
         return {
-            "version": "1.0",
+            "version": "2.0",
             "project_name": "unknown_project",
             "max_concurrency": 1,
             "queue": []
@@ -33,7 +33,7 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"Error loading manifest from {manifest_path}: {e}")
         return {
-            "version": "1.0",
+            "version": "2.0",
             "project_name": "unknown_project",
             "max_concurrency": 1,
             "queue": []
@@ -91,6 +91,7 @@ def update_task_in_queue(
     run_id: Optional[str] = None,
     branch_name: Optional[str] = None,
     pr_url: Optional[str] = None,
+    commit_url: Optional[str] = None,
     error_message: Optional[str] = None
 ) -> List[TaskEnvelope]:
     """Updates a task in the queue list in place and returns updated queue."""
@@ -106,6 +107,8 @@ def update_task_in_queue(
                 new_task["branch_name"] = branch_name
             if pr_url is not None:
                 new_task["pr_url"] = pr_url
+            if commit_url is not None:
+                new_task["commit_url"] = commit_url
             if error_message is not None:
                 new_task["error_message"] = error_message
             updated.append(new_task)

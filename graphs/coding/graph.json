@@ -8,10 +8,21 @@
   "max_retries": 3,
   "tools": {
     "bash": {
+      "workspaces/runs": ["execute"],
       "pkm/workspaces/runs": ["execute"]
     },
     "filesystem": {
       "pkm/wiki/software": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "replace_block",
+        "ls",
+        "find",
+        "grep"
+      ],
+      "workspaces/runs": [
         "read",
         "write",
         "overwrite",

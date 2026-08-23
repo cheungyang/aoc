@@ -44,6 +44,9 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
     clean_stderr = sanitize_traceback(raw_stderr) if raw_stderr else None
     critic_feedback = state.get("critic_feedback")
     human_feedback = state.get("latest_human_feedback")
+    pr_comments = state.get("github_pr_comments") or []
+    if pr_comments and not human_feedback:
+        human_feedback = "GitHub PR Review Comments:\n" + "\n".join(pr_comments)
 
     prompt = build_coder_prompt(
         workspace_path=workspace_path,
@@ -101,5 +104,6 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
         # Clear prior retry flags now that worker has produced fresh code
         "test_stderr": "",
         "critic_feedback": "",
-        "latest_human_feedback": ""
+        "latest_human_feedback": "",
+        "github_pr_comments": []
     }

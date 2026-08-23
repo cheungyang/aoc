@@ -76,33 +76,29 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
 
 def format_hitl_presentation(state: Dict[str, Any]) -> str:
-    """Generates the Markdown presentation string for HITL Review Gate."""
+    """Generates the Markdown presentation string for HITL Review Gate (v2)."""
     current_task = state.get("current_task") or {}
     task_id = current_task.get("task_id", "Unknown Task")
     run_id = state.get("run_id", "run_default")
     branch = state.get("branch_name", "feat/unknown")
-    diff = state.get("diff_summary", "(No git diff)")
+    pr_url = state.get("pr_url") or current_task.get("pr_url", "(PR pending creation)")
 
     test_passed = state.get("test_run_passed", False)
     test_status_str = "✅ ALL TESTS PASSING" if test_passed else "❌ TESTS FAILED"
-    test_out = state.get("test_stdout") or state.get("test_stderr") or ("(Test passed without stdout)" if test_passed else "(No test output captured)")
 
     critic_passed = state.get("critic_passed", False)
-    critic_status_str = "✅ APPROVED (No anti-patterns found)" if critic_passed else "⚠️ REJECTED (Anti-patterns detected)"
-    crit_feedback = state.get("critic_feedback") or ("No anti-patterns detected." if critic_passed else "Anti-patterns or quality issues detected.")
+    critic_status_str = "✅ APPROVED" if critic_passed else "⚠️ REJECTED"
 
     return (
         f"### 🔍 Coding Graph HITL Review Gate\n\n"
         f"- **Task ID**: `{task_id}`\n"
-        f"- **Run ID**: `{run_id}`\n"
         f"- **Branch**: `{branch}`\n"
+        f"- **GitHub PR**: 🔗 [{pr_url}]({pr_url})\n"
         f"- **Test Suite**: {test_status_str}\n"
         f"- **Critic Verdict**: {critic_status_str}\n\n"
-        f"#### Test Output Preview:\n"
-        f"```text\n{test_out[:400] + ('...' if len(test_out) > 400 else '')}\n```\n\n"
-        f"#### Diff Summary:\n"
-        f"```diff\n{diff[:1500] + ('\n... (truncated)' if len(diff) > 1500 else '')}\n```\n\n"
-        f"*Reply **'Approve'** to commit & push PR, or provide revision feedback to refine the implementation.*"
+        f"Please review the changes on GitHub.\n"
+        f"- **Approve**: Click **\"Approve\"** on GitHub PR OR reply `Approve` in chat to merge into `origin/main`.\n"
+        f"- **Revise**: Leave review comments on the GitHub PR or reply with feedback here to request updates."
     )
 
 
@@ -115,11 +111,21 @@ def format_output(state: Dict[str, Any]) -> str:
         return f"🛑 Coding graph execution error: {state['error_message']}"
 
     # If currently paused at HITL Gate
-    if state.get("critic_passed") and state.get("test_run_passed") and not state.get("pr_url"):
+    if state.get("hitl_decision") == "pending_review":
         return format_hitl_presentation(state)
 
-    # If completed and PR URL exists
-    if state.get("pr_url"):
+    # If completed and Commit URL exists
+    if state.get("commit_url"):
+        completed = state.get("completed_tasks", [])
+        return (
+            f"🎉 **Coding Execution Completed & Merged!**\n\n"
+            f"- **Tasks Completed**: `{', '.join(completed)}`\n"
+            f"- **Pull Request**: {state.get('pr_url')}\n"
+            f"- **Merged Commit on Main**: {state.get('commit_url')}\n"
+            f"- **Status**: ✅ Completed & Verified."
+        )
+
+    if state.get("pr_url") and not state.get("current_task"):
         completed = state.get("completed_tasks", [])
         return (
             f"🎉 **Coding Execution Completed!**\n\n"

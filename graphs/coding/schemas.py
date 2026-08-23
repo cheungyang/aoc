@@ -2,7 +2,7 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal
 from typing_extensions import TypedDict as ExtTypedDict
 from langchain_core.messages import AnyMessage
 
-TaskStatus = Literal["pending", "in_progress", "completed", "failed", "blocked"]
+TaskStatus = Literal["pending", "in_progress", "in_review", "completed", "failed", "blocked"]
 
 class TaskEnvelope(TypedDict, total=False):
     task_id: str
@@ -17,6 +17,7 @@ class TaskEnvelope(TypedDict, total=False):
     run_id: Optional[str]
     branch_name: Optional[str]
     pr_url: Optional[str]
+    commit_url: Optional[str]
     error_message: Optional[str]
 
 class CodingState(TypedDict, total=False):
@@ -36,7 +37,7 @@ class CodingState(TypedDict, total=False):
     channel: str
     current_task: TaskEnvelope
     project_path: str
-    workspace_path: str
+    workspace_path: str              # Strictly: "workspaces/runs/<run_id>/"
     branch_name: str
     base_branch: str
     base_ref: str
@@ -59,10 +60,13 @@ class CodingState(TypedDict, total=False):
     diff_summary: str
 
     # 5. HITL Review Gate (Interruption)
+    pr_url: str
+    pr_number: Optional[int]
     hitl_decision: str  # "approved" | "revise" | "abort"
     latest_human_feedback: str
+    github_pr_comments: List[str]
 
     # 6. Finalization & System Delivery
-    pr_url: str
+    commit_url: str
     error_message: str
     messages: List[AnyMessage]

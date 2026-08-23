@@ -7,7 +7,7 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
     """
     Worktree Provisioner Node:
     Deterministically provisions a sandboxed Git worktree directory for the current run
-    at pkm/workspaces/runs/{run_id}/ with dedicated branch feat/{project}/{feature}_{run_id}.
+    at workspaces/runs/{run_id}/ with dedicated branch feat/{project}/{feature}_{run_id}.
     """
     current_task = state.get("current_task") or {}
     run_id = state.get("run_id") or current_task.get("run_id") or "run_default"
@@ -26,8 +26,8 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
         }
     abs_repo = os.path.abspath(project_path)
     
-    # Define workspace path
-    workspace_path = os.path.abspath(os.path.join(abs_repo, "pkm", "workspaces", "runs", run_id))
+    # Define workspace path (v2 Delta: strictly outside pkm/)
+    workspace_path = os.path.abspath(os.path.join(abs_repo, "workspaces", "runs", run_id))
 
     # Base branch (inherits from prerequisite task or origin/main)
     base_ref = state.get("base_branch") or state.get("base_ref")

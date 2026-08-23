@@ -49,23 +49,32 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    async def test_full_xml_handoff_chain(self):
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
+    async def test_full_xml_handoff_chain(
+        self,
+        mock_diff,
+        mock_teardown,
+        mock_merge,
+        mock_commit,
+        mock_pr
+    ):
         """Tests that raw XML emitted by Worker and Critic is properly parsed and propagated through the graph."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
             return (True, "Worktree provisioned")
 
-        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
-             patch("graphs.coding.nodes.critic_node.git_ops.get_git_diff", new_callable=AsyncMock) as mock_diff, \
-             patch("graphs.coding.nodes.git_handoff.git_ops.create_pull_request", new_callable=AsyncMock) as mock_pr, \
-             patch("graphs.coding.nodes.git_handoff.git_ops.commit_and_push", new_callable=AsyncMock) as mock_commit, \
-             patch("graphs.coding.nodes.git_handoff.git_ops.teardown_worktree", new_callable=AsyncMock) as mock_teardown, \
-             patch("tools.agent_call.agent_call") as mock_agent:
+        mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/500", 500)
+        mock_merge.return_value = (True, "https://github.com/org/repo/commit/sha_500", "Merged")
+        mock_teardown.return_value = (True, "Cleaned")
 
-            mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
-            mock_commit.return_value = (True, "Committed")
-            mock_pr.return_value = (True, "https://github.com/org/repo/pull/500")
-            mock_teardown.return_value = (True, "Cleaned")
+        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
+             patch("tools.agent_call.agent_call") as mock_agent:
 
             # Worker raw XML and Critic raw XML
             raw_worker_xml = """
@@ -110,6 +119,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(paused_state["test_run_passed"])
             self.assertEqual(paused_state["test_stdout"], "2 passed in 0.1s")
             self.assertTrue(paused_state["critic_passed"])
+            self.assertEqual(paused_state["pr_url"], "https://github.com/org/repo/pull/500")
 
             # Verify presentation format
             presentation = format_output(paused_state)
@@ -120,6 +130,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
             await graph.aupdate_state(config, {"latest_human_feedback": "Looks good, proceed", "hitl_decision": "approved"})
             resumed = await graph.ainvoke(None, config=config)
             self.assertEqual(resumed["pr_url"], "https://github.com/org/repo/pull/500")
+            self.assertEqual(resumed["commit_url"], "https://github.com/org/repo/commit/sha_500")
             self.assertIn("TASK-HANDOFF-01", resumed["completed_tasks"])
 
     async def test_dynamic_hitl_intent_classification(self):
@@ -142,17 +153,32 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_hitl_intent("Change parameter type to string"), "revise")
         self.assertEqual(classify_hitl_intent("We found a bug in edge case handling"), "revise")
 
-    async def test_hitl_revision_feedback_loop_to_worker(self):
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
+    async def test_hitl_revision_feedback_loop_to_worker(
+        self,
+        mock_diff,
+        mock_teardown,
+        mock_merge,
+        mock_commit,
+        mock_pr
+    ):
         """Tests that user requesting revisions at HITL gate loops back to worker with feedback injected."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
             return (True, "Worktree provisioned")
 
-        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
-             patch("graphs.coding.nodes.critic_node.git_ops.get_git_diff", new_callable=AsyncMock) as mock_diff, \
-             patch("tools.agent_call.agent_call") as mock_agent:
+        mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/501", 501)
+        mock_merge.return_value = (True, "https://github.com/org/repo/commit/sha_501", "Merged")
+        mock_teardown.return_value = (True, "Cleaned")
 
-            mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
+        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
+             patch("tools.agent_call.agent_call") as mock_agent:
 
             # Iteration 1: Worker -> Critic
             # Iteration 2 (after human revision): Worker -> Critic
@@ -197,17 +223,32 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(paused_2["hitl_decision"], "pending_review")
             self.assertEqual(paused_2["implementation_summary"], "Attempt 2 with docstrings.")
 
-    async def test_critic_rejection_retry_loop(self):
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
+    async def test_critic_rejection_retry_loop(
+        self,
+        mock_diff,
+        mock_teardown,
+        mock_merge,
+        mock_commit,
+        mock_pr
+    ):
         """Tests that when Critic rejects diff, graph loops back to Worker with anti-pattern feedback."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
             return (True, "Worktree provisioned")
 
-        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
-             patch("graphs.coding.nodes.critic_node.git_ops.get_git_diff", new_callable=AsyncMock) as mock_diff, \
-             patch("tools.agent_call.agent_call") as mock_agent:
+        mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/502", 502)
+        mock_merge.return_value = (True, "https://github.com/org/repo/commit/sha_502", "Merged")
+        mock_teardown.return_value = (True, "Cleaned")
 
-            mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
+        with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
+             patch("tools.agent_call.agent_call") as mock_agent:
 
             # Attempt 1: Worker -> Critic (REJECT)
             # Attempt 2: Worker -> Critic (APPROVE) -> HITL
