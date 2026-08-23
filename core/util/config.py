@@ -25,6 +25,7 @@ class Config:
             cls._instance._anthropic_api_key = None
             cls._instance._runway_api_key = None
             cls._instance._seats_aero_api_key = None
+            cls._instance._rapidapi_key = None
             cls._instance._tasks_db_path = None
             cls._instance._projects_db_path = None
             cls._instance._projects_dir = None
@@ -51,6 +52,7 @@ class Config:
         self._anthropic_api_key = None
         self._runway_api_key = None
         self._seats_aero_api_key = None
+        self._rapidapi_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None
@@ -215,6 +217,16 @@ class Config:
     def seats_aero_api_key(self, value):
         self._seats_aero_api_key = str(value) if value is not None else None
 
+    @property
+    def rapidapi_key(self) -> str:
+        if self._rapidapi_key is not None:
+            return self._rapidapi_key
+        return os.getenv("RAPIDAPI_KEY", os.getenv("ZILLOW_RAPIDAPI_KEY", os.getenv("RAPID_API_KEY", "")))
+
+    @rapidapi_key.setter
+    def rapidapi_key(self, value):
+        self._rapidapi_key = str(value) if value is not None else None
+
     # -------------------------------------------------------------------------
     # PKM & Tasks Storage Paths
     # -------------------------------------------------------------------------
@@ -364,6 +376,7 @@ class Config:
         self._anthropic_api_key = None
         self._runway_api_key = None
         self._seats_aero_api_key = None
+        self._rapidapi_key = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None

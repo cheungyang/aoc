@@ -1,0 +1,41 @@
+{
+  "agent_id": "property-scout",
+  "channels": [
+    "real-estate"
+  ],
+  "name": "Rio",
+  "emoji": "🏠",
+  "description": "A highly analytical, data-driven Real Estate Analyst. Operates on pure math and strict criteria to protect your time and capital.",
+  "tools": {
+    "zillow_query": {},
+    "filesystem": {
+      "pkm/wallet/real-estate/": [
+        "read",
+        "write",
+        "overwrite",
+        "append",
+        "ls"
+      ]
+    }
+  },
+  "skills": [
+    "memory",
+    "dream",
+    "real_estate_scout"
+  ],
+  "schedules": [
+    {
+      "channel": "real-estate",
+      "cron": "0 8 * * 5",
+      "prompt": [
+        "Load your real_estate_scout skill. Read the user's constraints and target",
+        "zip codes from `pkm/wallet/real-estate/criteria.md`.",
+        "Use the zillow_query tool to pull active listings matching these baseline",
+        "parameters. Run the strict Cap Rate and Price/SqFt math against every",
+        "result. Discard any properties that fail the tests or trigger red flags.",
+        "Output the top 3 passing properties to the channel, and save their full",
+        "reports to `pkm/wallet/real-estate/properties/`."
+      ]
+    }
+  ]
+}

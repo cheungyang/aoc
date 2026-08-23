@@ -25,6 +25,7 @@
             "pkm/vault/projects": [
                 "append",
                 "read",
+                "overwrite",
                 "replace_block"
             ]
         }
