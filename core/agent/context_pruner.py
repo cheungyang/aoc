@@ -72,7 +72,7 @@ def find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 1
 
     Safety Invariant:
     - Never split an AIMessage(tool_calls=[...]) from its corresponding ToolMessage(s).
-    - `recent` must begin on a clean boundary (e.g. HumanMessage or top-level turn).
+    - `recent` MUST begin on a clean `HumanMessage` turn.
     - Preserves at least `window_messages` recent messages when possible.
     """
     total_len = len(messages)
@@ -81,57 +81,22 @@ def find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 1
 
     target_idx = max(0, total_len - window_messages)
 
-    # Map out tool call units: start_idx -> end_idx (inclusive of all ToolMessages)
-    tool_units: Dict[int, int] = {}
-    i = 0
-    while i < total_len:
-        msg = messages[i]
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            expected_ids = set()
-            for tc in msg.tool_calls:
-                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                if tc_id:
-                    expected_ids.add(tc_id)
+    # 1. Check if target_idx is already a HumanMessage
+    if target_idx > 0 and isinstance(messages[target_idx], HumanMessage):
+        return target_idx
 
-            j = i + 1
-            while j < total_len and expected_ids:
-                next_msg = messages[j]
-                if isinstance(next_msg, ToolMessage):
-                    t_id = getattr(next_msg, "tool_call_id", None)
-                    if t_id in expected_ids:
-                        expected_ids.remove(t_id)
-                elif isinstance(next_msg, (HumanMessage, AIMessage)):
-                    # Break out if a new turn starts unexpectedly
-                    break
-                j += 1
-            tool_units[i] = j - 1  # end index inclusive
-            i = j
-        else:
-            i += 1
+    # 2. Search backwards from target_idx for the closest preceding HumanMessage
+    for idx in range(target_idx - 1, 0, -1):
+        if isinstance(messages[idx], HumanMessage):
+            return idx
 
-    # Check if target_idx falls inside a tool unit
-    for start_idx, end_idx in tool_units.items():
-        if start_idx <= target_idx <= end_idx:
-            # Shift target_idx to start_idx to keep the entire tool transaction in the recent window
-            target_idx = start_idx
-            break
+    # 3. If none found backwards (excluding index 0), search forward for the next HumanMessage
+    for idx in range(target_idx + 1, total_len):
+        if isinstance(messages[idx], HumanMessage):
+            return idx
 
-    # Check if target_idx points to a ToolMessage (orphaned)
-    while target_idx > 0 and isinstance(messages[target_idx], ToolMessage):
-        target_idx -= 1
-
-    # If target_idx points to an AIMessage with tool calls, check that all preceding is clean
-    if target_idx > 0 and isinstance(messages[target_idx - 1], AIMessage) and getattr(messages[target_idx - 1], "tool_calls", None):
-        target_idx -= 1
-
-    # Ideally start recent window on a HumanMessage if one exists nearby (within 3 messages)
-    preferred_idx = target_idx
-    for lookback in range(target_idx, max(0, target_idx - 3), -1):
-        if isinstance(messages[lookback], HumanMessage):
-            preferred_idx = lookback
-            break
-
-    return preferred_idx
+    # 4. If no other HumanMessage exists, we cannot safely split without violating turn invariants
+    return 0
 
 
 def _format_message_for_summary(msg: BaseMessage) -> str:
@@ -392,8 +357,20 @@ class ContextPruner:
                 ]
             return clean_messages
 
-        older_messages = clean_messages[:split_idx]
-        recent_messages = clean_messages[split_idx:]
+        older_messages = list(clean_messages[:split_idx])
+        recent_messages = list(clean_messages[split_idx:])
+
+        # Defensive check: ensure recent_messages strictly starts with a HumanMessage
+        while recent_messages and not isinstance(recent_messages[0], HumanMessage):
+            older_messages.append(recent_messages.pop(0))
+
+        if not recent_messages:
+            if prev_summary:
+                return [
+                    SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"),
+                    *clean_messages
+                ]
+            return clean_messages
 
         # Summarize older messages via graph-worker or heuristic
         new_summary = self.summarize_messages(

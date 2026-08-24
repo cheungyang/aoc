@@ -228,6 +228,51 @@ class TestContextPruner(unittest.TestCase):
         self.assertEqual(res, "Graph worker generated summary of turns.")
         self.mock_worker.assert_called_once()
 
+    def test_find_safe_boundary_always_starts_on_human_message(self):
+        # Construct scenario where target_idx falls within consecutive AIMessage/ToolMessage sequence
+        messages = [
+            HumanMessage(content="Turn 0"),
+            AIMessage(content="", tool_calls=[{"name": "t0", "args": {}, "id": "c0"}]),
+            ToolMessage(content="r0", tool_call_id="c0", name="t0"),
+            AIMessage(content="Turn 0 reply"),
+            HumanMessage(content="Turn 1"),
+            AIMessage(content="", tool_calls=[{"name": "t1_a", "args": {}, "id": "c1_a"}]),
+            ToolMessage(content="r1_a", tool_call_id="c1_a", name="t1_a"),
+            AIMessage(content="", tool_calls=[{"name": "t1_b", "args": {}, "id": "c1_b"}]),
+            ToolMessage(content="r1_b", tool_call_id="c1_b", name="t1_b"),
+            AIMessage(content="", tool_calls=[{"name": "t1_c", "args": {}, "id": "c1_c"}]),
+            ToolMessage(content="r1_c", tool_call_id="c1_c", name="t1_c"),
+            AIMessage(content="Turn 1 reply"),
+            HumanMessage(content="Turn 2"),
+            AIMessage(content="Turn 2 reply"),
+        ]
+        # Total 14 messages. If window_messages=6, target_idx = 8 (which is ToolMessage r1_b)
+        split_idx = find_safe_boundary(messages, window_messages=6)
+        self.assertGreater(split_idx, 0)
+        self.assertIsInstance(messages[split_idx], HumanMessage)
+        self.assertEqual(messages[split_idx].content, "Turn 1")
+
+    def test_prune_messages_guarantees_human_message_at_start_of_recent(self):
+        messages = [
+            HumanMessage(content="Initial query"),
+            AIMessage(content="", tool_calls=[{"name": "t0", "args": {}, "id": "c0"}]),
+            ToolMessage(content="output 0", tool_call_id="c0", name="t0"),
+            AIMessage(content="Analysis 0"),
+            HumanMessage(content="Followup query"),
+            AIMessage(content="", tool_calls=[{"name": "t1", "args": {}, "id": "c1"}]),
+            ToolMessage(content="output 1", tool_call_id="c1", name="t1"),
+            AIMessage(content="", tool_calls=[{"name": "t2", "args": {}, "id": "c2"}]),
+            ToolMessage(content="output 2", tool_call_id="c2", name="t2"),
+            AIMessage(content="Analysis 1"),
+            HumanMessage(content="Latest query"),
+        ]
+        pruned = self.pruner.prune_messages(messages, window_messages=5, force=True)
+        # First message is summary SystemMessage
+        self.assertIsInstance(pruned[0], SystemMessage)
+        # First dialogue message after SystemMessage MUST be HumanMessage
+        self.assertIsInstance(pruned[1], HumanMessage)
+        self.assertNotIsInstance(pruned[1], (AIMessage, ToolMessage))
+
 
 if __name__ == "__main__":
     unittest.main()
