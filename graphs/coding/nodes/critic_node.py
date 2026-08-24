@@ -66,14 +66,15 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
 
     spec_content = ""
     project_path = state.get("project_path", "")
-    if spec_path:
-        target_spec_path = spec_path if os.path.isabs(spec_path) else os.path.join(project_path, spec_path)
-        if os.path.exists(target_spec_path):
-            try:
-                with open(target_spec_path, "r", encoding="utf-8") as f:
-                    spec_content = f.read()
-            except Exception:
-                pass
+    target_spec_path = state.get("master_spec_path") or spec_path
+    if target_spec_path and not os.path.isabs(target_spec_path) and project_path:
+        target_spec_path = os.path.join(project_path, target_spec_path)
+    if target_spec_path and os.path.exists(target_spec_path):
+        try:
+            with open(target_spec_path, "r", encoding="utf-8") as f:
+                spec_content = f.read()
+        except Exception:
+            pass
 
     # If spec file not found, use task envelope criteria
     if not spec_content and acceptance_criteria:

@@ -31,6 +31,7 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
     pr_number = state.get("pr_number")
 
     # 1. Automated Squash-Merge
+    target_repo = state.get("target_repo") or await git_ops.discover_target_repo(workspace_path, project_path)
     target_pr = pr_url or (str(pr_number) if pr_number else "")
     commit_url = ""
     target_dir = workspace_path or project_path or "."
@@ -39,7 +40,8 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
             workspace_path=target_dir,
             pr_url_or_number=target_pr,
             squash=True,
-            delete_branch=True
+            delete_branch=True,
+            target_repo=target_repo
         )
         if merge_ok and merge_commit:
             commit_url = merge_commit
@@ -49,8 +51,8 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
         commit_url = f"{pr_url}#merged"
 
     # 2. Teardown worktree
-    if project_path and workspace_path:
-        await git_ops.teardown_worktree(project_path, workspace_path)
+    if workspace_path:
+        await git_ops.teardown_worktree(".", workspace_path)
 
     # 3. Update queue and manifest
     queue = state.get("queue") or []
@@ -63,7 +65,7 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
         commit_url=commit_url
     )
 
-    manifest_path = resolve_manifest_path(state.get("build_request_path"), project_path)
+    manifest_path = state.get("build_request_path") or resolve_manifest_path(state.get("build_request_path"), project_path)
     save_manifest(manifest_path, {
         "version": "2.0",
         "project_name": project_name,

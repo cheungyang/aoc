@@ -6,15 +6,12 @@ from graphs.coding.schemas import TaskEnvelope, TaskStatus
 DEFAULT_MANIFEST_PATH = "pkm/wiki/software/build_request.json"
 
 def resolve_manifest_path(path: Optional[str] = None, project_path: Optional[str] = None) -> str:
-    """Resolves absolute path to build_request.json using project_path."""
+    """Resolves absolute path to global build_request.json."""
     if path and os.path.isabs(path):
         return path
-    
-    if not project_path:
-        return path or DEFAULT_MANIFEST_PATH
-
-    rel = path or DEFAULT_MANIFEST_PATH
-    return os.path.join(project_path, rel)
+    if path:
+        return os.path.abspath(path)
+    return os.path.abspath(DEFAULT_MANIFEST_PATH)
 
 
 def load_manifest(manifest_path: str) -> Dict[str, Any]:

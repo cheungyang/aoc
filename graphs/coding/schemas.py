@@ -16,6 +16,7 @@ class TaskEnvelope(TypedDict, total=False):
     status: TaskStatus
     run_id: Optional[str]
     branch_name: Optional[str]
+    target_repo: Optional[str]
     pr_url: Optional[str]
     commit_url: Optional[str]
     error_message: Optional[str]
@@ -24,6 +25,7 @@ class CodingState(TypedDict, total=False):
     # 1. Queue & Manifest Context
     build_request_path: str
     project_name: str
+    target_repo: str
     max_concurrency: int
     queue: List[TaskEnvelope]
     active_runs: Dict[str, TaskEnvelope]
@@ -36,8 +38,8 @@ class CodingState(TypedDict, total=False):
     session_id: str
     channel: str
     current_task: TaskEnvelope
-    project_path: str
-    workspace_path: str              # Strictly: "workspaces/runs/<run_id>/"
+    project_path: str                # Spec directory: pkm/wiki/software/<project>
+    workspace_path: str              # Coding workspace directory: workspaces/runs/<run_id>/
     branch_name: str
     base_branch: str
     base_ref: str

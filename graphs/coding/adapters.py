@@ -11,22 +11,6 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     else:
         formatted_query = query
 
-    # Extract build_request_path
-    build_request_path = kwargs.get("build_request_path") or kwargs.get("manifest_path") or ""
-    if not build_request_path:
-        m_req = re.search(r'(?:build_request_path|manifest_path|manifest)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
-        if m_req:
-            build_request_path = m_req.group(1).strip()
-        else:
-            build_request_path = "pkm/wiki/software/build_request.json"
-
-    # Extract project_path
-    project_path = kwargs.get("project_path") or ""
-    if not project_path:
-        m_dir = re.search(r'project_path[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
-        if m_dir:
-            project_path = m_dir.group(1).strip()
-
     # Extract project_name
     project_name = kwargs.get("project_name") or kwargs.get("project") or ""
     if not project_name:
@@ -34,13 +18,45 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         if m_proj:
             project_name = m_proj.group(1).strip()
 
+    # Extract project_path (Spec directory: pkm/wiki/software/<project>)
+    project_path = kwargs.get("project_path") or ""
+    if not project_path:
+        m_dir = re.search(r'project_path[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+        if m_dir:
+            project_path = m_dir.group(1).strip()
+
+    if not project_path and project_name:
+        project_path = os.path.join("pkm", "wiki", "software", project_name)
+
+    if project_path:
+        project_path = os.path.abspath(project_path)
+
+    # Extract build_request_path
+    build_request_path = kwargs.get("build_request_path") or kwargs.get("manifest_path") or ""
+    if not build_request_path:
+        m_req = re.search(r'(?:build_request_path|manifest_path|manifest)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
+        if m_req:
+            build_request_path = m_req.group(1).strip()
+
+    if not build_request_path:
+        build_request_path = os.path.abspath("pkm/wiki/software/build_request.json")
+    else:
+        build_request_path = os.path.abspath(build_request_path)
+
+    # Extract target_repo (e.g. owner/repo)
+    target_repo = kwargs.get("target_repo") or kwargs.get("repo") or ""
+    if not target_repo:
+        m_repo = re.search(r'(?:target_repo|repo)[:=]\s*["\']?([a-zA-Z0-9_\-\.]+/[a-zA-Z0-9_\-]+)["\']?', query, re.IGNORECASE)
+        if m_repo:
+            target_repo = m_repo.group(1).strip()
+
     max_concurrency = int(kwargs.get("max_concurrency") or 1)
     max_retries = int(kwargs.get("max_retries") or 3)
     session_id = kwargs.get("session_id") or ""
     thread_id = kwargs.get("thread_id") or session_id
     channel = kwargs.get("channel") or "coding-pipeline"
 
-    # Validation: project_path must be explicitly provided
+    # Validation: project_path must be explicitly provided or resolvable from project_name
     error_msg = ""
     if not project_path:
         error_msg = "Initialization error: 'project_path' is required and must be explicitly provided at graph initialization."
@@ -55,6 +71,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     return {
         "build_request_path": build_request_path,
         "project_name": project_name,
+        "target_repo": target_repo,
         "project_path": project_path,
         "max_concurrency": max_concurrency,
         "max_retries": max_retries,

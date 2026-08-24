@@ -55,6 +55,15 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
     spec_path = state.get("master_spec_path") or current_task.get("spec_path", "")
     project_path = state.get("project_path", "")
 
+    # Discover target repository for GitHub routing
+    target_repo = (
+        state.get("target_repo")
+        or current_task.get("target_repo")
+        or state.get("repo")
+        or current_task.get("repo")
+        or await git_ops.discover_target_repo(workspace_path, ".")
+    )
+
     existing_pr = state.get("pr_url")
     existing_pr_num = state.get("pr_number")
 
@@ -91,7 +100,8 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
             branch_name=branch_name,
             title=pr_title,
             body=pr_body,
-            base_branch=base_branch
+            base_branch=base_branch,
+            target_repo=target_repo
         )
         existing_pr = pr_url if pr_ok else ""
         existing_pr_num = pr_num
@@ -107,7 +117,7 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
         pr_url=existing_pr
     )
 
-    manifest_path = resolve_manifest_path(state.get("build_request_path"), project_path)
+    manifest_path = state.get("build_request_path") or resolve_manifest_path(state.get("build_request_path"), project_path)
     save_manifest(manifest_path, {
         "version": "2.0",
         "project_name": project_name,
@@ -131,6 +141,7 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
     messages.append(AIMessage(content=review_msg))
 
     return {
+        "target_repo": target_repo or "",
         "pr_url": existing_pr or "",
         "pr_number": existing_pr_num,
         "queue": updated_queue,
@@ -146,16 +157,18 @@ async def process_hitl_decision_node(state: CodingState) -> Dict[str, Any]:
     Evaluates dual-approval from GitHub PR status or chat feedback.
     """
     workspace_path = state.get("workspace_path", "")
+    project_path = state.get("project_path", "")
     pr_number = state.get("pr_number")
     pr_url = state.get("pr_url", "")
     target_pr = pr_number if pr_number is not None else pr_url
+    target_repo = state.get("target_repo") or await git_ops.discover_target_repo(workspace_path, ".")
 
     github_comments: List[str] = []
     gh_decision = ""
 
-    target_dir = workspace_path or state.get("project_path") or "."
+    target_dir = workspace_path or "."
     if target_pr:
-        pr_status = await git_ops.get_pull_request_status(target_dir, str(target_pr))
+        pr_status = await git_ops.get_pull_request_status(target_dir, str(target_pr), target_repo=target_repo)
         gh_decision = (pr_status.get("reviewDecision") or "").upper()
         raw_comments = pr_status.get("comments") or []
         for c in raw_comments:
@@ -185,6 +198,7 @@ async def process_hitl_decision_node(state: CodingState) -> Dict[str, Any]:
         final_feedback = human_feedback
 
     return {
+        "target_repo": target_repo or "",
         "hitl_decision": final_decision,
         "latest_human_feedback": final_feedback,
         "github_pr_comments": github_comments

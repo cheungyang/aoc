@@ -18,23 +18,24 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
     clean_project = str(project_name).replace(" ", "_").replace("/", "_")
     clean_feature = str(feature_name).replace(" ", "_").replace("/", "_")
     branch_name = f"feat/{clean_project}/{clean_feature}_{run_id}"
+
+    # Pre-define resolved absolute paths for the entire graph lifecycle
+    workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
+    project_path = os.path.abspath(state.get("project_path", "")) if state.get("project_path") else ""
+    build_request_path = os.path.abspath(state.get("build_request_path", "")) if state.get("build_request_path") else ""
     
-    project_path = state.get("project_path")
-    if not project_path:
-        return {
-            "error_message": "Provisioner error: 'project_path' is missing from graph state."
-        }
-    abs_repo = os.path.abspath(project_path)
-    
-    # Define workspace path (v2 Delta: strictly outside pkm/)
-    workspace_path = os.path.abspath(os.path.join(abs_repo, "workspaces", "runs", run_id))
+    raw_spec = state.get("master_spec_path") or current_task.get("spec_path", "")
+    if raw_spec:
+        master_spec_path = raw_spec if os.path.isabs(raw_spec) else (os.path.abspath(os.path.join(project_path, raw_spec)) if project_path else os.path.abspath(raw_spec))
+    else:
+        master_spec_path = ""
 
     # Base branch (inherits from prerequisite task or origin/main)
     base_ref = state.get("base_branch") or state.get("base_ref")
 
-    # Provision worktree
+    # Provision worktree from current execution root
     success, msg = await git_ops.provision_worktree(
-        repo_path=abs_repo,
+        repo_path=".",
         workspace_path=workspace_path,
         branch_name=branch_name,
         base_ref=base_ref
@@ -43,12 +44,18 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
     if not success:
         return {
             "workspace_path": workspace_path,
+            "project_path": project_path,
+            "build_request_path": build_request_path,
+            "master_spec_path": master_spec_path,
             "branch_name": branch_name,
             "error_message": f"Worktree provisioning failed: {msg}"
         }
 
     return {
         "workspace_path": workspace_path,
+        "project_path": project_path,
+        "build_request_path": build_request_path,
+        "master_spec_path": master_spec_path,
         "branch_name": branch_name,
         "error_message": ""
     }
