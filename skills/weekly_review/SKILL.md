@@ -11,10 +11,6 @@ This skill guides the agent to synthesize the past 7 days of daily journals and 
 
 ## Workflow
 
-### Phase 0: Pre-Flight Sync
-Always ensure the local vault is up to date before making changes.
-- Use the `git` tool to perform a `pull` action on the `pkm` repository.
-
 ### Phase 1: Information Gathering
 1. Calculate the dates for the past 7 days.
 2. Use the `filesystem` tool to `read` the fleeting notes for those dates at `pkm/vault/journals/fleeting/YYYY-MM-DD.md`.
@@ -38,11 +34,7 @@ Always ensure the local vault is up to date before making changes.
 4. Append the finalized "Wins" and "Next week's focus" to the resolved template text.
 5. Use the `filesystem` tool to `write` the fully resolved text to `pkm/vault/journals/weekly/YYYY-Www.md`.
 
-### Phase 5: Post-Flight Sync
-1. Use the `git` tool to perform an `add` action on the newly created weekly journal.
-2. Use the `git` tool to perform a `push` action to push changes to the remote.
-
-### Phase 6: Agent-Friendly Output & Memory (IPC Format)
+### Phase 5: Agent-Friendly Output & Memory (IPC Format)
 Finalize the execution by outputting the strict XML structure below to ensure perfect readability.
 ```xml
 <weekly_review_response>
@@ -52,7 +44,6 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
     <wins>[Final list of wins]</wins>
     <next_week_focus>[Final 3-point focus]</next_week_focus>
     <file_path>[vault/journals/weekly/YYYY-Www.md]</file_path>
-    <git_sync_status>[Status of Pre-Flight and Post-Flight sync]</git_sync_status>
   </payload>
   <errors>[Any errors or 'None']</errors>
   <learnings>[Observations about weekly productivity trends and the user's feedback during the hold points]</learnings>
@@ -61,6 +52,6 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
 **Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
-- `git`: Required to `pull`, `log`, `add`, and `push` the `pkm` repository.
+- `git`: Required to `log` the `pkm` repository to review commit history.
 - `project_query`: Required to retrieve active projects.
 - `filesystem`: Required to `read` fleeting notes and templates, and `write` the new weekly journal in the vault.

@@ -21,11 +21,6 @@ You must understand the following taxonomy to accurately filter and prioritize d
 
 ## Workflow
 
-### Phase 0: Sync Remote (Pre-Flight)
-Always ensure the local vault is up to date before analyzing priorities.
-- Use the `git` tool to perform a `pull` action on the `pkm` repository.
-- Execute `project_query` (`action="sync"`) and `task_query` (`action="sync"`) if required by the system state.
-
 ### Phase 1: Retrieve the Weekly Focus
 1. Use your internal knowledge of the current date to calculate the correct ISO week number (Format: `YYYY-Www`).
 2. Use the `filesystem` tool to `read` the previous week's journal located at `pkm/vault/journals/weekly/YYYY-Www.md` (Note: You are reading *last week's* journal to find the goals set for *this week*).
@@ -57,7 +52,6 @@ Compile the findings and finalize the execution using the strict XML structure b
     <sources_analyzed>
       [Brief list of files/directories read and analyzed (e.g., vault/journals/weekly/YYYY-Wxx.md, specific project files)]
     </sources_analyzed>
-    <git_sync_status>[Status of the Pre-Flight pull]</git_sync_status>
   </payload>
   <errors>[Any missing files, DB failures, or 'None']</errors>
   <learnings>[Observations on the user's workload balance, stalled projects, or newly discovered structural PKM patterns]</learnings>
@@ -66,7 +60,7 @@ Compile the findings and finalize the execution using the strict XML structure b
 **Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
-- `git`: Required to `pull` the latest changes from the remote `pkm` repository before scanning, and to use `log-p` to track project progress deltas.
+- `git`: Required to use `log-p` to track project progress deltas.
 - `project_query`: Required to query active projects efficiently.
 - `task_query`: Required to query pending tasks efficiently.
 - `filesystem`: Permitted ONLY to perform `read` actions on journals or specific target paths.

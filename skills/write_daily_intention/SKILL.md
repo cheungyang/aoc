@@ -7,10 +7,6 @@ This skill handles the creation and updating of the user's daily fleeting journa
 
 ## Workflow
 
-### Step 0: Sync Remote (Pre-Flight)
-Always ensure the local vault is up to date before making changes.
-- Use the `git` tool to perform a `pull` action on the `pkm` repository.
-
 ### Step 1: Check & Initialize Daily Note
 Determine if today's note already exists.
 - **Target Path**: `vault/journals/fleeting/YYYY-MM-DD.md` (Replace YYYY-MM-DD with today's date).
@@ -29,11 +25,7 @@ Add the day's plan to the journal.
 - Ensure you include empty newlines before the header so it renders cleanly in markdown.
 - Use the `filesystem` tool (`append` action) to add this block to the very bottom of the `YYYY-MM-DD.md` file.
 
-### Step 3: Sync Remote (Post-Flight)
-Upload the new journal entries back to the remote repository.
-- Use the `git` tool to perform a `add` action on the newly created file, then a `push` action on the `pkm` repository with a message.
-
-### Step 4: Agent-Friendly Output & Memory (IPC Format)
+### Step 3: Agent-Friendly Output & Memory (IPC Format)
 Finalize the execution by outputting the strict XML structure below to ensure perfect readability for routing agents.
 ```xml
 <write_daily_intention_response>
@@ -42,7 +34,6 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
   <payload>
     <intention_set>[The actual synthesized intention appended to the journal]</intention_set>
     <file_path>[The path of the file that was updated (e.g., vault/journals/fleeting/YYYY-MM-DD.md)]</file_path>
-    <git_sync_status>[Status of the Pre-Flight pull and Post-Flight push]</git_sync_status>
   </payload>
   <errors>[Any template resolution errors, sync conflicts, or 'None']</errors>
   <learnings>[Observations on the user's current project priorities or mood based on the agreed intentions]</learnings>
@@ -51,5 +42,4 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
 **Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
-- `git`: Required to `pull`, `add`, and `push` the `pkm` repository to maintain sync and prevent merge conflicts.
 - `filesystem`: Required to `read` templates, `write` new daily notes, and `append` recommendations within the `pkm` vault.

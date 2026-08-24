@@ -47,4 +47,3 @@ This skill acts as the agent's internal preparation pipeline for project coachin
 ## Required Tools
 - `project_query` & `task_query`: Required for instant, structured data ingestion.
 - `filesystem`: Required to write your dossier to `pkm/wiki/project-coaching/` and to append user-approved tasks to `pkm/vault/projects/`.
-- `git`: Required to ensure the vault is synced if necessary.

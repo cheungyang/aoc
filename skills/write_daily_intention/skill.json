@@ -4,7 +4,6 @@
   "description": "Skill for generating the user's daily journal and logging the agreed-upon daily intentions and recommendations.",
   "emoji": "📝",
   "tools": {
-    "git": [],
     "task_query": [],
     "filesystem": {
       "pkm/vault/journals": [
