@@ -1,6 +1,6 @@
 import os
 import re
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from tools.generate_image import generate_image
@@ -12,8 +12,8 @@ async def generate_image_task(state: dict) -> dict:
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     style = str(state.get("style") or "3D").strip()
-    project_path = normalize_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate1_decision = state.get("gate1_decision")

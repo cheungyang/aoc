@@ -1,7 +1,6 @@
 import os
 from graphs.content_creation.utils.classifiers import classify_gate1_intent, classify_gate2_intent, extract_remix_parameters
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.paths import normalize_project_path, infer_paths_from_state
 
 
 async def process_gate1_node(state: dict) -> dict:
@@ -14,7 +13,8 @@ async def process_gate1_node(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path, output_path = infer_paths_from_state(state)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     human_feedback = state.get("latest_human_feedback") or ""
@@ -48,7 +48,8 @@ async def process_gate2_node(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path, output_path = infer_paths_from_state(state)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     human_feedback = state.get("latest_human_feedback") or ""

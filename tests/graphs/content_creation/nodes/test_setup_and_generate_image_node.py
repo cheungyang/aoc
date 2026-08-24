@@ -46,14 +46,16 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "latest_human_feedback": "Make the eyes more expressive."
             }
 
-            target_path = os.path.join(output_path, "cat_image_v2.jpg")
+            canonical_target = os.path.join(output_path, "cat_image.jpg")
+            archived_v1 = os.path.join(output_path, "cat_image_v1.jpg")
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
-                mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{target_path}</payload>")
+                mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{canonical_target}</payload>")
 
                 result = await generate_image_task(state)
 
                 mock_gen.ainvoke.assert_called_once()
-                self.assertEqual(result["image_path"], target_path)
+                self.assertEqual(result["image_path"], canonical_target)
+                self.assertTrue(os.path.exists(archived_v1))
 
     async def test_loads_style_specific_character_sheet(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -162,7 +164,6 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             with open(ref_img_path, "wb") as f:
                 f.write(b"AYLA_3D_REF_BYTES")
 
-            # State where gate1_decision is 'approved' (default initialization) but human feedback is provided
             state = {
                 "topic": "cat",
                 "style": "3D",
@@ -172,17 +173,20 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "latest_human_feedback": "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
             }
 
-            target_path = os.path.join(output_path, "cat_image_v2.jpg")
+            canonical_target = os.path.join(output_path, "cat_image.jpg")
+            archived_v1 = os.path.join(output_path, "cat_image_v1.jpg")
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
-                mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{target_path}</payload>")
+                mock_gen.ainvoke = AsyncMock(return_value=f"<payload>{canonical_target}</payload>")
 
                 result = await generate_image_task(state)
 
                 mock_gen.ainvoke.assert_called_once()
-                self.assertEqual(result["image_path"], target_path)
+                self.assertEqual(result["image_path"], canonical_target)
+                self.assertTrue(os.path.exists(archived_v1))
                 call_args = mock_gen.ainvoke.call_args[0][0]
                 self.assertEqual(call_args.get("image_path"), ref_img_path)
                 self.assertIn("have ayla wear a cat costume", call_args["prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()

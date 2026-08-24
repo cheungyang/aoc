@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from graphs.content_creation.prompts import build_draft_copy_prompt
@@ -12,8 +12,8 @@ async def draft_copy_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path = normalize_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
@@ -67,19 +67,12 @@ async def draft_copy_task(state: dict) -> dict:
 
         # 1. Direct XML tag extraction for zero-overhead, certain parsing
         status_m = re.search(r"<status>(.*?)</status>", payload, re.DOTALL)
-        copy_path_m = re.search(r"<copy_path>(.*?)</copy_path>", payload, re.DOTALL)
-        if copy_path_m and copy_path_m.group(1).strip():
-            ret_copy_path = copy_path_m.group(1).strip()
-            if not ret_copy_path.startswith("{") and not ret_copy_path.endswith("}"):
-                copy_path = ret_copy_path
-                copy_json_path = copy_path.replace(".md", ".json")
-
         caption_m = re.search(r"<caption_text>(.*?)</caption_text>", payload, re.DOTALL)
         hashtags_m = re.search(r"<hashtags>(.*?)</hashtags>", payload, re.DOTALL)
         vocab_m = re.search(r"<vocabulary>(.*?)</vocabulary>", payload, re.DOTALL)
         md_m = re.search(r"<markdown_content>(.*?)</markdown_content>", payload, re.DOTALL)
 
-        if md_m or caption_m or copy_path_m:
+        if md_m or caption_m:
             caption_val = caption_m.group(1).strip() if caption_m else ""
             vocab_val = vocab_m.group(1).strip() if vocab_m else ""
             tags_list = []

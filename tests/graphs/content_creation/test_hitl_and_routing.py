@@ -87,7 +87,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f'<image path="{expected_img}"/>', last_msg)
 
     async def test_scenario_2_gate1_image_update_returns_new_image_with_same_plot(self):
-        """Scenario 2: HITL Gate 1, user asks for image update -> Returns new image (v2) with same plot."""
+        """Scenario 2: HITL Gate 1, user asks for image update -> Archives previous image to v1, returns fresh image with same canonical path."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "cat")
             os.makedirs(output_path, exist_ok=True)
@@ -128,9 +128,11 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
 
                 state_turn2 = await graph.ainvoke(None, config=config)
 
-                v2_img = os.path.join(output_path, "cat_image_v2.jpg")
-                self.assertEqual(state_turn2["image_path"], v2_img)
-                self.assertTrue(os.path.isfile(v2_img))
+                canonical_img = os.path.join(output_path, "cat_image.jpg")
+                archived_v1_img = os.path.join(output_path, "cat_image_v1.jpg")
+                self.assertEqual(state_turn2["image_path"], canonical_img)
+                self.assertTrue(os.path.isfile(canonical_img))
+                self.assertTrue(os.path.isfile(archived_v1_img))
 
                 # Video plot MUST be preserved (the same plot as v1)
                 self.assertEqual(state_turn2["video_plot_path"], v1_plot)
@@ -139,7 +141,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 assert_gate1_revision_invariants(state_turn1, state_turn2)
 
     async def test_scenario_3_gate1_plot_update_returns_new_plot_with_same_image(self):
-        """Scenario 3: HITL Gate 1, user asks for plot update -> Returns new plot (v2) with same image."""
+        """Scenario 3: HITL Gate 1, user asks for plot update -> Archives previous plot to v1, returns fresh plot with same canonical path."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "dog")
             os.makedirs(output_path, exist_ok=True)
@@ -185,10 +187,12 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_img.ainvoke.assert_not_called()
                 self.assertEqual(state_turn2["image_path"], v1_img)
 
-                # Video plot MUST be incremented to v2
-                v2_plot = os.path.join(output_path, "dog_video_plot_v2.md")
-                self.assertEqual(state_turn2["video_plot_path"], v2_plot)
-                self.assertTrue(os.path.isfile(v2_plot))
+                # Video plot MUST be refreshed at canonical path with v1 archived
+                canonical_plot = os.path.join(output_path, "dog_video_plot.md")
+                archived_v1_plot = os.path.join(output_path, "dog_video_plot_v1.md")
+                self.assertEqual(state_turn2["video_plot_path"], canonical_plot)
+                self.assertTrue(os.path.isfile(canonical_plot))
+                self.assertTrue(os.path.isfile(archived_v1_plot))
 
                 # Invariants must pass cleanly
                 assert_gate1_revision_invariants(state_turn1, state_turn2)
@@ -260,7 +264,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f'<video path="{master_video}"/>', last_msg)
 
     async def test_scenario_5_gate2_video_update_returns_new_video_with_remix(self):
-        """Scenario 5: HITL Gate 2, user asks for video update -> Returns new raw video (v2) and new remixed video (v2)."""
+        """Scenario 5: HITL Gate 2, user asks for video update -> Archives previous video to v1 and returns fresh canonical video."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "banana")
             os.makedirs(output_path, exist_ok=True)
@@ -322,13 +326,17 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 }, as_node="produce_deliverables")
                 state_turn3 = await graph.ainvoke(None, config=config)
 
-                raw_vid_v2 = os.path.join(output_path, "banana_raw_video_v2.mp4")
-                video_path_v2 = os.path.join(output_path, "banana_video_v2.mp4")
+                canonical_raw = os.path.join(output_path, "banana_raw_video.mp4")
+                canonical_remix = os.path.join(output_path, "banana_video.mp4")
+                archived_v1_raw = os.path.join(output_path, "banana_raw_video_v1.mp4")
+                archived_v1_remix = os.path.join(output_path, "banana_video_v1.mp4")
 
-                self.assertEqual(state_turn3["raw_video_path"], raw_vid_v2)
-                self.assertEqual(state_turn3["remixed_video_path"], video_path_v2)
-                self.assertTrue(os.path.isfile(raw_vid_v2))
-                self.assertTrue(os.path.isfile(video_path_v2))
+                self.assertEqual(state_turn3["raw_video_path"], canonical_raw)
+                self.assertEqual(state_turn3["remixed_video_path"], canonical_remix)
+                self.assertTrue(os.path.isfile(canonical_raw))
+                self.assertTrue(os.path.isfile(canonical_remix))
+                self.assertTrue(os.path.isfile(archived_v1_raw))
+                self.assertTrue(os.path.isfile(archived_v1_remix))
 
                 # Copy is preserved
                 self.assertEqual(state_turn3["copy_path"], copy_v1)
@@ -337,7 +345,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 assert_gate2_revision_invariants(state_turn2, state_turn3)
 
     async def test_scenario_6_gate2_remix_update_returns_same_raw_video_with_new_remix(self):
-        """Scenario 6: HITL Gate 2, user asks for remix update -> Returns same raw video with new remixed video (v2)."""
+        """Scenario 6: HITL Gate 2, user asks for remix update -> Preserves raw video, archives previous remix to v1, and returns fresh remix."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "panda")
             os.makedirs(output_path, exist_ok=True)
@@ -405,16 +413,18 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.ainvoke.assert_not_called()
                 self.assertEqual(state_turn3["raw_video_path"], raw_vid_v1)
 
-                # Remixed video MUST be incremented to v2
-                video_path_v2 = os.path.join(output_path, "panda_video_v2.mp4")
-                self.assertEqual(state_turn3["remixed_video_path"], video_path_v2)
-                self.assertTrue(os.path.isfile(video_path_v2))
+                # Remixed video MUST be refreshed at canonical path with v1 archived
+                canonical_remix = os.path.join(output_path, "panda_video.mp4")
+                archived_v1_remix = os.path.join(output_path, "panda_video_v1.mp4")
+                self.assertEqual(state_turn3["remixed_video_path"], canonical_remix)
+                self.assertTrue(os.path.isfile(canonical_remix))
+                self.assertTrue(os.path.isfile(archived_v1_remix))
 
                 # Invariants must pass cleanly
                 assert_gate2_revision_invariants(state_turn2, state_turn3)
 
     async def test_scenario_7_gate2_copy_update_returns_new_copy_with_same_video(self):
-        """Scenario 7: HITL Gate 2, user asks for copy update -> Returns new copy (v2) with same video."""
+        """Scenario 7: HITL Gate 2, user asks for copy update -> Preserves videos, archives previous copy to v1, and returns fresh copy."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "apple")
             os.makedirs(output_path, exist_ok=True)
@@ -492,10 +502,12 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state_turn3["raw_video_path"], raw_vid_v1)
                 self.assertEqual(state_turn3["remixed_video_path"], remix_vid_v1)
 
-                # Copy MUST be incremented to v2
-                expected_v2_copy = os.path.join(output_path, "apple_copy_v2.md")
-                self.assertEqual(state_turn3["copy_path"], expected_v2_copy)
-                self.assertTrue(os.path.isfile(expected_v2_copy))
+                # Copy MUST be refreshed at canonical path with v1 archived
+                canonical_copy = os.path.join(output_path, "apple_copy.md")
+                archived_v1_copy = os.path.join(output_path, "apple_copy_v1.md")
+                self.assertEqual(state_turn3["copy_path"], canonical_copy)
+                self.assertTrue(os.path.isfile(canonical_copy))
+                self.assertTrue(os.path.isfile(archived_v1_copy))
 
                 # Invariants must pass cleanly
                 assert_gate2_revision_invariants(state_turn2, state_turn3)

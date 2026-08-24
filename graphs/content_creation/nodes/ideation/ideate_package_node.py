@@ -1,6 +1,6 @@
 import os
 from langchain_core.messages import AIMessage
-from graphs.content_creation.utils.paths import normalize_project_path, canonicalize_output_path, infer_paths_from_state, validate_inter_node_paths
+from graphs.content_creation.utils.paths import validate_inter_node_paths
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.adapters import format_gate1_presentation
 from .generate_image import generate_image_task
@@ -12,13 +12,17 @@ async def ideate_package_node(state: dict) -> dict:
     if state.get("error_message"):
         return {}
 
+    project_path = state.get("project_path")
+    output_path = state.get("output_path")
+    if not project_path or not output_path:
+        return {
+            "error_message": "Missing required project/output path. Both 'project_path' and 'output_path' must be explicitly provided."
+        }
+
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path, output_path = infer_paths_from_state(state)
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     working_state = dict(state)
-    working_state["project_path"] = project_path
-    working_state["output_path"] = output_path
 
     human_feedback = state.get("latest_human_feedback")
     gate1_decision = state.get("gate1_decision")

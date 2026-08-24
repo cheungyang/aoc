@@ -1,5 +1,4 @@
 import os
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, _resolve_project_doc_path, canonicalize_output_path
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.schemas import PlotAudit
 from graphs.content_creation.prompts import build_audit_plot_prompt
@@ -10,11 +9,11 @@ async def audit_plot_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path = normalize_project_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
-    qc_playbook_path = _resolve_project_doc_path(state.get("qc_playbook_path"), project_path, "03_QC_Playbook.md")
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
-    image_path = state.get("image_path") or _resolve_asset_path(output_path, topic, "image", next_version=False)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
+    qc_playbook_path = state.get("qc_playbook_path") or (os.path.join(project_path, "03_QC_Playbook.md") if project_path else "")
+    video_plot_path = state.get("video_plot_path", "")
+    image_path = state.get("image_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     plot_content = ""

@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_project_path, _resolve_asset_path, canonicalize_output_path, resolve_task_asset
+from graphs.content_creation.utils.paths import resolve_task_asset
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent, extract_remix_parameters
 from tools.remix_video import remix_video
@@ -12,28 +12,15 @@ async def remix_video_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path = normalize_project_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
-    raw_video_path = normalize_project_path(state.get("raw_video_path"))
-
-    # Resilient resolution of raw_video_path under canonical output_path
-    if not raw_video_path or not (os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):
-        cand = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
-        if cand and os.path.isfile(cand) and os.path.getsize(cand) > 0:
-            raw_video_path = cand
-        elif raw_video_path and output_path:
-            cand2 = os.path.join(output_path, os.path.basename(raw_video_path))
-            if os.path.isfile(cand2) and os.path.getsize(cand2) > 0:
-                raw_video_path = cand2
-        else:
-            raw_video_path = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
+    raw_video_path = state.get("raw_video_path") or (os.path.join(output_path, f"{topic}_raw_video.mp4") if output_path else "")
 
     human_feedback = state.get("latest_human_feedback", "")
     gate2_decision = state.get("gate2_decision") or classify_gate2_intent(human_feedback)
     needs_remix_revision = (
         state.get("gate2_decision") in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"] or
-        bool(human_feedback and gate2_decision in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"]) or
-        bool(raw_video_path and re.search(r'_v\d+', os.path.basename(raw_video_path)))
+        bool(human_feedback and gate2_decision in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"])
     )
 
     video_path, should_generate = resolve_task_asset(output_path, topic, "video", needs_revision=needs_remix_revision)
@@ -43,7 +30,7 @@ async def remix_video_task(state: dict) -> dict:
             "video_persisted": True
         }
 
-    video_plot_path = state.get("video_plot_path") or _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    video_plot_path = state.get("video_plot_path") or (os.path.join(output_path, f"{topic}_video_plot.md") if output_path else "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
 
     if not (raw_video_path and os.path.isfile(raw_video_path) and os.path.getsize(raw_video_path) > 0):

@@ -7,7 +7,9 @@ from graphs.content_creation.utils.paths import (
     normalize_project_path,
     _resolve_project_doc_path,
     _resolve_asset_path,
-    canonicalize_output_path
+    canonicalize_output_path,
+    bind_canonical_paths,
+    extract_aspect_ratio_from_instructions
 )
 
 def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[str, Any]:
@@ -67,9 +69,6 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
     style = style or "3D"
 
-    if project_path:
-        project_path = normalize_project_path(project_path)
-
     if not topic:
         m_topic = re.search(r'(?:topic|word)[:=]\s*["\']?([a-zA-Z0-9_ -]+)["\']?', query, re.IGNORECASE)
         if m_topic:
@@ -92,45 +91,36 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
                 topic = "scene"
 
     topic = str(topic).strip().lower()
-    qc_timestamps = kwargs.get("qc_timestamps") or [1.0, 2.5, 4.0]
 
-    output_path = canonicalize_output_path(project_path, output_path_param, topic) if (output_path_param or project_path) else ""
-
-    source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
-    if not output_path and not project_path:
-        error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_path: 'path/to/project' or output_path: 'path/to/project/words/topic')."
-        manifest_path = kwargs.get("manifest_path", "")
-        creator_instructions_path = kwargs.get("creator_instructions_path", "")
-        qc_playbook_path = kwargs.get("qc_playbook_path", "")
-        output_path = ""
-        execution_log_path = ""
-        image_path = ""
-        video_plot_path = ""
-        raw_video_path = ""
-        video_path = ""
-        copy_path = ""
-        audio_path = ""
-        overlay_text = ""
+    if not project_path or not output_path_param:
+        error_msg = "Missing required project/output path. You must explicitly define where assets should be saved (e.g., project_path: 'path/to/project' and output_path: 'path/to/project/words/topic')."
+        paths = {
+            "project_path": "",
+            "output_path": "",
+            "image_path": "",
+            "video_plot_path": "",
+            "raw_video_path": "",
+            "video_path": "",
+            "remixed_video_path": "",
+            "copy_path": "",
+            "audio_path": "",
+            "manifest_path": "",
+            "creator_instructions_path": "",
+            "qc_playbook_path": "",
+            "execution_log_path": ""
+        }
     else:
         error_msg = ""
-        manifest_path = _resolve_project_doc_path(kwargs.get("manifest_path"), project_path, "01_Project_Manifest.md")
-        creator_instructions_path = _resolve_project_doc_path(kwargs.get("creator_instructions_path"), project_path, "02_Creator_Instructions.md")
-        qc_playbook_path = _resolve_project_doc_path(kwargs.get("qc_playbook_path"), project_path, "03_QC_Playbook.md")
-        execution_log_path = kwargs.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
+        paths = bind_canonical_paths(project_path, output_path_param, topic)
 
-        image_path = _resolve_asset_path(output_path, topic, "image", next_version=False)
-        video_plot_path = _resolve_asset_path(output_path, topic, "video_plot", next_version=False)
-        raw_video_path = _resolve_asset_path(output_path, topic, "raw_video", next_version=False)
-        video_path = _resolve_asset_path(output_path, topic, "video", next_version=False)
-        copy_path = _resolve_asset_path(output_path, topic, "copy", next_version=False)
-        
-        source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
-        audio_path = kwargs.get("audio_path") or source_audio or (os.path.join(output_path, f"{topic}_wav.wav") if output_path else f"{topic}_wav.wav")
-        overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
+    source_audio = kwargs.get("source_audio_path") or kwargs.get("audio") or kwargs.get("source_audio") or ""
+    overlay_text = kwargs.get("overlay_text") or kwargs.get("text") or ""
+
+    manifest_path = paths["manifest_path"]
+    creator_instructions_path = paths["creator_instructions_path"]
 
     aspect_ratio = kwargs.get("aspect_ratio")
     if not aspect_ratio and (creator_instructions_path or manifest_path):
-        from graphs.content_creation.utils.paths import extract_aspect_ratio_from_instructions
         instr_text = ""
         for p in [manifest_path, creator_instructions_path]:
             if p and os.path.exists(p):
@@ -144,25 +134,26 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     aspect_ratio = aspect_ratio or "16:9"
 
     return {
-        "project_path": project_path,
-        "output_path": output_path,
+        "project_path": paths["project_path"],
+        "output_path": paths["output_path"],
         "topic": topic,
         "style": style,
         "aspect_ratio": aspect_ratio,
         "session_id": session_id,
         "thread_id": thread_id,
-        "manifest_path": manifest_path,
-        "creator_instructions_path": creator_instructions_path,
-        "qc_playbook_path": qc_playbook_path,
-        "execution_log_path": execution_log_path,
+        "manifest_path": paths["manifest_path"],
+        "creator_instructions_path": paths["creator_instructions_path"],
+        "qc_playbook_path": paths["qc_playbook_path"],
+        "execution_log_path": paths["execution_log_path"],
         "source_audio_path": source_audio,
+        "audio_path": paths["audio_path"],
         "overlay_text": overlay_text,
-        "image_path": image_path,
-        "video_plot_path": video_plot_path,
-        "raw_video_path": raw_video_path if output_path else "",
-        "remixed_video_path": video_path,
+        "image_path": paths["image_path"],
+        "video_plot_path": paths["video_plot_path"],
+        "raw_video_path": paths["raw_video_path"],
+        "remixed_video_path": paths["remixed_video_path"],
         "extracted_frames_path": [],
-        "copy_path": copy_path,
+        "copy_path": paths["copy_path"],
         "video_plot_qc_passed": False,
         "video_qc_passed": False,
         "video_qc_attempts": 0,

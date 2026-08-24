@@ -5,10 +5,11 @@ from unittest.mock import patch, MagicMock
 from graphs.content_creation.utils.paths import (
     normalize_path,
     normalize_project_path,
-    resolve_under_project,
     resolve_project_doc_path,
     resolve_asset_path,
-    canonicalize_output_path,
+    resolve_task_asset,
+    archive_asset_for_revision,
+    bind_canonical_paths,
     extract_aspect_ratio_from_instructions,
     validate_inter_node_paths
 )
@@ -17,7 +18,7 @@ from graphs.content_creation.utils.invariants import AssetInvariantError
 
 class TestPaths(unittest.TestCase):
     def test_normalize_path(self):
-        self.assertEqual(normalize_path("foo/bar/"), "foo/bar")
+        self.assertEqual(normalize_path("foo/bar/"), os.path.abspath("foo/bar"))
         self.assertEqual(normalize_path(None), "")
         self.assertEqual(normalize_path(""), "")
 
@@ -38,65 +39,74 @@ class TestPaths(unittest.TestCase):
         mock_exists.side_effect = exists_side_effect
         self.assertEqual(normalize_project_path("wiki/software/test"), "/mock/pkm/wiki/software/test")
 
-    def test_resolve_under_project(self):
-        # Already prefixed
-        self.assertEqual(
-            resolve_under_project("pkm/wiki/ayla", "pkm/wiki/ayla/01_Manifest.md"),
-            "pkm/wiki/ayla/01_Manifest.md"
-        )
-        # Relative child
-        self.assertEqual(
-            resolve_under_project("pkm/wiki/ayla", "01_Manifest.md"),
-            "pkm/wiki/ayla/01_Manifest.md"
-        )
-        # Deduplicate directory segment
-        self.assertEqual(
-            resolve_under_project("pkm/wiki/ayla/words", "words/horse"),
-            "pkm/wiki/ayla/words/horse"
-        )
-        # Default subpath fallback
-        self.assertEqual(
-            resolve_under_project("pkm/wiki/ayla", "", "01_Default.md"),
-            "pkm/wiki/ayla/01_Default.md"
-        )
+    def test_bind_canonical_paths_validation(self):
+        with self.assertRaises(ValueError):
+            bind_canonical_paths("", "output/path", "horse")
+        with self.assertRaises(ValueError):
+            bind_canonical_paths("project/path", "", "horse")
+
+        paths = bind_canonical_paths("project/path", "output/path", "horse")
+        self.assertEqual(paths["topic"], "horse")
+        self.assertTrue(os.path.isabs(paths["project_path"]))
+        self.assertTrue(os.path.isabs(paths["output_path"]))
+        self.assertTrue(paths["image_path"].endswith("horse_image.jpg"))
+        self.assertTrue(paths["video_plot_path"].endswith("horse_video_plot.md"))
+        self.assertTrue(paths["raw_video_path"].endswith("horse_raw_video.mp4"))
+        self.assertTrue(paths["remixed_video_path"].endswith("horse_video.mp4"))
+        self.assertTrue(paths["copy_path"].endswith("horse_copy.md"))
 
     def test_resolve_project_doc_path(self):
         self.assertEqual(
-            resolve_project_doc_path(None, "pkm/wiki/ayla", "01_Project_Manifest.md"),
-            "pkm/wiki/ayla/01_Project_Manifest.md"
+            resolve_project_doc_path(None, "/tmp/project", "01_Project_Manifest.md"),
+            "/tmp/project/01_Project_Manifest.md"
         )
         self.assertEqual(
-            resolve_project_doc_path("custom_manifest.md", "pkm/wiki/ayla", "01_Project_Manifest.md"),
-            "pkm/wiki/ayla/custom_manifest.md"
+            resolve_project_doc_path("custom_manifest.md", "/tmp/project", "01_Project_Manifest.md"),
+            "/tmp/project/custom_manifest.md"
         )
 
-    def test_resolve_asset_path_versioning(self):
+    def test_archive_asset_for_revision(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            # v1 resolution
-            v1_path = resolve_asset_path(temp_dir, "horse", "image", next_version=False)
-            self.assertEqual(v1_path, os.path.join(temp_dir, "horse_image.jpg"))
+            img_file = os.path.join(temp_dir, "horse_image.jpg")
+            with open(img_file, "w") as f:
+                f.write("active content")
 
-            # Create file
-            with open(v1_path, "w") as f:
-                f.write("v1")
+            # First rejection: archives horse_image.jpg -> horse_image_v1.jpg
+            archived = archive_asset_for_revision(img_file)
+            self.assertEqual(archived, os.path.join(temp_dir, "horse_image_v1.jpg"))
+            self.assertTrue(os.path.exists(archived))
+            self.assertFalse(os.path.exists(img_file))
 
-            # Check next_version=True returns v2
-            v2_path = resolve_asset_path(temp_dir, "horse", "image", next_version=True)
-            self.assertEqual(v2_path, os.path.join(temp_dir, "horse_image_v2.jpg"))
+            # New active content written
+            with open(img_file, "w") as f:
+                f.write("v2 active content")
 
-    def test_canonicalize_output_path(self):
-        self.assertEqual(
-            canonicalize_output_path("pkm/wiki/ayla/words", "words/horse", "horse"),
-            "pkm/wiki/ayla/words/horse"
-        )
-        self.assertEqual(
-            canonicalize_output_path("pkm/wiki/ayla/words", "horse", "horse"),
-            "pkm/wiki/ayla/words/horse"
-        )
-        self.assertEqual(
-            canonicalize_output_path("pkm/wiki/ayla", "words/horse", "horse"),
-            "pkm/wiki/ayla/words/horse"
-        )
+            # Second rejection: archives horse_image.jpg -> horse_image_v2.jpg
+            archived2 = archive_asset_for_revision(img_file)
+            self.assertEqual(archived2, os.path.join(temp_dir, "horse_image_v2.jpg"))
+            self.assertTrue(os.path.exists(archived2))
+            self.assertTrue(os.path.exists(archived))
+
+    def test_resolve_task_asset_archive_on_reject(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img_path, should_gen = resolve_task_asset(temp_dir, "horse", "image", needs_revision=False)
+            self.assertEqual(img_path, os.path.join(temp_dir, "horse_image.jpg"))
+            self.assertTrue(should_gen)
+
+            # Create file on disk
+            with open(img_path, "w") as f:
+                f.write("initial image")
+
+            # Subsequent check without revision returns should_generate=False
+            img_path_reuse, should_gen_reuse = resolve_task_asset(temp_dir, "horse", "image", needs_revision=False)
+            self.assertEqual(img_path_reuse, img_path)
+            self.assertFalse(should_gen_reuse)
+
+            # Revision request archives existing to _v1 and returns same canonical path
+            img_path_rev, should_gen_rev = resolve_task_asset(temp_dir, "horse", "image", needs_revision=True)
+            self.assertEqual(img_path_rev, img_path)
+            self.assertTrue(should_gen_rev)
+            self.assertTrue(os.path.exists(os.path.join(temp_dir, "horse_image_v1.jpg")))
 
     def test_extract_aspect_ratio_from_instructions(self):
         # Format 1: aspect_ratio: 9:16
@@ -129,23 +139,6 @@ class TestPaths(unittest.TestCase):
         }
         with self.assertRaises(AssetInvariantError):
             validate_inter_node_paths(invalid, "node_test")
-
-    def test_infer_paths_from_state(self):
-        from graphs.content_creation.utils.paths import infer_paths_from_state
-        state = {
-            "topic": "cat",
-            "project_path": "",
-            "output_path": "cat",
-            "image_path": "pkm/wiki/software/ayla-first-words/words/cat/cat_image_v2.jpg"
-        }
-        p_path, out_path = infer_paths_from_state(state)
-        self.assertEqual(p_path, "pkm/wiki/software/ayla-first-words")
-        self.assertEqual(out_path, "pkm/wiki/software/ayla-first-words/words/cat")
-
-        # Invariants pass cleanly with inferred paths
-        state["project_path"] = p_path
-        state["output_path"] = out_path
-        validate_inter_node_paths(state, "produce_deliverables")
 
 
 if __name__ == "__main__":

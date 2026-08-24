@@ -19,6 +19,14 @@ class TestCodingAdapters(unittest.TestCase):
         res = prepare_input(query="Run build without dir")
         self.assertIn("Initialization error: 'project_path' is required", res["error_message"])
 
+    def test_prepare_input_project_path_resolution(self):
+        res = prepare_input(
+            query="Run build",
+            project_path="pkm/wiki/software/aoc"
+        )
+        self.assertTrue(res["project_path"].endswith("pkm/wiki/software/aoc"))
+        self.assertTrue(res["build_request_path"].endswith("pkm/wiki/software/build_request.json"))
+
     def test_prepare_input_human_feedback_extraction(self):
         res = prepare_input(
             query="Approve, please merge!",

@@ -94,10 +94,11 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
                 "feature_name": "auth",
                 "project_name": "cc-tracker"
             },
-            "project_path": "/tmp/repo"
+            "project_path": "pkm/wiki/software/cc-tracker"
         }
         res = await provisioner_node(state)
-        self.assertIn("run_8F2A", res["workspace_path"])
+        self.assertTrue(res["workspace_path"].endswith("workspaces/runs/run_8F2A"))
+        self.assertNotIn("pkm", res["workspace_path"])
         self.assertEqual(res["branch_name"], "feat/cc-tracker/auth_run_8F2A")
         self.assertEqual(res["error_message"], "")
 

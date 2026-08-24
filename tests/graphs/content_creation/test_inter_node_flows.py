@@ -4,15 +4,13 @@ import unittest
 import tempfile
 import json
 from unittest.mock import AsyncMock, patch
-from PIL import Image
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from graphs.content_creation.utils.paths import (
-    canonicalize_output_path,
     validate_inter_node_paths,
-    _resolve_asset_path,
-    normalize_project_path
+    bind_canonical_paths,
+    normalize_path
 )
 from graphs.content_creation.utils.invariants import AssetInvariantError
 from graphs.content_creation.nodes.ingestion import ingest_audio_node
@@ -29,39 +27,34 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     """Integration test suite verifying path mapping, aspect ratio preservation,
     and asset flows BETWEEN nodes in the content_creation graph."""
 
-    def test_canonicalize_output_path_deduplication(self):
-        """Tests that canonicalize_output_path eliminates words/words duplication and handles varied path formats."""
-        # Case 1: project_path has words/, output_path is words/horse -> should NOT create words/words/horse
-        res1 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "words/horse", "horse")
-        self.assertEqual(res1, "pkm/wiki/software/ayla-first-words/words/horse")
-
-        # Case 2: project_path is parent, output_path is words/horse
-        res2 = canonicalize_output_path("pkm/wiki/software/ayla-first-words", "words/horse", "horse")
-        self.assertEqual(res2, "pkm/wiki/software/ayla-first-words/words/horse")
-
-        # Case 3: project_path has words/, output_path is just horse
-        res3 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "horse", "horse")
-        self.assertEqual(res3, "pkm/wiki/software/ayla-first-words/words/horse")
-
-        # Case 4: output_path already absolute / full
-        res4 = canonicalize_output_path("pkm/wiki/software/ayla-first-words/words", "pkm/wiki/software/ayla-first-words/words/horse", "horse")
-        self.assertEqual(res4, "pkm/wiki/software/ayla-first-words/words/horse")
+    def test_bind_canonical_paths_validation(self):
+        """Tests deterministic path binding at graph ingress."""
+        paths = bind_canonical_paths(
+            "pkm/wiki/software/ayla-first-words",
+            "pkm/wiki/software/ayla-first-words/words/horse",
+            "horse"
+        )
+        self.assertTrue(paths["output_path"].endswith("words/horse"))
+        self.assertTrue(paths["image_path"].endswith("horse_image.jpg"))
+        self.assertTrue(paths["video_plot_path"].endswith("horse_video_plot.md"))
+        self.assertTrue(paths["raw_video_path"].endswith("horse_raw_video.mp4"))
+        self.assertTrue(paths["remixed_video_path"].endswith("horse_video.mp4"))
 
     def test_validate_inter_node_paths_fails_on_mismatch(self):
         """Tests that validate_inter_node_paths catches path divergence between nodes."""
         valid_state = {
-            "output_path": "pkm/wiki/software/ayla-first-words/words/horse",
-            "image_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_image.jpg",
-            "raw_video_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_raw_video.mp4"
+            "output_path": "/tmp/project/horse",
+            "image_path": "/tmp/project/horse/horse_image.jpg",
+            "raw_video_path": "/tmp/project/horse/horse_raw_video.mp4"
         }
         # Should succeed without error
         validate_inter_node_paths(valid_state, "test_node")
 
-        # Divergent path (e.g. words/words/horse/horse_raw_video.mp4)
+        # Divergent path
         invalid_state = {
-            "output_path": "pkm/wiki/software/ayla-first-words/words/horse",
-            "image_path": "pkm/wiki/software/ayla-first-words/words/horse/horse_image.jpg",
-            "raw_video_path": "words/words/horse/horse_raw_video.mp4"
+            "output_path": "/tmp/project/horse",
+            "image_path": "/tmp/project/horse/horse_image.jpg",
+            "raw_video_path": "/tmp/other_dir/horse_raw_video.mp4"
         }
         with self.assertRaises(AssetInvariantError) as ctx:
             validate_inter_node_paths(invalid_state, "test_node")
@@ -82,7 +75,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
             # Ingest Audio Node
             ingest_state = {
                 "project_path": project_path,
-                "output_path": "words/horse",
+                "output_path": horse_dir,
                 "topic": "horse"
             }
             ingest_res = await ingest_audio_node(ingest_state)
@@ -231,29 +224,25 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(call_args.get("aspect_ratio"), "9:16")
 
     async def test_gate1_image_revision_invariant_incrementation(self):
-        """Explicitly tests that Gate 1 image revision increments image_path to v2 and passes assert_gate1_revision_invariants."""
+        """Explicitly tests that Gate 1 image revision archives existing image to v1 and preserves canonical path."""
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "fish")
             os.makedirs(output_path, exist_ok=True)
 
-            v1_img = os.path.join(output_path, "fish_image.jpg")
-            with open(v1_img, "wb") as f:
+            canonical_img = os.path.join(output_path, "fish_image.jpg")
+            with open(canonical_img, "wb") as f:
                 f.write(b"FISH_V1_BYTES")
 
-            v1_plot = os.path.join(output_path, "fish_video_plot.md")
-            with open(v1_plot, "w") as f:
+            canonical_plot = os.path.join(output_path, "fish_video_plot.md")
+            with open(canonical_plot, "w") as f:
                 f.write("# Plot v1")
-
-            v2_plot = os.path.join(output_path, "fish_video_plot_v2.md")
-            with open(v2_plot, "w") as f:
-                f.write("# Plot v2")
 
             state = {
                 "project_path": temp_dir,
                 "output_path": output_path,
                 "topic": "fish",
-                "image_path": v1_img,
-                "video_plot_path": v1_plot,
+                "image_path": canonical_img,
+                "video_plot_path": canonical_plot,
                 "gate1_decision": "revise_image",
                 "latest_human_feedback": "Make the fish orange clownfish style"
             }
@@ -270,13 +259,12 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
 
                 img_res = await generate_image_task(state)
 
-                expected_v2_img = os.path.join(output_path, "fish_image_v2.jpg")
-                self.assertEqual(img_res["image_path"], expected_v2_img)
-                self.assertTrue(os.path.isfile(expected_v2_img))
+                self.assertEqual(img_res["image_path"], canonical_img)
+                self.assertTrue(os.path.isfile(canonical_img))
+                self.assertTrue(os.path.isfile(os.path.join(output_path, "fish_image_v1.jpg")))
 
                 working_state = dict(state)
                 working_state.update(img_res)
-                working_state["video_plot_path"] = v2_plot
                 # Ensure invariant assertion passes cleanly without error
                 assert_gate1_revision_invariants(state, working_state)
 

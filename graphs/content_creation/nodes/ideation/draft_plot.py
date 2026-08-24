@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, load_project_context
+from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from graphs.content_creation.prompts import build_draft_plot_prompt
@@ -13,8 +13,8 @@ async def draft_plot_task(state: dict) -> dict:
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
     style = str(state.get("style") or "3D").strip()
-    project_path = normalize_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     feedback = state.get("video_plot_feedback")
     human_feedback = state.get("latest_human_feedback")
@@ -41,7 +41,7 @@ async def draft_plot_task(state: dict) -> dict:
 
     video_plot_json_path = video_plot_path.replace(".md", ".json")
     image_path = state.get("image_path", "")
-    audio_path = state.get("source_audio_path") or (os.path.join(output_path, f"{topic}_wav.wav") if output_path else f"{topic}_wav.wav")
+    audio_path = state.get("source_audio_path") or state.get("audio_path") or (os.path.join(output_path, f"{topic}_wav.wav") if output_path else f"{topic}_wav.wav")
 
     ctx = load_project_context(
         project_path=project_path,
@@ -85,13 +85,6 @@ async def draft_plot_task(state: dict) -> dict:
         error_m = re.search(r"<error>(.*?)</error>", payload, re.DOTALL)
         error = error_m.group(1).strip() if error_m else ""
 
-        plot_path_m = re.search(r"<video_plot_path>(.*?)</video_plot_path>", payload, re.DOTALL)
-        if plot_path_m and plot_path_m.group(1).strip():
-            ret_path = plot_path_m.group(1).strip()
-            if not ret_path.startswith("{") and not ret_path.endswith("}"):
-                video_plot_path = ret_path
-                video_plot_json_path = video_plot_path.replace(".md", ".json")
-
         motion_m = re.search(r"<motion_prompt>(.*?)</motion_prompt>", payload, re.DOTALL)
         overlay_m = re.search(r"<overlay_text>(.*?)</overlay_text>", payload, re.DOTALL)
         md_m = re.search(r"<markdown_content>(.*?)</markdown_content>", payload, re.DOTALL)
@@ -125,7 +118,7 @@ async def draft_plot_task(state: dict) -> dict:
         }
 
         # 2. Fallback: JSON parsing
-        if not md_m and not motion_m and not plot_path_m:
+        if not md_m and not motion_m:
             try:
                 data = json.loads(payload)
                 if isinstance(data, dict):

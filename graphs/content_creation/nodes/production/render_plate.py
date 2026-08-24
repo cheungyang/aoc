@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from graphs.content_creation.utils.paths import normalize_path, canonicalize_output_path, resolve_task_asset, resolve_asset_path, load_project_context
+from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from tools.generate_animation_veo3 import generate_animation_veo3
@@ -12,10 +12,10 @@ async def render_plate_task(state: dict) -> dict:
         return {}
 
     topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
-    project_path = normalize_path(state.get("project_path", ""))
-    output_path = canonicalize_output_path(project_path, state.get("output_path"), topic)
-    image_path = state.get("image_path") or resolve_asset_path(output_path, topic, "image", next_version=False)
-    video_plot_path = state.get("video_plot_path") or resolve_asset_path(output_path, topic, "video_plot", next_version=False)
+    project_path = state.get("project_path", "")
+    output_path = state.get("output_path", "")
+    image_path = state.get("image_path") or (os.path.join(output_path, f"{topic}_image.jpg") if output_path else "")
+    video_plot_path = state.get("video_plot_path") or (os.path.join(output_path, f"{topic}_video_plot.md") if output_path else "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
     gate2_decision = state.get("gate2_decision")
@@ -93,15 +93,7 @@ async def render_plate_task(state: dict) -> dict:
         if "<payload>" in result and "</payload>" in result:
             saved = result.split("<payload>")[1].split("</payload>")[0].strip()
             if saved and os.path.exists(saved):
-                if raw_video_path and os.path.abspath(saved) == os.path.abspath(raw_video_path):
-                    pass
-                else:
-                    from core.util.config import Config
-                    codebase_dir = Config().codebase_dir
-                    if saved.startswith(codebase_dir):
-                        raw_video_path = os.path.relpath(saved, codebase_dir)
-                    else:
-                        raw_video_path = saved
+                raw_video_path = saved
         tool_err = ""
         if "<errors>" in result and "</errors>" in result:
             tool_err = result.split("<errors>")[1].split("</errors>")[0].strip()

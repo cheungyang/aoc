@@ -54,13 +54,13 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            expected_v2_path = os.path.join(output_path, "cat_video_plot_v2.md")
+            canonical_plot_path = os.path.join(output_path, "cat_video_plot.md")
+            archived_v1 = os.path.join(output_path, "cat_video_plot_v1.md")
             mock_response = (
                 f"<payload>\n"
                 f"<status>success</status>\n"
                 f"<error></error>\n"
                 f"<title>Cat Video Plot V2</title>\n"
-                f"<video_plot_path>{expected_v2_path}</video_plot_path>\n"
                 f"<motion_prompt>Fast cat running</motion_prompt>\n"
                 f"<overlay_text>CAT</overlay_text>\n"
                 f"</payload>"
@@ -71,8 +71,9 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
                 result = await draft_plot_task(state)
 
-                self.assertEqual(result["video_plot_path"], expected_v2_path)
-                self.assertTrue(os.path.exists(expected_v2_path))
+                self.assertEqual(result["video_plot_path"], canonical_plot_path)
+                self.assertTrue(os.path.exists(canonical_plot_path))
+                self.assertTrue(os.path.exists(archived_v1))
                 with open(result["video_plot_path"], "r") as f:
                     content = f.read()
                     self.assertIn("Fast cat running", content)
@@ -95,9 +96,9 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 f"<status>success</status>\n"
                 f"<error></error>\n"
                 f"<title>Playful Cat</title>\n"
-                f"<video_plot_path>{plot_md_path}</video_plot_path>\n"
                 f"<motion_prompt>Cat jumping playful kitten paws motion</motion_prompt>\n"
                 f"<overlay_text>貓貓</overlay_text>\n"
+                f"<markdown_content># Playful Cat\nCat jumping playful kitten paws motion\nOverlay Text: 貓貓</markdown_content>\n"
                 f"</payload>"
             )
 
@@ -146,7 +147,6 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 f"<status>success</status>\n"
                 f"<error></error>\n"
                 f"<title>Cat</title>\n"
-                f"<video_plot_path>{plot_md_path}</video_plot_path>\n"
                 f"<motion_prompt>Kitten paws motion</motion_prompt>\n"
                 f"<overlay_text>CAT</overlay_text>\n"
                 f"</payload>"
@@ -239,16 +239,18 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
             with open(state["creator_instructions_path"], "w") as f:
                 f.write("Instructions")
 
-            expected_v2 = os.path.join(output_path, "cat_video_plot_v2.md")
-            mock_response = f"<payload><video_plot_path>{expected_v2}</video_plot_path><motion_prompt>rapid zoom and pan</motion_prompt><overlay_text>CAT</overlay_text></payload>"
+            canonical_plot = os.path.join(output_path, "cat_video_plot.md")
+            archived_v1 = os.path.join(output_path, "cat_video_plot_v1.md")
+            mock_response = f"<payload><motion_prompt>rapid zoom and pan</motion_prompt><overlay_text>CAT</overlay_text></payload>"
 
             with patch("tools.agent_call.agent_call") as mock_agent_call:
                 mock_agent_call.ainvoke = AsyncMock(return_value=mock_response)
 
                 result = await draft_plot_task(state)
 
-                self.assertEqual(result["video_plot_path"], expected_v2)
-                self.assertTrue(os.path.exists(expected_v2))
+                self.assertEqual(result["video_plot_path"], canonical_plot)
+                self.assertTrue(os.path.exists(canonical_plot))
+                self.assertTrue(os.path.exists(archived_v1))
                 with open(result["video_plot_path"], "r") as f:
                     self.assertIn("rapid zoom and pan", f.read())
 
@@ -272,6 +274,7 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
 
             result = await draft_plot_task(state)
             self.assertEqual(result["video_plot_path"], existing_plot_path)
+
 
 if __name__ == "__main__":
     unittest.main()

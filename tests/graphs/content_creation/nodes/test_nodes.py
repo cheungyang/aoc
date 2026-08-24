@@ -116,6 +116,7 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         state = {
             "topic": "local",
             "project_path": self.project_path,
+            "output_path": os.path.join(self.project_path, "local"),
             "messages": [HumanMessage(content=local_file)]
         }
 
@@ -123,42 +124,39 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.get("source_audio_path"), local_file)
 
     async def test_receive_audio_from_existing_directory_file(self):
-        existing_audio = os.path.join(self.project_path, "dog_sound.wav")
+        out_dir = os.path.join(self.project_path, "dog")
+        os.makedirs(out_dir, exist_ok=True)
+        existing_audio = os.path.join(out_dir, "dog_sound.wav")
         with open(existing_audio, "wb") as f:
             f.write(b"EXISTING_WAV")
 
         state = {
             "topic": "dog",
             "project_path": self.project_path,
+            "output_path": out_dir,
             "messages": []
         }
 
         res = await receive_audio_node(state)
         self.assertEqual(res.get("source_audio_path"), existing_audio)
 
-    @patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.aiohttp.ClientSession")
-    async def test_receive_audio_downloads_to_inferred_output_path_when_output_path_omitted(self, mock_session_cls):
-        mock_session_cls.return_value = MockSession(MockResponse(data=b"INFERRED_OUTPUT_DIR_BYTES"))
-
+    async def test_receive_audio_missing_paths_returns_error(self):
         state = {
             "topic": "puppy",
-            "project_path": self.project_path,
             "messages": [
                 HumanMessage(content="[Attached file: Puppy_Audio.m4a](https://cdn.discordapp.com/attachments/1/2/Puppy_Audio.m4a)")
             ]
         }
 
         res = await receive_audio_node(state)
-        self.assertIn("source_audio_path", res)
-        expected_path = os.path.join(self.project_path, "puppy", "Puppy_Audio.m4a")
-        self.assertEqual(res["source_audio_path"], expected_path)
-        self.assertTrue(os.path.isfile(expected_path))
-        self.assertFalse(os.path.exists(os.path.join(self.project_path, "Puppy_Audio.m4a")))
+        self.assertIn("error_message", res)
+        self.assertIn("Missing required project/output path", res["error_message"])
 
     async def test_receive_audio_missing_returns_empty(self):
         state = {
             "topic": "bird",
             "project_path": self.project_path,
+            "output_path": os.path.join(self.project_path, "bird"),
             "messages": [HumanMessage(content="create content for bird")]
         }
 
