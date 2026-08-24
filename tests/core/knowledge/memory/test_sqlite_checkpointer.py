@@ -356,6 +356,14 @@ class TestSqliteCheckpointer(unittest.TestCase):
         tool_msg = retrieved_messages[2]
         self.assertIn(large_b64, tool_msg.content)
 
+    def test_no_file_descriptor_leak(self):
+        # Repeated checkpointer operations should close connections and not accumulate open FDs
+        config = {"configurable": {"thread_id": "fd_leak_thread"}}
+        for i in range(100):
+            self.checkpointer.put(config, {"id": f"cp_{i}"}, {"step": i}, {})
+            self.checkpointer.get_tuple(config)
+            list(self.checkpointer.list(config))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,9 +14,10 @@ class ScriptExecutorAgent(BaseAgent):
         super().__init__(agent_id, config or {})
 
     async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: List = None, role: str = "user") -> str:
-        session_id = SessionManager().get_session_id(self.agent_id, source, channel)
         if job_id is None:
             job_id = JobManager().new_job_id(self.agent_id)
+        is_stateless = self.config.get("stateless", False)
+        session_id = SessionManager().get_session_id(self.agent_id, source, channel, job_id=job_id, stateless=is_stateless)
             
         JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content)
         JobManager().update_job(job_id, "running")

@@ -154,5 +154,16 @@ class TestSqliteSessionStore(unittest.TestCase):
         self.assertEqual(history[0]["message"], json.dumps(list_msg))
         self.assertEqual(history[1]["message"], json.dumps(dict_msg))
 
+    def test_no_file_descriptor_leak(self):
+        # Repeated store operations should close connections and not accumulate open FDs
+        session_id = "fd_leak_session"
+        for i in range(100):
+            self.store.append_message(session_id, "user", f"msg_{i}")
+            self.store.append_token_usage(session_id, "model", 10, 10, 0.0)
+            self.store.load_history(session_id)
+            self.store.load_token_history(session_id)
+            self.store.list_active_sessions()
+
+
 if __name__ == "__main__":
     unittest.main()

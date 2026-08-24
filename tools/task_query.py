@@ -87,58 +87,54 @@ def task_query(
             return format_tool_response("task_query", payload=json.dumps(sync_result, indent=2))
 
         conn = get_connection()
-        init_db(conn)
+        try:
+            init_db(conn)
 
-        if action == "get":
-            if not task_id:
-                conn.close()
-                return format_tool_response("task_query", payload="", errors="Error: 'task_id' is required for action='get'.")
-            task = get_task_by_id(conn, task_id.strip())
-            conn.close()
-            if not task:
-                return format_tool_response("task_query", payload="", errors=f"Error: Task not found with ID '{task_id}'.")
-            return format_tool_response("task_query", payload=json.dumps(task, indent=2))
+            if action == "get":
+                if not task_id:
+                    return format_tool_response("task_query", payload="", errors="Error: 'task_id' is required for action='get'.")
+                task = get_task_by_id(conn, task_id.strip())
+                if not task:
+                    return format_tool_response("task_query", payload="", errors=f"Error: Task not found with ID '{task_id}'.")
+                return format_tool_response("task_query", payload=json.dumps(task, indent=2))
 
-        elif action == "stats":
-            stats = get_task_stats(conn)
-            conn.close()
-            return format_tool_response("task_query", payload=json.dumps(stats, indent=2))
+            elif action == "stats":
+                stats = get_task_stats(conn)
+                return format_tool_response("task_query", payload=json.dumps(stats, indent=2))
 
-        elif action == "sql":
-            if not sql:
-                conn.close()
-                return format_tool_response("task_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
-            results, err = execute_read_sql(conn, sql, limit=limit)
-            conn.close()
-            if err:
-                return format_tool_response("task_query", payload="", errors=err)
-            return format_tool_response("task_query", payload=json.dumps(results, indent=2))
+            elif action == "sql":
+                if not sql:
+                    return format_tool_response("task_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
+                results, err = execute_read_sql(conn, sql, limit=limit)
+                if err:
+                    return format_tool_response("task_query", payload="", errors=err)
+                return format_tool_response("task_query", payload=json.dumps(results, indent=2))
 
-        elif action == "search":
-            results = query_tasks_db(
-                conn=conn,
-                status=status,
-                tags=tags,
-                priority=priority,
-                min_priority=min_priority,
-                due_before=due_before,
-                due_after=due_after,
-                scheduled_date=scheduled_date,
-                source=source,
-                search_term=query,
-                limit=limit,
-                compact=compact
-            )
-            conn.close()
-            payload = {
-                "count": len(results),
-                "tasks": results
-            }
-            return format_tool_response("task_query", payload=json.dumps(payload, indent=2))
+            elif action == "search":
+                results = query_tasks_db(
+                    conn=conn,
+                    status=status,
+                    tags=tags,
+                    priority=priority,
+                    min_priority=min_priority,
+                    due_before=due_before,
+                    due_after=due_after,
+                    scheduled_date=scheduled_date,
+                    source=source,
+                    search_term=query,
+                    limit=limit,
+                    compact=compact
+                )
+                payload = {
+                    "count": len(results),
+                    "tasks": results
+                }
+                return format_tool_response("task_query", payload=json.dumps(payload, indent=2))
 
-        else:
+            else:
+                return format_tool_response("task_query", payload="", errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'.")
+        finally:
             conn.close()
-            return format_tool_response("task_query", payload="", errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'.")
 
     except Exception as e:
         return format_tool_response("task_query", payload="", errors=f"Error in task_query: {e}")

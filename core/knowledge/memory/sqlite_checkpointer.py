@@ -5,6 +5,7 @@ import json
 import time
 import zlib
 import re
+from contextlib import contextmanager
 from typing import Optional, List, Iterator, Sequence, Any, Dict
 from collections import defaultdict
 from langchain_core.runnables import RunnableConfig
@@ -163,13 +164,17 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA synchronous = NORMAL")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         # Trigger directory and initial connection check

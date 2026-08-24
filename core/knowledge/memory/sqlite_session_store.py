@@ -2,6 +2,7 @@ import os
 import sqlite3
 import json
 import time
+from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
 
 SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sessions"))
@@ -19,13 +20,17 @@ class SqliteSessionStore:
         self.db_path = db_path
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA synchronous = NORMAL")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _ensure_table(self, conn: sqlite3.Connection, table_name: str):
         conn.execute(f"""

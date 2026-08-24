@@ -91,65 +91,61 @@ def project_query(
             return format_tool_response("project_query", payload=json.dumps(sync_result, indent=2))
 
         conn = get_connection()
-        init_db(conn)
+        try:
+            init_db(conn)
 
-        if action == "get":
-            target_id = (id or project_id or name or "").strip()
-            if not target_id:
-                conn.close()
-                return format_tool_response("project_query", payload="", errors="Error: 'id' or 'name' is required for action='get'.")
+            if action == "get":
+                target_id = (id or project_id or name or "").strip()
+                if not target_id:
+                    return format_tool_response("project_query", payload="", errors="Error: 'id' or 'name' is required for action='get'.")
 
-            proj = get_project_by_id(conn, target_id)
-            if not proj:
-                proj = get_project_by_name(conn, target_id)
+                proj = get_project_by_id(conn, target_id)
+                if not proj:
+                    proj = get_project_by_name(conn, target_id)
 
+                if not proj:
+                    return format_tool_response("project_query", payload="", errors=f"Error: Project not found with ID or name '{target_id}'.")
+                return format_tool_response("project_query", payload=json.dumps(proj, indent=2, ensure_ascii=False))
+
+            elif action == "stats":
+                stats = get_project_stats(conn)
+                return format_tool_response("project_query", payload=json.dumps(stats, indent=2, ensure_ascii=False))
+
+            elif action == "sql":
+                if not sql:
+                    return format_tool_response("project_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
+                results, err = execute_read_sql(conn, sql, limit=limit)
+                if err:
+                    return format_tool_response("project_query", payload="", errors=err)
+                return format_tool_response("project_query", payload=json.dumps(results, indent=2, ensure_ascii=False))
+
+            elif action == "search":
+                results = query_projects_db(
+                    conn=conn,
+                    status=status if status else None,
+                    commitment_year=commitment_year,
+                    priority=priority if priority else None,
+                    min_priority=min_priority if min_priority else None,
+                    category=category if category else None,
+                    tags=tags,
+                    search_term=query if query else None,
+                    limit=limit,
+                    compact=compact
+                )
+                payload = {
+                    "count": len(results),
+                    "projects": results
+                }
+                return format_tool_response("project_query", payload=json.dumps(payload, indent=2, ensure_ascii=False))
+
+            else:
+                return format_tool_response(
+                    "project_query",
+                    payload="",
+                    errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'."
+                )
+        finally:
             conn.close()
-            if not proj:
-                return format_tool_response("project_query", payload="", errors=f"Error: Project not found with ID or name '{target_id}'.")
-            return format_tool_response("project_query", payload=json.dumps(proj, indent=2, ensure_ascii=False))
-
-        elif action == "stats":
-            stats = get_project_stats(conn)
-            conn.close()
-            return format_tool_response("project_query", payload=json.dumps(stats, indent=2, ensure_ascii=False))
-
-        elif action == "sql":
-            if not sql:
-                conn.close()
-                return format_tool_response("project_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
-            results, err = execute_read_sql(conn, sql, limit=limit)
-            conn.close()
-            if err:
-                return format_tool_response("project_query", payload="", errors=err)
-            return format_tool_response("project_query", payload=json.dumps(results, indent=2, ensure_ascii=False))
-
-        elif action == "search":
-            results = query_projects_db(
-                conn=conn,
-                status=status if status else None,
-                commitment_year=commitment_year,
-                priority=priority if priority else None,
-                min_priority=min_priority if min_priority else None,
-                category=category if category else None,
-                tags=tags,
-                search_term=query if query else None,
-                limit=limit,
-                compact=compact
-            )
-            conn.close()
-            payload = {
-                "count": len(results),
-                "projects": results
-            }
-            return format_tool_response("project_query", payload=json.dumps(payload, indent=2, ensure_ascii=False))
-
-        else:
-            conn.close()
-            return format_tool_response(
-                "project_query",
-                payload="",
-                errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'."
-            )
 
     except Exception as e:
         return format_tool_response("project_query", payload="", errors=f"Error in project_query: {e}")

@@ -90,6 +90,28 @@ class VoiceManager:
         # Fallback to the voice channel itself (Discord voice channels support text chat)
         return voice_channel
 
+    async def _cleanup_failed_connection(self, target_channel=None):
+        """Safely cleans up any dangling voice connection state and resources on failure."""
+        if self.vad_sink:
+            try:
+                self.vad_sink.cleanup()
+            except Exception:
+                pass
+            self.vad_sink = None
+
+        vc_to_disconnect = self.voice_client
+        self.voice_client = None
+
+        if not vc_to_disconnect and target_channel and hasattr(target_channel, "guild") and target_channel.guild:
+            vc_to_disconnect = target_channel.guild.voice_client
+
+        if vc_to_disconnect:
+            try:
+                if hasattr(vc_to_disconnect, "disconnect"):
+                    await vc_to_disconnect.disconnect(force=True)
+            except Exception:
+                pass
+
     async def join_voice_channel(self, channel_name_or_id: str = None, text_channel: discord.TextChannel = None) -> bool:
         """Joins a Discord voice channel and starts listening with VADSink."""
         if text_channel is not None:
@@ -123,25 +145,33 @@ class VoiceManager:
             print(f"[VoiceManager:{self.agent_id}] Could not find voice channel '{channel_name_or_id}'.{available_str}")
             return False
             
+        # Clean up any existing connection on the bot or guild before reconnecting
+        await self._cleanup_failed_connection(target_channel)
+
+        channel_name = getattr(target_channel, "name", str(target_channel))
         try:
-            if self.voice_client and self.voice_client.is_connected():
-                await self.voice_client.disconnect()
-                
-            print(f"[VoiceManager:{self.agent_id}] Connecting to voice channel '{target_channel.name}' ({target_channel.id})...")
+            print(f"[VoiceManager:{self.agent_id}] Connecting to voice channel '{channel_name}' ({target_channel.id})...")
             
             # Explicitly set self_deaf=False and self_mute=False so Discord delivers audio packets
             self.voice_client = await target_channel.connect(
                 cls=voice_recv.VoiceRecvClient,
                 self_deaf=False,
                 self_mute=False,
-                timeout=30.0
+                timeout=20.0
             )
             
             # Wait briefly for connection state to stabilize
+            connected = False
             for _ in range(30):
                 if self.voice_client and self.voice_client.is_connected():
+                    connected = True
                     break
                 await asyncio.sleep(0.1)
+
+            if not connected or not self.voice_client or not self.voice_client.is_connected():
+                print(f"[VoiceManager:{self.agent_id}] Voice connection to '{channel_name}' could not be established (handshake timed out).")
+                await self._cleanup_failed_connection(target_channel)
+                return False
 
             # Attach VAD sink to listen
             self.vad_sink = VADSink(self, loop=self.bot.loop)
@@ -152,20 +182,51 @@ class VoiceManager:
             print(f"[VoiceManager:{self.agent_id}] Connected! Context linked to text channel '#{resolved_name}'. Listening for voice...")
             return True
             
+        except (asyncio.TimeoutError, TimeoutError):
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Connection timed out (UDP/voice handshake timeout).")
+            await self._cleanup_failed_connection(target_channel)
+            return False
+        except discord.errors.ClientException as e:
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Discord client error: {e}")
+            await self._cleanup_failed_connection(target_channel)
+            return False
+        except (discord.errors.ConnectionClosed, discord.errors.GatewayNotFound) as e:
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Voice gateway connection closed ({e}).")
+            await self._cleanup_failed_connection(target_channel)
+            return False
+        except (OSError, ConnectionError) as e:
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Network error ({e}).")
+            await self._cleanup_failed_connection(target_channel)
+            return False
+        except asyncio.CancelledError:
+            print(f"[VoiceManager:{self.agent_id}] Voice connection to '{channel_name}' was cancelled.")
+            await self._cleanup_failed_connection(target_channel)
+            return False
         except Exception as e:
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel: {e}")
-            import traceback
-            traceback.print_exc()
+            err_msg = str(e).strip() or type(e).__name__
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': {err_msg}")
+            await self._cleanup_failed_connection(target_channel)
             return False
 
     async def leave_voice_channel(self):
         """Disconnects from the active voice channel and clears link."""
         self.linked_text_channel = None
-        if self.voice_client and self.voice_client.is_connected():
-            if self.vad_sink:
+        if self.vad_sink:
+            try:
                 self.vad_sink.cleanup()
-            await self.voice_client.disconnect()
-            self.voice_client = None
+            except Exception:
+                pass
+            self.vad_sink = None
+
+        vc = self.voice_client
+        self.voice_client = None
+
+        if vc:
+            try:
+                if hasattr(vc, "disconnect"):
+                    await vc.disconnect(force=True)
+            except Exception as e:
+                print(f"[VoiceManager:{self.agent_id}] Note: error during voice disconnect: {e}")
             print(f"[VoiceManager:{self.agent_id}] Disconnected from voice channel.")
 
     def _stop_playback(self):

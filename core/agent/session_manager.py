@@ -19,7 +19,11 @@ class SessionManager:
         store = SqliteSessionStore()
         return store.archive_all_sessions()
 
-    def get_session_id(self, agent_id: str, source: str, channel: discord.TextChannel = None) -> str:
+    def get_session_id(self, agent_id: str, source: str, channel: discord.TextChannel = None, job_id: str = None, stateless: bool = False) -> str:
+        if stateless:
+            from core.agent.job_manager import JobManager
+            return job_id if job_id else JobManager().new_job_id(agent_id)
+
         postfix = ""
         if channel is not None:
             channel_name = channel.name if hasattr(channel, "name") else str(channel.id)

@@ -48,20 +48,23 @@ class MockSelectOption:
         self.value = value
         self.emoji = emoji
 
-if 'discord' not in sys.modules:
-    mock_discord = MagicMock()
-    mock_discord.Thread = MockThread
-    mock_discord.HTTPException = MockHTTPException
-    mock_discord.SelectOption = MockSelectOption
-    mock_ui = MagicMock()
-    mock_ui.View = MockView
-    mock_ui.Button = MockButton
-    mock_ui.Select = MockSelect
-    mock_discord.ui = mock_ui
-    sys.modules['discord'] = mock_discord
-    sys.modules['discord.ext'] = MagicMock()
-    sys.modules['discord.ext.commands'] = MagicMock()
-    sys.modules['discord.ui'] = mock_ui
+try:
+    import discord
+except ImportError:
+    if 'discord' not in sys.modules:
+        mock_discord = MagicMock()
+        mock_discord.Thread = MockThread
+        mock_discord.HTTPException = MockHTTPException
+        mock_discord.SelectOption = MockSelectOption
+        mock_ui = MagicMock()
+        mock_ui.View = MockView
+        mock_ui.Button = MockButton
+        mock_ui.Select = MockSelect
+        mock_discord.ui = mock_ui
+        sys.modules['discord'] = mock_discord
+        sys.modules['discord.ext'] = MagicMock()
+        sys.modules['discord.ext.commands'] = MagicMock()
+        sys.modules['discord.ui'] = mock_ui
 else:
     if isinstance(getattr(sys.modules['discord'], 'HTTPException', None), MagicMock):
         sys.modules['discord'].HTTPException = MockHTTPException

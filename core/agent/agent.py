@@ -43,9 +43,10 @@ class Agent(BaseAgent):
         from core.agent.command_handler import CommandHandler
         
         # Get the necessary ids
-        session_id = SessionManager().get_session_id(self.agent_id, source, channel)
         if job_id is None:
             job_id = JobManager().new_job_id(self.agent_id)
+        is_stateless = self.config.get("stateless", False)
+        session_id = SessionManager().get_session_id(self.agent_id, source, channel, job_id=job_id, stateless=is_stateless)
 
         # Handle system commands ([new], [newall], [restart])
         if await CommandHandler().handle_command(content, session_id=session_id, channel=channel):

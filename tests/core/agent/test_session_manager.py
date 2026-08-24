@@ -52,5 +52,12 @@ class TestSessionManager(unittest.TestCase):
         session_id = SessionManager().get_session_id("agent1", "discord", message.channel)
         self.assertEqual(session_id, "agent1:discord:general:456")
 
+    def test_get_session_id_stateless(self):
+        session_id = SessionManager().get_session_id("graph-worker", "tool", job_id="job_12345", stateless=True)
+        self.assertEqual(session_id, "job_12345")
+
+        session_id_auto = SessionManager().get_session_id("graph-worker", "tool", stateless=True)
+        self.assertTrue(session_id_auto.startswith("graph-worker:job:"))
+
 if __name__ == '__main__':
     unittest.main()

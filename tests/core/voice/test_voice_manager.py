@@ -92,6 +92,93 @@ async def test_voice_manager_join_channel_not_found(mock_bot_runner):
     assert vm.voice_client is None
 
 @pytest.mark.asyncio
+async def test_voice_manager_join_channel_timeout_graceful(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner)
+    
+    mock_guild = MagicMock()
+    mock_vc = MagicMock()
+    mock_vc.name = "general-voice"
+    mock_vc.id = 12345
+    mock_vc.guild = mock_guild
+    mock_guild.voice_client = None
+    mock_vc.connect = AsyncMock(side_effect=TimeoutError())
+    mock_guild.voice_channels = [mock_vc]
+    mock_bot_runner.bot.guilds = [mock_guild]
+    
+    success = await vm.join_voice_channel("general-voice")
+    assert success is False
+    assert vm.voice_client is None
+    assert vm.vad_sink is None
+
+@pytest.mark.asyncio
+async def test_voice_manager_join_channel_client_exception_graceful(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner)
+    
+    mock_guild = MagicMock()
+    mock_vc = MagicMock()
+    mock_vc.name = "general-voice"
+    mock_vc.id = 12345
+    mock_vc.guild = mock_guild
+    mock_guild.voice_client = None
+    mock_vc.connect = AsyncMock(side_effect=discord.errors.ClientException("Already connected to a voice channel."))
+    mock_guild.voice_channels = [mock_vc]
+    mock_bot_runner.bot.guilds = [mock_guild]
+    
+    success = await vm.join_voice_channel("general-voice")
+    assert success is False
+    assert vm.voice_client is None
+    assert vm.vad_sink is None
+
+@pytest.mark.asyncio
+async def test_voice_manager_join_channel_stabilization_failure_graceful(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner)
+    
+    mock_guild = MagicMock()
+    mock_vc = MagicMock()
+    mock_vc.name = "general-voice"
+    mock_vc.id = 12345
+    mock_vc.guild = mock_guild
+    mock_guild.voice_client = None
+    
+    mock_voice_client = MagicMock()
+    mock_voice_client.is_connected.return_value = False
+    mock_voice_client.disconnect = AsyncMock()
+    mock_vc.connect = AsyncMock(return_value=mock_voice_client)
+    mock_guild.voice_channels = [mock_vc]
+    mock_bot_runner.bot.guilds = [mock_guild]
+    
+    with patch("asyncio.sleep", AsyncMock()):
+        success = await vm.join_voice_channel("general-voice")
+        assert success is False
+        assert vm.voice_client is None
+        assert vm.vad_sink is None
+
+@pytest.mark.asyncio
+async def test_voice_manager_join_channel_pre_cleans_existing_guild_vc(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner)
+    
+    mock_guild = MagicMock()
+    mock_existing_vc = MagicMock()
+    mock_existing_vc.disconnect = AsyncMock()
+    mock_guild.voice_client = mock_existing_vc
+    
+    mock_vc = MagicMock()
+    mock_vc.name = "general-voice"
+    mock_vc.id = 12345
+    mock_vc.guild = mock_guild
+    
+    mock_new_voice_client = MagicMock()
+    mock_new_voice_client.is_connected.return_value = True
+    mock_vc.connect = AsyncMock(return_value=mock_new_voice_client)
+    mock_guild.voice_channels = [mock_vc]
+    mock_bot_runner.bot.guilds = [mock_guild]
+    
+    with patch("core.voice.voice_manager.VADSink"):
+        success = await vm.join_voice_channel("general-voice")
+        assert success is True
+        mock_existing_vc.disconnect.assert_awaited_once()
+
+@pytest.mark.asyncio
 async def test_voice_manager_leave_channel(mock_bot_runner):
     vm = VoiceManager(mock_bot_runner)
     mock_vc = MagicMock()
