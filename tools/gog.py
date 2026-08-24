@@ -8,8 +8,12 @@ from core.util import format_tool_response
 @tool
 def gog(command: str) -> str:
     """
-    Execute a gog calendar command using gogcli.
+    Execute a gog CLI command using gogcli (supports Google Calendar and Gmail).
+
+    The command argument should be the rest of the command after 'gog'.
+
     Example commands:
+    # Calendar operations:
     - calendar calendars (List all calendars)
     - calendar events primary --today (List events on primary calendar)
     
@@ -18,6 +22,12 @@ def gog(command: str) -> str:
     
     # To set event color, use the --color flag (Google Calendar uses color IDs 1-11):
     - calendar create primary --summary 'Meeting' --color 1 --from 2026-04-07T10:00:00Z --to 2026-04-07T11:00:00Z
+
+    # Gmail operations:
+    - gmail search 'newer_than:7d' --max 10 --json (Search emails matching query)
+    - gmail get <messageId> --sanitize-content --json (Get email message content by ID)
+    - gmail thread get <threadId> --sanitize-content --json (Get email thread content by ID)
+    - gmail settings filters export | list | create | delete (Manage Gmail filters)
     """
     # Resolve path to gog binary
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
