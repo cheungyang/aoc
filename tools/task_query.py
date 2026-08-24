@@ -31,7 +31,8 @@ def task_query(
     source: str = "",
     task_id: str = "",
     sql: str = "",
-    limit: int = 50,
+    limit: int = 10,
+    compact: bool = True,
 ) -> str:
     """
     Search and inspect tasks from the Obsidian PKM SQLite cache (~/pkm/tasks.db).
@@ -125,7 +126,8 @@ def task_query(
                 scheduled_date=scheduled_date,
                 source=source,
                 search_term=query,
-                limit=limit
+                limit=limit,
+                compact=compact
             )
             conn.close()
             payload = {

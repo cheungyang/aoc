@@ -35,6 +35,9 @@ class CommandHandler:
         elif command == "[restart]":
             await self._handle_restart(channel)
             return True
+        elif command == "[compact]" or command == "[summarize]":
+            await self._handle_compact(session_id, channel)
+            return True
 
         return False
 
@@ -60,3 +63,57 @@ class CommandHandler:
             await channel.send("System is restarting...")
         await asyncio.sleep(0.5)
         os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    async def _handle_compact(self, session_id: Optional[str], channel: Optional[discord.TextChannel] = None):
+        if not session_id and channel is not None:
+            session_id = SessionManager().get_session_id("main", "discord", channel)
+        if not session_id:
+            if channel is not None:
+                await channel.send("No active session found to compact.")
+            return
+
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        from core.agent.context_pruner import ContextPruner, estimate_total_tokens
+
+        checkpointer = SqliteCheckpointer()
+        tuple_res = checkpointer.get_tuple({"configurable": {"thread_id": session_id}})
+        if not tuple_res or not tuple_res.checkpoint:
+            if channel is not None:
+                await channel.send("No active checkpoint messages found to compact.")
+            return
+
+        channel_values = tuple_res.checkpoint.get("channel_values", {})
+        messages = channel_values.get("messages", [])
+        if not messages or len(messages) <= 1:
+            if channel is not None:
+                await channel.send(f"Session history is already minimal ({len(messages)} messages).")
+            return
+
+        orig_count = len(messages)
+        orig_tokens = estimate_total_tokens(messages)
+
+        pruner = ContextPruner()
+        pruned_messages = pruner.prune_messages(messages, force=True)
+
+        new_count = len(pruned_messages)
+        new_tokens = estimate_total_tokens(pruned_messages)
+
+        # Update checkpoint in storage
+        tuple_res.checkpoint["channel_values"]["messages"] = pruned_messages
+        checkpointer.put(
+            tuple_res.config,
+            tuple_res.checkpoint,
+            tuple_res.metadata,
+            new_versions=tuple_res.checkpoint.get("versions_seen", {})
+        )
+
+        msg = (
+            f"**Session Context Compacted**\n"
+            f"- Previous: {orig_count} messages (~{orig_tokens:,} tokens)\n"
+            f"- Compacted: {new_count} messages (~{new_tokens:,} tokens)\n"
+            f"- Savings: ~{max(0, orig_tokens - new_tokens):,} tokens ({((orig_tokens - new_tokens) / max(1, orig_tokens) * 100):.1f}%)"
+        )
+        if channel is not None:
+            chunks = split_message(msg)
+            for chunk in chunks:
+                await channel.send(chunk)

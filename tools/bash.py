@@ -56,6 +56,11 @@ def bash(command_string: str, cwd: str, agent_id: str) -> str:
             output.append(result.stderr)
             
         full_output = "\n".join(output)
+        if len(full_output) > 15000:
+            head = full_output[:5000]
+            tail = full_output[-5000:]
+            omitted = len(full_output) - 10000
+            full_output = f"{head}\n\n... [Output truncated: {omitted} characters omitted. Total length was {len(full_output)} characters] ...\n\n{tail}"
         
         return format_tool_response("bash", payload=full_output, errors="None" if result.returncode == 0 else f"Error code {result.returncode}")
 

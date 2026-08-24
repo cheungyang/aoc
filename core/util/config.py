@@ -34,6 +34,10 @@ class Config:
             cls._instance._embedding_dimensions = None
             cls._instance._pkm_dir = None
             cls._instance._codebase_dir = None
+            cls._instance._context_pruning_enabled = None
+            cls._instance._context_max_tokens = None
+            cls._instance._context_window_messages = None
+            cls._instance._context_summary_max_tokens = None
             cls._instance.load_from_env()
         return cls._instance
 
@@ -61,6 +65,10 @@ class Config:
         self._embedding_dimensions = None
         self._pkm_dir = None
         self._codebase_dir = None
+        self._context_pruning_enabled = None
+        self._context_max_tokens = None
+        self._context_window_messages = None
+        self._context_summary_max_tokens = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Generic access to environment variables via the central Config."""
@@ -317,6 +325,73 @@ class Config:
         self._codebase_dir = str(value) if value is not None else None
 
     # -------------------------------------------------------------------------
+    # Context Pruning & Summarization Settings
+    # -------------------------------------------------------------------------
+    @property
+    def context_pruning_enabled(self) -> bool:
+        if self._context_pruning_enabled is not None:
+            return self._context_pruning_enabled
+        env_val = os.getenv("CONTEXT_PRUNING_ENABLED", "true").lower()
+        return env_val in ("true", "1", "yes", "t")
+
+    @context_pruning_enabled.setter
+    def context_pruning_enabled(self, value):
+        if isinstance(value, str):
+            self._context_pruning_enabled = value.lower() in ("true", "1", "yes", "t")
+        elif value is not None:
+            self._context_pruning_enabled = bool(value)
+        else:
+            self._context_pruning_enabled = None
+
+    @property
+    def context_max_tokens(self) -> int:
+        if self._context_max_tokens is not None:
+            return self._context_max_tokens
+        env_val = os.getenv("CONTEXT_MAX_TOKENS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 30000
+
+    @context_max_tokens.setter
+    def context_max_tokens(self, value):
+        self._context_max_tokens = int(value) if value is not None else None
+
+    @property
+    def context_window_messages(self) -> int:
+        if self._context_window_messages is not None:
+            return self._context_window_messages
+        env_val = os.getenv("CONTEXT_WINDOW_MESSAGES")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 15
+
+    @context_window_messages.setter
+    def context_window_messages(self, value):
+        self._context_window_messages = int(value) if value is not None else None
+
+    @property
+    def context_summary_max_tokens(self) -> int:
+        if self._context_summary_max_tokens is not None:
+            return self._context_summary_max_tokens
+        env_val = os.getenv("CONTEXT_SUMMARY_MAX_TOKENS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 1000
+
+    @context_summary_max_tokens.setter
+    def context_summary_max_tokens(self, value):
+        self._context_summary_max_tokens = int(value) if value is not None else None
+
+    # -------------------------------------------------------------------------
     # Channel Filtering Logic
     # -------------------------------------------------------------------------
     def is_channel_allowed(self, channel) -> bool:
@@ -385,6 +460,10 @@ class Config:
         self._embedding_dimensions = None
         self._pkm_dir = None
         self._codebase_dir = None
+        self._context_pruning_enabled = None
+        self._context_max_tokens = None
+        self._context_window_messages = None
+        self._context_summary_max_tokens = None
         self.load_from_env()
 
 

@@ -45,10 +45,15 @@ class TestUtil(unittest.TestCase):
         prompt = get_knowledge_prompt()
         self.assertIn("<common_knowledge>", prompt)
         self.assertIn("Today's Date:", prompt)
+        self.assertNotIn("Current Time:", prompt) # Omitted to preserve LLM prompt cache prefix
         
         now = datetime.datetime.now()
         date_str = now.strftime("%Y-%m-%d")
         self.assertIn(date_str, prompt)
+
+        # Verify deterministic output across multiple invocations
+        prompt_again = get_knowledge_prompt()
+        self.assertEqual(prompt, prompt_again)
 
     def test_get_formatting_prompt(self):
         from core.util import get_formatting_prompt

@@ -33,7 +33,7 @@ class TestSqliteSessionStore(unittest.TestCase):
 
     def test_append_and_load_token_usage(self):
         session_id = "session1"
-        self.store.append_token_usage(session_id, "gemini-pro", 100, 50, 20.0)
+        self.store.append_token_usage(session_id, "gemini-pro", 100, 50, 20.0, execution_time=2.45)
 
         tokens = self.store.load_token_history(session_id)
         self.assertEqual(len(tokens), 1)
@@ -41,6 +41,7 @@ class TestSqliteSessionStore(unittest.TestCase):
         self.assertEqual(tokens[0]["input_token"], 100)
         self.assertEqual(tokens[0]["output_token"], 50)
         self.assertEqual(tokens[0]["cached_token"], 20.0)
+        self.assertEqual(tokens[0]["execution_time"], 2.45)
 
     def test_archive_session_renames_table(self):
         session_id = "main:discord:general"

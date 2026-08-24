@@ -99,6 +99,16 @@ class TestProjectQueryTool(unittest.TestCase):
             commitment_year=2026
         )
         self.assertIn("Alpha Project", resp_year)
+        self.assertNotIn("raw_status", resp_year)
+
+        # Full non-compact search
+        resp_full = project_query.func(
+            agent_id="day-planner",
+            action="search",
+            commitment_year=2026,
+            compact=False
+        )
+        self.assertIn("raw_status", resp_full)
 
     @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")

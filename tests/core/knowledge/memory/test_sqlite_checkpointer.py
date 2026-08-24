@@ -283,5 +283,79 @@ class TestSqliteCheckpointer(unittest.TestCase):
         self.assertEqual(retrieved_messages[2].content, "42")
         self.assertEqual(retrieved_messages[3].content, "The answer is 42.")
 
+    def test_historical_base64_image_eviction(self):
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        
+        config = {"configurable": {"thread_id": "b64_eviction_thread"}}
+        tc = {"name": "filesystem", "args": {"instructions": [{"action": "read_image", "path": "images/test.png"}]}, "id": "call_img_1"}
+        
+        large_b64 = "A" * 5000
+        tool_payload = f'<filesystem_response>\n  <payload><instruction_result action="read_image" path="images/test.png">{large_b64}</instruction_result></payload>\n  <errors>None</errors>\n</filesystem_response>'
+        
+        # Multi-turn history: Turn 1 (Human -> AI(tc) -> Tool(b64) -> AI("I see a cat")) -> Turn 2 (Human("What color?"))
+        messages = [
+            HumanMessage(content="Check this image"),
+            AIMessage(content="", tool_calls=[tc]),
+            ToolMessage(content=tool_payload, tool_call_id="call_img_1"),
+            AIMessage(content="I see a cat in the image."),
+            HumanMessage(content="What color is the cat?")
+        ]
+        
+        checkpoint = {
+            "id": "cp_b64_turn2",
+            "channel_values": {
+                "messages": messages
+            }
+        }
+        
+        self.checkpointer.put(config, checkpoint, {"step": 2}, {})
+        
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        retrieved_messages = cp_tuple.checkpoint["channel_values"]["messages"]
+        
+        # ToolMessage (index 2) should have base64 payload evicted
+        tool_msg = retrieved_messages[2]
+        self.assertNotIn(large_b64, tool_msg.content)
+        self.assertIn("[Image base64 data evicted after visual processing - path: images/test.png]", tool_msg.content)
+        
+        # Subsequent AI response and Human message are preserved
+        self.assertEqual(retrieved_messages[3].content, "I see a cat in the image.")
+        self.assertEqual(retrieved_messages[4].content, "What color is the cat?")
+
+    def test_pending_base64_image_preserved(self):
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        
+        config = {"configurable": {"thread_id": "b64_pending_thread"}}
+        tc = {"name": "filesystem", "args": {"instructions": [{"action": "read_image", "path": "images/pending.png"}]}, "id": "call_img_pending"}
+        
+        large_b64 = "B" * 5000
+        tool_payload = f'<filesystem_response>\n  <payload><instruction_result action="read_image" path="images/pending.png">{large_b64}</instruction_result></payload>\n  <errors>None</errors>\n</filesystem_response>'
+        
+        # Pending turn: Tool just finished executing, AI has not responded yet (no trailing AIMessage)
+        messages = [
+            HumanMessage(content="Analyze pending image"),
+            AIMessage(content="", tool_calls=[tc]),
+            ToolMessage(content=tool_payload, tool_call_id="call_img_pending")
+        ]
+        
+        checkpoint = {
+            "id": "cp_b64_pending",
+            "channel_values": {
+                "messages": messages
+            }
+        }
+        
+        self.checkpointer.put(config, checkpoint, {"step": 1}, {})
+        
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        retrieved_messages = cp_tuple.checkpoint["channel_values"]["messages"]
+        
+        # Pending ToolMessage (index 2) must keep the full base64 for LLM evaluation
+        tool_msg = retrieved_messages[2]
+        self.assertIn(large_b64, tool_msg.content)
+
+
 if __name__ == "__main__":
     unittest.main()

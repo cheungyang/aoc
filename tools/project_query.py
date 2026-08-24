@@ -32,7 +32,8 @@ def project_query(
     project_id: str = "",
     name: str = "",
     sql: str = "",
-    limit: int = 50,
+    limit: int = 10,
+    compact: bool = True,
 ) -> str:
     """
     Search and inspect projects from the Obsidian PKM SQLite cache (~/pkm/projects.db).
@@ -132,7 +133,8 @@ def project_query(
                 category=category if category else None,
                 tags=tags,
                 search_term=query if query else None,
-                limit=limit
+                limit=limit,
+                compact=compact
             )
             conn.close()
             payload = {

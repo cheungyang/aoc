@@ -79,6 +79,27 @@ class TestFilesystemTool(unittest.TestCase):
         result = filesystem.func(agent_id="software-coder", instructions=instructions)
         self.assertIn("Error: Invalid line range", result)
 
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    def test_read_large_file_truncation_guardrail(self, mock_isfile, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        mock_isfile.return_value = True
+        
+        # 500 lines of data (exceeds 250 lines)
+        large_content = "\n".join([f"line {i}: some text content here" for i in range(500)])
+        
+        with patch('builtins.open', mock_open(read_data=large_content)):
+            instructions = [{"action": "read", "path": "allowed_folder/large_file.txt"}]
+            result = filesystem.func(agent_id="software-coder", instructions=instructions)
+            
+            self.assertIn("--- [TRUNCATED: File has 500 lines", result)
+            self.assertIn("Use 'start_line' and 'end_line' parameters to inspect specific sections.", result)
+            self.assertIn("line 0: some text content here", result)
+
     # --- Read Image Tests ---
 
     @patch('core.loaders.tools_loader.ToolsLoader')

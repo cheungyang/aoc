@@ -154,6 +154,15 @@ def _read(path: str, start_line: int | str | None = None, end_line: int | str | 
         formatted = [f"{s + idx}: {line}" for idx, line in enumerate(sliced_lines)]
         return "\n".join(formatted), "None"
     else:
+        lines = file_content.splitlines()
+        total_lines = len(lines)
+        if len(file_content) > 20000 or total_lines > 250:
+            preview_lines = lines[:200]
+            preview_text = "\n".join(preview_lines)
+            if len(preview_text) > 15000:
+                preview_text = preview_text[:15000]
+            truncation_notice = f"\n\n--- [TRUNCATED: File has {total_lines} lines ({len(file_content)} characters). Showing lines 1-200. Use 'start_line' and 'end_line' parameters to inspect specific sections.] ---"
+            return preview_text + truncation_notice, "None"
         return file_content, "None"
 
 

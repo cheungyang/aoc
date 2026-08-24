@@ -144,9 +144,10 @@ class GraphsLoader:
         overview += "The following lists the names and descriptions of the subgraphs that you have access to. "
         overview += "To execute a graph, use the `graph_call` tool with the graph name and your query.\n"
         
-        for name, info in self._graphs.items():
+        for name in sorted(self._graphs.keys()):
             if name == "main":
                 continue
+            info = self._graphs[name]
             metadata = info.get("metadata", {})
             desc = metadata.get("description", "No description available.")
             display_name = metadata.get("name", name)

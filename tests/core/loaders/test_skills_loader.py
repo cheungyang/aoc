@@ -116,5 +116,29 @@ Body content of skill.
         self.assertIn("memory", allowed_skills)
         self.assertEqual(len(allowed_skills), 3)
 
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    def test_get_skills_overview_sorted(self, mock_agents_loader):
+        mock_agent = MagicMock()
+        mock_agent.config = {"skills": ["zebra_skill", "apple_skill"]}
+        mock_agents_loader.return_value.get_agent.return_value = mock_agent
+
+        self.loader._skills_cache['zebra_skill'] = {
+            "name": "Zebra Skill",
+            "description": "Zebra desc",
+            "skill_id": "zebra_skill"
+        }
+        self.loader._skills_cache['apple_skill'] = {
+            "name": "Apple Skill",
+            "description": "Apple desc",
+            "skill_id": "apple_skill"
+        }
+
+        result = self.loader.get_skills_overview('agent_1')
+        pos_apple = result.find("Apple Skill")
+        pos_zebra = result.find("Zebra Skill")
+        self.assertNotEqual(pos_apple, -1)
+        self.assertNotEqual(pos_zebra, -1)
+        self.assertLess(pos_apple, pos_zebra, "Expected skills to be listed in alphabetical order")
+
 if __name__ == "__main__":
     unittest.main()

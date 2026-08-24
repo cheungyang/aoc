@@ -71,5 +71,36 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
 
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
+    async def test_handle_compact_command(self, mock_put, mock_get_tuple):
+        from langchain_core.messages import HumanMessage, AIMessage
+        mock_tuple = MagicMock()
+        mock_tuple.config = {"configurable": {"thread_id": "test-session"}}
+        mock_tuple.metadata = {}
+        mock_tuple.checkpoint = {
+            "channel_values": {
+                "messages": [
+                    HumanMessage(content="A" * 500) for _ in range(20)
+                ]
+            }
+        }
+        mock_get_tuple.return_value = mock_tuple
+        mock_channel = AsyncMock()
+
+        result = await self.handler.handle_command("[compact]", session_id="test-session", channel=mock_channel)
+        self.assertTrue(result)
+        mock_put.assert_called_once()
+        mock_channel.send.assert_called()
+        sent_text = mock_channel.send.call_args[0][0]
+        self.assertIn("Session Context Compacted", sent_text)
+
+    async def test_handle_compact_no_session(self):
+        mock_channel = AsyncMock()
+        with patch('core.agent.session_manager.SessionManager.get_session_id', return_value=""):
+            result = await self.handler.handle_command("[compact]", session_id="", channel=mock_channel)
+            self.assertTrue(result)
+            mock_channel.send.assert_called_once_with("No active session found to compact.")
+
 if __name__ == "__main__":
     unittest.main()

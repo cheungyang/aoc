@@ -302,6 +302,43 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.embedding_dimensions, 1024)
             self.assertEqual(self.config.pkm_dir, "/env/pkm")
 
+    def test_context_pruning_settings(self):
+        # Default values
+        with patch.dict(os.environ, {}, clear=True):
+            self.config.reset()
+            self.assertTrue(self.config.context_pruning_enabled)
+            self.assertEqual(self.config.context_max_tokens, 30000)
+            self.assertEqual(self.config.context_window_messages, 15)
+            self.assertEqual(self.config.context_summary_max_tokens, 1000)
+
+        # Setters
+        self.config.context_pruning_enabled = False
+        self.assertFalse(self.config.context_pruning_enabled)
+        self.config.context_pruning_enabled = "true"
+        self.assertTrue(self.config.context_pruning_enabled)
+
+        self.config.context_max_tokens = 20000
+        self.assertEqual(self.config.context_max_tokens, 20000)
+
+        self.config.context_window_messages = 10
+        self.assertEqual(self.config.context_window_messages, 10)
+
+        self.config.context_summary_max_tokens = 500
+        self.assertEqual(self.config.context_summary_max_tokens, 500)
+
+        # Environment loading
+        with patch.dict(os.environ, {
+            "CONTEXT_PRUNING_ENABLED": "false",
+            "CONTEXT_MAX_TOKENS": "15000",
+            "CONTEXT_WINDOW_MESSAGES": "8",
+            "CONTEXT_SUMMARY_MAX_TOKENS": "400"
+        }, clear=True):
+            self.config.reset()
+            self.assertFalse(self.config.context_pruning_enabled)
+            self.assertEqual(self.config.context_max_tokens, 15000)
+            self.assertEqual(self.config.context_window_messages, 8)
+            self.assertEqual(self.config.context_summary_max_tokens, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

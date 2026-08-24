@@ -1,3 +1,4 @@
+import json
 from langchain_core.tools import tool
 import requests
 from core.util import format_tool_response
@@ -34,6 +35,20 @@ async def web_search(query: str) -> str:
         # If async is strictly required, we could use httpx or aiohttp.
         response = requests.get(url, params=params, headers=headers)
         response.raise_for_status()
-        return format_tool_response("web_search", payload=response.text, errors="None")
+        raw_text = response.text
+        if len(raw_text) > 15000:
+            try:
+                data = json.loads(raw_text)
+                if isinstance(data, dict) and "results" in data and isinstance(data["results"], list):
+                    data["results"] = data["results"][:5]
+                    data["note"] = f"Showing top 5 results to conserve context."
+                    raw_text = json.dumps(data, indent=2)
+                elif isinstance(data, list):
+                    raw_text = json.dumps(data[:5], indent=2)
+                else:
+                    raw_text = raw_text[:15000] + "\n... [Search output truncated to conserve context] ..."
+            except Exception:
+                raw_text = raw_text[:15000] + "\n... [Search output truncated to conserve context] ..."
+        return format_tool_response("web_search", payload=raw_text, errors="None")
     except Exception as e:
         return format_tool_response("web_search", payload="", errors=f"Error performing search: {e}")

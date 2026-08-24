@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from core.knowledge.projects.parser import parse_project_file
@@ -81,6 +82,12 @@ def process_project_file(
         was_modified = updated_content is not None
         if was_modified and not dry_run:
             _atomic_write_file(file_path, updated_content)
+            if project_data:
+                try:
+                    mtime = os.path.getmtime(file_path)
+                    project_data["last_updated"] = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
         return project_data, was_modified
     except Exception as e:
         print(f"Error reading/parsing project {file_path}: {e}")

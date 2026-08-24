@@ -67,13 +67,14 @@ class SkillsLoader:
             that you have access to. To use a skill, use the `load_skill` tool with the \n\
             skill name to load the skill into your memory. Your agent_id is '{agent_id}'.\n"
 
-        for skill_id, info in self._skills_cache.items():
-            if skill_id not in allowed_skills:
+        for skill_id in sorted(allowed_skills):
+            info = self._skills_cache.get(skill_id)
+            if not info:
                 continue
-            name = info.get("name")
-            skill_id = info.get("skill_id")
-            desc = info.get("description")
-            overview += f"- {name} (id:{skill_id}): {desc}\n"
+            name = info.get("name", skill_id)
+            skill_id_val = info.get("skill_id", skill_id)
+            desc = info.get("description", "")
+            overview += f"- {name} (id:{skill_id_val}): {desc}\n"
         overview += "</skills_list>"
         return overview
 

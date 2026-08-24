@@ -264,10 +264,12 @@ def query_tasks_db(
     source: Optional[str] = None,
     search_term: Optional[str] = None,
     order_by: str = "priority_rank ASC, due_date ASC, scheduled_date ASC",
-    limit: int = 50
+    limit: int = 10,
+    compact: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Flexible query method to filter tasks with rich conditions.
+    When compact=True (default), returns only essential task fields (id, title, status, priority, due_date, scheduled_date, tags, source).
     """
     cursor = conn.cursor()
     where_clauses = []
@@ -344,12 +346,27 @@ def query_tasks_db(
     results = []
     for r in rows:
         d = dict(r)
-        if d.get("tags"):
+        tags_val = d.get("tags")
+        if tags_val and isinstance(tags_val, str):
             try:
-                d["tags"] = json.loads(d["tags"])
+                tags_val = json.loads(tags_val)
             except Exception:
                 pass
-        results.append(d)
+            d["tags"] = tags_val
+
+        if compact:
+            results.append({
+                "id": d.get("id"),
+                "title": d.get("title"),
+                "status": d.get("status"),
+                "priority": d.get("priority"),
+                "due_date": d.get("due_date"),
+                "scheduled_date": d.get("scheduled_date"),
+                "tags": tags_val,
+                "source": d.get("source"),
+            })
+        else:
+            results.append(d)
     return results
 
 

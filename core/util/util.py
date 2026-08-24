@@ -104,7 +104,6 @@ def get_channel_prompt(channel_name: str = None) -> str:
 def get_knowledge_prompt():
     now = datetime.datetime.now()
     date_str = now.strftime("%Y-%m-%d")
-    time_str = now.strftime("%H:%M:%S")
     day_of_week = now.strftime("%A")
     weekday = now.weekday()
     day_type = "Weekday" if weekday < 5 else "Weekend"
@@ -116,9 +115,7 @@ def get_knowledge_prompt():
     knowledge = [
         f"Today's Date: {date_str}",
         f"Today is: {day_of_week} ({day_type})",
-        f"Current Time: {time_str}",
         f"Current Timezone: {tz_str}",
-        "Current City: San Jose"
     ]
 
     return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"

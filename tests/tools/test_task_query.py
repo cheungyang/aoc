@@ -81,6 +81,13 @@ class TestTaskQueryTool(unittest.TestCase):
         # Search by keyword
         res_query = task_query.func(agent_id="day-planner", action="search", status="all", query="MCP")
         self.assertIn("tt_001", res_query)
+        self.assertNotIn("content_hash", res_query)
+        self.assertNotIn("raw_line", res_query)
+
+        # Full non-compact search
+        res_full = task_query.func(agent_id="day-planner", action="search", status="all", query="MCP", compact=False)
+        self.assertIn("content_hash", res_full)
+        self.assertIn("raw_line", res_full)
 
     @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")

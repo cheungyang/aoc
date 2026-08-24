@@ -4,6 +4,7 @@ import pickle
 import json
 import time
 import zlib
+import re
 from typing import Optional, List, Iterator, Sequence, Any, Dict
 from collections import defaultdict
 from langchain_core.runnables import RunnableConfig
@@ -26,8 +27,61 @@ def sanitize_table_name(thread_id: str) -> str:
     return f"ctx_{clean}"
 
 
+def _evict_base64_from_content(content: Any) -> Any:
+    """Evicts large base64 payloads from historical tool messages."""
+    if isinstance(content, str):
+        if len(content) < 500:
+            return content
+
+        # 1. Match filesystem read_image XML tag
+        content = re.sub(
+            r'<instruction_result action="read_image" path="([^"]+)">[A-Za-z0-9+/=\s\r\n]{500,}</instruction_result>',
+            r'<instruction_result action="read_image" path="\1">[Image base64 data evicted after visual processing - path: \1]</instruction_result>',
+            content
+        )
+
+        # 2. Match data URIs
+        content = re.sub(
+            r'data:image/[a-zA-Z+]+;base64,[A-Za-z0-9+/=\s\r\n]{500,}',
+            r'[Image data URI evicted after visual processing]',
+            content
+        )
+
+        # 3. Match pure large base64 strings inside tool payload tags
+        def replace_large_payload_b64(m):
+            return f"<payload>[Image base64 payload evicted ({len(m.group(1))} chars)]</payload>"
+
+        content = re.sub(
+            r'<payload>\s*([A-Za-z0-9+/=\s\r\n]{2000,})\s*</payload>',
+            replace_large_payload_b64,
+            content
+        )
+        return content
+
+    elif isinstance(content, list):
+        new_list = []
+        for part in content:
+            if isinstance(part, dict):
+                p = dict(part)
+                if p.get("type") == "image_url" and isinstance(p.get("image_url"), dict):
+                    url = p["image_url"].get("url", "")
+                    if url.startswith("data:image/") and len(url) > 500:
+                        p["image_url"] = {"url": "[Image data URI evicted after visual processing]"}
+                elif "text" in p and isinstance(p["text"], str):
+                    p["text"] = _evict_base64_from_content(p["text"])
+                new_list.append(p)
+            else:
+                new_list.append(part)
+        return new_list
+
+    return content
+
+
 def _sanitize_checkpoint_messages(checkpoint: Any) -> Any:
-    """Ensures every AIMessage with tool_calls in checkpoint history is followed by matching ToolMessages."""
+    """
+    Ensures every AIMessage with tool_calls in checkpoint history is followed by matching ToolMessages,
+    and evicts historical large base64 image data from past tool messages that have already been evaluated.
+    """
     if not isinstance(checkpoint, dict):
         return checkpoint
     channel_values = checkpoint.get("channel_values")
@@ -79,6 +133,23 @@ def _sanitize_checkpoint_messages(checkpoint: Any) -> Any:
             tool_call_id=tc_id,
             name=name
         ))
+
+    # Historical base64 eviction: find the last AIMessage index
+    last_ai_index = max((i for i, m in enumerate(sanitized) if isinstance(m, AIMessage)), default=-1)
+    if last_ai_index > 0:
+        for idx in range(last_ai_index):
+            m = sanitized[idx]
+            if isinstance(m, ToolMessage) and getattr(m, "content", None):
+                evicted_content = _evict_base64_from_content(m.content)
+                if evicted_content != m.content:
+                    # Update tool message with evicted content
+                    sanitized[idx] = ToolMessage(
+                        content=evicted_content,
+                        tool_call_id=getattr(m, "tool_call_id", ""),
+                        name=getattr(m, "name", None),
+                        additional_kwargs=getattr(m, "additional_kwargs", {}),
+                        id=getattr(m, "id", None)
+                    )
 
     channel_values["messages"] = sanitized
     return checkpoint
@@ -138,9 +209,14 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             input_tokens INTEGER,
             output_tokens INTEGER,
             cached_tokens REAL,
+            execution_time REAL DEFAULT 0.0,
             created_at REAL NOT NULL
         )
         """)
+        # Auto-migrate existing tables that don't have execution_time column
+        columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}");').fetchall()]
+        if "execution_time" not in columns:
+            conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN execution_time REAL DEFAULT 0.0;')
         # Index for efficient lookups by entry_type, step, and checkpoint_id
         conn.execute(f"""
         CREATE INDEX IF NOT EXISTS "idx_{table_name}_entry_step"

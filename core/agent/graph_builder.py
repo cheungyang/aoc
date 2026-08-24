@@ -39,21 +39,28 @@ class GraphBuilder:
             # 5. Formatting Prompt
             formatting_prompt = get_formatting_prompt()
 
+            # Order from most static to most dynamic to maximize prefix prompt caching
             system_messages = [
+                ("system", formatting_prompt),
                 ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", channel_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", formatting_prompt),
             ]
 
             # Filter out empty prompt messages (e.g. when channel_prompt is empty)
             system_messages = [msg for msg in system_messages if msg[1]]
             system_messages.append(MessagesPlaceholder(variable_name="messages"))
 
+            # Apply tool-call-safe sliding window and context summarization
+            raw_messages = state.get("messages", [])
+            from core.agent.context_pruner import ContextPruner
+            pruner = ContextPruner()
+            pruned_messages = pruner.prune_messages(raw_messages)
+
             prompt = ChatPromptTemplate.from_messages(system_messages)
-            return prompt.format_messages(messages=state["messages"])
+            return prompt.format_messages(messages=pruned_messages)
         return dynamic_prompt
 
     async def build_graph(self, agent_id, config):
@@ -102,8 +109,6 @@ class GraphBuilder:
 
         allowed_tools = [make_interruptible(t) for t in allowed_tools]
 
-        prompt = self._get_prompt_template(agent_id)
-
         if provider == "ollama":
             from langchain_ollama import ChatOllama
             llm = ChatOllama(model=model_name)
@@ -111,6 +116,8 @@ class GraphBuilder:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = SqliteCheckpointer()
+
+        prompt = self._get_prompt_template(agent_id)
 
         graph_name = config.get("graph", "main")
         from core.loaders.graphs_loader import GraphsLoader

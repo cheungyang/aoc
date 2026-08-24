@@ -23,7 +23,7 @@ def seats_aero(
     carriers: str = "",
     only_direct_flights: bool = False,
     order_by: str = "",
-    take: int = 50,
+    take: int = 10,
     skip: int = 0,
     cursor: Optional[int] = None,
     availability_id: str = "",
@@ -366,9 +366,9 @@ def _handle_get_trips(headers: dict, availability_id: str, include_filtered: boo
     return format_tool_response("seats_aero", payload=json.dumps(payload_data, indent=2), errors="None")
 
 
-def _format_trips_list(trips_raw: list) -> list:
+def _format_trips_list(trips_raw: list, max_trips: int = 15) -> list:
     formatted = []
-    for trip in trips_raw:
+    for trip in trips_raw[:max_trips]:
         segments_raw = trip.get("AvailabilitySegments") or []
         segments = []
         for seg in segments_raw:
@@ -379,9 +379,6 @@ def _format_trips_list(trips_raw: list) -> list:
                 "to": seg.get("DestinationAirport"),
                 "departure_local": seg.get("DepartsAt"),
                 "arrival_local": seg.get("ArrivesAt"),
-                "aircraft_name": seg.get("AircraftName") or seg.get("AircraftCode"),
-                "fare_class": seg.get("FareClass"),
-                "distance_miles": seg.get("Distance"),
             })
 
         duration_mins = trip.get("TotalDuration", 0)
@@ -550,10 +547,13 @@ def _handle_get_routes(headers: dict, source: str) -> str:
     resp.raise_for_status()
 
     routes = resp.json()
+    total_count = len(routes) if isinstance(routes, list) else 0
+    trimmed_routes = routes[:25] if isinstance(routes, list) and len(routes) > 25 else routes
     payload_data = {
         "source": source,
-        "route_count": len(routes) if isinstance(routes, list) else 0,
-        "routes": routes,
+        "route_count": total_count,
+        "returned_count": len(trimmed_routes) if isinstance(trimmed_routes, list) else 0,
+        "routes": trimmed_routes,
     }
 
     return format_tool_response("seats_aero", payload=json.dumps(payload_data, indent=2), errors="None")

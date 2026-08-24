@@ -60,5 +60,21 @@ class TestBashTool(unittest.TestCase):
         result = bash.func(command_string="", cwd="/workspace", agent_id="test_agent")
         self.assertIn("Error: command_string is required", result)
 
+    @patch('core.loaders.tools_loader.ToolsLoader.check_permission')
+    @patch('tools.bash.subprocess.run')
+    def test_bash_large_output_truncation(self, mock_run, mock_check_permission):
+        mock_check_permission.return_value = True
+        
+        mock_result = MagicMock()
+        mock_result.stdout = "X" * 30000
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+        
+        result = bash.func(command_string="cat bigfile.txt", cwd="/workspace", agent_id="test_agent")
+        self.assertIn("Output truncated: 20000 characters omitted", result)
+        self.assertIn("Total length was 30000 characters", result)
+
+
 if __name__ == '__main__':
     unittest.main()

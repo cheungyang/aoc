@@ -316,10 +316,12 @@ def query_projects_db(
     last_updated_after: Optional[str] = None,
     search_term: Optional[str] = None,
     order_by: str = "commitment_year DESC, priority_rank ASC, name ASC",
-    limit: int = 50
+    limit: int = 10,
+    compact: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Flexible query method to search and filter projects.
+    When compact=True (default), returns essential project metadata.
     """
     cursor = conn.cursor()
     where_clauses = []
@@ -395,7 +397,23 @@ def query_projects_db(
 
     cursor.execute(sql, params)
     rows = cursor.fetchall()
-    return [_deserialize_project_row(dict(r)) for r in rows]
+    results = []
+    for r in rows:
+        d = _deserialize_project_row(dict(r))
+        if compact:
+            results.append({
+                "id": d.get("id"),
+                "name": d.get("name"),
+                "status": d.get("status"),
+                "priority": d.get("priority"),
+                "commitment_year": d.get("commitment_year"),
+                "category": d.get("category"),
+                "tags": d.get("tags"),
+                "file_path": d.get("file_path"),
+            })
+        else:
+            results.append(d)
+    return results
 
 
 def get_project_by_id(conn: sqlite3.Connection, project_id: str) -> Optional[Dict[str, Any]]:

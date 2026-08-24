@@ -149,7 +149,7 @@ class ToolsLoader:
         discovered = self._discover_tools()
         tools = []
         loaded_names = []
-        for tool_name, folder in discovered.items():
+        for tool_name, folder in sorted(discovered.items()):
             if tool_name not in allowed_tool_names:
                 continue
  

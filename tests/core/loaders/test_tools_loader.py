@@ -64,6 +64,39 @@ class TestToolsLoader(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0].__name__, "git")
 
+    @patch('importlib.import_module')
+    @patch('os.listdir')
+    @patch('os.path.isdir')
+    @patch('os.path.isfile')
+    def test_load_tools_sorted(self, mock_isfile, mock_isdir, mock_listdir, mock_import):
+        from core.loaders.agents_loader import AgentsLoader
+        mock_loader = MagicMock()
+        AgentsLoader._instance = mock_loader
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {"tools": {"zebra": {}, "apple": {}}}
+
+        mock_isdir.side_effect = lambda p: p.endswith("tools")
+        mock_listdir.side_effect = lambda p: ["zebra.py", "apple.py"] if p.endswith("tools") else []
+        mock_isfile.side_effect = lambda p: p.endswith(".py")
+
+        def import_side_effect(mod_name):
+            mod = MagicMock()
+            tool_name = mod_name.split(".")[-1]
+            func = MagicMock()
+            func.name = tool_name
+            setattr(mod, tool_name, func)
+            return mod
+        mock_import.side_effect = import_side_effect
+
+        loader = ToolsLoader()
+        loader._discovered_tools = None
+        tools = loader.get_tools(agent_id="test_agent")
+
+        self.assertEqual(len(tools), 2)
+        tool_names = [t.name for t in tools]
+        self.assertEqual(tool_names, ["apple", "zebra"])
+
     @patch('core.loaders.skills_loader.SkillsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
     def test_merge_tool_permissions(self, mock_agents_loader, mock_skills_loader):

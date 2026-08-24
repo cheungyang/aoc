@@ -98,12 +98,33 @@ class TestLoggingHandler(unittest.TestCase):
             "model": "gemini-pro",
             "input_token_details": {"cache_read": 20}
         }
+        handler.last_execution_time = 1.234
         
         handler.on_chain_end({})
         
         handler.manager.append_token_usage.assert_called_once_with(
-            "session1", "gemini-pro", 100, 50, 20.0
+            "session1", "gemini-pro", 100, 50, 20.0, 1.234
         )
+
+    def test_on_llm_start_and_end_tracks_execution_time(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        handler.on_llm_start(None, ["Prompt"])
+        self.assertIsNotNone(handler.llm_start_time)
+        
+        mock_response = MagicMock()
+        mock_generation = MagicMock()
+        mock_generation.text = "AI Reply"
+        mock_message = MagicMock()
+        mock_message.usage_metadata = {"input_tokens": 10, "output_tokens": 5}
+        mock_generation.message = mock_message
+        mock_response.generations = [[mock_generation]]
+        mock_response.llm_output = {"model_name": "gemini-pro"}
+        
+        handler.on_llm_end(mock_response)
+        self.assertGreaterEqual(handler.last_execution_time, 0.0)
+        self.assertIsNone(handler.llm_start_time)
 
     def test_on_llm_start_appends_list_human_message_as_json(self):
         msg_list = [{"type": "text", "text": "hello"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]
@@ -142,6 +163,30 @@ class TestLoggingHandler(unittest.TestCase):
         
         import json
         handler.manager.append_message.assert_called_once_with("session1", "ai", json.dumps([{"type": "text", "text": "AI reply list"}]))
+
+    def test_on_tool_start_and_end_tracks_execution_time(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        handler.on_tool_start({"name": "web_search"}, "query_string", run_id="run_123")
+        self.assertIn("run_123", handler.tool_start_times)
+        
+        mock_output = MagicMock()
+        mock_output.content = "Search result output"
+        
+        handler.on_tool_end(mock_output, run_id="run_123")
+        self.assertNotIn("run_123", handler.tool_start_times)
+        
+        self.assertEqual(handler.manager.append_message.call_count, 2)
+        start_call = handler.manager.append_message.call_args_list[0][0]
+        self.assertEqual(start_call, ("session1", "system", "Tool web_search:query_string"))
+        
+        end_call = handler.manager.append_message.call_args_list[1][0]
+        self.assertEqual(end_call[0], "session1")
+        self.assertEqual(end_call[1], "system")
+        logged_msg = end_call[2]
+        self.assertTrue(logged_msg.startswith("Tool Output ["), f"Message '{logged_msg}' should start with 'Tool Output ['")
+        self.assertTrue(logged_msg.endswith("s]: Search result output"), f"Message '{logged_msg}' should end with 's]: Search result output'")
 
 if __name__ == "__main__":
     unittest.main()

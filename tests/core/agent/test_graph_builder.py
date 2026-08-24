@@ -216,5 +216,73 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertTrue(any("Mock Subgraphs" in msg.content for msg in messages))
           self.assertTrue(any("Knowledge with braces {}" in msg.content for msg in messages))
 
+     @patch('core.agent.graph_builder.get_agent_prompt')
+     @patch('core.agent.graph_builder.SkillsLoader')
+     @patch('core.agent.graph_builder.get_knowledge_prompt')
+     def test_get_prompt_template_prunes_long_context(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
+          mock_get_agent_prompt.return_value = "Agent System Prompt"
+          mock_skills_loader = MagicMock()
+          mock_skills_loader_class.return_value = mock_skills_loader
+          mock_skills_loader.get_skills_overview.return_value = "Skills Prompt"
+          mock_get_knowledge_prompt.return_value = "Knowledge Prompt"
+
+          from core.agent.graph_builder import GraphBuilder
+          from core.util.config import Config
+          from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+          builder = GraphBuilder()
+
+          # Configure pruner with low max_tokens via global Config
+          Config().context_max_tokens = 1000
+          Config().context_window_messages = 4
+
+          with patch('core.agent.context_pruner.ContextPruner._summarize_with_graph_worker', return_value="Summary of previous turns."):
+              prompt_fn = builder._get_prompt_template("main")
+
+              # Create 20 messages exceeding 1000 tokens
+              long_messages = []
+              for i in range(10):
+                  long_messages.append(HumanMessage(content=f"Query {i}: " + ("text " * 100)))
+                  long_messages.append(AIMessage(content=f"Reply {i}: " + ("analysis " * 100)))
+
+              formatted = prompt_fn({"messages": long_messages})
+
+          # Verify that messages were pruned and include the summary tag
+          has_summary = any(isinstance(m, SystemMessage) and "<conversation_summary>" in m.content for m in formatted)
+          self.assertTrue(has_summary, "Expected conversation summary in formatted prompt messages")
+          # Total user/assistant message count in formatted output should be bounded
+          user_ai_msgs = [m for m in formatted if isinstance(m, (HumanMessage, AIMessage))]
+          self.assertLessEqual(len(user_ai_msgs), 5)
+
+     @patch('core.agent.graph_builder.get_agent_prompt')
+     @patch('core.agent.graph_builder.SkillsLoader')
+     @patch('core.agent.graph_builder.get_knowledge_prompt')
+     @patch('core.agent.graph_builder.get_channel_prompt')
+     @patch('core.agent.graph_builder.get_formatting_prompt')
+     def test_prompt_template_ordering_for_caching(self, mock_formatting, mock_channel, mock_knowledge, mock_skills_loader_class, mock_agent):
+          mock_formatting.return_value = "FORMATTING_RULES"
+          mock_agent.return_value = "AGENT_PERSONA"
+          mock_skills_loader = MagicMock()
+          mock_skills_loader_class.return_value = mock_skills_loader
+          mock_skills_loader.get_skills_overview.return_value = "SKILLS_OVERVIEW"
+          self.mock_graphs_loader.get_graphs_overview.return_value = "SUBGRAPHS_OVERVIEW"
+          mock_knowledge.return_value = "KNOWLEDGE_CONTEXT"
+          mock_channel.return_value = "CHANNEL_CONTEXT"
+
+          from core.agent.graph_builder import GraphBuilder
+          from langchain_core.messages import HumanMessage, SystemMessage
+          builder = GraphBuilder()
+          prompt_fn = builder._get_prompt_template("main")
+          formatted = prompt_fn({"messages": [HumanMessage(content="Hello")]})
+
+          system_contents = [m.content for m in formatted if isinstance(m, SystemMessage)]
+          self.assertEqual(system_contents, [
+              "FORMATTING_RULES",
+              "AGENT_PERSONA",
+              "SKILLS_OVERVIEW",
+              "SUBGRAPHS_OVERVIEW",
+              "KNOWLEDGE_CONTEXT",
+              "CHANNEL_CONTEXT"
+          ])
+
 if __name__ == "__main__":
     unittest.main()
