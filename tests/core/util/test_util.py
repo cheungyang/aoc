@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, mock_open, MagicMock
 import os
 import sys
+import re
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -65,6 +66,8 @@ class TestUtil(unittest.TestCase):
         self.assertIn("<image path=", prompt)
         self.assertIn("<videos>", prompt)
         self.assertIn("<video path=", prompt)
+        self.assertIn("<memory_logging_rules>", prompt)
+        self.assertIn("<system_memory_log>", prompt)
         self.assertIn("<tool_execution_rules>", prompt)
         self.assertIn("Permission Restrictions", prompt)
         self.assertIn("Cross-Channel Communication", prompt)
@@ -252,6 +255,51 @@ class TestUtil(unittest.TestCase):
         # None / Empty
         self.assertEqual(format_error_message(None), "Sorry, I encountered an error processing the request.")
         self.assertEqual(format_error_message(""), "Sorry, I encountered an error processing the request.")
+
+    def test_save_agent_memory_log(self):
+        import tempfile
+        import datetime
+        from core.util import save_agent_memory_log
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch('core.util.config.Config.pkm_dir', new=tmp_dir):
+                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                log_content = "- [MEMORY] Task completed."
+                
+                log_file = save_agent_memory_log("topic-researcher", log_content)
+                self.assertIsNotNone(log_file)
+                self.assertTrue(os.path.exists(log_file))
+                
+                with open(log_file, "r") as f:
+                    content = f.read()
+                self.assertTrue(re.search(r"^- \[\d{2}:\d{2}:\d{2}\] \[MEMORY\] Task completed\.\n$", content))
+
+                # Test append via filesystem tool and placeholder stripping
+                save_agent_memory_log("topic-researcher", "- [00:00:00] [FEEDBACK] Added follow-up.")
+                with open(log_file, "r") as f:
+                    content_after = f.read()
+                self.assertTrue(re.search(r"- \[\d{2}:\d{2}:\d{2}\] \[FEEDBACK\] Added follow-up\.\n", content_after))
+
+    def test_save_agent_memory_log_empty(self):
+        from core.util import save_agent_memory_log
+        self.assertIsNone(save_agent_memory_log("topic-researcher", ""))
+        self.assertIsNone(save_agent_memory_log("topic-researcher", "   \n\n  "))
+        self.assertIsNone(save_agent_memory_log("", "- [12:00:00] [MEMORY] Task"))
+        self.assertIsNone(save_agent_memory_log(None, "- [12:00:00] [MEMORY] Task"))
+
+    def test_save_agent_memory_log_tool_error(self):
+        from unittest.mock import patch, MagicMock
+        from core.util import save_agent_memory_log
+
+        error_response = """<filesystem_response>
+  <payload></payload>
+  <errors><instruction_error action="append" path="/bad/path">Error: Permission Denied</instruction_error></errors>
+</filesystem_response>"""
+
+        with patch('tools.filesystem.filesystem') as mock_fs:
+            mock_fs.invoke.return_value = error_response
+            result = save_agent_memory_log("topic-researcher", "- [12:00:00] [MEMORY] Task")
+            self.assertIsNone(result)
 
 
 if __name__ == "__main__":

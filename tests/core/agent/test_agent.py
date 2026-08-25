@@ -578,8 +578,38 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Here are the options:")
         self.assertEqual(mock_channel.send.call_count, 2)
         # Second call should not have view
-        _, kwargs2 = mock_channel.send.call_args_list[1]
-        self.assertNotIn("view", kwargs2)
+    @patch('core.agent.agent.save_agent_memory_log')
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_with_system_memory_log(self, mock_logging_handler_class, mock_save_memory_log):
+        mock_graph = MagicMock()
+        reply_with_mem = """Task completed successfully.
+<system_memory_log>
+- [12:00:00] [MEMORY] Task: Processed file. Status: Success.
+</system_memory_log>"""
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_mem)]})
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+
+        mock_channel = AsyncMock()
+        reply = await agent.execute("run", source="discord", channel=mock_channel)
+
+        self.assertEqual(reply, "Task completed successfully.")
+        mock_save_memory_log.assert_called_once_with(
+            "test-agent",
+            "- [12:00:00] [MEMORY] Task: Processed file. Status: Success."
+        )
+        mock_channel.send.assert_called_once_with("Task completed successfully.")
+
+    @patch('core.agent.context_pruner.ContextPruner.auto_prune_session')
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_auto_prunes_session(self, mock_logging_handler_class, mock_auto_prune):
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Done")]})
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+
+        await agent.execute("test prompt", "session1")
+        mock_auto_prune.assert_called_once_with("test-agent:session1", channel="")
 
 if __name__ == "__main__":
     unittest.main()

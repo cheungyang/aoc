@@ -65,7 +65,7 @@ def estimate_total_tokens(messages: Sequence[Any]) -> int:
     return sum(estimate_message_tokens(m) for m in messages)
 
 
-def find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 15) -> int:
+def _find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 15) -> int:
     """
     Finds a safe split index `split_idx` dividing `messages` into `older = messages[:split_idx]`
     and `recent = messages[split_idx:]`.
@@ -134,7 +134,7 @@ def _format_message_for_summary(msg: BaseMessage) -> str:
     return f"Message: {str(msg)}"
 
 
-def build_heuristic_summary(older_messages: Sequence[BaseMessage], previous_summary: str = "") -> str:
+def _build_heuristic_summary(older_messages: Sequence[BaseMessage], previous_summary: str = "") -> str:
     """
     Builds a high-density, deterministic summary of older conversation turns
     without requiring an active LLM call.
@@ -190,6 +190,11 @@ def build_heuristic_summary(older_messages: Sequence[BaseMessage], previous_summ
     return "\n".join(summary_parts)
 
 
+# Module-level aliases for backwards compatibility
+find_safe_boundary = _find_safe_boundary
+build_heuristic_summary = _build_heuristic_summary
+
+
 class ContextPruner:
     """
     Manages token estimation, tool-call-safe sliding window message slicing,
@@ -199,7 +204,7 @@ class ContextPruner:
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
 
-    def extract_existing_summary(self, messages: Sequence[BaseMessage]) -> Tuple[str, List[BaseMessage]]:
+    def _extract_existing_summary(self, messages: Sequence[BaseMessage]) -> Tuple[str, List[BaseMessage]]:
         """
         Checks if the first message is a previously injected SystemMessage summary.
         Returns (existing_summary_text, remaining_messages).
@@ -210,12 +215,13 @@ class ContextPruner:
         first = messages[0]
         if isinstance(first, SystemMessage) and isinstance(first.content, str) and SUMMARY_PREFIX in first.content:
             content = first.content
-            # Extract content inside tags
             match = re.search(r"<conversation_summary>(.*?)</conversation_summary>", content, re.DOTALL)
             summary_text = match.group(1).strip() if match else content.strip()
             return summary_text, list(messages[1:])
 
         return "", list(messages)
+
+    extract_existing_summary = _extract_existing_summary
 
     def _summarize_with_graph_worker(
         self,
@@ -275,11 +281,10 @@ class ContextPruner:
             pass
         return ""
 
-    def summarize_messages(
+    def _summarize_messages(
         self,
         older_messages: Sequence[BaseMessage],
         previous_summary: str = "",
-        max_summary_tokens: int = 1000,
         channel: str = "general"
     ) -> str:
         """
@@ -296,23 +301,22 @@ class ContextPruner:
         worker_summary = self._summarize_with_graph_worker(
             transcript=transcript,
             previous_summary=previous_summary,
-            max_summary_tokens=max_summary_tokens,
+            max_summary_tokens=self.config.context_summary_max_tokens,
             channel=channel
         )
         if worker_summary:
             return worker_summary
 
         # 2. Deterministic heuristic fallback (0 token cost)
-        return build_heuristic_summary(older_messages, previous_summary=previous_summary)
+        return _build_heuristic_summary(older_messages, previous_summary=previous_summary)
+
+    summarize_messages = _summarize_messages
 
     def prune_messages(
         self,
         messages: List[BaseMessage],
-        max_tokens: Optional[int] = None,
-        window_messages: Optional[int] = None,
-        max_summary_tokens: Optional[int] = None,
-        force: bool = False,
-        channel: str = "general"
+        channel: str = "general",
+        force: bool = False
     ) -> List[BaseMessage]:
         """
         Applies a tool-call-safe sliding window and summarizes older messages if
@@ -325,9 +329,8 @@ class ContextPruner:
         if not force and not self.config.context_pruning_enabled:
             return messages
 
-        token_threshold = max_tokens or self.config.context_max_tokens
-        window_size = window_messages or self.config.context_window_messages
-        summary_tokens = max_summary_tokens or self.config.context_summary_max_tokens
+        token_threshold = self.config.context_max_tokens
+        window_size = self.config.context_window_messages
 
         total_tokens = estimate_total_tokens(messages)
         total_count = len(messages)
@@ -337,7 +340,7 @@ class ContextPruner:
             return messages
 
         # Extract any existing summary message
-        prev_summary, clean_messages = self.extract_existing_summary(messages)
+        prev_summary, clean_messages = self._extract_existing_summary(messages)
         if len(clean_messages) <= window_size:
             # If after extracting existing summary we are within the window, return with summary
             if prev_summary:
@@ -348,7 +351,7 @@ class ContextPruner:
             return messages
 
         # Find safe boundary
-        split_idx = find_safe_boundary(clean_messages, window_messages=window_size)
+        split_idx = _find_safe_boundary(clean_messages, window_messages=window_size)
         if split_idx <= 0:
             if prev_summary:
                 return [
@@ -373,10 +376,9 @@ class ContextPruner:
             return clean_messages
 
         # Summarize older messages via graph-worker or heuristic
-        new_summary = self.summarize_messages(
+        new_summary = self._summarize_messages(
             older_messages,
             previous_summary=prev_summary,
-            max_summary_tokens=summary_tokens,
             channel=channel
         )
 
@@ -390,3 +392,50 @@ class ContextPruner:
             f"-> {len(pruned)} msgs (~{estimate_total_tokens(pruned)} tokens)"
         )
         return pruned
+
+    def auto_prune_session(
+        self,
+        session_id: str,
+        channel: str = "general",
+        force: bool = False
+    ) -> bool:
+        """
+        Inspects the session checkpoint in SqliteCheckpointer and prunes it in-place
+        if it exceeds configured token or message count thresholds.
+        Returns True if the session checkpoint was pruned and updated in SQLite storage, False otherwise.
+        """
+        if not session_id:
+            return False
+
+        if not force and not self.config.context_pruning_enabled:
+            return False
+
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+
+        checkpointer = SqliteCheckpointer()
+        tuple_res = checkpointer.get_tuple({"configurable": {"thread_id": session_id}})
+        if not tuple_res or not tuple_res.checkpoint:
+            return False
+
+        channel_values = tuple_res.checkpoint.get("channel_values", {})
+        messages = channel_values.get("messages", [])
+        if not messages or len(messages) <= 1:
+            return False
+
+        pruned_messages = self.prune_messages(
+            messages,
+            channel=channel,
+            force=force
+        )
+
+        if len(pruned_messages) != len(messages) or pruned_messages != messages:
+            tuple_res.checkpoint["channel_values"]["messages"] = pruned_messages
+            checkpointer.put(
+                tuple_res.config,
+                tuple_res.checkpoint,
+                tuple_res.metadata,
+                new_versions=tuple_res.checkpoint.get("versions_seen", {})
+            )
+            return True
+
+        return False

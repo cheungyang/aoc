@@ -53,14 +53,8 @@ class GraphBuilder:
             system_messages = [msg for msg in system_messages if msg[1]]
             system_messages.append(MessagesPlaceholder(variable_name="messages"))
 
-            # Apply tool-call-safe sliding window and context summarization
-            raw_messages = state.get("messages", [])
-            from core.agent.context_pruner import ContextPruner
-            pruner = ContextPruner()
-            pruned_messages = pruner.prune_messages(raw_messages)
-
             prompt = ChatPromptTemplate.from_messages(system_messages)
-            return prompt.format_messages(messages=pruned_messages)
+            return prompt.format_messages(messages=state.get("messages", []))
         return dynamic_prompt
 
     async def build_graph(self, agent_id, config):

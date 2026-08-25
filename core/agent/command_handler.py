@@ -92,20 +92,19 @@ class CommandHandler:
         orig_count = len(messages)
         orig_tokens = estimate_total_tokens(messages)
 
+        channel_name = channel.name if channel and hasattr(channel, "name") else "general"
         pruner = ContextPruner()
-        pruned_messages = pruner.prune_messages(messages, force=True)
+        pruned = pruner.auto_prune_session(session_id, channel=channel_name, force=True)
 
-        new_count = len(pruned_messages)
-        new_tokens = estimate_total_tokens(pruned_messages)
+        if not pruned:
+            if channel is not None:
+                await channel.send(f"Session history is already minimal ({len(messages)} messages).")
+            return
 
-        # Update checkpoint in storage
-        tuple_res.checkpoint["channel_values"]["messages"] = pruned_messages
-        checkpointer.put(
-            tuple_res.config,
-            tuple_res.checkpoint,
-            tuple_res.metadata,
-            new_versions=tuple_res.checkpoint.get("versions_seen", {})
-        )
+        updated_tuple = checkpointer.get_tuple({"configurable": {"thread_id": session_id}})
+        new_messages = updated_tuple.checkpoint.get("channel_values", {}).get("messages", []) if updated_tuple else []
+        new_count = len(new_messages)
+        new_tokens = estimate_total_tokens(new_messages)
 
         msg = (
             f"**Session Context Compacted**\n"

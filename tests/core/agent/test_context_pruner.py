@@ -133,7 +133,7 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content="Now look for hotels."),
             AIMessage(content="Searching hotels now.")
         ]
-        extracted, clean = self.pruner.extract_existing_summary(messages)
+        extracted, clean = self.pruner._extract_existing_summary(messages)
         self.assertEqual(extracted, summary_text)
         self.assertEqual(len(clean), 2)
         self.assertIsInstance(clean[0], HumanMessage)
@@ -158,7 +158,7 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content="First request"),
             AIMessage(content="First response")
         ]
-        res = self.pruner.summarize_messages(older, previous_summary="")
+        res = self.pruner._summarize_messages(older, previous_summary="")
         self.assertEqual(res, "Mock summarized history")
         self.mock_worker.assert_called_once()
 
@@ -169,7 +169,7 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content="User requested code refactoring for module X."),
             AIMessage(content="Refactored module X successfully.")
         ]
-        res = self.pruner.summarize_messages(older, previous_summary="")
+        res = self.pruner._summarize_messages(older, previous_summary="")
         # Should fallback to heuristic summary without crashing
         self.assertIn("module X", res)
 
@@ -178,7 +178,9 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content="Short query"),
             AIMessage(content="Short response")
         ]
-        result = self.pruner.prune_messages(messages, max_tokens=30000, window_messages=15)
+        Config().context_max_tokens = 30000
+        Config().context_window_messages = 15
+        result = self.pruner.prune_messages(messages)
         self.assertEqual(result, messages)
 
     def test_prune_messages_exceeding_token_threshold(self):
@@ -190,7 +192,9 @@ class TestContextPruner(unittest.TestCase):
 
         self.assertGreater(estimate_total_tokens(messages), 30000)
 
-        pruned = self.pruner.prune_messages(messages, max_tokens=30000, window_messages=10)
+        Config().context_max_tokens = 30000
+        Config().context_window_messages = 10
+        pruned = self.pruner.prune_messages(messages)
 
         # First message should be the summary SystemMessage
         self.assertIsInstance(pruned[0], SystemMessage)
@@ -206,7 +210,8 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content=f"Query {i}")
             for i in range(12)
         ]
-        pruned = self.pruner.prune_messages(messages, window_messages=4, force=True)
+        Config().context_window_messages = 4
+        pruned = self.pruner.prune_messages(messages, force=True)
         self.assertIsInstance(pruned[0], SystemMessage)
         self.assertIn(SUMMARY_PREFIX, pruned[0].content)
         self.assertEqual(len(pruned), 5)  # 1 summary + 4 recent
@@ -224,7 +229,7 @@ class TestContextPruner(unittest.TestCase):
             HumanMessage(content="First request"),
             AIMessage(content="First response")
         ]
-        res = self.pruner.summarize_messages(older, previous_summary="")
+        res = self.pruner._summarize_messages(older, previous_summary="")
         self.assertEqual(res, "Graph worker generated summary of turns.")
         self.mock_worker.assert_called_once()
 
@@ -266,12 +271,54 @@ class TestContextPruner(unittest.TestCase):
             AIMessage(content="Analysis 1"),
             HumanMessage(content="Latest query"),
         ]
-        pruned = self.pruner.prune_messages(messages, window_messages=5, force=True)
+        Config().context_window_messages = 5
+        pruned = self.pruner.prune_messages(messages, force=True)
         # First message is summary SystemMessage
         self.assertIsInstance(pruned[0], SystemMessage)
         # First dialogue message after SystemMessage MUST be HumanMessage
         self.assertIsInstance(pruned[1], HumanMessage)
         self.assertNotIsInstance(pruned[1], (AIMessage, ToolMessage))
+
+
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
+    def test_auto_prune_session_prunes_and_updates_checkpoint(self, mock_put, mock_get_tuple):
+        mock_tuple = MagicMock()
+        mock_tuple.config = {"configurable": {"thread_id": "test-session"}}
+        mock_tuple.metadata = {}
+        mock_tuple.checkpoint = {
+            "channel_values": {
+                "messages": [HumanMessage(content=f"Query {i}: " + ("data " * 300)) for i in range(25)]
+            },
+            "versions_seen": {}
+        }
+        mock_get_tuple.return_value = mock_tuple
+
+        Config().context_max_tokens = 1000
+        Config().context_window_messages = 5
+        res = self.pruner.auto_prune_session("test-session")
+        self.assertTrue(res)
+        mock_put.assert_called_once()
+        saved_messages = mock_tuple.checkpoint["channel_values"]["messages"]
+        self.assertIsInstance(saved_messages[0], SystemMessage)
+        self.assertIn(SUMMARY_PREFIX, saved_messages[0].content)
+
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
+    def test_auto_prune_session_skips_when_under_threshold(self, mock_put, mock_get_tuple):
+        mock_tuple = MagicMock()
+        mock_tuple.checkpoint = {
+            "channel_values": {
+                "messages": [HumanMessage(content="Short message")]
+            }
+        }
+        mock_get_tuple.return_value = mock_tuple
+
+        Config().context_max_tokens = 30000
+        Config().context_window_messages = 15
+        res = self.pruner.auto_prune_session("test-session")
+        self.assertFalse(res)
+        mock_put.assert_not_called()
 
 
 if __name__ == "__main__":

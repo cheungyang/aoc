@@ -1,4 +1,4 @@
-from core.util import split_message, Config, format_error_message
+from core.util import split_message, Config, format_error_message, save_agent_memory_log
 from core.agent.logging_handler import LoggingHandler
 from core.agent.base_agent import BaseAgent
 from core.agent.job_manager import current_job_id, current_agent_id
@@ -52,15 +52,20 @@ class Agent(BaseAgent):
         if await CommandHandler().handle_command(content, session_id=session_id, channel=channel):
             return
 
-        # Lazy load langgraph graph object
-        if self.graph is None:
-            self.graph = await self._build_graph()
-
         channel_name = ""
         if channel is not None:
             channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
             if isinstance(channel, discord.Thread) and channel.parent:
                 channel_name = channel.parent.name
+
+        # Auto-prune session checkpoint in SQLite storage before execution if history exceeds thresholds
+        if not is_stateless:
+            from core.agent.context_pruner import ContextPruner
+            ContextPruner().auto_prune_session(session_id, channel=channel_name)
+
+        # Lazy load langgraph graph object
+        if self.graph is None:
+            self.graph = await self._build_graph()
 
         JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content if isinstance(content, str) else str(content))
         logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
@@ -151,6 +156,10 @@ class Agent(BaseAgent):
         image_paths = response.image_paths
         video_paths = response.video_paths
 
+        # Intercept and persist in-band memory logs
+        if response.system_memory_log:
+            save_agent_memory_log(self.agent_id, response.system_memory_log)
+
         # Send message to channel only for direct Discord or scheduled invocations
         if channel is not None and source in ["discord", "scheduled"]:
             chunks = split_message(text_content)
@@ -223,5 +232,5 @@ class Agent(BaseAgent):
                 for path, media_type in missing_files:
                     await channel.send(f"{media_type} file not found: {path}")
 
-        # Return reponse regardless of channel
+        # Return response regardless of channel
         return text_content

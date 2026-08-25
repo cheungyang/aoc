@@ -219,7 +219,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.get_knowledge_prompt')
-     def test_get_prompt_template_prunes_long_context(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
+     def test_get_prompt_template_formats_messages(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
           mock_get_agent_prompt.return_value = "Agent System Prompt"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
@@ -227,31 +227,22 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           mock_get_knowledge_prompt.return_value = "Knowledge Prompt"
 
           from core.agent.graph_builder import GraphBuilder
-          from core.util.config import Config
           from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
           builder = GraphBuilder()
 
-          # Configure pruner with low max_tokens via global Config
-          Config().context_max_tokens = 1000
-          Config().context_window_messages = 4
+          prompt_fn = builder._get_prompt_template("main")
 
-          with patch('core.agent.context_pruner.ContextPruner._summarize_with_graph_worker', return_value="Summary of previous turns."):
-              prompt_fn = builder._get_prompt_template("main")
+          input_messages = [
+              HumanMessage(content="Hello"),
+              AIMessage(content="Hi there")
+          ]
 
-              # Create 20 messages exceeding 1000 tokens
-              long_messages = []
-              for i in range(10):
-                  long_messages.append(HumanMessage(content=f"Query {i}: " + ("text " * 100)))
-                  long_messages.append(AIMessage(content=f"Reply {i}: " + ("analysis " * 100)))
+          formatted = prompt_fn({"messages": input_messages})
 
-              formatted = prompt_fn({"messages": long_messages})
-
-          # Verify that messages were pruned and include the summary tag
-          has_summary = any(isinstance(m, SystemMessage) and "<conversation_summary>" in m.content for m in formatted)
-          self.assertTrue(has_summary, "Expected conversation summary in formatted prompt messages")
-          # Total user/assistant message count in formatted output should be bounded
-          user_ai_msgs = [m for m in formatted if isinstance(m, (HumanMessage, AIMessage))]
-          self.assertLessEqual(len(user_ai_msgs), 5)
+          # Verify system messages and input messages are formatted
+          self.assertTrue(any(isinstance(m, SystemMessage) and "Agent System Prompt" in m.content for m in formatted))
+          self.assertEqual(formatted[-2], input_messages[0])
+          self.assertEqual(formatted[-1], input_messages[1])
 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
