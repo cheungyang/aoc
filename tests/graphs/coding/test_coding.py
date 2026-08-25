@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+import shutil
 import tempfile
 import json
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -67,6 +68,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
@@ -113,6 +115,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
     async def test_coding_subgraph_retry_and_fail(self):
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \

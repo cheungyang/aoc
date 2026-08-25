@@ -38,6 +38,7 @@ class Config:
             cls._instance._context_max_tokens = None
             cls._instance._context_window_messages = None
             cls._instance._context_summary_max_tokens = None
+            cls._instance._context_pruning_timeout = None
             cls._instance.load_from_env()
         return cls._instance
 
@@ -69,6 +70,7 @@ class Config:
         self._context_max_tokens = None
         self._context_window_messages = None
         self._context_summary_max_tokens = None
+        self._context_pruning_timeout = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Generic access to environment variables via the central Config."""
@@ -391,6 +393,22 @@ class Config:
     def context_summary_max_tokens(self, value):
         self._context_summary_max_tokens = int(value) if value is not None else None
 
+    @property
+    def context_pruning_timeout(self) -> int:
+        if self._context_pruning_timeout is not None:
+            return self._context_pruning_timeout
+        env_val = os.getenv("CONTEXT_PRUNING_TIMEOUT")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return 30
+
+    @context_pruning_timeout.setter
+    def context_pruning_timeout(self, value):
+        self._context_pruning_timeout = int(value) if value is not None else None
+
     # -------------------------------------------------------------------------
     # Channel Filtering Logic
     # -------------------------------------------------------------------------
@@ -464,6 +482,7 @@ class Config:
         self._context_max_tokens = None
         self._context_window_messages = None
         self._context_summary_max_tokens = None
+        self._context_pruning_timeout = None
         self.load_from_env()
 
 

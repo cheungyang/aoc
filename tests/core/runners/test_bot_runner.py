@@ -174,17 +174,21 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.channel.send = AsyncMock()
         
         # Mock AgentsLoader and dynamic Agent
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": []}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
 
         mock_loader.get_agent.assert_called_with("main")
-        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
@@ -211,18 +215,22 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.channel = mock_thread
         
         # Mock AgentsLoader and dynamic Agent
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["parent-channel-name"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
 
         # Verify that it considered it a host because of the parent name
         mock_loader.get_agent.assert_called_with("main")
-        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_run_bot_success(self, mock_bot_class):
@@ -308,17 +316,21 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.channel.typing.return_value = mock_typing
         
         # Mock AgentsLoader and dynamic Agent
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["test-channel"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
         
-        # Verify that execute was called with the stripped content
-        mock_agent.execute.assert_called_once_with("i prefer option1", source="discord", channel=mock_message.channel, callbacks=unittest.mock.ANY)
+        # Verify that execute_stream was called with the stripped content
+        mock_agent.execute_stream.assert_called_once_with("i prefer option1", source="discord", channel=mock_message.channel, callbacks=unittest.mock.ANY)
 
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
@@ -372,18 +384,22 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.channel.typing.return_value = mock_typing
         
         # Mock AgentsLoader and dynamic Agent
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": []}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
         
-        # Verify that execute was called with the list payload
-        mock_agent.execute.assert_called_once()
-        args, kwargs = mock_agent.execute.call_args
+        # Verify that execute_stream was called with the list payload
+        mock_agent.execute_stream.assert_called_once()
+        args, kwargs = mock_agent.execute_stream.call_args
         content_arg = args[0]
         
         self.assertIsInstance(content_arg, list)
@@ -417,21 +433,67 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_message.channel.typing.return_value = mock_typing
         
         # Mock AgentsLoader and dynamic Agent
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": []}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
         
-        # Verify that execute was called with string payload (no history image pulled)
-        mock_agent.execute.assert_called_once()
-        args, kwargs = mock_agent.execute.call_args
+        # Verify that execute_stream was called with string payload (no history image pulled)
+        mock_agent.execute_stream.assert_called_once()
+        args, kwargs = mock_agent.execute_stream.call_args
         content_arg = args[0]
         
         self.assertEqual(content_arg, "What is that image?")
+
+    @patch('core.agent.streaming_handler.DiscordStreamBuffer.finalize')
+    @patch('core.agent.streaming_handler.DiscordStreamBuffer.append_token')
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_streams_with_discord_stream_buffer(self, mock_bot_class, mock_agents_loader_class, mock_append_token, mock_finalize):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+
+        runner = BotRunner("test_token", "main")
+
+        mock_message = MagicMock()
+        mock_message.author = MagicMock(bot=False)
+        mock_message.content = "Stream this test"
+        mock_message.mentions = [runner.bot.user]
+        mock_message.channel.send = AsyncMock()
+        mock_message.attachments = []
+
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "token", "content": "Hello "}
+            yield {"type": "token", "content": "world!"}
+            yield {"type": "final_response", "text": "Hello world!", "response": None}
+
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": []}
+        mock_agent.execute_stream = fake_stream
+
+        mock_loader = MagicMock()
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        mock_agents_loader_class.return_value = mock_loader
+
+        await runner.on_message(mock_message)
+
+        self.assertEqual(mock_append_token.call_count, 2)
+        mock_finalize.assert_called_once_with(final_text="Hello world!", response=None)
 
 if __name__ == "__main__":
     unittest.main()

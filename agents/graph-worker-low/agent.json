@@ -1,11 +1,11 @@
 {
-  "agent_id": "graph-worker",
+  "agent_id": "graph-worker-low",
   "channels": [
     "*"
   ],
-  "name": "Graph Worker",
-  "emoji": "👷",
-  "model": "gemini-3.7-flash",
+  "name": "Graph Worker Low",
+  "emoji": "👨🏻‍🔧",
+  "model": "gemini-2.5-flash",
   "description": "Stateless, system-aware backend execution node for LangGraph orchestrations.",
   "stateless": true,
   "tools": {},

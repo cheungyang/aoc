@@ -56,11 +56,15 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         self.config.is_debug = False
         self.config.debug_channel = "debug-channel"
 
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["general"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent.return_value = mock_agent
 
         mock_message = MagicMock()
@@ -74,7 +78,7 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
 
         await self.runner.on_message(mock_message)
 
-        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_debug_mode_disabled_ignores_debug_channel(self, mock_agents_loader):
@@ -85,7 +89,6 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["debug-channel"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
         mock_loader.get_agent.return_value = mock_agent
 
         # Message sent in debug-channel when is_debug == False
@@ -101,7 +104,6 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
 
         # Agent should NOT be called because debug is False and channel is debug_channel
         mock_agents_loader.assert_not_called()
-        mock_agent.execute.assert_not_called()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_debug_mode_enabled_ignores_non_debug_channel(self, mock_agents_loader):
@@ -112,7 +114,6 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["general"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
         mock_loader.get_agent.return_value = mock_agent
 
         # Message in 'general' channel
@@ -128,18 +129,21 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
 
         # Agent should NOT be called because channel is not debug-channel
         mock_agents_loader.assert_not_called()
-        mock_agent.execute.assert_not_called()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_debug_mode_enabled_responds_in_debug_channel(self, mock_agents_loader):
         self.config.is_debug = True
         self.config.debug_channel = "debug-channel"
 
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["debug-channel"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent.return_value = mock_agent
 
         # Message in 'debug-channel'
@@ -155,18 +159,22 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         await self.runner.on_message(mock_message)
 
         # Agent should be executed
-        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_debug_mode_enabled_thread_in_debug_channel(self, mock_agents_loader):
         self.config.is_debug = True
         self.config.debug_channel = "debug-channel"
 
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["debug-channel"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
         mock_loader.get_agent.return_value = mock_agent
 
         parent_channel = MagicMock()
@@ -196,7 +204,7 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         await self.runner.on_message(mock_message)
 
         # Agent should be executed
-        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_debug_mode_enabled_thread_in_non_debug_channel(self, mock_agents_loader):
@@ -207,7 +215,6 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": ["general"]}
-        mock_agent.execute = AsyncMock(return_value="reply")
         mock_loader.get_agent.return_value = mock_agent
 
         parent_channel = MagicMock()
@@ -229,7 +236,7 @@ class TestBotRunnerDebugMode(unittest.IsolatedAsyncioTestCase):
         await self.runner.on_message(mock_message)
 
         # Agent should NOT be executed
-        mock_agent.execute.assert_not_called()
+        mock_agents_loader.assert_not_called()
 
 
 if __name__ == '__main__':

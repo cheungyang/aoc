@@ -35,17 +35,42 @@ class BotsLoader:
         self._bots[agent_id] = bot
         return bot
 
+    @staticmethod
+    def _match_channel(channel_obj, target_name: str) -> bool:
+        if not target_name or not channel_obj:
+            return False
+        clean_target = str(target_name).lstrip("#").lower()
+        ch_name = getattr(channel_obj, "name", "").lower()
+        ch_id = str(getattr(channel_obj, "id", ""))
+        return ch_name == clean_target or ch_id == clean_target or ch_name == str(target_name).lower()
+
+    @staticmethod
+    def _get_guild_channels(guild) -> list:
+        channels = list(getattr(guild, "text_channels", []))
+        if hasattr(guild, "voice_channels"):
+            for vc in guild.voice_channels:
+                if vc not in channels:
+                    channels.append(vc)
+        if hasattr(guild, "threads"):
+            for th in guild.threads:
+                if th not in channels:
+                    channels.append(th)
+        return channels
+
     def get_channel(self, agent_id, channel_name: str = None):
         bot_runner = self.get_bot(agent_id)
         if bot_runner and bot_runner.bot:
             loader = AgentsLoader()
             agent = loader.get_agent(agent_id)
-            channel_hosts = agent.get_config("channel_hosts", [])
+            channel_hosts = agent.get_config("channel_hosts", []) if agent else []
+            clean_target = str(channel_name).lstrip("#") if channel_name else None
             
             for guild in bot_runner.bot.guilds:
-                for ch in guild.text_channels:
+                for ch in self._get_guild_channels(guild):
                     if channel_name:
-                        if (ch.name == channel_name or str(ch.id) == channel_name) and (ch.name in channel_hosts or str(ch.id) in channel_hosts):
+                        if self._match_channel(ch, channel_name) and (
+                            ch.name in channel_hosts or str(ch.id) in channel_hosts or (clean_target and clean_target in channel_hosts)
+                        ):
                             return ch
                     else:
                         if ch.name in channel_hosts or str(ch.id) in channel_hosts:
@@ -53,31 +78,36 @@ class BotsLoader:
         return None
 
     def find_channel(self, channel_name: str):
+        if not channel_name:
+            return None
         loader = AgentsLoader()
+        clean_target = str(channel_name).lstrip("#")
+        
         # 1. Primary: Prefer the bot whose agent lists this channel in channel_hosts
         for agent_id, bot_runner in self._bots.items():
             if bot_runner and bot_runner.bot:
                 agent = loader.get_agent(agent_id)
                 channel_hosts = agent.get_config("channel_hosts", []) if agent else []
-                if channel_name in channel_hosts or any(str(h) == str(channel_name) for h in channel_hosts):
+                if (channel_name in channel_hosts or clean_target in channel_hosts or
+                    any(str(h) == str(channel_name) or str(h) == clean_target for h in channel_hosts)):
                     for guild in bot_runner.bot.guilds:
-                        for ch in guild.text_channels:
-                            if ch.name == channel_name or str(ch.id) == channel_name:
+                        for ch in self._get_guild_channels(guild):
+                            if self._match_channel(ch, channel_name):
                                 return ch
 
         # 2. Secondary: If main / concierge bot is active, use it as default host
         if "main" in self._bots and self._bots["main"] and self._bots["main"].bot:
             for guild in self._bots["main"].bot.guilds:
-                for ch in guild.text_channels:
-                    if ch.name == channel_name or str(ch.id) == channel_name:
+                for ch in self._get_guild_channels(guild):
+                    if self._match_channel(ch, channel_name):
                         return ch
 
         # 3. Fallback: Any bot with access to the channel
         for bot_runner in self._bots.values():
             if bot_runner and bot_runner.bot:
                 for guild in bot_runner.bot.guilds:
-                    for ch in guild.text_channels:
-                        if ch.name == channel_name or str(ch.id) == channel_name:
+                    for ch in self._get_guild_channels(guild):
+                        if self._match_channel(ch, channel_name):
                             return ch
         return None
 

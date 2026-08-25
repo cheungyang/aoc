@@ -1,5 +1,6 @@
 import unittest
 import os
+import shutil
 import tempfile
 import json
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -78,6 +79,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
 
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
@@ -167,6 +169,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
 
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
@@ -261,6 +264,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
             captured_base_branch = base_ref
             captured_ws_path = workspace_path
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \

@@ -110,6 +110,35 @@ class TestBotsLoader(unittest.TestCase):
         found = loader.find_channel("12345")
         self.assertEqual(found, mock_ch)
 
+    def test_find_channel_found_with_hash(self):
+        loader = BotsLoader()
+        mock_ch = MagicMock()
+        mock_ch.name = "software-dev"
+        mock_ch.id = 12345
+        mock_guild = MagicMock()
+        mock_guild.text_channels = [mock_ch]
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        loader._bots = {"main": mock_bot_runner}
+
+        found = loader.find_channel("#software-dev")
+        self.assertEqual(found, mock_ch)
+
+    def test_find_channel_found_in_voice_channels(self):
+        loader = BotsLoader()
+        mock_vc = MagicMock()
+        mock_vc.name = "general-voice"
+        mock_vc.id = 9999
+        mock_guild = MagicMock()
+        mock_guild.text_channels = []
+        mock_guild.voice_channels = [mock_vc]
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        loader._bots = {"main": mock_bot_runner}
+
+        found = loader.find_channel("general-voice")
+        self.assertEqual(found, mock_vc)
+
     def test_find_channel_not_found(self):
         loader = BotsLoader()
         

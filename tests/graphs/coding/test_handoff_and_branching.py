@@ -1,5 +1,6 @@
 import unittest
 import os
+import shutil
 import tempfile
 import json
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -65,6 +66,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
         """Tests that raw XML emitted by Worker and Critic is properly parsed and propagated through the graph."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
@@ -169,6 +171,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
         """Tests that user requesting revisions at HITL gate loops back to worker with feedback injected."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"
@@ -239,6 +242,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
         """Tests that when Critic rejects diff, graph loops back to Worker with anti-pattern feedback."""
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
+            self.addCleanup(shutil.rmtree, workspace_path, True)
             return (True, "Worktree provisioned")
 
         mock_diff.return_value = "diff --git a/app.py b/app.py\n+ def core(): return True"

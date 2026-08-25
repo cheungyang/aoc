@@ -26,11 +26,16 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_on_message_host_responds_without_tag(self, mock_agents_loader):
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         # Mock Loader
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent = MagicMock()
         mock_loader.get_agent.return_value.config = {"channel_hosts": ["agent-lab"]}
+        mock_loader.get_agent.return_value.execute_stream = MagicMock(side_effect=fake_empty_stream)
         
         # Mock Message
         mock_message = MagicMock()
@@ -39,12 +44,10 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = []
         mock_message.content = "hello"
         mock_message.channel.send = AsyncMock()
-        
-        mock_loader.get_agent.return_value.execute = AsyncMock(return_value="reply")
 
         await self.runner.on_message(mock_message)
         
-        mock_loader.get_agent.return_value.execute.assert_called_once()
+        mock_loader.get_agent.return_value.execute_stream.assert_called_once()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_on_message_host_yields_to_tagged(self, mock_agents_loader):
@@ -62,11 +65,9 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = [mock_other_bot]
         mock_message.content = "hello"
         
-        mock_loader.get_agent.return_value.execute = AsyncMock(return_value="reply")
-        
         await self.runner.on_message(mock_message)
         
-        mock_loader.get_agent.return_value.execute.assert_not_called()
+        mock_loader.get_agent.return_value.execute_stream.assert_not_called()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_on_message_non_host_ignores_untagged(self, mock_agents_loader):
@@ -81,18 +82,21 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = []
         mock_message.content = "hello"
         
-        mock_loader.get_agent.return_value.execute = AsyncMock(return_value="reply")
-        
         await self.runner.on_message(mock_message)
         
-        mock_loader.get_agent.return_value.execute.assert_not_called()
+        mock_loader.get_agent.return_value.execute_stream.assert_not_called()
 
     @patch('core.runners.bot_runner.AgentsLoader')
     async def test_on_message_non_host_responds_when_tagged(self, mock_agents_loader):
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent = MagicMock()
         mock_loader.get_agent.return_value.config = {"channel_hosts": ["other-channel"]}
+        mock_loader.get_agent.return_value.execute_stream = MagicMock(side_effect=fake_empty_stream)
         
         mock_message = MagicMock()
         mock_message.author.bot = False
@@ -100,12 +104,10 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         mock_message.mentions = [self.runner.bot.user] # Tagged self
         mock_message.content = "hello"
         mock_message.channel.send = AsyncMock()
-        
-        mock_loader.get_agent.return_value.execute = AsyncMock(return_value="reply")
 
         await self.runner.on_message(mock_message)
         
-        mock_loader.get_agent.return_value.execute.assert_called_once()
+        mock_loader.get_agent.return_value.execute_stream.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

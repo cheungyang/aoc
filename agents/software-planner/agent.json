@@ -6,6 +6,7 @@
   "name": "Elephant",
   "emoji": "🐘",
   "description": "Stateful Co-Design Architect. Spars with the user on software design, edge cases, and constraints. Strictly outputs No-Code, mathematically rigorous Design Specifications for LangGraph execution.",
+  "model": "gemini-3.1-pro-preview",
   "tools": {
     "filesystem": {
       "pkm/wiki/software": [

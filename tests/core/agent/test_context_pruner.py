@@ -1,7 +1,7 @@
 import unittest
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
@@ -12,11 +12,13 @@ from langchain_core.messages import (
     ToolMessage,
     SystemMessage,
 )
-from core.agent.context_pruner import (
-    ContextPruner,
+from core.agent.context_pruner import ContextPruner
+from core.util.message_util import (
     estimate_message_tokens,
     estimate_total_tokens,
     find_safe_boundary,
+)
+from core.util.summarize_util import (
     build_heuristic_summary,
     SUMMARY_PREFIX,
     SUMMARY_SUFFIX,
@@ -24,7 +26,7 @@ from core.agent.context_pruner import (
 from core.util.config import Config
 
 
-class TestContextPruner(unittest.TestCase):
+class TestContextPruner(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         Config().reset()
         self.pruner = ContextPruner()
@@ -319,6 +321,109 @@ class TestContextPruner(unittest.TestCase):
         res = self.pruner.auto_prune_session("test-session")
         self.assertFalse(res)
         mock_put.assert_not_called()
+
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
+    async def test_aauto_prune_session_prunes_checkpoint(self, mock_put, mock_get_tuple):
+        mock_tuple = MagicMock()
+        mock_tuple.config = {"configurable": {"thread_id": "test-session"}}
+        mock_tuple.metadata = {}
+        mock_tuple.checkpoint = {
+            "channel_values": {
+                "messages": [HumanMessage(content=f"Query {i}: " + ("data " * 300)) for i in range(25)]
+            },
+            "versions_seen": {}
+        }
+        mock_get_tuple.return_value = mock_tuple
+
+        Config().context_max_tokens = 1000
+        Config().context_window_messages = 5
+        res = await self.pruner.aauto_prune_session("test-session")
+        self.assertTrue(res)
+        mock_put.assert_called_once()
+        saved_messages = mock_tuple.checkpoint["channel_values"]["messages"]
+        self.assertIsInstance(saved_messages[0], SystemMessage)
+        self.assertIn(SUMMARY_PREFIX, saved_messages[0].content)
+
+    async def test_summarize_with_graph_worker_timeout_fallback(self):
+        # Stop default mock to test actual _summarize_with_graph_worker timeout handling
+        self.worker_patcher.stop()
+
+        import asyncio
+
+        async def slow_agent_call(*args, **kwargs):
+            await asyncio.sleep(0.5)
+            return "<summary>Delayed summary</summary>"
+
+        mock_tool = MagicMock()
+        mock_tool.ainvoke = AsyncMock(side_effect=slow_agent_call)
+
+        with patch('tools.agent_call.agent_call', mock_tool):
+            Config().context_pruning_timeout = 0.05
+            pruner = ContextPruner()
+            res = pruner._summarize_with_graph_worker(transcript="User: Hello")
+            self.assertEqual(res, "")
+
+            # Verify that summarize_messages falls back to heuristic summary without error
+            fallback_res = pruner._summarize_messages([HumanMessage(content="Hello world")])
+            self.assertIn("Hello world", fallback_res)
+
+        # Restart mock for teardown
+        self.mock_worker = self.worker_patcher.start()
+
+    async def test_asummarize_with_graph_worker_timeout_fallback(self):
+        import asyncio
+
+        async def slow_agent_call(*args, **kwargs):
+            await asyncio.sleep(0.5)
+            return "<summary>Delayed summary</summary>"
+
+        mock_tool = MagicMock()
+        mock_tool.ainvoke = AsyncMock(side_effect=slow_agent_call)
+
+        with patch('tools.agent_call.agent_call', mock_tool):
+            Config().context_pruning_timeout = 0.05
+            pruner = ContextPruner()
+            res = await pruner._asummarize_with_graph_worker(transcript="User: Hello")
+            self.assertEqual(res, "")
+
+            fallback_res = await pruner._asummarize_messages([HumanMessage(content="Async hello world")])
+            self.assertIn("Async hello world", fallback_res)
+
+    async def test_summarize_with_graph_worker_error_payload_fallback(self):
+        self.worker_patcher.stop()
+
+        error_xml = '<tool_response name="agent_call"><payload></payload><errors>Error: Rate limit exceeded</errors></tool_response>'
+        mock_tool = MagicMock()
+        mock_tool.ainvoke = AsyncMock(return_value=error_xml)
+
+        with patch('tools.agent_call.agent_call', mock_tool):
+            pruner = ContextPruner()
+            res = await pruner._asummarize_with_graph_worker(transcript="User: Test")
+            self.assertEqual(res, "")
+
+            fallback_res = await pruner._asummarize_messages([HumanMessage(content="Test error visibility")])
+            self.assertIn("Test error visibility", fallback_res)
+
+        self.mock_worker = self.worker_patcher.start()
+
+    @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple', side_effect=Exception("Database lock error"))
+    async def test_aauto_prune_session_handles_checkpointer_exception(self, mock_get_tuple):
+        Config().context_max_tokens = 1000
+        pruner = ContextPruner()
+        res = await pruner.aauto_prune_session("test-session")
+        self.assertFalse(res)
+
+    def test_config_context_pruning_timeout(self):
+        cfg = Config()
+        self.assertEqual(cfg.context_pruning_timeout, 30)
+
+        cfg.context_pruning_timeout = 45
+        self.assertEqual(cfg.context_pruning_timeout, 45)
+
+        with patch.dict(os.environ, {"CONTEXT_PRUNING_TIMEOUT": "60"}):
+            cfg.load_from_env()
+            self.assertEqual(cfg.context_pruning_timeout, 60)
 
 
 if __name__ == "__main__":

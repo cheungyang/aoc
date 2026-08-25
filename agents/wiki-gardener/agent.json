@@ -7,6 +7,7 @@
   "name": "William",
   "emoji": "🌿",
   "description": "Intellectual Sparring Partner & Knowledge Weaver. Proactively triages inbox notes, links knowledge via wiki_query, and flags research gaps to the topic-researcher.",
+  "model": "gemini-3.1-pro-preview",
   "tools": {},
   "skills": [
     "wiki_lint",

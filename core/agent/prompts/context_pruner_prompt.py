@@ -8,7 +8,7 @@ def build_summarization_prompt(
 ) -> str:
     """
     Builds a structured <playbook>, <current_state>, <assigned_task> prompt
-    for the graph-worker agent to distill earlier conversation turns into
+    for the graph-worker-low agent to distill earlier conversation turns into
     a high-density, machine-readable summary.
     """
     playbook_sections = [

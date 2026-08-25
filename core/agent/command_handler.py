@@ -94,7 +94,7 @@ class CommandHandler:
 
         channel_name = channel.name if channel and hasattr(channel, "name") else "general"
         pruner = ContextPruner()
-        pruned = pruner.auto_prune_session(session_id, channel=channel_name, force=True)
+        pruned = await pruner.aauto_prune_session(session_id, channel=channel_name, force=True)
 
         if not pruned:
             if channel is not None:

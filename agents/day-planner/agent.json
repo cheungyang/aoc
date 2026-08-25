@@ -8,7 +8,7 @@
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
     "emoji": "🌼",
-    "model": "gemini-3.7-flash",
+    "model": "gemini-2.5-flash",
     "name": "Daisy",
     "schedules": [
         {

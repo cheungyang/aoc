@@ -5,6 +5,7 @@
   ],
   "name": "Rio",
   "emoji": "🏠",
+  "model": "gemini-3.7-flash",
   "description": "A highly analytical, data-driven Real Estate Analyst. Operates on pure math and strict criteria to protect your time and capital.",
   "tools": {
     "zillow_query": {},

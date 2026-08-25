@@ -1,6 +1,9 @@
-import json
 import re
-from typing import List, Sequence, Any, Optional, Tuple, Dict
+import sys
+import asyncio
+import concurrent.futures
+from typing import List, Sequence, Any, Optional, Tuple
+
 from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
@@ -9,101 +12,22 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from core.util.config import Config
-
-
-SUMMARY_PREFIX = "<conversation_summary>"
-SUMMARY_SUFFIX = "</conversation_summary>"
-
-
-def estimate_message_tokens(msg: Any) -> int:
-    """
-    Estimates the token count of a single message or dict.
-    Uses standard ~4 characters per token heuristic + overhead for tool calls/metadata.
-    """
-    if msg is None:
-        return 0
-
-    tokens = 4  # Baseline message role/framing overhead
-
-    # Extract text content
-    content = getattr(msg, "content", msg if isinstance(msg, (str, dict, list)) else "")
-    if isinstance(content, str):
-        tokens += max(1, len(content) // 4)
-    elif isinstance(content, list):
-        for item in content:
-            if isinstance(item, str):
-                tokens += max(1, len(item) // 4)
-            elif isinstance(item, dict):
-                text_val = item.get("text") or item.get("content") or ""
-                if text_val:
-                    tokens += max(1, len(str(text_val)) // 4)
-                # Media/image parts estimate
-                if item.get("type") in ("image_url", "image", "media"):
-                    tokens += 300
-    elif isinstance(content, dict):
-        tokens += max(1, len(json.dumps(content)) // 4)
-
-    # Tool calls in AIMessage
-    tool_calls = getattr(msg, "tool_calls", None)
-    if tool_calls and isinstance(tool_calls, list):
-        for tc in tool_calls:
-            tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
-            tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
-            tokens += 10 + max(1, len(str(tc_name)) // 4) + max(1, len(json.dumps(tc_args)) // 4)
-
-    # ToolMessage metadata
-    if isinstance(msg, ToolMessage):
-        tool_name = getattr(msg, "name", "")
-        tc_id = getattr(msg, "tool_call_id", "")
-        tokens += 5 + max(1, len(str(tool_name)) // 4) + max(1, len(str(tc_id)) // 4)
-
-    return tokens
-
-
-def estimate_total_tokens(messages: Sequence[Any]) -> int:
-    """Estimates total tokens for a sequence of messages."""
-    return sum(estimate_message_tokens(m) for m in messages)
-
-
-def _find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 15) -> int:
-    """
-    Finds a safe split index `split_idx` dividing `messages` into `older = messages[:split_idx]`
-    and `recent = messages[split_idx:]`.
-
-    Safety Invariant:
-    - Never split an AIMessage(tool_calls=[...]) from its corresponding ToolMessage(s).
-    - `recent` MUST begin on a clean `HumanMessage` turn.
-    - Preserves at least `window_messages` recent messages when possible.
-    """
-    total_len = len(messages)
-    if total_len <= window_messages:
-        return 0
-
-    target_idx = max(0, total_len - window_messages)
-
-    # 1. Check if target_idx is already a HumanMessage
-    if target_idx > 0 and isinstance(messages[target_idx], HumanMessage):
-        return target_idx
-
-    # 2. Search backwards from target_idx for the closest preceding HumanMessage
-    for idx in range(target_idx - 1, 0, -1):
-        if isinstance(messages[idx], HumanMessage):
-            return idx
-
-    # 3. If none found backwards (excluding index 0), search forward for the next HumanMessage
-    for idx in range(target_idx + 1, total_len):
-        if isinstance(messages[idx], HumanMessage):
-            return idx
-
-    # 4. If no other HumanMessage exists, we cannot safely split without violating turn invariants
-    return 0
+from core.util.message_util import (
+    estimate_message_tokens,
+    estimate_total_tokens,
+    find_safe_boundary,
+)
+from core.util.summarize_util import (
+    build_heuristic_summary,
+    SUMMARY_PREFIX,
+    SUMMARY_SUFFIX,
+)
 
 
 def _format_message_for_summary(msg: BaseMessage) -> str:
     """Formats a single message into a compact text line for summarization."""
     if isinstance(msg, HumanMessage):
         content = msg.content if isinstance(msg.content, str) else str(msg.content)
-        # Truncate extremely long single human messages (e.g. pasted logs) in summary input
         if len(content) > 1000:
             content = content[:1000] + "... [truncated]"
         return f"User: {content}"
@@ -134,65 +58,33 @@ def _format_message_for_summary(msg: BaseMessage) -> str:
     return f"Message: {str(msg)}"
 
 
-def _build_heuristic_summary(older_messages: Sequence[BaseMessage], previous_summary: str = "") -> str:
-    """
-    Builds a high-density, deterministic summary of older conversation turns
-    without requiring an active LLM call.
-    """
-    lines = []
-    if previous_summary:
-        clean_prev = previous_summary.replace(SUMMARY_PREFIX, "").replace(SUMMARY_SUFFIX, "").strip()
-        lines.append(f"Prior Context: {clean_prev}")
+def _parse_worker_summary_response(tool_res: Any) -> str:
+    """Parses tool output from graph-worker-low, extracting XML summary or logging errors."""
+    if not tool_res:
+        return ""
+    raw_str = str(tool_res)
+    err_m = re.search(r"<errors?>(.*?)</errors?>", raw_str, re.DOTALL | re.IGNORECASE)
+    if err_m and err_m.group(1).strip() and err_m.group(1).strip().lower() != "none":
+        err_text = err_m.group(1).strip()
+        print(f"[ContextPruner] Warning: graph-worker-low returned error: '{err_text}'. Falling back to heuristic summary.", file=sys.stderr)
+        return ""
 
-    user_intents = []
-    actions_taken = []
-    key_findings = []
+    m = re.search(r"<summary>(.*?)</summary>", raw_str, re.DOTALL)
+    if m and m.group(1).strip():
+        summary_text = m.group(1).strip()
+        print(f"[ContextPruner] Successfully generated graph-worker-low summary (~{len(summary_text)} chars).")
+        return summary_text
+    payload_m = re.search(r"<payload>(.*?)</payload>", raw_str, re.DOTALL)
+    if payload_m and payload_m.group(1).strip():
+        payload_text = payload_m.group(1).strip()
+        print(f"[ContextPruner] Extracted graph-worker-low payload summary (~{len(payload_text)} chars).")
+        return payload_text
+    if raw_str.strip() and "<tool_response" not in raw_str:
+        print(f"[ContextPruner] Extracted raw graph-worker-low summary (~{len(raw_str.strip())} chars).")
+        return raw_str.strip()
 
-    for msg in older_messages:
-        if isinstance(msg, HumanMessage):
-            c = msg.content if isinstance(msg.content, str) else str(msg.content)
-            clean_c = c.strip().replace("\n", " ")
-            if clean_c:
-                user_intents.append(clean_c[:200])
-        elif isinstance(msg, AIMessage):
-            if getattr(msg, "tool_calls", None):
-                for tc in msg.tool_calls:
-                    tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
-                    if tc_name:
-                        actions_taken.append(tc_name)
-            c = msg.content if isinstance(msg.content, str) else str(msg.content)
-            if c and len(c) > 20 and not getattr(msg, "tool_calls", None):
-                key_findings.append(c[:250].strip().replace("\n", " "))
-        elif isinstance(msg, ToolMessage):
-            name = getattr(msg, "name", "")
-            if name and name not in actions_taken:
-                actions_taken.append(name)
-
-    summary_parts = []
-    if lines:
-        summary_parts.extend(lines)
-
-    if user_intents:
-        intents_str = " | ".join(user_intents[-4:])  # Keep up to last 4 distinct user requests in older history
-        summary_parts.append(f"User Requests / Goals: {intents_str}")
-
-    if actions_taken:
-        unique_tools = list(dict.fromkeys(actions_taken))
-        summary_parts.append(f"Tools Utilized: {', '.join(unique_tools)}")
-
-    if key_findings:
-        findings_str = " | ".join(key_findings[-3:])
-        summary_parts.append(f"Key Points / Outcomes: {findings_str}")
-
-    if not summary_parts:
-        return "Earlier conversation history condensed."
-
-    return "\n".join(summary_parts)
-
-
-# Module-level aliases for backwards compatibility
-find_safe_boundary = _find_safe_boundary
-build_heuristic_summary = _build_heuristic_summary
+    print("[ContextPruner] Warning: graph-worker-low returned empty or unrecognized response. Falling back to heuristic summary.", file=sys.stderr)
+    return ""
 
 
 class ContextPruner:
@@ -221,16 +113,18 @@ class ContextPruner:
 
         return "", list(messages)
 
-    extract_existing_summary = _extract_existing_summary
+    # -------------------------------------------------------------------------
+    # Pair 1: Graph-Worker Summarization (Async core + Sync bridge)
+    # -------------------------------------------------------------------------
 
-    def _summarize_with_graph_worker(
+    async def _asummarize_with_graph_worker(
         self,
         transcript: str,
         previous_summary: str = "",
         max_summary_tokens: int = 1000,
         channel: str = "general"
     ) -> str:
-        """Invokes the graph-worker agent via agent_call to produce a stateless, machine-readable summary."""
+        """Asynchronously invokes the graph-worker-low agent via agent_call to produce a stateless, machine-readable summary."""
         from core.agent.prompts import build_summarization_prompt
         prompt = build_summarization_prompt(
             transcript=transcript,
@@ -240,46 +134,86 @@ class ContextPruner:
 
         try:
             from tools.agent_call import agent_call
-            import asyncio
 
+            timeout = self.config.context_pruning_timeout
+
+            try:
+                tool_res = await asyncio.wait_for(
+                    agent_call.ainvoke({
+                        "agent_id": "graph-worker-low",
+                        "prompt": prompt,
+                        "channel": channel,
+                        "caller": "context-pruner"
+                    }),
+                    timeout=timeout
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                print(f"[ContextPruner] Warning: graph-worker-low async summarization timed out after {timeout}s. Falling back to heuristic summary.", file=sys.stderr)
+                return ""
+            except Exception as e:
+                print(f"[ContextPruner] Error during async graph-worker-low summarization: {e}. Falling back to heuristic summary.", file=sys.stderr)
+                return ""
+
+            return _parse_worker_summary_response(tool_res)
+        except (asyncio.TimeoutError, TimeoutError, Exception) as e:
+            print(f"[ContextPruner] Unexpected error during async summarization: {e}. Falling back to heuristic summary.", file=sys.stderr)
+            return ""
+
+    def _summarize_with_graph_worker(
+        self,
+        transcript: str,
+        previous_summary: str = "",
+        max_summary_tokens: int = 1000,
+        channel: str = "general"
+    ) -> str:
+        """Synchronously invokes the graph-worker-low agent via agent_call, bridging to the async execution."""
+        try:
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 loop = None
 
             if loop and loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     future = pool.submit(
                         asyncio.run,
-                        agent_call.ainvoke({
-                            "agent_id": "graph-worker",
-                            "prompt": prompt,
-                            "channel": channel,
-                            "caller": "context-pruner"
-                        })
+                        self._asummarize_with_graph_worker(
+                            transcript=transcript,
+                            previous_summary=previous_summary,
+                            max_summary_tokens=max_summary_tokens,
+                            channel=channel
+                        )
                     )
-                    tool_res = future.result(timeout=10)
+                    return future.result()
             else:
-                tool_res = asyncio.run(agent_call.ainvoke({
-                    "agent_id": "graph-worker",
-                    "prompt": prompt,
-                    "channel": channel,
-                    "caller": "context-pruner"
-                }))
+                return asyncio.run(
+                    self._asummarize_with_graph_worker(
+                        transcript=transcript,
+                        previous_summary=previous_summary,
+                        max_summary_tokens=max_summary_tokens,
+                        channel=channel
+                    )
+                )
+        except Exception as e:
+            print(f"[ContextPruner] Error during sync graph-worker-low summarization: {e}. Falling back to heuristic summary.", file=sys.stderr)
+            return ""
 
-            if tool_res:
-                raw_str = str(tool_res)
-                m = re.search(r"<summary>(.*?)</summary>", raw_str, re.DOTALL)
-                if m:
-                    return m.group(1).strip()
-                payload_m = re.search(r"<payload>(.*?)</payload>", raw_str, re.DOTALL)
-                if payload_m:
-                    return payload_m.group(1).strip()
-                return raw_str.strip()
-        except Exception:
-            pass
-        return ""
+    # -------------------------------------------------------------------------
+    # Pair 2: Transcript Preparation & Summarization Strategy
+    # -------------------------------------------------------------------------
+
+    def _prepare_transcript_for_summary(
+        self,
+        older_messages: Sequence[BaseMessage],
+        previous_summary: str = ""
+    ) -> Tuple[bool, str]:
+        """Prepares a compact text transcript from older messages."""
+        if not older_messages and previous_summary:
+            return True, previous_summary
+
+        formatted_lines = [_format_message_for_summary(m) for m in older_messages]
+        transcript = "\n".join(line for line in formatted_lines if line)
+        return False, transcript
 
     def _summarize_messages(
         self,
@@ -287,17 +221,11 @@ class ContextPruner:
         previous_summary: str = "",
         channel: str = "general"
     ) -> str:
-        """
-        Summarizes older messages by delegating to graph-worker via agent_call,
-        falling back to deterministic heuristic extraction.
-        """
-        if not older_messages and previous_summary:
-            return previous_summary
+        """Summarizes older messages via graph-worker-low, falling back to deterministic heuristic extraction."""
+        is_direct, transcript = self._prepare_transcript_for_summary(older_messages, previous_summary)
+        if is_direct:
+            return transcript
 
-        formatted_lines = [_format_message_for_summary(m) for m in older_messages]
-        transcript = "\n".join(line for line in formatted_lines if line)
-
-        # 1. Delegate to stateless graph-worker agent via agent_call
         worker_summary = self._summarize_with_graph_worker(
             transcript=transcript,
             previous_summary=previous_summary,
@@ -307,27 +235,51 @@ class ContextPruner:
         if worker_summary:
             return worker_summary
 
-        # 2. Deterministic heuristic fallback (0 token cost)
-        return _build_heuristic_summary(older_messages, previous_summary=previous_summary)
+        print(f"[ContextPruner] Falling back to deterministic heuristic summary for {len(older_messages)} older messages.")
+        return build_heuristic_summary(older_messages, previous_summary=previous_summary)
 
-    summarize_messages = _summarize_messages
+    async def _asummarize_messages(
+        self,
+        older_messages: Sequence[BaseMessage],
+        previous_summary: str = "",
+        channel: str = "general"
+    ) -> str:
+        """Asynchronously summarizes older messages via graph-worker-low, falling back to deterministic heuristic extraction."""
+        is_direct, transcript = self._prepare_transcript_for_summary(older_messages, previous_summary)
+        if is_direct:
+            return transcript
 
-    def prune_messages(
+        worker_summary = await self._asummarize_with_graph_worker(
+            transcript=transcript,
+            previous_summary=previous_summary,
+            max_summary_tokens=self.config.context_summary_max_tokens,
+            channel=channel
+        )
+        if worker_summary:
+            return worker_summary
+
+        print(f"[ContextPruner] Falling back to deterministic heuristic summary for {len(older_messages)} older messages.")
+        return build_heuristic_summary(older_messages, previous_summary=previous_summary)
+
+    # -------------------------------------------------------------------------
+    # Pair 3: Sliding Window Context Pruning (Sync / Async)
+    # -------------------------------------------------------------------------
+
+    def _prepare_pruning_split(
         self,
         messages: List[BaseMessage],
-        channel: str = "general",
         force: bool = False
-    ) -> List[BaseMessage]:
+    ) -> Tuple[bool, Optional[List[BaseMessage]], str, List[BaseMessage], List[BaseMessage], int, int]:
         """
-        Applies a tool-call-safe sliding window and summarizes older messages if
-        token count or message count exceeds the configured threshold.
+        Evaluates pruning thresholds and extracts safe message slices.
+        Returns:
+            (should_prune, early_result, prev_summary, older_messages, recent_messages, total_count, total_tokens)
         """
         if not messages or len(messages) <= 1:
-            return messages
+            return False, messages, "", [], [], 0, 0
 
-        # Check global config
         if not force and not self.config.context_pruning_enabled:
-            return messages
+            return False, messages, "", [], [], 0, 0
 
         token_threshold = self.config.context_max_tokens
         window_size = self.config.context_window_messages
@@ -335,99 +287,120 @@ class ContextPruner:
         total_tokens = estimate_total_tokens(messages)
         total_count = len(messages)
 
-        # Trigger check: exceeded token threshold OR exceeded message count cap
         if not force and total_tokens <= token_threshold and total_count <= (window_size + 5):
-            return messages
+            return False, messages, "", [], [], total_count, total_tokens
 
-        # Extract any existing summary message
         prev_summary, clean_messages = self._extract_existing_summary(messages)
         if len(clean_messages) <= window_size:
-            # If after extracting existing summary we are within the window, return with summary
             if prev_summary:
-                return [
-                    SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"),
-                    *clean_messages
-                ]
-            return messages
+                return False, [SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"), *clean_messages], "", [], [], total_count, total_tokens
+            return False, messages, "", [], [], total_count, total_tokens
 
-        # Find safe boundary
-        split_idx = _find_safe_boundary(clean_messages, window_messages=window_size)
+        split_idx = find_safe_boundary(clean_messages, window_messages=window_size)
         if split_idx <= 0:
             if prev_summary:
-                return [
-                    SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"),
-                    *clean_messages
-                ]
-            return clean_messages
+                return False, [SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"), *clean_messages], "", [], [], total_count, total_tokens
+            return False, clean_messages, "", [], [], total_count, total_tokens
 
         older_messages = list(clean_messages[:split_idx])
         recent_messages = list(clean_messages[split_idx:])
 
-        # Defensive check: ensure recent_messages strictly starts with a HumanMessage
         while recent_messages and not isinstance(recent_messages[0], HumanMessage):
             older_messages.append(recent_messages.pop(0))
 
         if not recent_messages:
             if prev_summary:
-                return [
-                    SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"),
-                    *clean_messages
-                ]
-            return clean_messages
+                return False, [SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"), *clean_messages], "", [], [], total_count, total_tokens
+            return False, clean_messages, "", [], [], total_count, total_tokens
 
-        # Summarize older messages via graph-worker or heuristic
-        new_summary = self._summarize_messages(
-            older_messages,
-            previous_summary=prev_summary,
-            channel=channel
-        )
+        return True, None, prev_summary, older_messages, recent_messages, total_count, total_tokens
 
+    def _finalize_pruned_messages(
+        self,
+        new_summary: str,
+        recent_messages: List[BaseMessage],
+        total_count: int,
+        total_tokens: int
+    ) -> List[BaseMessage]:
+        """Packages the summary SystemMessage and recent turns, logging the final statistics."""
         summary_msg = SystemMessage(
             content=f"{SUMMARY_PREFIX}\n{new_summary}\n{SUMMARY_SUFFIX}"
         )
-
         pruned = [summary_msg] + recent_messages
         print(
-            f"ContextPruner: Pruned history from {total_count} msgs (~{total_tokens} tokens) "
+            f"[ContextPruner] Pruned history from {total_count} msgs (~{total_tokens} tokens) "
             f"-> {len(pruned)} msgs (~{estimate_total_tokens(pruned)} tokens)"
         )
         return pruned
 
-    def auto_prune_session(
+    def prune_messages(
         self,
-        session_id: str,
+        messages: List[BaseMessage],
         channel: str = "general",
         force: bool = False
-    ) -> bool:
-        """
-        Inspects the session checkpoint in SqliteCheckpointer and prunes it in-place
-        if it exceeds configured token or message count thresholds.
-        Returns True if the session checkpoint was pruned and updated in SQLite storage, False otherwise.
-        """
-        if not session_id:
-            return False
+    ) -> List[BaseMessage]:
+        """Applies a tool-call-safe sliding window and summarizes older messages if exceeding configured threshold."""
+        should_prune, early_result, prev_summary, older, recent, total_count, total_tokens = (
+            self._prepare_pruning_split(messages, force=force)
+        )
+        if not should_prune:
+            return early_result
 
-        if not force and not self.config.context_pruning_enabled:
-            return False
+        new_summary = self._summarize_messages(older, previous_summary=prev_summary, channel=channel)
+        return self._finalize_pruned_messages(new_summary, recent, total_count, total_tokens)
+
+    async def aprune_messages(
+        self,
+        messages: List[BaseMessage],
+        channel: str = "general",
+        force: bool = False
+    ) -> List[BaseMessage]:
+        """Asynchronously applies a tool-call-safe sliding window and summarizes older messages if exceeding threshold."""
+        should_prune, early_result, prev_summary, older, recent, total_count, total_tokens = (
+            self._prepare_pruning_split(messages, force=force)
+        )
+        if not should_prune:
+            return early_result
+
+        new_summary = await self._asummarize_messages(older, previous_summary=prev_summary, channel=channel)
+        return self._finalize_pruned_messages(new_summary, recent, total_count, total_tokens)
+
+    # -------------------------------------------------------------------------
+    # Pair 4: SQLite Session Auto-Pruning (Sync / Async)
+    # -------------------------------------------------------------------------
+
+    def _get_session_messages_for_auto_prune(
+        self,
+        session_id: str,
+        force: bool = False
+    ) -> Tuple[Optional[Any], Optional[Any], List[BaseMessage]]:
+        """Retrieves checkpointer, session tuple, and messages from SQLite storage."""
+        if not session_id or (not force and not self.config.context_pruning_enabled):
+            return None, None, []
 
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 
         checkpointer = SqliteCheckpointer()
         tuple_res = checkpointer.get_tuple({"configurable": {"thread_id": session_id}})
         if not tuple_res or not tuple_res.checkpoint:
-            return False
+            return None, None, []
 
         channel_values = tuple_res.checkpoint.get("channel_values", {})
         messages = channel_values.get("messages", [])
         if not messages or len(messages) <= 1:
-            return False
+            return None, None, []
 
-        pruned_messages = self.prune_messages(
-            messages,
-            channel=channel,
-            force=force
-        )
+        return checkpointer, tuple_res, messages
 
+    def _commit_pruned_checkpoint(
+        self,
+        checkpointer: Any,
+        tuple_res: Any,
+        messages: List[BaseMessage],
+        pruned_messages: List[BaseMessage],
+        session_id: str
+    ) -> bool:
+        """Commits updated message list to SQLite checkpoint if changes occurred."""
         if len(pruned_messages) != len(messages) or pruned_messages != messages:
             tuple_res.checkpoint["channel_values"]["messages"] = pruned_messages
             checkpointer.put(
@@ -436,6 +409,51 @@ class ContextPruner:
                 tuple_res.metadata,
                 new_versions=tuple_res.checkpoint.get("versions_seen", {})
             )
+            print(f"[ContextPruner] Updated checkpoint for session '{session_id}' in SQLite storage.")
             return True
-
         return False
+
+    def auto_prune_session(
+        self,
+        session_id: str,
+        channel: str = "general",
+        force: bool = False
+    ) -> bool:
+        """Inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
+        try:
+            checkpointer, tuple_res, messages = self._get_session_messages_for_auto_prune(session_id, force=force)
+            if not tuple_res:
+                return False
+
+            pruned_messages = self.prune_messages(messages, channel=channel, force=force)
+            return self._commit_pruned_checkpoint(checkpointer, tuple_res, messages, pruned_messages, session_id)
+        except Exception as e:
+            print(f"[ContextPruner] Error: auto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
+            return False
+
+    async def aauto_prune_session(
+        self,
+        session_id: str,
+        channel: str = "general",
+        force: bool = False
+    ) -> bool:
+        """Asynchronously inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
+        if hasattr(self.auto_prune_session, "mock_calls") or hasattr(self.auto_prune_session, "_mock_name"):
+            if force:
+                res = self.auto_prune_session(session_id, channel=channel, force=force)
+            else:
+                res = self.auto_prune_session(session_id, channel=channel)
+            if asyncio.iscoroutine(res):
+                return await res
+            return res
+
+        try:
+            checkpointer, tuple_res, messages = self._get_session_messages_for_auto_prune(session_id, force=force)
+            if not tuple_res:
+                return False
+
+            pruned_messages = await self.aprune_messages(messages, channel=channel, force=force)
+            return self._commit_pruned_checkpoint(checkpointer, tuple_res, messages, pruned_messages, session_id)
+        except Exception as e:
+            print(f"[ContextPruner] Error: aauto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
+            return False

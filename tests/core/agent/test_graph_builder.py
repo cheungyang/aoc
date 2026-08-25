@@ -47,10 +47,11 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_skills_loader_class.return_value = mock_skills_loader
          mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
          
-         agent = Agent("main", config={"tools": {"tool1": {}}})
+         from core.agent.graph_builder import GraphBuilder
+         builder = GraphBuilder()
          
          # Run
-         graph = await agent._build_graph()
+         graph = await builder.build_graph("main", config={"tools": {"tool1": {}}})
          
          # Assertions
          self.assertEqual(graph, "MockGraph")
@@ -82,9 +83,9 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_skills_loader_class.return_value = mock_skills_loader
          mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
          
-         agent = Agent("test_agent", config={"tools": {"tool1": {}}, "skills": ["skill1"]})
- 
-         graph = await agent._build_graph()
+         from core.agent.graph_builder import GraphBuilder
+         builder = GraphBuilder()
+         graph = await builder.build_graph("test_agent", config={"tools": {"tool1": {}}, "skills": ["skill1"]})
  
          self.mock_create_graph.assert_called_once_with(
              llm=unittest.mock.ANY,
@@ -94,7 +95,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              agent_id="test_agent",
              config={"tools": {"tool1": {}}, "skills": ["skill1"]}
          )
-
+ 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
@@ -120,10 +121,11 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_skills_loader_class.return_value = mock_skills_loader
          mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
          
-         agent = Agent("main", config={"tools": {"tool1": {}}})
+         from core.agent.graph_builder import GraphBuilder
+         builder = GraphBuilder()
          
          # Run
-         await agent._build_graph()
+         await builder.build_graph("main", config={"tools": {"tool1": {}}})
          
          # Get the wrapped tool passed to create_graph
          wrapped_tools = self.mock_create_graph.call_args.kwargs["tools"]
@@ -148,7 +150,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          
          mock_job_manager.update_job.assert_called_with("job1", "killed")
          mock_interrupt.assert_called_once_with("Job was killed")
-
+ 
      @patch('core.agent.graph_builder.get_agent_prompt')
      @patch('core.agent.graph_builder.SkillsLoader')
      @patch('core.agent.graph_builder.ToolsLoader')
@@ -167,7 +169,8 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_skills_loader_class.return_value = mock_skills_loader
          mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
          
-         agent = Agent("main", config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}})
+         from core.agent.graph_builder import GraphBuilder
+         builder = GraphBuilder()
          
          # Mock sys.modules to handle missing langchain_ollama
          import sys
@@ -177,7 +180,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          
          with patch.dict('sys.modules', {'langchain_ollama': mock_ollama}):
              # Run
-             graph = await agent._build_graph()
+             graph = await builder.build_graph("main", config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}})
          
          # Assertions
          self.assertEqual(graph, "MockGraph")

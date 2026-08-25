@@ -114,3 +114,11 @@ async def test_patch_discord_voice_gateway_session_description():
     
     await gw.DiscordVoiceWebSocket.received_message(ws, msg)
     assert msg["d"]["dave_protocol_version"] == 0
+
+def test_load_libopus():
+    import core.voice
+    from core.voice import _load_libopus
+    import discord.opus
+    _load_libopus()
+    # Opus should be loaded if libopus is available on the system
+    assert discord.opus.is_loaded() is True

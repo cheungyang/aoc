@@ -224,8 +224,12 @@ async def test_voice_manager_on_speech_finished_pipeline(mock_bot_runner, tmp_pa
     vm.stt_engine.transcribe = AsyncMock(return_value="Check my tasks for today")
     
     # Mock Agent execution
+    async def fake_stream(*args, **kwargs):
+        yield {"type": "token", "content": "You have 2 tasks scheduled."}
+        yield {"type": "final_response", "text": "You have 2 tasks scheduled.", "response": None}
+
     mock_agent = MagicMock()
-    mock_agent.execute = AsyncMock(return_value="You have 2 tasks scheduled.")
+    mock_agent.execute_stream = MagicMock(side_effect=fake_stream)
     
     # Mock TTS file synthesis
     fake_tts_file = tmp_path / "reply.mp3"
@@ -250,15 +254,14 @@ async def test_voice_manager_on_speech_finished_pipeline(mock_bot_runner, tmp_pa
         mock_text_channel.send.assert_any_call("🎤 **Alice (Voice):** Check my tasks for today")
         
         # 3. Verify Agent executed with shared source='discord'
-        mock_agent.execute.assert_awaited_once_with(
+        mock_agent.execute_stream.assert_called_once_with(
             content="Check my tasks for today",
             source="discord",
             channel=mock_text_channel
         )
         
-        # 4. Verify TTS synthesized and played
+        # 4. Verify TTS synthesized and queued
         vm.tts_engine.synthesize_to_file.assert_awaited_once_with("You have 2 tasks scheduled.")
-        mock_vc.play.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_voice_manager_ignores_bot_speech(mock_bot_runner):
@@ -283,13 +286,14 @@ async def test_voice_manager_interruption_turn_invalidation(mock_bot_runner, tmp
     vm.voice_client = mock_vc
     
     # Simulate an interruption occurring while agent is executing
-    async def slow_execute(*args, **kwargs):
+    async def slow_stream(*args, **kwargs):
         # Trigger interruption by simulating user speaking again
         await vm.on_speech_started(MagicMock(bot=False))
-        return "Old answer that should be discarded"
+        yield {"type": "token", "content": "Old answer that should be discarded"}
+        yield {"type": "final_response", "text": "Old answer that should be discarded", "response": None}
         
     mock_agent = MagicMock()
-    mock_agent.execute = AsyncMock(side_effect=slow_execute)
+    mock_agent.execute_stream = MagicMock(side_effect=slow_stream)
     
     vm.stt_engine.transcribe = AsyncMock(return_value="Initial question")
     vm.tts_engine.synthesize_to_file = AsyncMock()
@@ -347,11 +351,16 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     # 1. First turn: user asks "Help me ask Daisy to say hi."
     vm.stt_engine.transcribe = AsyncMock(side_effect=["Help me ask Daisy to say hi.", "Tell me the list of agents."])
     
+    async def fake_stream_1(*args, **kwargs):
+        yield {"type": "token", "content": "Alva, I tried to reach Daisy..."}
+        yield {"type": "final_response", "text": "Alva, I tried to reach Daisy...", "response": None}
+
+    async def fake_stream_2(*args, **kwargs):
+        yield {"type": "token", "content": "Here are the available agents: Daisy, Rick, Concierge."}
+        yield {"type": "final_response", "text": "Here are the available agents: Daisy, Rick, Concierge.", "response": None}
+
     mock_agent = MagicMock()
-    mock_agent.execute = AsyncMock(side_effect=[
-        "Alva, I tried to reach Daisy...",
-        "Here are the available agents: Daisy, Rick, Concierge."
-    ])
+    mock_agent.execute_stream = MagicMock(side_effect=[fake_stream_1(), fake_stream_2()])
     
     fake_tts1 = tmp_path / "reply1.mp3"
     fake_tts1.write_bytes(b"audio1")
@@ -372,8 +381,7 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
         if vm._current_task:
             await vm._current_task
             
-        assert mock_agent.execute.call_count == 1
-        assert mock_vc.play.call_count == 1
+        assert mock_agent.execute_stream.call_count == 1
         
         # Now simulate playback active
         mock_vc.is_playing.return_value = True
@@ -389,6 +397,6 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
             
         # Verify second sentence was transcribed and answered!
         assert vm.stt_engine.transcribe.call_count == 2
-        assert mock_agent.execute.call_count == 2
-        assert mock_agent.execute.call_args_list[1][1]["content"] == "Tell me the list of agents."
+        assert mock_agent.execute_stream.call_count == 2
+        assert mock_agent.execute_stream.call_args_list[1][1]["content"] == "Tell me the list of agents."
         assert vm.tts_engine.synthesize_to_file.call_count == 2

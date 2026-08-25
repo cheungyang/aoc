@@ -10,7 +10,7 @@
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
   "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
   "emoji": "🧠",
-  "model": "gemini-3.1-pro-preview",
+  "model": "gemini-3.7-flash",
   "name": "Aki",
   "skills": [
     "agent_creation",

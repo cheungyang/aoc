@@ -1,4 +1,5 @@
 import os
+import inspect
 import io
 import re
 import asyncio
@@ -8,6 +9,9 @@ from .vad_sink import VADSink
 from .stt_engine import STTEngine
 from .tts_engine import TTSEngine
 from .blurp_generator import BlurpGenerator
+from .sentence_chunker import SentenceChunker
+from .audio_queue import AudioStreamQueue
+from .bridge_manager import BridgeManager
 from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
 
@@ -34,13 +38,15 @@ class VoiceManager:
         agent = loader.get_agent(self.agent_id)
         self.config = agent.config.get("voice_config", {}) if agent else {}
         
-        # Initialize STT and TTS engines
+        # Initialize STT, TTS, Bridge, and Audio Stream Queue
         stt_model = self.config.get("stt_model", "base.en")
         tts_voice = self.config.get("tts_voice", "en-US-JennyNeural")
         tts_speed = float(self.config.get("tts_speed", 1.0))
         
         self.stt_engine = STTEngine(model_size=stt_model)
         self.tts_engine = TTSEngine(default_voice=tts_voice, default_speed=tts_speed)
+        self.bridge_manager = BridgeManager()
+        self.audio_queue = AudioStreamQueue(self, loop=getattr(self.bot, "loop", None))
         
         self._is_processing = False
         self._lock = asyncio.Lock()
@@ -231,15 +237,16 @@ class VoiceManager:
 
     def _stop_playback(self):
         """Stops active audio playback without stopping voice reception."""
-        if not self.voice_client:
-            return
-        try:
-            if hasattr(self.voice_client, "stop_playing"):
-                self.voice_client.stop_playing()
-            elif hasattr(self.voice_client, "stop"):
-                self.voice_client.stop()
-        except Exception:
-            pass
+        if hasattr(self, "audio_queue") and self.audio_queue:
+            self.audio_queue.clear()
+        elif self.voice_client:
+            try:
+                if hasattr(self.voice_client, "stop_playing"):
+                    self.voice_client.stop_playing()
+                elif hasattr(self.voice_client, "stop"):
+                    self.voice_client.stop()
+            except Exception:
+                pass
 
     async def on_speech_started(self, user):
         """Called when user begins speaking. Handles barge-in by halting current audio and cancelling prior in-flight task."""
@@ -251,7 +258,7 @@ class VoiceManager:
         self._active_turn += 1
         
         # 1. Stop audio playback immediately (without stopping voice reception!)
-        if self.voice_client and self.voice_client.is_playing():
+        if (self.voice_client and self.voice_client.is_playing()) or (hasattr(self, "audio_queue") and self.audio_queue.is_playing()):
             user_name = getattr(user, "display_name", str(user))
             print(f"[VoiceManager:{self.agent_id}] 🛑 User {user_name} spoke during playback. Halting audio (Barge-in).")
             self._stop_playback()
@@ -276,7 +283,7 @@ class VoiceManager:
         self._current_task = asyncio.create_task(self._process_speech_turn(user, wav_bytes, turn_id))
 
     async def _process_speech_turn(self, user, wav_bytes: bytes, turn_id: int):
-        """Processes a speech turn through STT, Agent, and TTS."""
+        """Processes a speech turn through STT, Agent streaming, and real-time chunked TTS."""
         async with self._lock:
             try:
                 # 1. Instantly play static acoustic blurp
@@ -312,45 +319,76 @@ class VoiceManager:
                 if turn_id != self._active_turn:
                     return
 
-                # 4. Execute LangGraph Agent with source="discord" so it shares the EXACT same session context as typing!
+                # 4. Execute LangGraph Agent with streaming
                 loader = AgentsLoader()
                 agent = loader.get_agent(self.agent_id)
                 if not agent:
                     return
                     
-                print(f"[VoiceManager:{self.agent_id}] 🤖 Executing LangGraph agent under #{target_name} context...")
-                response_text = await agent.execute(
-                    content=transcript,
-                    source="discord", # Shared context with text channel
-                    channel=target_channel
-                )
+                print(f"[VoiceManager:{self.agent_id}] 🤖 Streaming LangGraph agent under #{target_name} context...")
                 
-                if turn_id != self._active_turn:
-                    print(f"[VoiceManager:{self.agent_id}] Discarding response due to newer voice interruption.")
-                    return
+                chunker = SentenceChunker()
+                has_emitted_speech = False
 
-                print(f"[VoiceManager:{self.agent_id}] 💬 Agent response: '{response_text[:80]}...'")
-                
-                # 5. Synthesize and speak reply
-                if response_text and self.voice_client and self.voice_client.is_connected():
-                    print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing speech with Edge-TTS...")
-                    tts_file = await self.tts_engine.synthesize_to_file(response_text)
-                    
+                # Ensure audio queue is started
+                self.audio_queue.start()
+
+                # Stream agent execution events (tokens, tool bridge phrases, and final audio)
+                async for event in agent.execute_stream(
+                    content=transcript,
+                    source="discord",
+                    channel=target_channel
+                ):
                     if turn_id != self._active_turn:
-                        if tts_file and os.path.exists(tts_file):
-                            os.unlink(tts_file)
+                        print(f"[VoiceManager:{self.agent_id}] Discarding streaming event due to newer voice turn.")
                         return
 
-                    if tts_file and os.path.exists(tts_file):
-                        print(f"[VoiceManager:{self.agent_id}] 🎧 Streaming audio reply to voice channel...")
-                        self._play_audio_file(tts_file)
+                    event_type = event.get("type")
+                    if event_type == "tool_start":
+                        if not has_emitted_speech:
+                            tool_name = event.get("tool_name", "")
+                            tool_args = event.get("tool_args", {})
+                            voice_name = self.config.get("tts_voice")
+                            voice_speed = float(self.config.get("tts_speed", 1.0))
+                            bridge_audio = await self.bridge_manager.get_or_create_bridge_audio(
+                                self.agent_id, tool_name, tool_args, self.tts_engine, voice=voice_name, speed=voice_speed
+                            )
+                            if bridge_audio and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
+                                has_emitted_speech = True
+                                print(f"[VoiceManager:{self.agent_id}] 🌉 Dual-track bridge: Playing floor-holding audio for '{tool_name}'...")
+                                await self.audio_queue.put(bridge_audio, priority=False, auto_delete=False)
+
+                    elif event_type == "token":
+                        token_delta = event.get("content", "")
+                        sentences = chunker.add_token(token_delta)
+                        for sentence in sentences:
+                            if turn_id != self._active_turn:
+                                return
+                            has_emitted_speech = True
+                            print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing sentence chunk: '{sentence[:60]}...'")
+                            tts_file = await self.tts_engine.synthesize_to_file(sentence)
+                            if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
+                                await self.audio_queue.put(tts_file, auto_delete=True)
+
+                    elif event_type == "final_response":
+                        pass
+
+                # Flush remaining sentences from chunker
+                remaining_sentences = chunker.flush()
+                for sentence in remaining_sentences:
+                    if turn_id != self._active_turn:
+                        return
+                    print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing final sentence chunk: '{sentence[:60]}...'")
+                    tts_file = await self.tts_engine.synthesize_to_file(sentence)
+                    if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
+                        await self.audio_queue.put(tts_file, auto_delete=True)
                         
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[VoiceManager:{self.agent_id}] Error in voice pipeline: {e}")
-                import traceback
-                traceback.print_exc()
+                from core.util import format_error_message
+                err_msg = format_error_message(e)
+                print(f"[VoiceManager:{self.agent_id}] Error in voice pipeline: {err_msg}")
             finally:
                 self._is_processing = False
 

@@ -6,6 +6,7 @@
     ],
     "name": "Grace",
     "emoji": "🚀",
+    "model": "gemini-3.1-pro-preview",
     "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
     "schedules": [
         {

@@ -1,4 +1,5 @@
 import os
+import inspect
 import asyncio
 import discord
 import base64
@@ -208,7 +209,23 @@ class BotRunner:
 
         try:
             async with message.channel.typing():
-                await agent.execute(content_payload, source="discord", channel=message.channel, callbacks=[reaction_handler])
+                from core.agent.streaming_handler import DiscordStreamBuffer
+                stream_buffer = DiscordStreamBuffer(message.channel, edit_interval=1.0)
+
+                async for event in agent.execute_stream(
+                    content_payload,
+                    source="discord",
+                    channel=message.channel,
+                    callbacks=[reaction_handler]
+                ):
+                    event_type = event.get("type")
+                    if event_type == "token":
+                        await stream_buffer.append_token(event.get("content", ""))
+                    elif event_type == "final_response":
+                        await stream_buffer.finalize(
+                            final_text=event.get("text", ""),
+                            response=event.get("response")
+                        )
 
         except Exception as e:
             print(f"Error in BotRunner for agent {self.agent_id}: {e}")

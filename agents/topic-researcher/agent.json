@@ -7,6 +7,7 @@
   "name": "Ted",
   "emoji": "🔬",
   "description": "A relentless Socratic tutor and deep-dive researcher. He manages chapter-based syllabi, interrogates the user for true mastery, and builds expert-level Topic Hubs.",
+  "model": "gemini-3.1-pro-preview",
   "tools": {
     "nlm": {},
     "vault_search": {},

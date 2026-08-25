@@ -255,8 +255,10 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Here is an image.")
         
         # Verify channel.send was called with files
+        from core.util.config import Config
+        expected_path = os.path.join(Config().pkm_dir, "assets/test.png")
         mock_channel.send.assert_called_once_with("Here is an image.", files=[mock_file_instance])
-        mock_discord_file.assert_called_once_with("assets/test.png")
+        mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.agent.agent.LoggingHandler')
     @patch('core.agent.agent.os.path.exists')
@@ -316,8 +318,10 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "")
         
         # Verify channel.send was called once with empty content and files
+        from core.util.config import Config
+        expected_path = os.path.join(Config().pkm_dir, "assets/test.png")
         mock_channel.send.assert_called_once_with("", files=[mock_file_instance])
-        mock_discord_file.assert_called_once_with("assets/test.png")
+        mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.agent.agent.LoggingHandler')
     @patch('core.agent.agent.os.path.exists')
@@ -348,8 +352,10 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Here is a video.")
         
         # Verify channel.send was called with files
+        from core.util.config import Config
+        expected_path = os.path.join(Config().pkm_dir, "assets/test.mp4")
         mock_channel.send.assert_called_once_with("Here is a video.", files=[mock_file_instance])
-        mock_discord_file.assert_called_once_with("assets/test.mp4")
+        mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.agent.agent.LoggingHandler')
     @patch('core.agent.agent.os.path.exists')

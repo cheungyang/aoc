@@ -8,7 +8,7 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt
+from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt, Config
 from langgraph.types import interrupt
 from core.agent.job_manager import JobManager, current_job_id
 
@@ -64,7 +64,7 @@ class GraphBuilder:
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
-        model_name = config.get("model", "gemini-3.7-flash")
+        model_name = config.get("model", "gemini-2.5-flash")
         provider = config.get("provider", "google")
         
         loader = ToolsLoader()

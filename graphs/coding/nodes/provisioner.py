@@ -20,7 +20,7 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
     branch_name = f"feat/{clean_project}/{clean_feature}_{run_id}"
 
     # Pre-define resolved absolute paths for the entire graph lifecycle
-    workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
+    workspace_path = state.get("workspace_path") or os.path.abspath(os.path.join("workspaces", "runs", run_id))
     project_path = os.path.abspath(state.get("project_path", "")) if state.get("project_path") else ""
     build_request_path = os.path.abspath(state.get("build_request_path", "")) if state.get("build_request_path") else ""
     

@@ -6,6 +6,7 @@
   ],
   "name": "Miles",
   "emoji": "✈️",
+  "model": "gemini-3.7-flash",
   "description": "The Strategic Travel Concierge. Optimizes credit card category spend, manages statement credits, advises on card application strategy, and creatively routes award travel for maximum lifestyle enrichment.",
   "tools": {
     "web_search": {},
