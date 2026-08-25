@@ -6,6 +6,17 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+try:
+    import discord
+except ImportError:
+    mock_discord = MagicMock()
+    mock_ui = MagicMock()
+    mock_discord.ui = mock_ui
+    sys.modules['discord'] = mock_discord
+    sys.modules['discord.ext'] = MagicMock()
+    sys.modules['discord.ext.commands'] = MagicMock()
+    sys.modules['discord.ui'] = mock_ui
+
 from core.loaders.skills_loader import SkillsLoader
 import core.loaders.agents_loader
 
@@ -100,21 +111,21 @@ Body content of skill.
         
         self.assertIn("skill1", allowed_skills)
         self.assertIn("dream", allowed_skills)
-        self.assertIn("memory", allowed_skills)
-        self.assertEqual(len(allowed_skills), 3)
+        self.assertEqual(len(allowed_skills), 2)
 
+    @patch('core.loaders.graphs_loader.GraphsLoader.get_graph_skills')
     @patch('core.loaders.agents_loader.AgentsLoader')
-    def test_get_allowed_skills_already_present(self, mock_agents_loader):
+    def test_get_allowed_skills_with_graph(self, mock_agents_loader, mock_get_graph_skills):
         mock_agent = MagicMock()
-        mock_agent.config = {"skills": ["skill1", "dream"]}
+        mock_agent.config = {"skills": ["skill1"], "graph": "custom_graph"}
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
+        mock_get_graph_skills.return_value = ["graph_skill_1"]
         
         allowed_skills = self.loader.get_allowed_skills('agent_1')
         
         self.assertIn("skill1", allowed_skills)
-        self.assertIn("dream", allowed_skills)
-        self.assertIn("memory", allowed_skills)
-        self.assertEqual(len(allowed_skills), 3)
+        self.assertIn("graph_skill_1", allowed_skills)
+        self.assertEqual(len(allowed_skills), 2)
 
     @patch('core.loaders.agents_loader.AgentsLoader')
     def test_get_skills_overview_sorted(self, mock_agents_loader):

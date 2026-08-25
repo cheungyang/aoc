@@ -34,12 +34,12 @@ Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure tem
   "tools": {
     "<tool_name_1>": {}
   },
-  "skills": ["memory", "dream"]
+  "skills": []
 }
 ```
 *Critical Constraints for agent.json:*
 - The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
-- Do not explicitly add tools to the `tools` object if they are already inherited via the skills listed in the `skills` array (e.g., `filesystem` is inherited via the `memory` skill).
+- Do not explicitly add tools to the `tools` object if they are already inherited via the skills listed in the `skills` array (e.g., `filesystem` permissions are inherited via the `dream` skill).
 
 ### 3. Create Core Markdown Files
 Create the following files under `agents/<agent_id>/`:

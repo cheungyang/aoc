@@ -11,8 +11,7 @@
   "skills": [
     "wiki_lint",
     "wiki_ingest",
-    "wiki_query",
-    "memory"
+    "wiki_query"
   ],
   "schedules": [
     {

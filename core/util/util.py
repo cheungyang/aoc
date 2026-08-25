@@ -4,7 +4,7 @@ import os
 import re
 import ast
 import json
-from typing import Any
+from typing import Any, Optional
 
 def split_message(text, limit=2000):
     """Splits a text into chunks of at most 'limit' characters."""
@@ -59,7 +59,7 @@ def get_formatting_prompt():
     return """<formatting_rules>
 If you want to present options to the user, use the optional <poll> tag after your response, formatted below.
 Option text (<text>) MUST be concise and 80 or fewer characters in length (to meet Discord button limits).
-Do not include any xml response to the user except the <poll>, <images>, and <videos> blocks.
+Do not include any xml response to the user except <poll>, <images>, <videos>, and <system_memory_log> blocks.
 <poll allow_multiple="{{true_or_false}}">
     <question>{{question to ask the user}}</question>
     <options>
@@ -83,6 +83,16 @@ If you want to send videos to the user, use the <videos> tag, formatted below.
     <video path="{{path to the video file}}"/>
     {{...additional <video path="..."/> tags for each video...}}
 </videos>
+
+<memory_logging_rules>
+When a task completes, user feedback occurs, or evergreen user context is revealed, append a <system_memory_log> block at the end of your response. The orchestrator intercepts and removes this block before the user sees it. Do not use file tools for memory logging.
+Format:
+<system_memory_log>
+- [HH:MM:SS] [MEMORY] Task: <task summary>. Status: <Success/Failure>. Decisions: <key decisions>.
+- [HH:MM:SS] [FEEDBACK] <direct or indirect human feedback/corrections to adhere to>.
+- [HH:MM:SS] [CONTEXT] Evergreen: <persistent user context, preferences, or relationships>.
+</system_memory_log>
+</memory_logging_rules>
 </formatting_rules>
 
 <tool_execution_rules>
@@ -252,3 +262,65 @@ def get_agent_prompt(agent_id):
     ]
 
     return "\n\n".join(prompt_parts) if prompt_parts else ""
+
+
+def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
+    """
+    Appends intercepted memory log content to <pkm_dir>/agents/<agent_id>/memory_logs/YYYY-MM-DD.md
+    using the filesystem tool.
+    """
+    if not log_content or not log_content.strip() or not agent_id:
+        return None
+
+    try:
+        from core.util.config import Config
+        from tools.filesystem import filesystem
+
+        pkm_dir = Config().pkm_dir
+        now = datetime.datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M:%S")
+        log_file = os.path.join(pkm_dir, "agents", agent_id, "memory_logs", f"{today_str}.md")
+
+        formatted_lines = []
+        for raw_line in log_content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # Strip leading list bullets/hyphens
+            line_body = re.sub(r"^[-*•]\s*", "", line)
+            # Strip placeholder or prior timestamps e.g. [00:00:00], [HH:MM:SS], [12:34:56]
+            line_body = re.sub(r"^\[(?:\d{2}:\d{2}:\d{2}|HH:MM:SS|--:--:--)\]\s*", "", line_body, flags=re.IGNORECASE)
+            
+            formatted_lines.append(f"- [{time_str}] {line_body}")
+
+        if not formatted_lines:
+            return None
+
+        payload = "\n".join(formatted_lines) + "\n"
+
+        result = filesystem.invoke({
+            "agent_id": agent_id,
+            "instructions": [{
+                "action": "append",
+                "path": log_file,
+                "content": payload
+            }]
+        })
+
+        result_str = str(result)
+        errors_match = re.search(r'<errors>(.*?)</errors>', result_str, re.DOTALL)
+        if errors_match:
+            errors_content = errors_match.group(1).strip()
+            if errors_content and errors_content != "None":
+                print(f"Error persisting memory log for agent {agent_id}: {errors_content}")
+                return None
+        elif "Error" in result_str:
+            print(f"Error persisting memory log for agent {agent_id}: {result_str}")
+            return None
+
+        return log_file
+    except Exception as e:
+        print(f"Warning: Failed to persist memory log for agent {agent_id}: {e}")
+        return None

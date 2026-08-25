@@ -52,7 +52,9 @@ class ToolsLoader:
         config = agent.config
         
         active_graph = graph_id or current_graph_id.get() or config.get("graph")
-        cache_key = f"{agent_id}::{active_graph or ''}"
+        from core.util.config import Config
+        pkm_dir = Config().pkm_dir
+        cache_key = f"{agent_id}::{active_graph or ''}::{pkm_dir}"
         if cache_key in self._agent_permissions_cache:
             return self._agent_permissions_cache[cache_key]
 
@@ -96,6 +98,15 @@ class ToolsLoader:
             graph_tools = graphs_loader.get_graph_tools(active_graph)
             merge_tool_dict(graph_tools)
 
+        # Ensure default filesystem permissions for the agent's PKM workspace only
+        if "filesystem" not in merged_tools:
+            merged_tools["filesystem"] = {}
+        if isinstance(merged_tools["filesystem"], dict):
+            agent_workspace_pkm = os.path.join(pkm_dir, "agents", agent_id)
+            default_actions = ["read", "write", "overwrite", "append", "replace_block", "ls", "find", "grep", "delete"]
+            if agent_workspace_pkm not in merged_tools["filesystem"]:
+                merged_tools["filesystem"][agent_workspace_pkm] = default_actions.copy()
+
         self._agent_permissions_cache[cache_key] = merged_tools
         return merged_tools
 
@@ -120,8 +131,12 @@ class ToolsLoader:
             
             for base_path, actions in permissions.items():
                 resolved_base_path = base_path.replace("<agent_id>", agent_id)
-                base_abs_path = os.path.abspath(os.path.join(workspace_root, resolved_base_path))
-                if target_abs_path.startswith(base_abs_path):
+                if os.path.isabs(resolved_base_path):
+                    base_abs_path = os.path.abspath(resolved_base_path)
+                else:
+                    base_abs_path = os.path.abspath(os.path.join(workspace_root, resolved_base_path))
+
+                if target_abs_path == base_abs_path or target_abs_path.startswith(base_abs_path.rstrip(os.sep) + os.sep):
                     if action_name in actions:
                         return True
             return False

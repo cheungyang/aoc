@@ -212,10 +212,9 @@ def _overwrite(path: str, content: str) -> tuple[str, str]:
 
 
 def _append(path: str, content: str) -> tuple[str, str]:
-    if not os.path.exists(path):
-        return "", f"Error: File not found at {path} to append."
-    if not os.path.isfile(path):
+    if os.path.exists(path) and not os.path.isfile(path):
         return "", f"Error: Path {path} is not a file."
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(content)
     return f"Successfully appended to {path}", "None"

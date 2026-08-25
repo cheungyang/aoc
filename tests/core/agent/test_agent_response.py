@@ -1,4 +1,6 @@
 import unittest
+import os
+import sys
 from core.agent.agent_response import AgentResponse
 
 class TestAgentResponse(unittest.TestCase):
@@ -137,6 +139,58 @@ class TestAgentResponse(unittest.TestCase):
         self.assertIsNotNone(response.video_paths)
         self.assertEqual(response.video_paths, ["assets/video1.mp4"])
 
+    def test_perfect_system_memory_log(self):
+        reply_text = """I have completed your task successfully!
+<system_memory_log>
+- [12:00:00] [MEMORY] Task: Generated chart. Status: Success. Decisions: Used matplotlib.
+- [12:00:00] [CONTEXT] Evergreen: User prefers dark mode charts.
+- [12:00:00] [FEEDBACK] Explicit: Ensure axes are always labeled.
+</system_memory_log>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "I have completed your task successfully!")
+        self.assertIsNotNone(response.system_memory_log)
+        self.assertIn("[MEMORY] Task: Generated chart.", response.system_memory_log)
+        self.assertIn("[CONTEXT] Evergreen: User prefers dark mode charts.", response.system_memory_log)
+        self.assertIn("[FEEDBACK] Explicit: Ensure axes are always labeled.", response.system_memory_log)
+        self.assertNotIn("<system_memory_log>", response.text)
+        self.assertNotIn("</system_memory_log>", response.text)
+
+    def test_combined_all_xml_blocks(self):
+        reply_text = """Here is the complete report and options:
+<poll allow_multiple="false">
+  <question>Proceed?</question>
+  <options>
+    <option><text>Yes</text><emoji>✅</emoji><response>Yes</response></option>
+  </options>
+</poll>
+<images>
+  <image path="assets/report.png"/>
+</images>
+<videos>
+  <video path="assets/summary.mp4"/>
+</videos>
+<system_memory_log>
+- [12:00:00] [MEMORY] Task: Full report generated.
+</system_memory_log>
+"""
+        response = AgentResponse.from_string(reply_text)
+        self.assertEqual(response.text.strip(), "Here is the complete report and options:")
+        self.assertIsNotNone(response.poll_data)
+        self.assertIsNotNone(response.image_paths)
+        self.assertIsNotNone(response.video_paths)
+        self.assertIsNotNone(response.system_memory_log)
+        self.assertEqual(response.poll_data["question"], "Proceed?")
+        self.assertEqual(response.image_paths, ["assets/report.png"])
+        self.assertEqual(response.video_paths, ["assets/summary.mp4"])
+        self.assertEqual(response.system_memory_log, "- [12:00:00] [MEMORY] Task: Full report generated.")
+        self.assertNotIn("<system_memory_log>", response.text)
+        self.assertNotIn("<poll", response.text)
+        self.assertNotIn("<images>", response.text)
+        self.assertNotIn("<videos>", response.text)
+
+
 if __name__ == '__main__':
     unittest.main()
+
 

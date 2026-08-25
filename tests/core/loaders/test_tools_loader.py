@@ -229,6 +229,63 @@ class TestCheckPermission(unittest.TestCase):
         finally:
             current_graph_id.reset(token)
 
+    @patch('core.loaders.agents_loader.AgentsLoader.get_agent')
+    def test_default_pkm_workspace_permission(self, mock_get_agent):
+        from core.util.config import Config
+        mock_agent = MagicMock()
+        mock_agent.config = {"tools": {}}
+        mock_get_agent.return_value = mock_agent
+
+        pkm_dir = Config().pkm_dir
+        expected_pkm_path = os.path.join(pkm_dir, "agents", "researcher")
+        unexpected_code_path = "agents/researcher"
+
+        perms = self.loader._merge_tool_permissions("researcher")
+        self.assertIn("filesystem", perms)
+        self.assertIn(expected_pkm_path, perms["filesystem"])
+        self.assertNotIn(unexpected_code_path, perms["filesystem"])
+        self.assertIn("append", perms["filesystem"][expected_pkm_path])
+        self.assertIn("read", perms["filesystem"][expected_pkm_path])
+
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_check_permission_absolute_path(self, mock_merge):
+        abs_allowed_dir = "/var/data/custom_agent_vault"
+        mock_merge.return_value = {
+            "filesystem": {
+                abs_allowed_dir: ["read", "write", "append"]
+            }
+        }
+
+        # Subfile in allowed absolute directory
+        target_file = os.path.join(abs_allowed_dir, "logs", "2026-08-24.md")
+        self.assertTrue(self.loader.check_permission("agent1", "filesystem", "append", path=target_file))
+        self.assertTrue(self.loader.check_permission("agent1", "filesystem", "read", path=target_file))
+        self.assertFalse(self.loader.check_permission("agent1", "filesystem", "delete", path=target_file))
+
+        # Outside directory (with similar prefix name)
+        outside_file = "/var/data/custom_agent_vault_other/secret.txt"
+        self.assertFalse(self.loader.check_permission("agent1", "filesystem", "read", path=outside_file))
+
+    @patch.object(ToolsLoader, '_merge_tool_permissions')
+    def test_check_permission_workspace_root_relative_path(self, mock_merge):
+        mock_merge.return_value = {
+            "filesystem": {
+                "pkm/wiki": ["read", "write"]
+            }
+        }
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+        # Valid subfile
+        valid_path = os.path.join(workspace_root, "pkm", "wiki", "index.md")
+        self.assertTrue(self.loader.check_permission("agent1", "filesystem", "read", path=valid_path))
+        self.assertTrue(self.loader.check_permission("agent1", "filesystem", "write", path=valid_path))
+        self.assertFalse(self.loader.check_permission("agent1", "filesystem", "delete", path=valid_path))
+
+        # Sibling directory with similar prefix (should not match)
+        sibling_path = os.path.join(workspace_root, "pkm", "wiki_gardener", "index.md")
+        self.assertFalse(self.loader.check_permission("agent1", "filesystem", "read", path=sibling_path))
+
+
 if __name__ == "__main__":
     unittest.main()
 

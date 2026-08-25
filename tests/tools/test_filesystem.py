@@ -229,6 +229,61 @@ class TestFilesystemTool(unittest.TestCase):
         self.assertEqual(result, expected)
         mock_file().write.assert_called_with("new_line\n")
 
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.makedirs')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_append_creates_dirs_and_file_if_not_exists(self, mock_file, mock_makedirs, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = False
+        
+        instructions = [{"action": "append", "path": "allowed_folder/nested/new_file.txt", "content": "hello\n"}]
+        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        
+        expected_payload = '<instruction_result action="append" path="allowed_folder/nested/new_file.txt">Successfully appended to allowed_folder/nested/new_file.txt</instruction_result>'
+        expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
+        self.assertEqual(result, expected)
+        mock_makedirs.assert_called_once()
+        mock_file().write.assert_called_with("hello\n")
+
+    @patch('core.loaders.tools_loader.ToolsLoader')
+    @patch('os.path.exists')
+    @patch('os.path.isfile')
+    def test_append_fails_if_path_is_directory(self, mock_isfile, mock_exists, mock_tools_loader):
+        mock_loader = MagicMock()
+        mock_tools_loader.return_value = mock_loader
+        mock_loader.check_permission.return_value = True
+        mock_exists.return_value = True
+        mock_isfile.return_value = False
+        
+        instructions = [{"action": "append", "path": "allowed_folder/existing_directory", "content": "hello\n"}]
+        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        
+        expected_errors = '<instruction_error action="append" path="allowed_folder/existing_directory">Error: Path allowed_folder/existing_directory is not a file.</instruction_error>'
+        expected = format_tool_response("filesystem", payload="", errors=expected_errors)
+        self.assertEqual(result, expected)
+
+    def test_append_integration_auto_create(self):
+        import tempfile
+        from tools.filesystem import _append
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            nested_file = os.path.join(tmp_dir, "new_folder", "log.md")
+            
+            # 1. Append to non-existent file in non-existent directory -> should auto-create directory and file
+            res, err = _append(nested_file, "Line 1\n")
+            self.assertEqual(err, "None")
+            self.assertTrue(os.path.exists(nested_file))
+            with open(nested_file, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "Line 1\n")
+                
+            # 2. Append again -> should append without overwriting
+            res2, err2 = _append(nested_file, "Line 2\n")
+            self.assertEqual(err2, "None")
+            with open(nested_file, "r", encoding="utf-8") as f:
+                self.assertEqual(f.read(), "Line 1\nLine 2\n")
+
     # --- Replace Block Tests ---
 
     @patch('core.loaders.tools_loader.ToolsLoader')
