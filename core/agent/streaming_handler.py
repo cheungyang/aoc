@@ -8,11 +8,11 @@ from core.agent.discord_ui import PollButtonView
 
 class DiscordStreamBuffer:
     """
-    Manages rate-limited (1.0s) message editing and multi-message overflow (1,900 chars)
+    Manages rate-limited (1.5s) message editing and multi-message overflow (1,900 chars)
     for real-time Discord text streaming while filtering incomplete/completed XML tags.
     """
 
-    def __init__(self, channel: Optional[discord.abc.Messageable], edit_interval: float = 1.0, max_chunk_size: int = 1900):
+    def __init__(self, channel: Optional[discord.abc.Messageable], edit_interval: float = 1.5, max_chunk_size: int = 1900):
         self.channel = channel
         self.edit_interval = edit_interval
         self.max_chunk_size = max_chunk_size

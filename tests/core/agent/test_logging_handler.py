@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.agent.logging_handler import LoggingHandler
+from core.agent.logging_handler import LoggingHandler, format_tool_extra_str
 
 class TestLoggingHandler(unittest.TestCase):
 
@@ -50,6 +50,86 @@ class TestLoggingHandler(unittest.TestCase):
             "session1", 
             "system", 
             "Tool MyTool [action: create, path: /tmp, skill_id: skill_123]:{'action': 'create', 'path': '/tmp', 'skill_id': 'skill_123'}"
+        )
+
+    def test_on_tool_start_filesystem_instructions_multiple(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_str = "{'instructions': [{'action': 'ls', 'path': '{directory1}'}, {'action': 'read', 'path': '{file2}'}]}"
+        handler.on_tool_start({"name": "filesystem"}, input_str)
+        
+        handler.manager.append_message.assert_called_once_with(
+            "session1",
+            "system",
+            'Tool filesystem [action "ls" on {directory1}, "read" on {file2}]:{\'instructions\': [{\'action\': \'ls\', \'path\': \'{directory1}\'}, {\'action\': \'read\', \'path\': \'{file2}\'}]}'
+        )
+
+    def test_on_tool_start_filesystem_instructions_single(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_str = "{'agent_id': 'main', 'instructions': [{'action': 'ls', 'path': '/tmp'}]}"
+        handler.on_tool_start({"name": "filesystem"}, input_str)
+        
+        handler.manager.append_message.assert_called_once_with(
+            "session1",
+            "system",
+            'Tool filesystem [action "ls" on /tmp]:{\'agent_id\': \'main\', \'instructions\': [{\'action\': \'ls\', \'path\': \'/tmp\'}]}'
+        )
+
+    def test_on_tool_start_filesystem_json_input_str(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_str = '{"agent_id": "main", "instructions": [{"action": "ls", "path": "{directory1}"}, {"action": "read", "path": "{file2}"}]}'
+        handler.on_tool_start({"name": "filesystem"}, input_str)
+        
+        handler.manager.append_message.assert_called_once_with(
+            "session1",
+            "system",
+            'Tool filesystem [action "ls" on {directory1}, "read" on {file2}]:' + input_str
+        )
+
+    def test_on_tool_start_filesystem_dict_input(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_dict = {"agent_id": "main", "instructions": [{"action": "ls", "path": "/var/log"}]}
+        handler.on_tool_start({"name": "filesystem"}, input_dict)
+        
+        handler.manager.append_message.assert_called_once_with(
+            "session1",
+            "system",
+            'Tool filesystem [action "ls" on /var/log]:' + str(input_dict)
+        )
+
+    def test_on_tool_start_other_tools_sweep(self):
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        # git tool
+        handler.on_tool_start({"name": "git"}, "{'command': 'status', 'path': '/repo'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool git [path: /repo]:{'command': 'status', 'path': '/repo'}"
+        )
+        
+        # load_skill tool
+        handler.on_tool_start({"name": "load_skill"}, "{'skill_id': 'code_search', 'agent_id': 'main'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool load_skill [skill_id: code_search]:{'skill_id': 'code_search', 'agent_id': 'main'}"
+        )
+        
+        # task_query tool
+        handler.on_tool_start({"name": "task_query"}, "{'action': 'search', 'query': 'fix bug'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool task_query [action: search]:{'action': 'search', 'query': 'fix bug'}"
+        )
+        
+        # web_search tool (no action/path/skill_id/instructions)
+        handler.on_tool_start({"name": "web_search"}, "{'query': 'python langgraph'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool web_search:{'query': 'python langgraph'}"
         )
     def test_on_tool_end_appends_to_session(self):
         handler = LoggingHandler(session_id="session1")
@@ -187,6 +267,75 @@ class TestLoggingHandler(unittest.TestCase):
         logged_msg = end_call[2]
         self.assertTrue(logged_msg.startswith("Tool Output ["), f"Message '{logged_msg}' should start with 'Tool Output ['")
         self.assertTrue(logged_msg.endswith("s]: Search result output"), f"Message '{logged_msg}' should end with 's]: Search result output'")
+
+class TestFormatToolExtraStr(unittest.TestCase):
+    def test_format_filesystem_multiple_instructions_dict(self):
+        input_data = {
+            "instructions": [
+                {"action": "ls", "path": "{directory1}"},
+                {"action": "read", "path": "{file2}"}
+            ]
+        }
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, ' [action "ls" on {directory1}, "read" on {file2}]')
+
+    def test_format_filesystem_multiple_instructions_str(self):
+        input_str = "{'instructions': [{'action': 'ls', 'path': '/var/log'}, {'action': 'read', 'path': '/etc/hosts'}]}"
+        res = format_tool_extra_str(input_str)
+        self.assertEqual(res, ' [action "ls" on /var/log, "read" on /etc/hosts]')
+
+    def test_format_filesystem_single_instruction(self):
+        input_data = {"instructions": [{"action": "ls", "path": "/tmp"}]}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, ' [action "ls" on /tmp]')
+
+    def test_format_filesystem_action_only(self):
+        input_data = {"instructions": [{"action": "list_all"}]}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, ' [action "list_all"]')
+
+    def test_format_filesystem_path_only(self):
+        input_data = {"instructions": [{"path": "/tmp/test"}]}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, ' [action on /tmp/test]')
+
+    def test_format_filesystem_serialized_json_instructions(self):
+        input_data = {'instructions': '[{"action": "ls", "path": "/tmp"}]'}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, ' [action "ls" on /tmp]')
+
+    def test_format_action_path_skill_id(self):
+        input_data = {"action": "create", "path": "/tmp", "skill_id": "skill_123"}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, " [action: create, path: /tmp, skill_id: skill_123]")
+
+    def test_format_path_only(self):
+        input_str = "{'command': 'status', 'path': '/repo'}"
+        res = format_tool_extra_str(input_str)
+        self.assertEqual(res, " [path: /repo]")
+
+    def test_format_skill_id_only(self):
+        input_data = {"skill_id": "code_search", "agent_id": "main"}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, " [skill_id: code_search]")
+
+    def test_format_action_only(self):
+        input_str = "{'action': 'search', 'query': 'fix bug'}"
+        res = format_tool_extra_str(input_str)
+        self.assertEqual(res, " [action: search]")
+
+    def test_format_no_matching_keys(self):
+        input_data = {"query": "python langgraph"}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, "")
+
+    def test_format_empty_or_none_or_invalid_inputs(self):
+        self.assertEqual(format_tool_extra_str(None), "")
+        self.assertEqual(format_tool_extra_str({}), "")
+        self.assertEqual(format_tool_extra_str(""), "")
+        self.assertEqual(format_tool_extra_str("invalid {string"), "")
+        self.assertEqual(format_tool_extra_str(12345), "")
+
 
 if __name__ == "__main__":
     unittest.main()

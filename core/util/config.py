@@ -371,7 +371,7 @@ class Config:
                 return int(env_val)
             except ValueError:
                 pass
-        return 15
+        return 30
 
     @context_window_messages.setter
     def context_window_messages(self, value):

@@ -2,8 +2,80 @@ import datetime
 import os
 import json
 import time
+import ast
+from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+
+def format_tool_extra_str(input_str: Any) -> str:
+    """
+    Format extra string info for tool start logging.
+    - For filesystem instructions list: [action "ls" on {directory1}, "read" on {file2}]
+    - For other tools with action/path/skill_id: [action: create, path: /tmp, skill_id: skill_123]
+    """
+    if input_str is None:
+        return ""
+
+    try:
+        input_dict = None
+        if isinstance(input_str, dict):
+            input_dict = input_str
+        elif isinstance(input_str, str):
+            try:
+                input_dict = json.loads(input_str)
+            except Exception:
+                try:
+                    input_dict = ast.literal_eval(input_str)
+                except Exception:
+                    input_dict = None
+
+        if not isinstance(input_dict, dict):
+            return ""
+
+        instructions = input_dict.get("instructions")
+        if isinstance(instructions, str):
+            try:
+                instructions = json.loads(instructions)
+            except Exception:
+                try:
+                    instructions = ast.literal_eval(instructions)
+                except Exception:
+                    pass
+
+        if isinstance(instructions, list) and instructions:
+            action_items = []
+            for inst in instructions:
+                if isinstance(inst, dict):
+                    act = inst.get("action")
+                    p = inst.get("path")
+                    if act and p:
+                        action_items.append(f'"{act}" on {p}')
+                    elif act:
+                        action_items.append(f'"{act}"')
+                    elif p:
+                        action_items.append(f'on {p}')
+            if action_items:
+                joined = ", ".join(action_items)
+                return f" [action {joined}]"
+
+        action = input_dict.get("action")
+        path = input_dict.get("path")
+        skill_id = input_dict.get("skill_id")
+
+        extra_info = []
+        if action:
+            extra_info.append(f"action: {action}")
+        if path:
+            extra_info.append(f"path: {path}")
+        if skill_id:
+            extra_info.append(f"skill_id: {skill_id}")
+        if extra_info:
+            return f" [{', '.join(extra_info)}]"
+    except Exception:
+        pass
+
+    return ""
+
 
 class LoggingHandler(BaseCallbackHandler):
     def __init__(self, session_id=None, role=None, human_message=None):
@@ -92,27 +164,7 @@ class LoggingHandler(BaseCallbackHandler):
             self.tool_start_times = {}
         self.tool_start_times[run_id] = time.time()
         
-        action = None
-        path = None
-        skill_id = None
-        try:
-            import ast
-            input_dict = ast.literal_eval(input_str)
-            if isinstance(input_dict, dict):
-                action = input_dict.get("action")
-                path = input_dict.get("path")
-                skill_id = input_dict.get("skill_id")
-        except Exception:
-            pass
-
-        extra_info = []
-        if action:
-            extra_info.append(f"action: {action}")
-        if path:
-            extra_info.append(f"path: {path}")
-        if skill_id:
-            extra_info.append(f"skill_id: {skill_id}")
-        extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
+        extra_str = format_tool_extra_str(input_str)
         
         print(f"Tool use: {tool_name}{extra_str}")
         if self.session_id:

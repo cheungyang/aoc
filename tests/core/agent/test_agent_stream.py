@@ -96,5 +96,43 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["type"], "error")
         self.assertEqual(events[0]["content"], "'unexpected_missing_field'")
 
+    @patch('core.agent.agent.SqliteCheckpointer')
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_stream_recovers_from_corrupt_checkpoint(self, mock_logging_handler_class, mock_checkpointer_class):
+        mock_checkpointer = MagicMock()
+        mock_checkpointer_class.return_value = mock_checkpointer
+
+        mock_graph = MagicMock()
+        attempts = 0
+
+        async def mock_astream_events(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise Exception("tool_calls that do not have a corresponding ToolMessage in checkpoint")
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": MagicMock(content="Recovered answer")}
+            }
+
+        mock_graph.astream_events = mock_astream_events
+        mock_state = MagicMock()
+        mock_state.values = {"messages": [MagicMock(content="Recovered answer")]}
+        mock_state.next = []
+        mock_graph.get_state.return_value = mock_state
+
+        agent = Agent("test-agent", {})
+        agent.graph = mock_graph
+
+        events = []
+        async for event in agent.execute_stream("Hello", source="discord"):
+            events.append(event)
+
+        mock_checkpointer.rollback_last_step.assert_called_once()
+        self.assertEqual(attempts, 2)
+        final_events = [e for e in events if e["type"] == "final_response"]
+        self.assertEqual(len(final_events), 1)
+        self.assertEqual(final_events[0]["text"], "Recovered answer")
+
 if __name__ == "__main__":
     unittest.main()

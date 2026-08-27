@@ -287,7 +287,7 @@ class ContextPruner:
         total_tokens = estimate_total_tokens(messages)
         total_count = len(messages)
 
-        if not force and total_tokens <= token_threshold and total_count <= (window_size + 5):
+        if not force and total_tokens <= token_threshold and total_count <= (window_size * 2):
             return False, messages, "", [], [], total_count, total_tokens
 
         prev_summary, clean_messages = self._extract_existing_summary(messages)

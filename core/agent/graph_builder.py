@@ -64,7 +64,7 @@ class GraphBuilder:
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
-        model_name = config.get("model", "gemini-2.5-flash")
+        model_name = config.get("model", "gemini-3.5-flash-lite")
         provider = config.get("provider", "google")
         
         loader = ToolsLoader()

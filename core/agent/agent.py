@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import discord
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, List
 
 from core.util import split_message, Config, format_error_message, save_agent_memory_log
@@ -212,6 +213,125 @@ class Agent(BaseAgent):
             for path, media_type in missing_files:
                 await channel.send(f"{media_type} file not found: {path}")
 
+    async def _handle_empty_content(self, channel: Optional[discord.TextChannel], source: str) -> str:
+        """Emits warning for empty user prompts."""
+        msg = "I cannot process empty messages. Please provide some text."
+        if channel is not None:
+            try:
+                await channel.send(msg)
+            except Exception as e:
+                print(f"[Agent:{self.agent_id}] Error sending empty content warning: {e}")
+        return msg
+
+    @asynccontextmanager
+    async def _execution_context(self, job_id: str, channel_name: str):
+        """Context manager managing ContextVars and initial job running status."""
+        from core.agent.job_manager import JobManager, current_job_id, current_agent_id, current_channel_name
+        token = current_job_id.set(job_id)
+        channel_token = current_channel_name.set(channel_name)
+        agent_token = current_agent_id.set(self.agent_id)
+        JobManager().update_job(job_id, "running")
+        try:
+            yield
+        finally:
+            current_job_id.reset(token)
+            current_channel_name.reset(channel_token)
+            current_agent_id.reset(agent_token)
+
+    @staticmethod
+    def _is_corrupt_checkpoint_error(error: Exception) -> bool:
+        """Detects dangling tool call exceptions resulting from interrupted/corrupted checkpoints."""
+        return "tool_calls that do not have a corresponding ToolMessage" in str(error)
+
+    def _recover_corrupt_checkpoint(self, session_id: str):
+        """Rolls back the corrupt checkpoint step in SQLite storage to restore a valid state."""
+        SqliteCheckpointer().rollback_last_step(session_id)
+        print(f"[Agent:{self.agent_id}] Rolled back corrupt checkpoint for session: {session_id}, retrying...")
+
+    async def _handle_execution_error(
+        self,
+        job_id: str,
+        error: Exception,
+        channel: Optional[discord.TextChannel],
+        source: str
+    ) -> str:
+        """Updates job status to error, formats error message, and dispatches to channel."""
+        from core.agent.job_manager import JobManager
+        JobManager().update_job(job_id, "error")
+        err_msg = format_error_message(error)
+        print(f"[Agent:{self.agent_id}] Error executing graph: {err_msg}")
+        if channel is not None and source in ["discord", "scheduled"]:
+            try:
+                await channel.send(err_msg)
+            except Exception as se:
+                print(f"[Agent:{self.agent_id}] Error sending failure message: {se}")
+        return err_msg
+
+    def _resolve_final_response(
+        self,
+        config: Dict[str, Any],
+        accumulated_tokens: Optional[List[str]] = None
+    ) -> AgentResponse:
+        """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
+        state = self.graph.get_state(config) if hasattr(self.graph, "get_state") else None
+        raw_reply = ""
+        if state and hasattr(state, "values") and state.values and "messages" in state.values and state.values["messages"]:
+            raw_reply = state.values["messages"][-1].content
+        elif accumulated_tokens:
+            raw_reply = "".join(accumulated_tokens)
+        return self._parse_final_response(raw_reply)
+
+    async def _stream_graph_events(self, inputs: Dict[str, Any], config: Dict[str, Any]):
+        """Low-level graph streaming generator yielding normalized token/tool events."""
+        if hasattr(self.graph, "astream_events"):
+            async for event in self.graph.astream_events(inputs, config=config, version="v2"):
+                kind = event.get("event")
+                if kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content"):
+                        content_delta = chunk.content
+                        if isinstance(content_delta, str) and content_delta:
+                            yield {"type": "token", "content": content_delta}
+                        elif isinstance(content_delta, list):
+                            for p in content_delta:
+                                if isinstance(p, dict) and p.get("type") == "text":
+                                    t = p.get("text", "")
+                                    if t:
+                                        yield {"type": "token", "content": t}
+                                elif isinstance(p, str) and p:
+                                    yield {"type": "token", "content": p}
+                elif kind == "on_tool_start":
+                    yield {
+                        "type": "tool_start",
+                        "tool_name": event.get("name"),
+                        "tool_args": event.get("data", {}).get("input", {}),
+                        "run_id": event.get("run_id")
+                    }
+                elif kind == "on_tool_end":
+                    yield {
+                        "type": "tool_end",
+                        "tool_name": event.get("name"),
+                        "output": event.get("data", {}).get("output"),
+                        "run_id": event.get("run_id")
+                    }
+        else:
+            result = await self.graph.ainvoke(inputs, config=config)
+            reply_message = result["messages"][-1]
+            yield {"type": "token", "content": str(reply_message.content)}
+
+    async def _stream_graph_with_recovery(self, inputs: Dict[str, Any], config: Dict[str, Any], session_id: str):
+        """Streams graph events with automatic corrupt checkpoint recovery and retry."""
+        try:
+            async for event in self._stream_graph_events(inputs, config):
+                yield event
+        except Exception as e:
+            if self._is_corrupt_checkpoint_error(e):
+                self._recover_corrupt_checkpoint(session_id)
+                async for event in self._stream_graph_events(inputs, config):
+                    yield event
+            else:
+                raise e
+
     async def execute(
         self,
         content: str | list,
@@ -223,47 +343,27 @@ class Agent(BaseAgent):
     ) -> str:
         """Executes the agent graph in batch mode and returns full response text."""
         if self._is_empty_content(content):
-            msg = "I cannot process empty messages. Please provide some text."
-            if channel is not None:
-                await channel.send(msg)
-            return msg
+            return await self._handle_empty_content(channel, source)
 
         prep = await self._prepare_execution(content, source, job_id, channel, callbacks, role)
         if prep is None:
             return ""
         job_id, session_id, channel_name, config, inputs = prep
 
-        from core.agent.job_manager import JobManager, current_job_id, current_agent_id, current_channel_name
-        token = current_job_id.set(job_id)
-        channel_token = current_channel_name.set(channel_name)
-        agent_token = current_agent_id.set(self.agent_id)
-
-        try:
+        async with self._execution_context(job_id, channel_name):
             try:
-                JobManager().update_job(job_id, "running")
                 print(f"Invoking graph for {self.agent_id}")
                 try:
                     result = await self.graph.ainvoke(inputs, config=config)
                 except Exception as e:
-                    if "tool_calls that do not have a corresponding ToolMessage" in str(e):
-                        SqliteCheckpointer().rollback_last_step(session_id)
-                        print(f"Rolled back corrupt checkpoint for session: {session_id}, retrying...")
+                    if self._is_corrupt_checkpoint_error(e):
+                        self._recover_corrupt_checkpoint(session_id)
                         result = await self.graph.ainvoke(inputs, config=config)
                     else:
                         raise e
-
                 self._update_job_status(job_id, config)
             except Exception as e:
-                JobManager().update_job(job_id, "error")
-                err_msg = format_error_message(e)
-                print(f"Error invoking graph: {err_msg}")
-                if channel is not None and source in ["discord", "scheduled"]:
-                    await channel.send(err_msg)
-                return err_msg
-        finally:
-            current_job_id.reset(token)
-            current_channel_name.reset(channel_token)
-            current_agent_id.reset(agent_token)
+                return await self._handle_execution_error(job_id, e, channel, source)
 
         reply_message = result["messages"][-1]
         response = self._parse_final_response(reply_message.content)
@@ -288,9 +388,7 @@ class Agent(BaseAgent):
           - {"type": "final_response", "text": str, "poll_data": dict, "image_paths": list, "video_paths": list, "system_memory_log": str, "response": AgentResponse}
         """
         if self._is_empty_content(content):
-            msg = "I cannot process empty messages. Please provide some text."
-            if channel is not None and source in ["discord", "scheduled"]:
-                await channel.send(msg)
+            msg = await self._handle_empty_content(channel, source)
             yield {"type": "final_response", "text": msg, "poll_data": None, "image_paths": [], "video_paths": [], "system_memory_log": None, "response": None}
             return
 
@@ -299,80 +397,21 @@ class Agent(BaseAgent):
             return
         job_id, session_id, channel_name, config, inputs = prep
 
-        from core.agent.job_manager import JobManager, current_job_id, current_agent_id, current_channel_name
-        token = current_job_id.set(job_id)
-        channel_token = current_channel_name.set(channel_name)
-        agent_token = current_agent_id.set(self.agent_id)
-
         accumulated_tokens = []
-        try:
+        async with self._execution_context(job_id, channel_name):
             try:
-                JobManager().update_job(job_id, "running")
                 print(f"Streaming graph for {self.agent_id}")
-
-                if hasattr(self.graph, "astream_events"):
-                    async for event in self.graph.astream_events(inputs, config=config, version="v2"):
-                        kind = event.get("event")
-                        if kind == "on_chat_model_stream":
-                            chunk = event.get("data", {}).get("chunk")
-                            if chunk and hasattr(chunk, "content"):
-                                content_delta = chunk.content
-                                if isinstance(content_delta, str) and content_delta:
-                                    accumulated_tokens.append(content_delta)
-                                    yield {"type": "token", "content": content_delta}
-                                elif isinstance(content_delta, list):
-                                    for p in content_delta:
-                                        if isinstance(p, dict) and p.get("type") == "text":
-                                            t = p.get("text", "")
-                                            if t:
-                                                accumulated_tokens.append(t)
-                                                yield {"type": "token", "content": t}
-                                        elif isinstance(p, str) and p:
-                                            accumulated_tokens.append(p)
-                                            yield {"type": "token", "content": p}
-                        elif kind == "on_tool_start":
-                            yield {
-                                "type": "tool_start",
-                                "tool_name": event.get("name"),
-                                "tool_args": event.get("data", {}).get("input", {}),
-                                "run_id": event.get("run_id")
-                            }
-                        elif kind == "on_tool_end":
-                            yield {
-                                "type": "tool_end",
-                                "tool_name": event.get("name"),
-                                "output": event.get("data", {}).get("output"),
-                                "run_id": event.get("run_id")
-                            }
-                else:
-                    result = await self.graph.ainvoke(inputs, config=config)
-                    reply_message = result["messages"][-1]
-                    accumulated_tokens.append(str(reply_message.content))
-                    yield {"type": "token", "content": str(reply_message.content)}
-
+                async for event in self._stream_graph_with_recovery(inputs, config, session_id):
+                    if event.get("type") == "token":
+                        accumulated_tokens.append(event.get("content", ""))
+                    yield event
                 self._update_job_status(job_id, config)
             except Exception as e:
-                JobManager().update_job(job_id, "error")
-                err_msg = format_error_message(e)
-                print(f"Error streaming graph: {err_msg}")
-                if channel is not None and source in ["discord", "scheduled"]:
-                    await channel.send(err_msg)
+                err_msg = await self._handle_execution_error(job_id, e, channel, source)
                 yield {"type": "error", "content": err_msg}
                 return
-        finally:
-            current_job_id.reset(token)
-            current_channel_name.reset(channel_token)
-            current_agent_id.reset(agent_token)
 
-        state = self.graph.get_state(config) if hasattr(self.graph, "get_state") else None
-        raw_reply = ""
-        if state and hasattr(state, "values") and state.values and "messages" in state.values and state.values["messages"]:
-            raw_reply = state.values["messages"][-1].content
-        elif accumulated_tokens:
-            raw_reply = "".join(accumulated_tokens)
-
-        response = self._parse_final_response(raw_reply)
-
+        response = self._resolve_final_response(config, accumulated_tokens)
         yield {
             "type": "final_response",
             "text": response.text,

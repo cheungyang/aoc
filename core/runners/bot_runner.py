@@ -3,6 +3,7 @@ import inspect
 import asyncio
 import discord
 import base64
+from collections import OrderedDict
 from discord.ext import commands
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -23,6 +24,7 @@ class BotRunner:
         self.discord_token = discord_token
         self.agent_id = agent_id
         self.voice_manager = VoiceManager(self)
+        self._processed_message_ids = OrderedDict()
         
         # Register events
         self.bot.event(self.on_ready)
@@ -121,6 +123,20 @@ class BotRunner:
 
 
     async def on_message(self, message):
+        # Deduplicate incoming Discord messages by message ID.
+        # Discord gateway socket reconnections or rapid client double-clicks can deliver the exact same
+        # message event multiple times. By caching recently processed message IDs in a bounded LRU structure,
+        # we ensure each message is processed only once, preventing duplicate LLM executions and duplicate
+        # responses from being posted to the channel.
+        msg_id = getattr(message, "id", None)
+        if msg_id:
+            if msg_id in self._processed_message_ids:
+                print(f"[BotRunner:{self.agent_id}] 🛑 Dropping duplicate message event (id: {msg_id}).")
+                return
+            self._processed_message_ids[msg_id] = True
+            if len(self._processed_message_ids) > 1000:
+                self._processed_message_ids.popitem(last=False)
+
         # Ignore messages from other bots
         if message.author.bot and message.author != self.bot.user:
             return
@@ -210,7 +226,7 @@ class BotRunner:
         try:
             async with message.channel.typing():
                 from core.agent.streaming_handler import DiscordStreamBuffer
-                stream_buffer = DiscordStreamBuffer(message.channel, edit_interval=1.0)
+                stream_buffer = DiscordStreamBuffer(message.channel, edit_interval=1.5)
 
                 async for event in agent.execute_stream(
                     content_payload,
