@@ -27,12 +27,9 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
     acceptance_criteria = current_task.get("acceptance_criteria", "")
     verification_command = current_task.get("verification_command", "")
     
-    # Read spec text if available
+    # Read spec text from pre-resolved spec_path
     spec_content = ""
-    project_path = state.get("project_path", "")
-    target_spec_path = state.get("master_spec_path") or spec_path
-    if target_spec_path and not os.path.isabs(target_spec_path) and project_path:
-        target_spec_path = os.path.join(project_path, target_spec_path)
+    target_spec_path = state.get("spec_path") or spec_path
     if target_spec_path and os.path.exists(target_spec_path):
         try:
             with open(target_spec_path, "r", encoding="utf-8") as f:

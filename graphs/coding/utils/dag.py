@@ -5,13 +5,29 @@ from graphs.coding.schemas import TaskEnvelope, TaskStatus
 
 DEFAULT_MANIFEST_PATH = "pkm/wiki/software/build_request.json"
 
-def resolve_manifest_path(path: Optional[str] = None, project_path: Optional[str] = None) -> str:
-    """Resolves absolute path to global build_request.json."""
-    if path and os.path.isabs(path):
-        return path
-    if path:
-        return os.path.abspath(path)
-    return os.path.abspath(DEFAULT_MANIFEST_PATH)
+def resolve_path(path: Optional[str], default: Optional[str] = None, must_exist: bool = False) -> str:
+    """
+    Resolves an absolute path from system root ($cwd/$path).
+    If must_exist is True and the file does not exist, raises FileNotFoundError.
+    No fallbacks or heuristic guessing.
+    """
+    target = path or default
+    if not target:
+        if must_exist:
+            raise ValueError("Path is missing or empty.")
+        return ""
+    
+    abs_path = os.path.abspath(target) if os.path.isabs(target) else os.path.abspath(os.path.join(os.getcwd(), target))
+    
+    if must_exist and not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Path not found at '{abs_path}' (resolved from system root).")
+    
+    return abs_path
+
+
+def resolve_manifest_path(path: Optional[str] = None, *args, **kwargs) -> str:
+    """Resolves absolute path to global build_request.json from system root."""
+    return resolve_path(path, default=DEFAULT_MANIFEST_PATH)
 
 
 def load_manifest(manifest_path: str) -> Dict[str, Any]:

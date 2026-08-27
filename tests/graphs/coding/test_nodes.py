@@ -67,21 +67,21 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
             </spec_validation_result>
             """)
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
-                spec_file = tf.name
+                temp_spec_path = tf.name
                 tf.write(b"# Spec\nAllowed files: auth.py\nSchema: User\nGiven X When Y Then Z\nVerification: pytest")
 
             try:
                 state: CodingState = {
-                    "master_spec_path": spec_file,
-                    "project_path": os.path.dirname(spec_file),
-                    "current_task": {"task_id": "T-1", "spec_path": spec_file}
+                    "spec_path": temp_spec_path,
+                    "project_path": os.path.dirname(temp_spec_path),
+                    "current_task": {"task_id": "T-1", "spec_path": temp_spec_path}
                 }
                 res = await spec_validator_node(state)
                 self.assertTrue(res["spec_validation_passed"])
                 self.assertIn("PASS", res["spec_validation_feedback"])
             finally:
-                if os.path.exists(spec_file):
-                    os.remove(spec_file)
+                if os.path.exists(temp_spec_path):
+                    os.remove(temp_spec_path)
 
     @patch('graphs.coding.nodes.provisioner.git_ops.provision_worktree', new_callable=AsyncMock)
     async def test_provisioner_node(self, mock_provision):

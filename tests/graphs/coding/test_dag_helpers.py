@@ -128,5 +128,33 @@ class TestDAGHelpers(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    def test_resolve_path_success(self):
+        from graphs.coding.utils.dag import resolve_path
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tf:
+            path = tf.name
+            tf.write(b"# Spec")
+
+        try:
+            resolved = resolve_path(path, must_exist=True)
+            self.assertEqual(resolved, os.path.abspath(path))
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_resolve_path_file_not_found(self):
+        from graphs.coding.utils.dag import resolve_path
+        with self.assertRaises(FileNotFoundError):
+            resolve_path("non_existent_file_12345.md", must_exist=True)
+
+    def test_resolve_path_empty_must_exist(self):
+        from graphs.coding.utils.dag import resolve_path
+        with self.assertRaises(ValueError):
+            resolve_path("", must_exist=True)
+
+    def test_resolve_path_default_fallback(self):
+        from graphs.coding.utils.dag import resolve_path
+        res = resolve_path(None, default="foo/bar.json")
+        self.assertTrue(res.endswith("foo/bar.json"))
+
 if __name__ == "__main__":
     unittest.main()

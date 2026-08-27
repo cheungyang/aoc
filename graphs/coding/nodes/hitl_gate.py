@@ -52,7 +52,7 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
     project_name = current_task.get("project_name") or state.get("project_name") or "coding_project"
     feature_name = current_task.get("feature_name") or task_id
     run_id = state.get("run_id") or "run_default"
-    spec_path = state.get("master_spec_path") or current_task.get("spec_path", "")
+    spec_path = state.get("spec_path") or current_task.get("spec_path", "")
     project_path = state.get("project_path", "")
 
     # Discover target repository for GitHub routing
@@ -117,7 +117,7 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
         pr_url=existing_pr
     )
 
-    manifest_path = state.get("build_request_path") or resolve_manifest_path(state.get("build_request_path"), project_path)
+    manifest_path = state.get("build_request_path") or resolve_manifest_path()
     save_manifest(manifest_path, {
         "version": "2.0",
         "project_name": project_name,

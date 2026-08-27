@@ -31,16 +31,6 @@
         "ls",
         "find",
         "grep"
-      ],
-      "pkm/workspaces/runs": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep"
       ]
     }
   },

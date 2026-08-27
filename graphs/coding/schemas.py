@@ -43,7 +43,7 @@ class CodingState(TypedDict, total=False):
     branch_name: str
     base_branch: str
     base_ref: str
-    master_spec_path: str
+    spec_path: str
 
     # 3. Spec Validation (Goldfish 0)
     spec_validation_passed: bool

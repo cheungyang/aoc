@@ -18,13 +18,9 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
     3. Resolves dependent base_branch (inherits prerequisite branch if dependent, else origin/main).
     4. Dispatches next eligible pending task for execution.
     """
-    project_path = state.get("project_path")
-    if not project_path:
-        return {
-            "error_message": "DAG scheduler error: 'project_path' is missing from graph state. Explicit project_path is required."
-        }
+    project_path = state.get("project_path", "")
 
-    manifest_path = resolve_manifest_path(state.get("build_request_path"), project_path)
+    manifest_path = resolve_manifest_path(state.get("build_request_path"))
     
     # 1. Obtain current queue
     queue = state.get("queue")
@@ -95,6 +91,9 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
         "queue": updated_queue
     })
 
+    workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
+    spec_path = selected_task.get("spec_path", "")
+
     return {
         "build_request_path": manifest_path,
         "project_name": selected_task.get("project_name") or project_name,
@@ -103,8 +102,9 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
         "failed_tasks": failed_tasks,
         "current_task": selected_task,
         "run_id": run_id,
+        "workspace_path": workspace_path,
         "base_branch": base_branch,
-        "master_spec_path": selected_task.get("spec_path", ""),
+        "spec_path": spec_path,
         "attempt_count": 0,
         "test_run_passed": False,
         "critic_passed": False,

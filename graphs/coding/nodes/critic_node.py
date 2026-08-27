@@ -50,7 +50,7 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
             "attempt_count": current_attempt + 1
         }
 
-    # 3. Read master spec text / ground truth
+    # 3. Read spec text / ground truth from pre-resolved spec_path
     current_task = state.get("current_task") or {}
     task_id = current_task.get("task_id")
     if not task_id:
@@ -60,15 +60,12 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
             "error_message": "Missing required 'task_id' in current_task state.",
             "attempt_count": current_attempt + 1
         }
-    spec_path = state.get("master_spec_path") or current_task.get("spec_path", "")
+    spec_path = current_task.get("spec_path", "")
     allowed_files = current_task.get("allowed_files", [])
     acceptance_criteria = current_task.get("acceptance_criteria", "")
 
     spec_content = ""
-    project_path = state.get("project_path", "")
-    target_spec_path = state.get("master_spec_path") or spec_path
-    if target_spec_path and not os.path.isabs(target_spec_path) and project_path:
-        target_spec_path = os.path.join(project_path, target_spec_path)
+    target_spec_path = state.get("spec_path") or spec_path
     if target_spec_path and os.path.exists(target_spec_path):
         try:
             with open(target_spec_path, "r", encoding="utf-8") as f:

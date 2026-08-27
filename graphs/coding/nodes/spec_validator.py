@@ -17,11 +17,7 @@ async def spec_validator_node(state: CodingState) -> Dict[str, Any]:
         return {}
 
     current_task = state.get("current_task") or {}
-    target_spec_path = state.get("master_spec_path") or current_task.get("spec_path", "")
-    project_path = state.get("project_path", "")
-
-    if target_spec_path and not os.path.isabs(target_spec_path) and project_path:
-        target_spec_path = os.path.join(project_path, target_spec_path)
+    target_spec_path = state.get("spec_path") or current_task.get("spec_path", "")
 
     if not target_spec_path or not os.path.exists(target_spec_path):
         err = f"Spec file not found at {target_spec_path or 'unspecified path'}"

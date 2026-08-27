@@ -3,6 +3,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from graphs.coding.prompts.spec_validator_prompt import build_spec_validator_prompt
 from graphs.coding.utils.xml_parsers import parse_spec_validation_xml
+from graphs.coding.utils.dag import resolve_path
 from core.util import format_tool_response
 
 @tool
@@ -22,23 +23,18 @@ async def spec_validator(
     4. Is there an explicit verification command provided?
 
     Args:
-        spec_path: Path to the Markdown specification file.
-        project_path: Root directory of the project.
+        spec_path: Path to the Markdown specification file from system root.
+        project_path: Root directory of the project (optional).
         caller: The ID of the triggering agent (e.g., 'software-planner').
     """
     if not spec_path:
         return format_tool_response("spec_validator", payload="", errors="Error: 'spec_path' is required.")
 
-    # Resolve spec path relative to project_path
-    target_path = spec_path
-    if not os.path.isabs(target_path):
-        if project_path:
-            target_path = os.path.join(project_path, spec_path)
-        else:
-            target_path = os.path.abspath(spec_path)
-
-    if not os.path.exists(target_path):
-        return format_tool_response("spec_validator", payload="", errors=f"Error: Spec file not found at {spec_path} (resolved: {target_path})")
+    # Resolve spec path strictly from system root
+    try:
+        target_path = resolve_path(spec_path, must_exist=True)
+    except Exception as e:
+        return format_tool_response("spec_validator", payload="", errors=f"Error: {e}")
 
     try:
         with open(target_path, "r", encoding="utf-8") as f:

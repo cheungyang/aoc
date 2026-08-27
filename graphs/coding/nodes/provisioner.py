@@ -1,6 +1,7 @@
 import os
 from typing import Dict, Any
 from graphs.coding.schemas import CodingState
+from graphs.coding.utils.dag import resolve_path, resolve_manifest_path
 from graphs.coding.utils import git_ops
 
 async def provisioner_node(state: CodingState) -> Dict[str, Any]:
@@ -20,15 +21,25 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
     branch_name = f"feat/{clean_project}/{clean_feature}_{run_id}"
 
     # Pre-define resolved absolute paths for the entire graph lifecycle
-    workspace_path = state.get("workspace_path") or os.path.abspath(os.path.join("workspaces", "runs", run_id))
-    project_path = os.path.abspath(state.get("project_path", "")) if state.get("project_path") else ""
-    build_request_path = os.path.abspath(state.get("build_request_path", "")) if state.get("build_request_path") else ""
+    workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
+    project_path = resolve_path(state.get("project_path", "")) if state.get("project_path") else ""
+    build_request_path = resolve_manifest_path(state.get("build_request_path"))
     
-    raw_spec = state.get("master_spec_path") or current_task.get("spec_path", "")
+    raw_spec = current_task.get("spec_path") or state.get("spec_path", "")
     if raw_spec:
-        master_spec_path = raw_spec if os.path.isabs(raw_spec) else (os.path.abspath(os.path.join(project_path, raw_spec)) if project_path else os.path.abspath(raw_spec))
+        try:
+            resolved_spec_path = resolve_path(raw_spec, must_exist=True)
+        except Exception as e:
+            return {
+                "workspace_path": workspace_path,
+                "project_path": project_path,
+                "build_request_path": build_request_path,
+                "spec_path": "",
+                "branch_name": branch_name,
+                "error_message": f"Spec path error: {e}"
+            }
     else:
-        master_spec_path = ""
+        resolved_spec_path = ""
 
     # Base branch (inherits from prerequisite task or origin/main)
     base_ref = state.get("base_branch") or state.get("base_ref")
@@ -46,7 +57,7 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
             "workspace_path": workspace_path,
             "project_path": project_path,
             "build_request_path": build_request_path,
-            "master_spec_path": master_spec_path,
+            "spec_path": resolved_spec_path,
             "branch_name": branch_name,
             "error_message": f"Worktree provisioning failed: {msg}"
         }
@@ -55,7 +66,7 @@ async def provisioner_node(state: CodingState) -> Dict[str, Any]:
         "workspace_path": workspace_path,
         "project_path": project_path,
         "build_request_path": build_request_path,
-        "master_spec_path": master_spec_path,
+        "spec_path": resolved_spec_path,
         "branch_name": branch_name,
         "error_message": ""
     }

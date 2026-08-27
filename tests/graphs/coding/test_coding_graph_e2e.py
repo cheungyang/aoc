@@ -218,7 +218,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
               <summary>Spec is 100% self-contained.</summary>
             </spec_validation_result>
             """)
-            res = await spec_validator.ainvoke({"spec_path": "specs/auth.md", "project_path": self.temp_dir.name})
+            res = await spec_validator.ainvoke({"spec_path": self.spec_path})
             self.assertIn("<verdict>PASS</verdict>", res)
 
     async def test_dependent_branch_inheritance(self):
