@@ -8,22 +8,34 @@
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
     "emoji": "🌼",
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.5-flash-lite",
     "name": "Daisy",
     "schedules": [
         {
             "channel": "day-planning",
             "cron": "0 6 * * *",
             "prompt": [
-                "Provide your daily update"
+                "Good morning. It is time to generate the daily plan.",
+                "1. Use `list_impactful_actions` to retrieve project priorities.",
+                "2. Use `check_recurring_chores` for required maintenance.",
+                "3. Use `write_daily_intention` to output the final grounded task list.",
+                "CRITICAL: Enforce the '50/50 plan' (50% Growth vs 50% Maintenance).",
+                "Ensure non-meeting time is equally split between long-term progression",
+                "and daily chores. Check today's weekday: if it is Mon, Wed, or Thu",
+                "(heavy meetings), proactively break down large tasks into smaller,",
+                "bite-sized sub-tasks so the user can make realistic progress."
             ]
         },
         {
-            "channel": "weekly-planning",
-            "cron": "0 8 * * 0",
+            "channel": "day-planning",
+            "cron": "0 15 * * 5",
             "prompt": [
-                "Trigger the weekly_review skill to start the collaborative weekly",
-                "review process."
+                "Good afternoon. It is time for the weekly review.",
+                "Trigger the `weekly_review` skill and strictly follow its phased workflow.",
+                "CRITICAL ADDITION: During Phase 2 (Synthesize Wins), evaluate the past week's",
+                "data against the '50/50 plan' constraint (50% Growth vs 50% Maintenance).",
+                "Explicitly inform the user how well they balanced long-term progression",
+                "against daily chores before asking for their input on wins."
             ]
         }
     ],

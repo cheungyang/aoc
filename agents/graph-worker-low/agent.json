@@ -5,7 +5,7 @@
   ],
   "name": "Graph Worker Low",
   "emoji": "👨🏻‍🔧",
-  "model": "gemini-2.5-flash",
+  "model": "gemini-3.5-flash-lite",
   "description": "Stateless, system-aware backend execution node for LangGraph orchestrations.",
   "stateless": true,
   "tools": {},

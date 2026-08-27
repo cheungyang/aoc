@@ -37,8 +37,9 @@
       "prompt": [
         "Execute Mode A: Queue Initialization.",
         "Read `pkm/wiki/topics/research_requests.md`.",
-        "If empty, terminate immediately and stay.",
-        "If populated, research the topic, outline a syllabus roadmap, flesh out Chapter 1, and save to `pkm/wiki/topics/pending/[Topic]_Syllabus.md`.",
+        "If empty, terminate your execution immediately and stay silent in the channel.",
+        "If populated, research the topic, outline a syllabus roadmap, flesh out",
+        "Chapter 1, and save to `pkm/wiki/topics/pending/[Topic]_Syllabus.md`.",
         "Remove the request from the queue."
       ]
     },
@@ -48,7 +49,7 @@
       "prompt": [
         "Execute Mode B: The Proactive Nudge.",
         "Scan `pkm/wiki/topics/pending/` for idle syllabi.",
-        "If empty, terminate immediately.",
+        "If empty, terminate your execution immediately and stay silent in the channel.",
         "If populated, pick EXACTLY ONE (the most important or oldest) idle topic.",
         "Proactively ping the user in the channel to resume that specific topic."
       ]

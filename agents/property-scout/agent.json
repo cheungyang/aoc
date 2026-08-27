@@ -32,8 +32,9 @@
         "Use the zillow_query tool to pull active listings matching these baseline",
         "parameters. Run the strict Cap Rate and Price/SqFt math against every",
         "result. Discard any properties that fail the tests or trigger red flags.",
-        "Output the top 3 passing properties to the channel, and save their full",
-        "reports to `pkm/wallet/real-estate/properties/`."
+        "If no properties pass the tests, terminate your execution immediately and stay",
+        "silent in the channel. Output the top 3 passing properties to the channel,",
+        "and save their full reports to `pkm/wallet/real-estate/properties/`."
       ]
     }
   ]

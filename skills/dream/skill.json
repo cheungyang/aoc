@@ -5,12 +5,14 @@
   "emoji": "💭",
   "tools": {
     "filesystem": {
-      "pkm/agents/<agent_id>/memory": [
+      "pkm/agents/<agent_id>": [
         "read",
         "write",
         "append",
         "overwrite",
-        "delete"
+        "delete",
+        "ls",
+        "find"
       ]
     }
   }
