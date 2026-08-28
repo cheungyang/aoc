@@ -113,5 +113,8 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
         "critic_feedback": "",
         "latest_human_feedback": "",
         "hitl_decision": "",
-        "error_message": ""
+        "error_message": "",
+        "pr_url": "",
+        "pr_number": None,
+        "commit_url": ""
     }
