@@ -3,14 +3,16 @@ import os
 import json
 import time
 import ast
-from typing import Any
+from typing import Any, Optional
 from langchain_core.callbacks import BaseCallbackHandler
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 
-def format_tool_extra_str(input_str: Any) -> str:
+def format_tool_extra_str(input_str: Any, tool_name: Optional[str] = None) -> str:
     """
     Format extra string info for tool start logging.
     - For filesystem instructions list: [action "ls" on {directory1}, "read" on {file2}]
+    - For agent_call: [agent_id: {agent_id}]
+    - For graph_call: [graph_id: {graph_id}]
     - For other tools with action/path/skill_id: [action: create, path: /tmp, skill_id: skill_123]
     """
     if input_str is None:
@@ -58,11 +60,26 @@ def format_tool_extra_str(input_str: Any) -> str:
                 joined = ", ".join(action_items)
                 return f" [action {joined}]"
 
+        graph_id = input_dict.get("graph_id") or input_dict.get("graph_name") or input_dict.get("subgraph_name")
         action = input_dict.get("action")
         path = input_dict.get("path")
         skill_id = input_dict.get("skill_id")
 
+        target_agent_id = None
+        if tool_name == "agent_call" or (
+            "agent_id" in input_dict
+            and not action
+            and not path
+            and not skill_id
+            and not graph_id
+        ):
+            target_agent_id = input_dict.get("agent_id") or input_dict.get("target_agent")
+
         extra_info = []
+        if target_agent_id:
+            extra_info.append(f"agent_id: {target_agent_id}")
+        if graph_id:
+            extra_info.append(f"graph_id: {graph_id}")
         if action:
             extra_info.append(f"action: {action}")
         if path:
@@ -78,10 +95,11 @@ def format_tool_extra_str(input_str: Any) -> str:
 
 
 class LoggingHandler(BaseCallbackHandler):
-    def __init__(self, session_id=None, role=None, human_message=None):
+    def __init__(self, session_id=None, role=None, human_message=None, agent_id=None):
         self.session_id = session_id
         self.role = role
         self.human_message = human_message
+        self.agent_id = agent_id
         self.manager = SqliteSessionStore()
         self.llm_start_time = None
         self.last_execution_time = 0.0
@@ -158,15 +176,45 @@ class LoggingHandler(BaseCallbackHandler):
             self.last_execution_time = 0.0
 
     def on_tool_start(self, serialized, input_str, **kwargs):
-        tool_name = serialized.get("name", "Unknown")
+        tool_name = serialized.get("name", "Unknown") if isinstance(serialized, dict) else "Unknown"
         run_id = str(kwargs.get("run_id") or "default")
         if not hasattr(self, "tool_start_times"):
             self.tool_start_times = {}
         self.tool_start_times[run_id] = time.time()
         
-        extra_str = format_tool_extra_str(input_str)
+        agent_id = self.agent_id
+        if not agent_id:
+            try:
+                from core.agent.job_manager import current_agent_id
+                agent_id = current_agent_id.get()
+            except Exception:
+                pass
+
+        if not agent_id:
+            try:
+                dict_val = None
+                if isinstance(input_str, dict):
+                    dict_val = input_str
+                elif isinstance(input_str, str):
+                    try:
+                        dict_val = json.loads(input_str)
+                    except Exception:
+                        try:
+                            dict_val = ast.literal_eval(input_str)
+                        except Exception:
+                            pass
+                if isinstance(dict_val, dict):
+                    if tool_name == "agent_call":
+                        agent_id = dict_val.get("caller")
+                    else:
+                        agent_id = dict_val.get("agent_id")
+            except Exception:
+                pass
+
+        agent_prefix = f"[Agent:{agent_id}] " if agent_id else ""
+        extra_str = format_tool_extra_str(input_str, tool_name=tool_name)
         
-        print(f"Tool use: {tool_name}{extra_str}")
+        print(f"{agent_prefix}Tool use: {tool_name}{extra_str}")
         if self.session_id:
             self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}{extra_str}:{input_str}")
 

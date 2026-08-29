@@ -82,7 +82,7 @@ class Agent(BaseAgent):
             initial_prompt=content if isinstance(content, str) else str(content)
         )
 
-        logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content)
+        logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content, agent_id=self.agent_id)
         config = {
             "configurable": {
                 "thread_id": session_id,

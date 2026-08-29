@@ -104,10 +104,77 @@ class TestLoggingHandler(unittest.TestCase):
             'Tool filesystem [action "ls" on /var/log]:' + str(input_dict)
         )
 
+    def test_on_tool_start_with_agent_id_print(self):
+        from unittest.mock import patch
+        handler = LoggingHandler(session_id="session1", agent_id="graph-worker")
+        handler.manager = MagicMock()
+        
+        input_str = "{'instructions': [{'action': 'ls', 'path': '{file}'}]}"
+        with patch("builtins.print") as mock_print:
+            handler.on_tool_start({"name": "filesystem"}, input_str)
+            mock_print.assert_called_once_with('[Agent:graph-worker] Tool use: filesystem [action "ls" on {file}]')
+
+    def test_on_tool_start_with_contextvar_agent_id(self):
+        from unittest.mock import patch
+        from core.agent.job_manager import current_agent_id
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        token = current_agent_id.set("graph-worker")
+        try:
+            input_str = "{'instructions': [{'action': 'ls', 'path': '{file}'}]}"
+            with patch("builtins.print") as mock_print:
+                handler.on_tool_start({"name": "filesystem"}, input_str)
+                mock_print.assert_called_once_with('[Agent:graph-worker] Tool use: filesystem [action "ls" on {file}]')
+        finally:
+            current_agent_id.reset(token)
+
+    def test_on_tool_start_with_input_agent_id(self):
+        from unittest.mock import patch
+        handler = LoggingHandler(session_id="session1")
+        handler.manager = MagicMock()
+        
+        input_str = "{'agent_id': 'graph-worker', 'instructions': [{'action': 'ls', 'path': '{file}'}]}"
+        with patch("builtins.print") as mock_print:
+            handler.on_tool_start({"name": "filesystem"}, input_str)
+            mock_print.assert_called_once_with('[Agent:graph-worker] Tool use: filesystem [action "ls" on {file}]')
+
+    def test_on_tool_start_agent_call_with_agent_print(self):
+        from unittest.mock import patch
+        handler = LoggingHandler(session_id="session1", agent_id="software-planner")
+        handler.manager = MagicMock()
+        
+        input_str = "{'agent_id': 'graph-worker', 'prompt': 'build feature', 'channel': 'coding-pipeline'}"
+        with patch("builtins.print") as mock_print:
+            handler.on_tool_start({"name": "agent_call"}, input_str)
+            mock_print.assert_called_once_with('[Agent:software-planner] Tool use: agent_call [agent_id: graph-worker]')
+
+    def test_on_tool_start_graph_call_with_agent_print(self):
+        from unittest.mock import patch
+        handler = LoggingHandler(session_id="session1", agent_id="software-planner")
+        handler.manager = MagicMock()
+        
+        input_str = "{'graph_name': 'coding', 'query': 'build feature'}"
+        with patch("builtins.print") as mock_print:
+            handler.on_tool_start({"name": "graph_call"}, input_str)
+            mock_print.assert_called_once_with('[Agent:software-planner] Tool use: graph_call [graph_id: coding]')
+
     def test_on_tool_start_other_tools_sweep(self):
         handler = LoggingHandler(session_id="session1")
         handler.manager = MagicMock()
         
+        # agent_call tool
+        handler.on_tool_start({"name": "agent_call"}, "{'agent_id': 'graph-worker', 'prompt': 'build feature'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool agent_call [agent_id: graph-worker]:{'agent_id': 'graph-worker', 'prompt': 'build feature'}"
+        )
+
+        # graph_call tool
+        handler.on_tool_start({"name": "graph_call"}, "{'graph_name': 'coding', 'query': 'build feature'}")
+        handler.manager.append_message.assert_called_with(
+            "session1", "system", "Tool graph_call [graph_id: coding]:{'graph_name': 'coding', 'query': 'build feature'}"
+        )
+
         # git tool
         handler.on_tool_start({"name": "git"}, "{'command': 'status', 'path': '/repo'}")
         handler.manager.append_message.assert_called_with(
@@ -328,6 +395,31 @@ class TestFormatToolExtraStr(unittest.TestCase):
         input_data = {"query": "python langgraph"}
         res = format_tool_extra_str(input_data)
         self.assertEqual(res, "")
+
+    def test_format_graph_name(self):
+        input_data = {"graph_name": "coding", "query": "implement feature"}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, " [graph_id: coding]")
+
+    def test_format_graph_id(self):
+        input_str = "{'graph_id': 'content_creation', 'query': 'create post'}"
+        res = format_tool_extra_str(input_str)
+        self.assertEqual(res, " [graph_id: content_creation]")
+
+    def test_format_subgraph_name(self):
+        input_data = {"subgraph_name": "coding", "query": "fix bug"}
+        res = format_tool_extra_str(input_data)
+        self.assertEqual(res, " [graph_id: coding]")
+
+    def test_format_agent_call_with_tool_name(self):
+        input_data = {"agent_id": "graph-worker", "prompt": "run task", "channel": "dev"}
+        res = format_tool_extra_str(input_data, tool_name="agent_call")
+        self.assertEqual(res, " [agent_id: graph-worker]")
+
+    def test_format_agent_id_standalone(self):
+        input_str = "{'agent_id': 'graph-worker', 'prompt': 'run task'}"
+        res = format_tool_extra_str(input_str)
+        self.assertEqual(res, " [agent_id: graph-worker]")
 
     def test_format_empty_or_none_or_invalid_inputs(self):
         self.assertEqual(format_tool_extra_str(None), "")
