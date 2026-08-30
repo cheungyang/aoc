@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 from langchain_core.messages import AIMessage
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import git_ops
-from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path
+from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path, load_manifest
 
 async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
     """
@@ -55,7 +55,9 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
         await git_ops.teardown_worktree(".", workspace_path)
 
     # 3. Update queue and manifest
-    queue = state.get("queue") or []
+    manifest_path = state.get("build_request_path") or resolve_manifest_path()
+    manifest_data = load_manifest(manifest_path)
+    queue = manifest_data.get("queue") or []
     updated_queue = update_task_in_queue(
         queue=queue,
         task_id=task_id,
@@ -65,13 +67,8 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
         commit_url=commit_url
     )
 
-    manifest_path = state.get("build_request_path") or resolve_manifest_path()
-    save_manifest(manifest_path, {
-        "version": "2.0",
-        "project_name": project_name,
-        "max_concurrency": state.get("max_concurrency", 1),
-        "queue": updated_queue
-    })
+    manifest_data["queue"] = updated_queue
+    save_manifest(manifest_path, manifest_data)
 
     completed = list(state.get("completed_tasks", []))
     if task_id not in completed:
