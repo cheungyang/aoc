@@ -133,23 +133,23 @@ Tools allow agents to query data.
         self.assertEqual(chunks[0]["header_path"], "General")
 
     def test_get_embedding_client_without_api_key(self):
-        Config().openai_api_key = ""
+        Config().gemini_api_key = ""
         client = get_embedding_client()
         self.assertIsNone(client)
 
-    @patch("langchain_openai.OpenAIEmbeddings")
-    def test_get_embedding_client_with_api_key(self, mock_embeddings_class):
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
+    def test_get_embedding_client_with_gemini_key(self, mock_gemini_class):
         mock_instance = MagicMock()
-        mock_embeddings_class.return_value = mock_instance
+        mock_gemini_class.return_value = mock_instance
 
-        Config().openai_api_key = "test-sk-key"
-        Config().embedding_model = "text-embedding-3-small"
+        Config().gemini_api_key = "test-gemini-key"
+        Config().embedding_model = "text-embedding-004"
 
         client = get_embedding_client()
         self.assertEqual(client, mock_instance)
-        mock_embeddings_class.assert_called_once_with(
-            model="text-embedding-3-small",
-            openai_api_key="test-sk-key"
+        mock_gemini_class.assert_called_once_with(
+            model="models/text-embedding-004",
+            google_api_key="test-gemini-key"
         )
 
     def test_generate_embeddings_deterministic_fallback(self):

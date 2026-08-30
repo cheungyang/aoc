@@ -191,18 +191,23 @@ def split_markdown_into_chunks(
 
 def get_embedding_client():
     """
-    Returns an OpenAIEmbeddings client if API key is configured.
+    Returns a GoogleGenerativeAIEmbeddings client if Gemini API key is configured.
     """
-    api_key = Config().openai_api_key
-    model = Config().embedding_model
-    if not api_key:
+    config = Config()
+    gemini_key = config.gemini_api_key
+    if not gemini_key or gemini_key == "your_gemini_api_key_here":
         return None
 
     try:
-        from langchain_openai import OpenAIEmbeddings
-        return OpenAIEmbeddings(model=model, openai_api_key=api_key)
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        model = config.embedding_model
+        if not model or model == "text-embedding-3-small":
+            model = "models/text-embedding-004"
+        elif not model.startswith("models/"):
+            model = f"models/{model}"
+        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=gemini_key)
     except Exception as e:
-        print(f"Warning: Could not initialize OpenAIEmbeddings: {e}")
+        print(f"Warning: Could not initialize GoogleGenerativeAIEmbeddings: {e}")
         return None
 
 
