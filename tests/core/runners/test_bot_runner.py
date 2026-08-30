@@ -507,8 +507,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         self.assertEqual(content_arg, "What is that image?")
 
-    @patch('core.agent.streaming_handler.DiscordStreamBuffer.finalize')
-    @patch('core.agent.streaming_handler.DiscordStreamBuffer.append_token')
+    @patch('core.agent.stream_handler.DiscordStreamBuffer.finalize')
+    @patch('core.agent.stream_handler.DiscordStreamBuffer.append_token')
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_message_streams_with_discord_stream_buffer(self, mock_bot_class, mock_agents_loader_class, mock_append_token, mock_finalize):

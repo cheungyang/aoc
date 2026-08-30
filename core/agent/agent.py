@@ -15,6 +15,15 @@ from core.agent.discord_ui import PollButtonView, PollSelectView
 from core.agent.agent_response import AgentResponse
 from core.agent.session_identifier import SessionIdentifier
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+from core.agent.stream_handler import (
+    StreamHandler,
+    EVENT_TOKEN,
+    EVENT_FINAL_RESPONSE,
+    EVENT_ERROR,
+    EVENT_SUBAGENT_FINAL,
+    SUBAGENT_STREAM_TOKEN,
+    SUBAGENT_STREAM_FINAL,
+)
 
 
 class Agent(BaseAgent):
@@ -156,7 +165,6 @@ class Agent(BaseAgent):
         files = []
         missing_files = []
         if (image_paths or video_paths) and source == "discord":
-            pkm_dir = Config().pkm_dir
             media_items = []
             if image_paths:
                 for p in image_paths:
@@ -167,8 +175,9 @@ class Agent(BaseAgent):
 
             for path, media_type in media_items:
                 # 1. Path is already an absolute path
-                # 2. Path is a relative path resolved against pkm_dir (Config().pkm_dir)
-                resolved_path = path if os.path.isabs(path) else os.path.join(pkm_dir, path)
+                # 2. Path is a relative path resolved against system root ("./")
+                resolved_path = os.path.abspath(os.path.join(os.getcwd(), path))
+                
 
                 if os.path.exists(resolved_path):
                     files.append(discord.File(resolved_path))
@@ -255,71 +264,6 @@ class Agent(BaseAgent):
                 print(f"[Agent:{self.agent_id}] Error sending failure message: {se}")
         return err_msg
 
-    def _resolve_final_response(
-        self,
-        config: Dict[str, Any],
-        accumulated_tokens: Optional[List[str]] = None
-    ) -> AgentResponse:
-        """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
-        state = self.graph.get_state(config) if hasattr(self.graph, "get_state") else None
-        raw_reply = ""
-        if state and hasattr(state, "values") and state.values and "messages" in state.values and state.values["messages"]:
-            raw_reply = state.values["messages"][-1].content
-        elif accumulated_tokens:
-            raw_reply = "".join(accumulated_tokens)
-        return self._parse_final_response(raw_reply)
-
-    async def _stream_graph_events(self, inputs: Dict[str, Any], config: Dict[str, Any]):
-        """Low-level graph streaming generator yielding normalized token/tool events."""
-        if hasattr(self.graph, "astream_events"):
-            async for event in self.graph.astream_events(inputs, config=config, version="v2"):
-                kind = event.get("event")
-                if kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content"):
-                        content_delta = chunk.content
-                        if isinstance(content_delta, str) and content_delta:
-                            yield {"type": "token", "content": content_delta}
-                        elif isinstance(content_delta, list):
-                            for p in content_delta:
-                                if isinstance(p, dict) and p.get("type") == "text":
-                                    t = p.get("text", "")
-                                    if t:
-                                        yield {"type": "token", "content": t}
-                                elif isinstance(p, str) and p:
-                                    yield {"type": "token", "content": p}
-                elif kind == "on_tool_start":
-                    yield {
-                        "type": "tool_start",
-                        "tool_name": event.get("name"),
-                        "tool_args": event.get("data", {}).get("input", {}),
-                        "run_id": event.get("run_id")
-                    }
-                elif kind == "on_tool_end":
-                    yield {
-                        "type": "tool_end",
-                        "tool_name": event.get("name"),
-                        "output": event.get("data", {}).get("output"),
-                        "run_id": event.get("run_id")
-                    }
-        else:
-            result = await self.graph.ainvoke(inputs, config=config)
-            reply_message = result["messages"][-1]
-            yield {"type": "token", "content": str(reply_message.content)}
-
-    async def _stream_graph_with_recovery(self, inputs: Dict[str, Any], config: Dict[str, Any], session: SessionIdentifier):
-        """Streams graph events with automatic corrupt checkpoint recovery and retry."""
-        try:
-            async for event in self._stream_graph_events(inputs, config):
-                yield event
-        except Exception as e:
-            if self._is_corrupt_checkpoint_error(e):
-                self._recover_corrupt_checkpoint(session)
-                async for event in self._stream_graph_events(inputs, config):
-                    yield event
-            else:
-                raise e
-
     async def execute(
         self,
         prompt: Union[str, list],
@@ -373,7 +317,15 @@ class Agent(BaseAgent):
         """
         if self._is_empty_prompt(prompt):
             msg = await self._handle_empty_content(session.channel_obj, session.source)
-            yield {"type": "final_response", "text": msg, "poll_data": None, "image_paths": [], "video_paths": [], "system_memory_log": None, "response": None}
+            yield {
+                "type": EVENT_FINAL_RESPONSE,
+                "text": msg,
+                "poll_data": None,
+                "image_paths": [],
+                "video_paths": [],
+                "system_memory_log": None,
+                "response": None
+            }
             return
 
         prep = await self._prepare_execution(prompt, session, callbacks, role)
@@ -382,22 +334,41 @@ class Agent(BaseAgent):
         config, inputs = prep
 
         accumulated_tokens = []
+        subagent_final_response = None
         async with self._execution_context(session):
             try:
                 print(f"Streaming graph for {self.agent_id}")
-                async for event in self._stream_graph_with_recovery(inputs, config, session):
-                    if event.get("type") == "token":
+                async for event in StreamHandler.stream_with_recovery(
+                    graph=self.graph,
+                    inputs=inputs,
+                    config=config,
+                    session=session,
+                    recover_checkpoint_fn=self._recover_corrupt_checkpoint,
+                    is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error
+                ):
+                    if event.get("type") == EVENT_TOKEN:
                         accumulated_tokens.append(event.get("content", ""))
+                    elif event.get("type") == EVENT_SUBAGENT_FINAL:
+                        subagent_final_response = event.get("response")
                     yield event
                 self._update_job_status(session, config)
             except Exception as e:
                 err_msg = await self._handle_execution_error(session, e)
-                yield {"type": "error", "content": err_msg}
+                yield {"type": EVENT_ERROR, "content": err_msg}
                 return
 
-        response = self._resolve_final_response(config, accumulated_tokens)
+        response = subagent_final_response
+        if not response:
+            """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
+            response = StreamHandler.resolve_final_response(
+                graph=self.graph,
+                config=config,
+                accumulated_tokens=accumulated_tokens,
+                parse_fn=self._parse_final_response
+            )
+
         yield {
-            "type": "final_response",
+            "type": EVENT_FINAL_RESPONSE,
             "text": response.text,
             "poll_data": response.poll_data,
             "image_paths": response.image_paths,

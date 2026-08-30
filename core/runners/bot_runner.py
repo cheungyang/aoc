@@ -252,7 +252,7 @@ class BotRunner:
 
         try:
             async with message.channel.typing():
-                from core.agent.streaming_handler import DiscordStreamBuffer
+                from core.agent.stream_handler import DiscordStreamBuffer
                 stream_buffer = DiscordStreamBuffer(message.channel, edit_interval=1.5)
 
                 async for event in agent.execute_stream(

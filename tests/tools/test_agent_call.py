@@ -19,9 +19,15 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_agent = MagicMock()
-        mock_agent.config = {"channels": ["software-dev"]}
+        mock_agent.config = {"channels": ["software-dev"], "emoji": "💻", "name": "Software Developer"}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent response")
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "token", "content": "agent "}
+            yield {"type": "token", "content": "response"}
+            yield {"type": "final_response", "text": "agent response", "response": MagicMock(text="agent response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "20260829_215134_abc12"
         
         mock_discord_channel = MagicMock()
@@ -31,12 +37,6 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         
         mock_loader.get_agent.assert_called_once_with("agent1")
         mock_bots_loader.return_value.find_channel.assert_called_once_with("software-dev")
-        mock_agent.execute.assert_called_once_with("hello", session=ANY)
-        called_session = mock_agent.execute.call_args[1]["session"]
-        self.assertEqual(called_session.agent_id, "agent1")
-        self.assertEqual(called_session.source, "tool")
-        self.assertEqual(called_session.job_id, "20260829_215134_abc12")
-        self.assertEqual(called_session.channel_obj, mock_discord_channel)
         self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
 
     @patch('core.loaders.bots_loader.BotsLoader')
@@ -48,15 +48,18 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["*"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent response")
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "token", "content": "agent response"}
+            yield {"type": "final_response", "text": "agent response", "response": MagicMock(text="agent response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_123"
         
         mock_discord_channel = MagicMock()
         mock_bots_loader.return_value.find_channel.return_value = mock_discord_channel
         
         result = await agent_call.ainvoke({"agent_id": "main", "prompt": "hello", "channel": "any-channel"})
-        
-        mock_agent.execute.assert_called_once_with("hello", session=ANY)
         self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
 
     @patch('tools.agent_call.AgentsLoader')
@@ -105,7 +108,15 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["software-dev"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent response")
+        
+        called_prompt = None
+        async def fake_stream(prompt, session=None):
+            nonlocal called_prompt
+            called_prompt = prompt
+            yield {"type": "token", "content": "agent response"}
+            yield {"type": "final_response", "text": "agent response", "response": MagicMock(text="agent response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_123"
         
         mock_discord_channel = MagicMock()
@@ -118,10 +129,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             "caller": "main"
         })
         
-        mock_agent.execute.assert_called_once_with(
-            "<caller>main</caller>\nhello",
-            session=ANY
-        )
+        self.assertEqual(called_prompt, "<caller>main</caller>\nhello")
         self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
 
     @patch('core.loaders.bots_loader.BotsLoader')
@@ -135,7 +143,15 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["software-dev"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent response")
+        
+        called_prompt = None
+        async def fake_stream(prompt, session=None):
+            nonlocal called_prompt
+            called_prompt = prompt
+            yield {"type": "token", "content": "agent response"}
+            yield {"type": "final_response", "text": "agent response", "response": MagicMock(text="agent response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_123"
         
         mock_discord_channel = MagicMock()
@@ -151,10 +167,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
                 "channel": "software-dev"
             })
             
-            mock_agent.execute.assert_called_once_with(
-                "<caller>software-orchestrator</caller>\nhello",
-                session=ANY
-            )
+            self.assertEqual(called_prompt, "<caller>software-orchestrator</caller>\nhello")
             self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
         finally:
             current_session_identifier.reset(token)
@@ -168,7 +181,15 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["software-dev"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent response")
+        
+        called_prompt = None
+        async def fake_stream(prompt, session=None):
+            nonlocal called_prompt
+            called_prompt = prompt
+            yield {"type": "token", "content": "agent response"}
+            yield {"type": "final_response", "text": "agent response", "response": MagicMock(text="agent response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_123"
         
         mock_discord_channel = MagicMock()
@@ -181,10 +202,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             "caller": "main"
         })
         
-        mock_agent.execute.assert_called_once_with(
-            "<caller>custom_caller</caller>\nhello",
-            session=ANY
-        )
+        self.assertEqual(called_prompt, "<caller>custom_caller</caller>\nhello")
         self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
 
     @patch('core.loaders.bots_loader.BotsLoader')
@@ -200,7 +218,17 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["topic-research"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent thread response")
+        
+        called_prompt = None
+        called_session = None
+        async def fake_stream(prompt, session=None):
+            nonlocal called_prompt, called_session
+            called_prompt = prompt
+            called_session = session
+            yield {"type": "token", "content": "agent thread response"}
+            yield {"type": "final_response", "text": "agent thread response", "response": MagicMock(text="agent thread response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_456"
         
         # Mock active channel as a Thread
@@ -221,11 +249,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             
             # Should have used the active mock_thread directly instead of calling find_channel
             mock_bots_loader.return_value.find_channel.assert_not_called()
-            mock_agent.execute.assert_called_once_with(
-                "<caller>test-caller</caller>\nexplain deliberate practice",
-                session=ANY
-            )
-            called_session = mock_agent.execute.call_args[1]["session"]
+            self.assertEqual(called_prompt, "<caller>test-caller</caller>\nexplain deliberate practice")
             self.assertEqual(called_session.agent_id, "topic-researcher")
             self.assertEqual(called_session.channel_name, "topic-research")
             self.assertEqual(called_session.discord_thread_id, "1541110915540324533")
@@ -247,7 +271,17 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_agent = MagicMock()
         mock_agent.config = {"channels": ["topic-research"]}
         mock_loader.get_agent.return_value = mock_agent
-        mock_agent.execute = AsyncMock(return_value="agent channel response")
+        
+        called_prompt = None
+        called_session = None
+        async def fake_stream(prompt, session=None):
+            nonlocal called_prompt, called_session
+            called_prompt = prompt
+            called_session = session
+            yield {"type": "token", "content": "agent channel response"}
+            yield {"type": "final_response", "text": "agent channel response", "response": MagicMock(text="agent channel response")}
+
+        mock_agent.execute_stream = fake_stream
         mock_get_job_id.return_value = "job_789"
         
         # Mock active channel as a TextChannel
@@ -266,11 +300,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             })
             
             mock_bots_loader.return_value.find_channel.assert_not_called()
-            mock_agent.execute.assert_called_once_with(
-                "<caller>test-caller</caller>\nexplain naive practice",
-                session=ANY
-            )
-            called_session = mock_agent.execute.call_args[1]["session"]
+            self.assertEqual(called_prompt, "<caller>test-caller</caller>\nexplain naive practice")
             self.assertEqual(called_session.agent_id, "topic-researcher")
             self.assertEqual(called_session.channel_name, "topic-research")
             self.assertEqual(called_session.channel_obj, mock_channel)
@@ -285,6 +315,46 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
     async def test_missing_channel_arg(self):
         with self.assertRaises(Exception):
             await agent_call.ainvoke({"agent_id": "agent1", "prompt": "hello"})
+
+    @patch('core.loaders.bots_loader.BotsLoader')
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call._safe_dispatch_custom_event')
+    async def test_agent_call_dispatches_streaming_events(self, mock_dispatch, mock_get_job_id, mock_agents_loader, mock_bots_loader):
+        from core.agent.agent_response import AgentResponse
+        from core.agent.stream_handler import SUBAGENT_STREAM_TOKEN, SUBAGENT_STREAM_FINAL
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channels": ["software-dev"], "emoji": "🛠️", "name": "Software Planner"}
+        mock_loader.get_agent.return_value = mock_agent
+
+        sub_resp = AgentResponse(text="Plan created successfully.")
+        async def fake_stream(prompt, session=None):
+            yield {"type": "token", "content": "Plan "}
+            yield {"type": "token", "content": "created successfully."}
+            yield {"type": "final_response", "text": "Plan created successfully.", "response": sub_resp}
+
+        mock_agent.execute_stream = fake_stream
+        mock_get_job_id.return_value = "job_plan_1"
+        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
+
+        result = await agent_call.ainvoke({
+            "agent_id": "software-planner",
+            "prompt": "create plan",
+            "channel": "software-dev"
+        })
+
+        self.assertEqual(result, format_tool_response("agent_call", payload="Plan created successfully.", errors="None"))
+        
+        # Verify dispatch calls: header, delta1, delta2, final
+        dispatched_events = [call.args[0] for call in mock_dispatch.call_args_list]
+        self.assertIn(SUBAGENT_STREAM_TOKEN, dispatched_events)
+        self.assertIn(SUBAGENT_STREAM_FINAL, dispatched_events)
+
+        header_call = [call for call in mock_dispatch.call_args_list if call.args[1].get("is_header") is True]
+        self.assertEqual(len(header_call), 1)
+        self.assertEqual(header_call[0].args[1]["content"], "🛠️ Software Planner: ")
 
 
 if __name__ == '__main__':

@@ -146,5 +146,55 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(final_events), 1)
         self.assertEqual(final_events[0]["text"], "Recovered answer")
 
+    @patch('core.agent.agent.LoggingHandler')
+    async def test_execute_stream_handles_subagent_custom_events(self, mock_logging_handler_class):
+        mock_graph = MagicMock()
+        from core.agent.agent_response import AgentResponse
+        from core.agent.stream_handler import (
+            SUBAGENT_STREAM_TOKEN,
+            SUBAGENT_STREAM_FINAL,
+            EVENT_TOKEN,
+            EVENT_FINAL_RESPONSE,
+        )
+
+        sub_resp = AgentResponse(text="Subagent final text", poll_data={"options": ["A", "B"]})
+
+        async def mock_astream_events(*args, **kwargs):
+            yield {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_TOKEN,
+                "data": {"content": "🔍 Researcher: ", "agent_id": "topic-researcher", "is_header": True}
+            }
+            yield {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_TOKEN,
+                "data": {"content": "Subagent final text", "agent_id": "topic-researcher"}
+            }
+            yield {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_FINAL,
+                "data": {"agent_id": "topic-researcher", "response": sub_resp, "text": "Subagent final text"}
+            }
+
+        mock_graph.astream_events = mock_astream_events
+        agent = Agent("main", {})
+        agent.graph = mock_graph
+
+        session = SessionManager.get_session(agent_id="main", source="discord", channel="general")
+        events = []
+        async for event in agent.execute_stream("Research AI", session=session):
+            events.append(event)
+
+        token_events = [e for e in events if e["type"] == EVENT_TOKEN]
+        self.assertEqual(len(token_events), 2)
+        self.assertEqual(token_events[0]["content"], "🔍 Researcher: ")
+        self.assertEqual(token_events[1]["content"], "Subagent final text")
+
+        final_events = [e for e in events if e["type"] == EVENT_FINAL_RESPONSE]
+        self.assertEqual(len(final_events), 1)
+        self.assertEqual(final_events[0]["text"], "Subagent final text")
+        self.assertEqual(final_events[0]["poll_data"], {"options": ["A", "B"]})
+        self.assertEqual(final_events[0]["response"], sub_resp)
+
 if __name__ == "__main__":
     unittest.main()
