@@ -107,7 +107,10 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         # Test _execute_schedule directly
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
+        mock_agent.execute.assert_called_once_with("test prompt", session=unittest.mock.ANY, role="user")
+        called_session = mock_agent.execute.call_args[1]["session"]
+        self.assertEqual(called_session.agent_id, "agent1")
+        self.assertEqual(called_session.source, "scheduled")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')
@@ -146,7 +149,10 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_thread, role="user", source="scheduled")
+        mock_agent.execute.assert_called_once_with("test prompt", session=unittest.mock.ANY, role="user")
+        called_session = mock_agent.execute.call_args[1]["session"]
+        self.assertEqual(called_session.agent_id, "agent1")
+        self.assertEqual(called_session.source, "scheduled")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
 
@@ -193,7 +199,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         await runner._execute_schedule(runner.schedules[0])
             
-        mock_agent.execute.assert_called_once_with("test prompt", channel=mock_channel, role="user", source="scheduled")
+        mock_agent.execute.assert_called_once_with("test prompt", session=unittest.mock.ANY, role="user")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')
@@ -235,7 +241,7 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         await runner._execute_schedule(runner.schedules[0])
         
         mock_bots.get_channel.assert_called_once_with("main", "day-planning")
-        mock_day_planner.execute.assert_called_once_with("Provide your daily update", channel=mock_target_channel, role="user", source="scheduled")
+        mock_day_planner.execute.assert_called_once_with("Provide your daily update", session=unittest.mock.ANY, role="user")
 
     @patch('core.runners.schedule_runner.AgentsLoader')
     @patch('core.runners.schedule_runner.BotsLoader')

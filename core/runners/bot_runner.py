@@ -223,6 +223,33 @@ class BotRunner:
             if content_parts:
                 content_payload = content_parts
 
+        # Get an immutable session object for this request
+        session = SessionManager().get_session(self.agent_id, source="discord", channel=message.channel)
+
+        # For newly opened threads, ensure the thread's starter message context is seeded
+        if session.is_thread():
+            thread_obj = session.channel_obj
+            try:
+                starter_msg = getattr(thread_obj, "starter_message", None)
+                if starter_msg is None and hasattr(thread_obj, "fetch_message") and message.id != getattr(thread_obj, "id", None):
+                    try:
+                        starter_msg = await thread_obj.fetch_message(thread_obj.id)
+                    except Exception:
+                        starter_msg = None
+                if starter_msg and starter_msg.id != message.id and getattr(starter_msg, "content", None):
+                    from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+                    session_store = SqliteSessionStore()                    
+                    history = session_store.load_history(session.session_id, limit=1)
+                    if not history:
+                        starter_author = getattr(starter_msg.author, "display_name", "User")
+                        starter_text = starter_msg.content
+                        if isinstance(content_payload, str):
+                            content_payload = f"[Thread starter message from {starter_author}: \"{starter_text}\"]\n\n{content_payload}"
+                        elif isinstance(content_payload, list):
+                            content_payload = [{"type": "text", "text": f"[Thread starter message from {starter_author}: \"{starter_text}\"]\n\n"}] + content_payload
+            except Exception as e:
+                print(f"[BotRunner:{self.agent_id}] Note: could not seed thread starter context: {e}")
+
         try:
             async with message.channel.typing():
                 from core.agent.streaming_handler import DiscordStreamBuffer
@@ -230,8 +257,7 @@ class BotRunner:
 
                 async for event in agent.execute_stream(
                     content_payload,
-                    source="discord",
-                    channel=message.channel,
+                    session=session,
                     callbacks=[reaction_handler]
                 ):
                     event_type = event.get("type")

@@ -2,32 +2,35 @@ from abc import ABC
 import os
 import asyncio
 import discord
-from typing import List
+from typing import List, Optional, Any
 import subprocess
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import JobManager, current_job_id, current_channel_name, current_agent_id
+from core.agent.job_manager import JobManager, current_session_identifier
 from core.agent.session_manager import SessionManager
+from core.agent.session_identifier import SessionIdentifier
 from core.util import split_message
 
 class ScriptExecutorAgent(BaseAgent):
     def __init__(self, agent_id: str, config: dict = None):
         super().__init__(agent_id, config or {})
 
-    async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: List = None, role: str = "user") -> str:
-        if job_id is None:
-            job_id = JobManager().new_job_id(self.agent_id)
-        is_stateless = self.config.get("stateless", False)
-        session_id = SessionManager().get_session_id(self.agent_id, source, channel, job_id=job_id, stateless=is_stateless)
+    async def execute(
+        self,
+        prompt: str,
+        session: SessionIdentifier,
+        callbacks: List = None,
+        role: str = "user"
+    ) -> str:
+        job_id = session.job_id
+        channel_name = session.channel_name
+        channel_obj = session.channel_obj
             
-        JobManager().add_job(job_id, self.agent_id, session_id, initial_prompt=content)
+        JobManager().add_job(session=session, prompt=prompt)
         JobManager().update_job(job_id, "running")
 
-        channel_name = channel.name if channel and hasattr(channel, "name") else ""
-        token = current_job_id.set(job_id)
-        channel_token = current_channel_name.set(channel_name)
-        agent_token = current_agent_id.set(self.agent_id)
+        session_token = current_session_identifier.set(session)
 
-        lines = content.strip().split('\n')
+        lines = prompt.strip().split('\n')
         results = []
         
         try:
@@ -118,15 +121,13 @@ class ScriptExecutorAgent(BaseAgent):
             JobManager().update_job(job_id, "error")
             results.append(f"Unexpected error during execution: {str(e)}")
         finally:
-            current_job_id.reset(token)
-            current_channel_name.reset(channel_token)
-            current_agent_id.reset(agent_token)
+            current_session_identifier.reset(session_token)
 
         final_output = "\n".join(results)
         
-        if channel is not None:
+        if channel_obj is not None:
             chunks = split_message(final_output)
             for chunk in chunks:
-                await channel.send(chunk)
+                await channel_obj.send(chunk)
                 
         return final_output

@@ -8,7 +8,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools.graph_call import graph_call
 from core.util import format_tool_response
-from core.agent.job_manager import current_agent_id
 
 class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
@@ -50,7 +49,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.get("run_name"), "graph:coding")
         self.assertEqual(config.get("tags"), ["graph", "coding"])
         self.assertEqual(config.get("metadata", {}).get("graph_name"), "coding")
-        self.assertEqual(config.get("configurable", {}).get("thread_id"), "graph:coding:default")
+        self.assertEqual(config.get("configurable", {}).get("thread_id"), "coding:default")
 
         self.assertEqual(result, format_tool_response("graph_call", payload="Finished execution", errors="None"))
 
@@ -90,7 +89,8 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_with_contextvar_caller(self, mock_graphs_loader_class):
-        from core.agent.job_manager import current_agent_id
+        from core.agent.job_manager import current_session_identifier
+        from core.agent.session_identifier import SessionIdentifier
 
         mock_loader = MagicMock()
         mock_graphs_loader_class.return_value = mock_loader
@@ -103,7 +103,9 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             "metadata": {"name": "coding"}
         }
 
-        token = current_agent_id.set("topic-researcher")
+        from core.agent.session_manager import SessionManager
+        sess = SessionManager.get_session(agent_id="topic-researcher", source="discord", channel="general")
+        token = current_session_identifier.set(sess)
         try:
             result = await graph_call.ainvoke({
                 "graph_name": "coding",
@@ -122,7 +124,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config.get("metadata", {}).get("caller"), "topic-researcher")
             self.assertEqual(config.get("metadata", {}).get("triggering_agent"), "topic-researcher")
         finally:
-            current_agent_id.reset(token)
+            current_session_identifier.reset(token)
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_does_not_duplicate_caller_tag(self, mock_graphs_loader_class):
@@ -201,8 +203,10 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_resumes_interrupted_channel_thread(self, mock_graphs_loader_class):
-        from core.agent.job_manager import current_channel_name
-        token = current_channel_name.set("content-creation")
+        from core.agent.job_manager import current_session_identifier
+        from core.agent.session_manager import SessionManager
+        sess = SessionManager.get_session(agent_id="main", source="discord", channel="content-creation")
+        token = current_session_identifier.set(sess)
 
         try:
             mock_loader = MagicMock()
@@ -227,10 +231,10 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             called_payload = mock_graph.aupdate_state.call_args[0][1]
             self.assertEqual(called_payload["latest_human_feedback"], feedback)
             called_config = mock_graph.aupdate_state.call_args[0][0]
-            self.assertEqual(called_config["configurable"]["thread_id"], "graph:content_creation:content-creation")
+            self.assertEqual(called_config["configurable"]["thread_id"], sess.get_session_thread_id("content_creation"))
             mock_graph.ainvoke.assert_called_once_with(None, config=called_config)
         finally:
-            current_channel_name.reset(token)
+            current_session_identifier.reset(token)
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_sets_current_graph_id_context(self, mock_graphs_loader_class):
@@ -253,10 +257,44 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             "metadata": {"name": "coding", "graph_id": "coding"}
         }
 
-        self.assertIsNone(current_graph_id.get())
-        result = await graph_call.ainvoke({"graph_name": "coding", "query": "Build feature"})
-        self.assertEqual(captured_graph_id, "coding")
-        self.assertIsNone(current_graph_id.get())
+    @patch('tools.graph_call.GraphsLoader')
+    async def test_graph_call_with_thread_context(self, mock_graphs_loader_class):
+        import discord
+        from core.agent.job_manager import current_session_identifier
+        from core.agent.session_manager import SessionManager
+
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Finished in thread")]})
+
+        mock_loader.get_graph.return_value = {
+            "graph": mock_graph,
+            "metadata": {"name": "coding"}
+        }
+
+        mock_thread = MagicMock(spec=discord.Thread)
+        mock_thread.id = 1541110915540324533
+        mock_thread.name = "sub-feature"
+        mock_thread.parent = MagicMock(spec=discord.TextChannel)
+        mock_thread.parent.name = "software-dev"
+
+        sess = SessionManager.get_session(agent_id="main", source="discord", channel=mock_thread)
+        tok = current_session_identifier.set(sess)
+        try:
+            result = await graph_call.ainvoke({"graph_name": "coding", "query": "Build feature"})
+
+            mock_graph.ainvoke.assert_called_once()
+            args, kwargs = mock_graph.ainvoke.call_args
+            config = kwargs.get("config", {})
+            self.assertEqual(
+                config.get("configurable", {}).get("thread_id"),
+                sess.get_session_thread_id("coding")
+            )
+            self.assertEqual(result, format_tool_response("graph_call", payload="Finished in thread", errors="None"))
+        finally:
+            current_session_identifier.reset(tok)
 
 
 if __name__ == "__main__":

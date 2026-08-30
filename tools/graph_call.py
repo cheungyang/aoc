@@ -4,7 +4,10 @@ from typing import Optional
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import current_agent_id, current_job_id, current_channel_name, current_graph_id
+from core.agent.job_manager import (
+    current_session_identifier,
+    current_graph_id,
+)
 from core.util import format_tool_response
 
 @tool
@@ -33,7 +36,8 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         if graph is None and graph_info.get("create_graph") is not None:
             graph = graph_info["create_graph"]()
             
-        triggering_agent = caller or current_agent_id.get()
+        active_sess = current_session_identifier.get()
+        triggering_agent = caller or (active_sess.agent_id if active_sess else None)
         
         # 1. Adapt input
         prepare_input_fn = graph_info.get("prepare_input")
@@ -46,14 +50,12 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
                 formatted_query = query
             inputs = {"messages": [{"role": "user", "content": formatted_query}], "query": formatted_query}
         
-        channel_name = current_channel_name.get() or ""
-        job_id = current_job_id.get() or "default"
         if isinstance(inputs, dict) and inputs.get("thread_id"):
             thread_id = inputs["thread_id"]
-        elif channel_name:
-            thread_id = f"graph:{target_graph}:{channel_name}"
+        elif active_sess:
+            thread_id = active_sess.get_session_thread_id(target_graph)
         else:
-            thread_id = f"graph:{target_graph}:{job_id}"
+            thread_id = f"{target_graph}:default"
 
         tags = ["graph", target_graph]
         metadata = {
@@ -83,36 +85,6 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
                         is_interrupted = True
             except Exception:
                 is_interrupted = False
-
-            # If not interrupted on the computed thread_id, check channel or default thread
-            if not is_interrupted and channel_name:
-                alt_thread = f"graph:{target_graph}:{channel_name}"
-                if alt_thread != thread_id:
-                    try:
-                        alt_cfg = {"configurable": {"thread_id": alt_thread}, "run_name": f"graph:{target_graph}", "tags": tags, "metadata": metadata}
-                        state_snapshot = graph.get_state(alt_cfg)
-                        if state_snapshot and getattr(state_snapshot, "next", None):
-                            next_nodes = state_snapshot.next
-                            if isinstance(next_nodes, (tuple, list)) and len(next_nodes) > 0:
-                                is_interrupted = True
-                                config = alt_cfg
-                                thread_id = alt_thread
-                    except Exception:
-                        pass
-            if not is_interrupted:
-                alt_thread = f"graph:{target_graph}:default"
-                if alt_thread != thread_id:
-                    try:
-                        alt_cfg = {"configurable": {"thread_id": alt_thread}, "run_name": f"graph:{target_graph}", "tags": tags, "metadata": metadata}
-                        state_snapshot = graph.get_state(alt_cfg)
-                        if state_snapshot and getattr(state_snapshot, "next", None):
-                            next_nodes = state_snapshot.next
-                            if isinstance(next_nodes, (tuple, list)) and len(next_nodes) > 0:
-                                is_interrupted = True
-                                config = alt_cfg
-                                thread_id = alt_thread
-                    except Exception:
-                        pass
 
         graph_token = current_graph_id.set(target_graph)
         try:

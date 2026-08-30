@@ -1,7 +1,8 @@
-import os
+from typing import Optional, Any, Union
 import discord
-import datetime
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+from core.agent.session_identifier import SessionIdentifier
+
 
 class SessionManager:
     _instance = None
@@ -11,28 +12,30 @@ class SessionManager:
             cls._instance = super(SessionManager, cls).__new__(cls)
         return cls._instance
 
-    def clear_session(self, session_id: str) -> str:
+    @classmethod
+    def get_session(
+        cls,
+        agent_id: str,
+        source: str = "discord",
+        channel: Optional[Union[discord.TextChannel, discord.Thread, str]] = None,
+        job_id: Optional[str] = None,
+        stateless: bool = False
+    ) -> SessionIdentifier:
+        """
+        Creates a SessionIdentifier instance.
+        """
+        return SessionIdentifier._create(
+            agent_id=str(agent_id or ""),
+            source=source,
+            channel=channel,
+            job_id=job_id,
+            stateless=stateless,
+        )
+
+    def clear_session(self, session: SessionIdentifier) -> str:
         store = SqliteSessionStore()
-        return store.archive_session(session_id)
-        
+        return store.archive_session(session.session_id)
+
     def clear_sessions(self) -> str:
         store = SqliteSessionStore()
         return store.archive_all_sessions()
-
-    def get_session_id(self, agent_id: str, source: str, channel: discord.TextChannel = None, job_id: str = None, stateless: bool = False) -> str:
-        if stateless:
-            from core.agent.job_manager import JobManager
-            return job_id if job_id else JobManager().new_job_id(agent_id)
-
-        postfix = ""
-        if channel is not None:
-            channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
-            thread_id = ""
-            if isinstance(channel, discord.Thread):
-                thread_id = str(channel.id)
-                if channel.parent:
-                    channel_name = channel.parent.name
-            postfix = f"{channel_name}:{thread_id}" if thread_id else channel_name
-
-        session_id = f"{agent_id}:{source}:{postfix}" if postfix else f"{agent_id}:{source}"
-        return session_id

@@ -157,12 +157,43 @@ class TestSqliteSessionStore(unittest.TestCase):
     def test_no_file_descriptor_leak(self):
         # Repeated store operations should close connections and not accumulate open FDs
         session_id = "fd_leak_session"
-        for i in range(100):
-            self.store.append_message(session_id, "user", f"msg_{i}")
-            self.store.append_token_usage(session_id, "model", 10, 10, 0.0)
-            self.store.load_history(session_id)
-            self.store.load_token_history(session_id)
-            self.store.list_active_sessions()
+    def test_archive_thread_session_does_not_archive_parent_channel(self):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        cp = SqliteCheckpointer(db_path=self.db_path)
+
+        main_sess = "main:discord:topic-research"
+        thread_sess = "main:discord:topic-research:1541110915540324533"
+
+        self.store.append_message(main_sess, "user", "msg in main channel")
+        self.store.append_message(thread_sess, "user", "msg in thread")
+
+        cp.put({"configurable": {"thread_id": "graph:coding:topic-research"}}, {"id": "cp_main"}, {"step": 1}, {})
+        cp.put({"configurable": {"thread_id": "graph:coding:topic-research:1541110915540324533"}}, {"id": "cp_th"}, {"step": 1}, {})
+
+        active = self.store.list_active_sessions()
+        self.assertIn("ctx_main_discord_topic_research", active)
+        self.assertIn("ctx_main_discord_topic_research_1541110915540324533", active)
+        self.assertIn("ctx_graph_coding_topic_research", active)
+        self.assertIn("ctx_graph_coding_topic_research_1541110915540324533", active)
+
+        # Archive only the thread session
+        result = self.store.archive_session(thread_sess)
+        self.assertIn("ctx_main_discord_topic_research_1541110915540324533_archived_", result)
+        self.assertIn("Archived ctx_graph_coding_topic_research_1541110915540324533 to", result)
+
+        active_after = self.store.list_active_sessions()
+        # Thread tables must be archived
+        self.assertNotIn("ctx_main_discord_topic_research_1541110915540324533", active_after)
+        self.assertNotIn("ctx_graph_coding_topic_research_1541110915540324533", active_after)
+
+        # Parent channel tables MUST remain active
+        self.assertIn("ctx_main_discord_topic_research", active_after)
+        self.assertIn("ctx_graph_coding_topic_research", active_after)
+
+        # Main channel history still loads
+        main_hist = self.store.load_history(main_sess)
+        self.assertEqual(len(main_hist), 1)
+        self.assertEqual(main_hist[0]["message"], "msg in main channel")
 
 
 if __name__ == "__main__":

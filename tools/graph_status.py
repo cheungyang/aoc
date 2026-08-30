@@ -2,7 +2,7 @@ import os
 from typing import Optional, Dict, Any, List
 from langchain_core.tools import tool
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import current_channel_name, current_job_id, JobManager
+from core.agent.job_manager import current_session_identifier, JobManager
 from core.util import format_tool_response
 
 @tool
@@ -20,8 +20,9 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
     """
     try:
         loader = GraphsLoader()
-        channel_name = channel or current_channel_name.get() or ""
-        job_id = current_job_id.get() or "default"
+        active_sess = current_session_identifier.get()
+        channel_name = channel or (active_sess.channel_name if active_sess else "") or ""
+        job_id = (active_sess.job_id if active_sess else None) or "default"
         
         if graph_name:
             graphs_to_check = [graph_name]
@@ -47,11 +48,16 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
                 continue
 
             candidate_threads = []
+            if active_sess:
+                candidate_threads.append(active_sess.get_session_thread_id(name))
             if channel_name:
-                candidate_threads.append(f"graph:{name}:{channel_name}")
-            if job_id and job_id != "default":
-                candidate_threads.append(f"graph:{name}:{job_id}")
-            candidate_threads.append(f"graph:{name}:default")
+                clean_ch = channel_name.lstrip("#")
+                for cand in [f"{name}:main:discord:{clean_ch}", f"{name}:{clean_ch}", f"graph:{name}:{clean_ch}"]:
+                    if cand not in candidate_threads:
+                        candidate_threads.append(cand)
+            for default_cand in [f"{name}:default", f"graph:{name}:default"]:
+                if default_cand not in candidate_threads:
+                    candidate_threads.append(default_cand)
 
             state_found = None
             matched_thread = None
@@ -110,32 +116,7 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
             lines.append(f"• Active Graph: {gname}")
             lines.append(f"  - Status: Paused / Awaiting Human Feedback (Interrupted)")
             lines.append(f"  - Waiting at Node(s): [{nodes}]")
-            lines.append(f"  - Thread ID: {ag['thread_id']}")
-            
-            # Extract key context fields if present
-            vals = ag["values"]
-            context_details = []
-            if isinstance(vals, dict):
-                if vals.get("topic"):
-                    context_details.append(f"Topic: '{vals['topic']}'")
-                elif vals.get("word"):
-                    context_details.append(f"Topic: '{vals['word']}'")
-                if vals.get("project_path"):
-                    context_details.append(f"Project: '{vals['project_path']}'")
-                if vals.get("output_dir"):
-                    context_details.append(f"Output: '{vals['output_dir']}'")
-                if vals.get("image_path"):
-                    context_details.append(f"Base Image: '{vals['image_path']}'")
-                if vals.get("video_plot_path"):
-                    context_details.append(f"Video Plot: '{vals['video_plot_path']}'")
-                if vals.get("video_path"):
-                    context_details.append(f"Video: '{vals['video_path']}'")
-                if vals.get("copy_path"):
-                    context_details.append(f"Copy: '{vals['copy_path']}'")
-                    
-            if context_details:
-                lines.append(f"  - Context: {', '.join(context_details)}")
-                
+            lines.append(f"  - Thread ID: {ag['thread_id']}")    
             lines.append(
                 f"  - Routing Guidance: The user's next message in this conversation will be relayed "
                 f"directly to the '{gname}' graph via graph_call to resume execution."

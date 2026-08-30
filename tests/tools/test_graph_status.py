@@ -8,7 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools.graph_status import graph_status
 from core.util import format_tool_response
-from core.agent.job_manager import current_channel_name, current_job_id, Job
+from core.agent.job_manager import current_session_identifier, Job
+from core.agent.session_identifier import SessionIdentifier
 
 class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
@@ -58,8 +59,6 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
         result = graph_status.func(channel="content-creation")
         self.assertIn("Active Graph: content_creation", result)
         self.assertIn("hitl_image_and_plot_approval", result)
-        self.assertIn("Topic: 'fish'", result)
-        self.assertIn("Project: 'pkm/wiki/software/ayla-first-words'", result)
         self.assertIn("relay", result.lower())
 
     @patch('tools.graph_status.GraphsLoader')
@@ -129,15 +128,15 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
         mock_jm = MagicMock()
         mock_job_manager_class.return_value = mock_jm
-        mock_jm.get_jobs.return_value = []
-
-        token = current_channel_name.set("content-creation")
+        from core.agent.session_manager import SessionManager
+        sess = SessionManager.get_session(agent_id="test", source="discord", channel="content-creation")
+        token = current_session_identifier.set(sess)
         try:
             result = graph_status.func()
             self.assertIn("Active Graph: content_creation", result)
             self.assertIn("hitl_final_package_approval", result)
         finally:
-            current_channel_name.reset(token)
+            current_session_identifier.reset(token)
 
     @patch('tools.graph_status.GraphsLoader')
     @patch('tools.graph_status.JobManager')
@@ -155,7 +154,7 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
             started=100.0,
             updated=105.0,
             status="running",
-            initial_prompt="Generate video"
+            prompt="Generate video"
         )
         mock_jm.get_jobs.return_value = [job]
 

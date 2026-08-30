@@ -1,6 +1,13 @@
 import unittest
+import os
+import sys
 from unittest.mock import patch, MagicMock, AsyncMock
+
+# Inject root
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+
 from core.agent.agent import Agent
+from core.agent.session_manager import SessionManager
 
 class TestAgentStream(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -36,8 +43,9 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         agent = Agent("test-agent", {})
         agent.graph = mock_graph
 
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
-        async for event in agent.execute_stream("Hi", source="discord"):
+        async for event in agent.execute_stream("Hi", session=session):
             events.append(event)
 
         types = [e["type"] for e in events]
@@ -64,8 +72,10 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         agent.graph = mock_graph
 
         mock_channel = AsyncMock()
+        mock_channel.name = "general"
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
         events = []
-        async for event in agent.execute_stream("Hi", source="discord", channel=mock_channel):
+        async for event in agent.execute_stream("Hi", session=session):
             events.append(event)
 
         self.assertEqual(len(events), 1)
@@ -88,8 +98,9 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         agent = Agent("test-agent", {})
         agent.graph = mock_graph
 
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
-        async for event in agent.execute_stream("Hi", source="discord"):
+        async for event in agent.execute_stream("Hi", session=session):
             events.append(event)
 
         self.assertEqual(len(events), 1)
@@ -124,8 +135,9 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         agent = Agent("test-agent", {})
         agent.graph = mock_graph
 
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
-        async for event in agent.execute_stream("Hello", source="discord"):
+        async for event in agent.execute_stream("Hello", session=session):
             events.append(event)
 
         mock_checkpointer.rollback_last_step.assert_called_once()

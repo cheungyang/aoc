@@ -112,8 +112,13 @@ class ScheduleRunner:
                 else:
                     print(f"Thread {thread_name} not found in channel {channel_name}, falling back to channel.")
 
-            # Execute regardless of channel existance
-            await agent.execute(prompt, source="scheduled", channel=channel, role="user")
+            # Execute regardless of channel existence
+            session_ident = SessionManager.get_session(
+                agent_id=agent_id,
+                source="scheduled",
+                channel=channel or channel_name
+            )
+            await agent.execute(prompt, session=session_ident, role="user")
 
 
         except Exception as e:

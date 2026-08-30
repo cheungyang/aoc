@@ -102,13 +102,6 @@ class BotsLoader:
                     if self._match_channel(ch, channel_name):
                         return ch
 
-        # 3. Fallback: Any bot with access to the channel
-        for bot_runner in self._bots.values():
-            if bot_runner and bot_runner.bot:
-                for guild in bot_runner.bot.guilds:
-                    for ch in self._get_guild_channels(guild):
-                        if self._match_channel(ch, channel_name):
-                            return ch
         return None
 
     async def reload_bot(self, agent_id):

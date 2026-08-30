@@ -51,9 +51,16 @@ Format:
 
 
 def get_channel_prompt(channel_name: Optional[str] = None) -> str:
-    if channel_name is None:
-        from core.agent.job_manager import current_channel_name
-        channel_name = current_channel_name.get()
+    from core.agent.job_manager import current_session_identifier
+    sess = current_session_identifier.get()
+
+    if channel_name is None and sess:
+        channel_name = sess.channel_name
+
+    if sess and sess.is_thread() and channel_name:
+        thread_name = getattr(sess.channel_obj, "name", "") or sess.discord_thread_id
+        if thread_name and thread_name != channel_name:
+            return f"<current_channel_context>\nYou are currently executing in Discord thread '{thread_name}' within channel: #{channel_name}\n</current_channel_context>"
 
     if channel_name:
         return f"<current_channel_context>\nYou are currently executing in the Discord channel: #{channel_name}\n</current_channel_context>"

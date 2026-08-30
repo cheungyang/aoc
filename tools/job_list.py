@@ -7,7 +7,7 @@ from core.util import format_tool_response
 def job_list() -> str:
     """
     Returns a list of active background specialization jobs.
-    Output fields array: job_id, agent_id, session_id, started, status, initial_prompt
+    Output fields array: job_id, agent_id, session_id, started, status, prompt
     """
     jobs = []
     for job in JobManager().get_jobs():
@@ -17,7 +17,7 @@ def job_list() -> str:
             "session_id": job.session_id,
             "started": datetime.fromtimestamp(job.started).strftime('%Y-%m-%d %H:%M:%S'),
             "status": job.status,
-            "initial_prompt": getattr(job, "initial_prompt", ""),
+            "prompt": getattr(job, "prompt", ""),
         })
     return format_tool_response("job_list", payload=str(jobs), errors="None")
 

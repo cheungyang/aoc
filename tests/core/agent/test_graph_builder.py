@@ -101,10 +101,10 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.SqliteCheckpointer')
-     @patch('core.agent.graph_builder.current_job_id')
+     @patch('core.agent.graph_builder.current_session_identifier')
      @patch('core.agent.graph_builder.JobManager')
      @patch('core.agent.graph_builder.interrupt')
-     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_job_id, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_session_identifier, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
@@ -132,7 +132,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          wrapped_tool = wrapped_tools[0]
          
          # Test normal execution
-         mock_current_job_id.get.return_value = "job1"
+         mock_current_session_identifier.get.return_value = MagicMock(job_id="job1")
          mock_job_manager = MagicMock()
          mock_job_manager_class.return_value = mock_job_manager
          mock_job = MagicMock()

@@ -334,10 +334,14 @@ class VoiceManager:
                 self.audio_queue.start()
 
                 # Stream agent execution events (tokens, tool bridge phrases, and final audio)
-                async for event in agent.execute_stream(
-                    content=transcript,
+                session_ident = SessionManager().get_session(
+                    agent_id=self.agent_id,
                     source="discord",
                     channel=target_channel
+                )
+                async for event in agent.execute_stream(
+                    content=transcript,
+                    session=session_ident
                 ):
                     if turn_id != self._active_turn:
                         print(f"[VoiceManager:{self.agent_id}] Discarding streaming event due to newer voice turn.")

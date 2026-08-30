@@ -130,10 +130,16 @@ class SqliteSessionStore:
                 clean_pf = _clean_token(postfix)
                 if clean_pf:
                     postfix_candidates.add(clean_pf)
-                for p in parts[2:]:
-                    cp = _clean_token(p)
-                    if cp:
-                        postfix_candidates.add(cp)
+                if len(parts) >= 4:
+                    # Specific thread session: add thread ID but avoid adding parent channel to prevent over-matching
+                    th_token = _clean_token(parts[-1])
+                    if th_token:
+                        postfix_candidates.add(th_token)
+                else:
+                    for p in parts[2:]:
+                        cp = _clean_token(p)
+                        if cp:
+                            postfix_candidates.add(cp)
             elif len(parts) == 2:
                 clean_src = _clean_token(parts[1])
                 if clean_src:
@@ -153,6 +159,8 @@ class SqliteSessionStore:
             matched_tables = []
             for t in active_tables:
                 if t == table_name:
+                    matched_tables.append(t)
+                elif t.endswith(f"_{clean_session}"):
                     matched_tables.append(t)
                 elif t.startswith("ctx_graph_"):
                     t_suffix = t.removeprefix("ctx_graph_")

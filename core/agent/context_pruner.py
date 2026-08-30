@@ -2,7 +2,8 @@ import re
 import sys
 import asyncio
 import concurrent.futures
-from typing import List, Sequence, Any, Optional, Tuple
+from typing import List, Sequence, Any, Optional, Tuple, Union
+from core.agent.session_identifier import SessionIdentifier
 
 from langchain_core.messages import (
     BaseMessage,
@@ -415,11 +416,12 @@ class ContextPruner:
 
     def auto_prune_session(
         self,
-        session_id: str,
-        channel: str = "general",
+        session: SessionIdentifier,
         force: bool = False
     ) -> bool:
         """Inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
+        session_id = session.session_id
+        channel = session.channel_name
         try:
             checkpointer, tuple_res, messages = self._get_session_messages_for_auto_prune(session_id, force=force)
             if not tuple_res:
@@ -433,16 +435,17 @@ class ContextPruner:
 
     async def aauto_prune_session(
         self,
-        session_id: str,
-        channel: str = "general",
+        session: SessionIdentifier,
         force: bool = False
     ) -> bool:
         """Asynchronously inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
+        session_id = session.session_id
+        channel = session.channel_name
         if hasattr(self.auto_prune_session, "mock_calls") or hasattr(self.auto_prune_session, "_mock_name"):
             if force:
-                res = self.auto_prune_session(session_id, channel=channel, force=force)
+                res = self.auto_prune_session(session, force=force)
             else:
-                res = self.auto_prune_session(session_id, channel=channel)
+                res = self.auto_prune_session(session)
             if asyncio.iscoroutine(res):
                 return await res
             return res

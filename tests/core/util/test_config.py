@@ -308,7 +308,7 @@ class TestConfig(unittest.TestCase):
             self.config.reset()
             self.assertTrue(self.config.context_pruning_enabled)
             self.assertEqual(self.config.context_max_tokens, 30000)
-            self.assertEqual(self.config.context_window_messages, 15)
+            self.assertEqual(self.config.context_window_messages, 30)
             self.assertEqual(self.config.context_summary_max_tokens, 1000)
 
         # Setters

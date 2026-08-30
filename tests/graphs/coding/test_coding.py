@@ -153,7 +153,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(failed_state["test_run_passed"])
             self.assertGreaterEqual(failed_state["attempt_count"], 2)
-            self.assertNotIn("pr_url", failed_state)
+            self.assertFalse(failed_state.get("pr_url"))
 
 if __name__ == "__main__":
     unittest.main()

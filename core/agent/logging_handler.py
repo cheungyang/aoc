@@ -3,9 +3,10 @@ import os
 import json
 import time
 import ast
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from langchain_core.callbacks import BaseCallbackHandler
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+from core.agent.session_identifier import SessionIdentifier
 
 def format_tool_extra_str(input_str: Any, tool_name: Optional[str] = None) -> str:
     """
@@ -95,11 +96,17 @@ def format_tool_extra_str(input_str: Any, tool_name: Optional[str] = None) -> st
 
 
 class LoggingHandler(BaseCallbackHandler):
-    def __init__(self, session_id=None, role=None, human_message=None, agent_id=None):
-        self.session_id = session_id
+    def __init__(
+        self,
+        session: SessionIdentifier,
+        human_message: Optional[Union[str, list]] = None,
+        role: str = "user",
+    ):
+        self.session = session
+        self.session_id = session.session_id
+        self.agent_id = session.agent_id
         self.role = role
         self.human_message = human_message
-        self.agent_id = agent_id
         self.manager = SqliteSessionStore()
         self.llm_start_time = None
         self.last_execution_time = 0.0
@@ -185,8 +192,9 @@ class LoggingHandler(BaseCallbackHandler):
         agent_id = self.agent_id
         if not agent_id:
             try:
-                from core.agent.job_manager import current_agent_id
-                agent_id = current_agent_id.get()
+                from core.agent.job_manager import current_session_identifier
+                sess = current_session_identifier.get()
+                agent_id = sess.agent_id if sess else None
             except Exception:
                 pass
 

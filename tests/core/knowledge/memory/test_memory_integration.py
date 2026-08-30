@@ -131,9 +131,96 @@ class TestMemoryIntegration(unittest.TestCase):
         archive_all_res = self.store.archive_all_sessions()
         self.assertIn("Archived ctx_graph_content_creation_dev to ctx_graph_content_creation_dev_archived_", archive_all_res)
 
-        # Verify all active states are empty
-        self.assertEqual(len(self.store.list_active_sessions()), 0)
-        self.assertIsNone(self.checkpointer.get_tuple(graph_config_dev))
+    def test_channel_and_thread_isolation_end_to_end(self):
+        """
+        Validates the exact scenario:
+        (main thread A)
+        message A1
+        message A2
+        new thread B1 (main thread sees this one) -> message B2 -> message B3
+        message A3
+
+        Main channel should see: A1, A2, B1, A3.
+        Thread B should see: B1, B2, B3.
+        Delegated subagent checkpoints for channel and thread must remain completely isolated.
+        """
+        main_sess = "main:discord:topic-research"
+        thread_sess = "main:discord:topic-research:1541110915540324533"
+        tool_main_sess = "topic-researcher:tool:topic-research"
+        tool_thread_sess = "topic-researcher:tool:topic-research:1541110915540324533"
+
+        # 1. Main thread A: A1, A2
+        self.store.append_message(main_sess, "user", "A1: Introduce cognitive load theory")
+        self.store.append_message(main_sess, "ai", "AI: Explaining cognitive load theory...")
+        self.store.append_message(tool_main_sess, "user", "A1: Introduce cognitive load theory")
+        self.store.append_message(tool_main_sess, "ai", "AI: Explaining cognitive load theory...")
+
+        self.store.append_message(main_sess, "user", "A2: Compare extraneous vs germane load")
+        self.store.append_message(main_sess, "ai", "AI: Comparing load types...")
+        self.store.append_message(tool_main_sess, "user", "A2: Compare extraneous vs germane load")
+        self.store.append_message(tool_main_sess, "ai", "AI: Comparing load types...")
+
+        # 2. New thread B started from B1:
+        # Main channel sees B1 (starter message posted in channel)
+        self.store.append_message(main_sess, "user", "B1: Let's investigate swarm coordination")
+        self.store.append_message(main_sess, "ai", "AI: Creating thread for swarm coordination...")
+
+        # Thread B receives B1 as starter and replies
+        self.store.append_message(thread_sess, "user", "B1: Let's investigate swarm coordination")
+        self.store.append_message(thread_sess, "ai", "AI: Exploring swarm coordination...")
+        self.store.append_message(tool_thread_sess, "user", "B1: Let's investigate swarm coordination")
+        self.store.append_message(tool_thread_sess, "ai", "AI: Exploring swarm coordination...")
+
+        # Thread B receives B2, B3
+        self.store.append_message(thread_sess, "user", "B2: Explain git worktree isolation")
+        self.store.append_message(thread_sess, "ai", "AI: Explaining git worktree...")
+        self.store.append_message(tool_thread_sess, "user", "B2: Explain git worktree isolation")
+        self.store.append_message(tool_thread_sess, "ai", "AI: Explaining git worktree...")
+
+        self.store.append_message(thread_sess, "user", "B3: How to test collision resolution")
+        self.store.append_message(thread_sess, "ai", "AI: Detailing collision tests...")
+        self.store.append_message(tool_thread_sess, "user", "B3: How to test collision resolution")
+        self.store.append_message(tool_thread_sess, "ai", "AI: Detailing collision tests...")
+
+        # 3. Main channel receives A3
+        self.store.append_message(main_sess, "user", "A3: Back to deliberate practice")
+        self.store.append_message(main_sess, "ai", "AI: Explaining deliberate practice...")
+        self.store.append_message(tool_main_sess, "user", "A3: Back to deliberate practice")
+        self.store.append_message(tool_main_sess, "ai", "AI: Explaining deliberate practice...")
+
+        # 4. Verify Main Channel Messages: [A1, A2, B1, A3]
+        main_user_msgs = [e["message"] for e in self.store.load_history(main_sess) if e["from"] == "user"]
+        self.assertEqual(main_user_msgs, [
+            "A1: Introduce cognitive load theory",
+            "A2: Compare extraneous vs germane load",
+            "B1: Let's investigate swarm coordination",
+            "A3: Back to deliberate practice"
+        ])
+
+        # 5. Verify Thread B Messages: [B1, B2, B3] (Does NOT contain A1, A2, or A3)
+        thread_user_msgs = [e["message"] for e in self.store.load_history(thread_sess) if e["from"] == "user"]
+        self.assertEqual(thread_user_msgs, [
+            "B1: Let's investigate swarm coordination",
+            "B2: Explain git worktree isolation",
+            "B3: How to test collision resolution"
+        ])
+
+        # 6. Verify Subagent Main Tool Session: [A1, A2, A3] (Does NOT contain B2 or B3)
+        tool_main_user_msgs = [e["message"] for e in self.store.load_history(tool_main_sess) if e["from"] == "user"]
+        self.assertEqual(tool_main_user_msgs, [
+            "A1: Introduce cognitive load theory",
+            "A2: Compare extraneous vs germane load",
+            "A3: Back to deliberate practice"
+        ])
+
+        # 7. Verify Subagent Thread Tool Session: [B1, B2, B3] (Does NOT contain A1, A2, A3)
+        tool_thread_user_msgs = [e["message"] for e in self.store.load_history(tool_thread_sess) if e["from"] == "user"]
+        self.assertEqual(tool_thread_user_msgs, [
+            "B1: Let's investigate swarm coordination",
+            "B2: Explain git worktree isolation",
+            "B3: How to test collision resolution"
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

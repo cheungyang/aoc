@@ -2,7 +2,8 @@ import asyncio
 from typing import Optional
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
-from core.agent.job_manager import JobManager, current_agent_id
+from core.agent.session_identifier import SessionIdentifier
+from core.agent.session_manager import SessionManager
 from core.util import format_tool_response
 
 @tool
@@ -43,21 +44,35 @@ async def agent_call(
                 errors=f"Error: Agent '{agent_id}' cannot be called in channel '{channel}'. Allowed channels: {allowed_channels}"
             )
             
+        from core.agent.job_manager import current_session_identifier
+        from core.agent.session_manager import SessionManager
         from core.loaders.bots_loader import BotsLoader
-        discord_channel = BotsLoader().find_channel(channel)
+
+        active_sess = current_session_identifier.get()
+        if active_sess and active_sess.matches_channel(channel):
+            discord_channel = active_sess.channel_obj
+        else:
+            discord_channel = BotsLoader().find_channel(channel)
         
-        triggering_agent = caller or current_agent_id.get()
+        triggering_agent = caller or (active_sess.agent_id if active_sess else None)
         if triggering_agent and "<caller>" not in prompt:
             formatted_prompt = f"<caller>{triggering_agent}</caller>\n{prompt}"
         else:
             formatted_prompt = prompt
 
-        job_id = JobManager().new_job_id(agent_id)
+        is_stateless = agent.config.get("stateless", False)
+        target_session = SessionManager().get_session(
+            agent_id=agent_id,
+            source="tool",
+            channel=discord_channel or channel,
+            stateless=is_stateless
+        )
+
         if run_async:
-            asyncio.create_task(agent.execute(formatted_prompt, source="tool", job_id=job_id, channel=discord_channel))
-            return format_tool_response("agent_call", payload=f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {job_id}.", errors="None")
+            asyncio.create_task(agent.execute(formatted_prompt, session=target_session))
+            return format_tool_response("agent_call", payload=f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {target_session.job_id}.", errors="None")
         else:
-            response = await agent.execute(formatted_prompt, source="tool", job_id=job_id, channel=discord_channel)
+            response = await agent.execute(formatted_prompt, session=target_session)
             return format_tool_response("agent_call", payload=response, errors="None")
     except Exception as e:
         return format_tool_response("agent_call", payload="", errors=f"Error calling agent: {e}")

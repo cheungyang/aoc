@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from core.agent.script_executor_agent import ScriptExecutorAgent
 from core.loaders.agents_loader import AgentsLoader
+from core.agent.session_manager import SessionManager
 
 class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -27,7 +28,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         mock_run.return_value = MagicMock(stdout="command output", stderr="", returncode=0)
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("script echo hello", "test_source")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("script echo hello", session=session)
         
         self.assertIn("Script 'echo hello' executed successfully", output)
         self.assertIn("command output", output)
@@ -44,7 +46,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         mock_import.return_value = mock_module
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", "test_source")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", session=session)
         
         self.assertIn("Tool test_tool executed successfully", output)
         self.assertIn("tool result", output)
@@ -61,7 +64,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         mock_import.return_value = mock_module
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", "test_source")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("tool test_tool {\"arg1\": \"val1\"}", session=session)
         
         self.assertIn("Tool test_tool executed successfully", output)
         self.assertIn("direct result val1", output)
@@ -71,7 +75,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         mock_run.return_value = MagicMock(stdout="ls output", stderr="", returncode=0)
         
         agent = ScriptExecutorAgent("script-executor")
-        output = await agent.execute("script ls -la ~", "test_source")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("script ls -la ~", session=session)
         
         self.assertIn("Script 'ls -la ~' executed successfully", output)
         mock_run.assert_called_once()
@@ -89,17 +94,18 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
 
     @patch('subprocess.run')
     @patch('core.agent.script_executor_agent.JobManager')
-    async def test_execute_passes_initial_prompt_to_job_manager(self, mock_job_manager_class, mock_run):
+    async def test_execute_passes_prompt_to_job_manager(self, mock_job_manager_class, mock_run):
         mock_job_manager = MagicMock()
         mock_job_manager_class.return_value = mock_job_manager
         mock_job_manager.new_job_id.return_value = "test-job-id"
         mock_run.return_value = MagicMock(stdout="output", stderr="", returncode=0)
         
         agent = ScriptExecutorAgent("script-executor")
-        await agent.execute("script echo hello", "test_source")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general", job_id="test-job-id")
+        await agent.execute("script echo hello", session=session)
         
         mock_job_manager.add_job.assert_called_once_with(
-            "test-job-id", "script-executor", "script-executor:test_source", initial_prompt="script echo hello"
+            session=session, prompt="script echo hello"
         )
 
 if __name__ == "__main__":

@@ -1,15 +1,14 @@
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 import contextvars
 import os
 import json
 import sqlite3
 from contextlib import contextmanager
+from core.agent.session_identifier import SessionIdentifier
 
-current_job_id = contextvars.ContextVar("current_job_id", default=None)
-current_channel_name = contextvars.ContextVar("current_channel_name", default="")
-current_agent_id = contextvars.ContextVar("current_agent_id", default=None)
+current_session_identifier = contextvars.ContextVar("current_session_identifier", default=None)
 current_graph_id = contextvars.ContextVar("current_graph_id", default=None)
 
 SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
@@ -24,7 +23,7 @@ class Job:
     started: float
     updated: float
     status: str
-    initial_prompt: str = ""
+    prompt: str = ""
 
 
 class JobManager:
@@ -64,7 +63,7 @@ class JobManager:
                 started REAL NOT NULL,
                 updated REAL NOT NULL,
                 status TEXT NOT NULL,
-                initial_prompt TEXT DEFAULT ''
+                prompt TEXT DEFAULT ''
             )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
@@ -81,7 +80,7 @@ class JobManager:
                     for jid, job_data in data.items():
                         conn.execute("""
                         INSERT OR IGNORE INTO jobs (
-                            job_id, agent_id, session_id, started, updated, status, initial_prompt
+                            job_id, agent_id, session_id, started, updated, status, prompt
                         ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, (
                             job_data.get("job_id", jid),
@@ -90,7 +89,7 @@ class JobManager:
                             job_data.get("started", time.time()),
                             job_data.get("updated", time.time()),
                             job_data.get("status", "completed"),
-                            job_data.get("initial_prompt", "")
+                            job_data.get("prompt", "")
                         ))
                     conn.commit()
                 os.remove(legacy_file)
@@ -101,7 +100,7 @@ class JobManager:
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute(
-                    "SELECT job_id, agent_id, session_id, started, updated, status, initial_prompt FROM jobs ORDER BY updated ASC"
+                    "SELECT job_id, agent_id, session_id, started, updated, status, prompt FROM jobs ORDER BY updated ASC"
                 )
                 for row in cursor.fetchall():
                     job = Job(
@@ -111,7 +110,7 @@ class JobManager:
                         started=row["started"],
                         updated=row["updated"],
                         status=row["status"],
-                        initial_prompt=row["initial_prompt"] or ""
+                        prompt=row["prompt"] or ""
                     )
                     self._jobs[job.job_id] = job
                     if job.job_id not in self._job_ids:
@@ -124,7 +123,7 @@ class JobManager:
             return self._jobs[job_id]
         with self._get_connection() as conn:
             cursor = conn.execute(
-                "SELECT job_id, agent_id, session_id, started, updated, status, initial_prompt FROM jobs WHERE job_id = ?",
+                "SELECT job_id, agent_id, session_id, started, updated, status, prompt FROM jobs WHERE job_id = ?",
                 (job_id,)
             )
             row = cursor.fetchone()
@@ -136,7 +135,7 @@ class JobManager:
                     started=row["started"],
                     updated=row["updated"],
                     status=row["status"],
-                    initial_prompt=row["initial_prompt"] or ""
+                    prompt=row["prompt"] or ""
                 )
                 self._jobs[job_id] = job
                 return job
@@ -164,12 +163,6 @@ class JobManager:
             self._jobs[job_id].updated = time.time()
         self.update_job(job_id, "killing")
 
-    def new_job_id(self, agent_id: str) -> str:
-        import uuid
-        job_id = f"{agent_id}:job:{uuid.uuid4().hex[:8]}"
-        self._job_ids.append(job_id)
-        return job_id
-
     def _clean_jobs(self):
         to_remove = []
         for jid in list(self._job_ids):
@@ -192,18 +185,27 @@ class JobManager:
         except Exception as e:
             print(f"Error cleaning jobs in sqlite: {e}")
 
-    def add_job(self, job_id: str, agent_id: str, session_id: str, initial_prompt: str = ""):
+    def add_job(
+        self,
+        session: SessionIdentifier,
+        prompt: str = "",
+    ):
         if len(self._job_ids) > 50:
             self._clean_jobs()
         now = time.time()
+
+        if not isinstance(session, SessionIdentifier):
+            raise TypeError(f"session must be an instance of SessionIdentifier, got {type(session).__name__}")
+
+        job_id = session.job_id
         job = Job(
             job_id=job_id,
-            agent_id=agent_id,
-            session_id=session_id,
+            agent_id=session.agent_id,
+            session_id=session.session_id,
             started=now,
             updated=now,
             status="queued",
-            initial_prompt=initial_prompt
+            prompt=prompt,
         )
         self._jobs[job_id] = job
         if job_id not in self._job_ids:
@@ -213,13 +215,13 @@ class JobManager:
             with self._get_connection() as conn:
                 conn.execute("""
                 INSERT OR REPLACE INTO jobs (
-                    job_id, agent_id, session_id, started, updated, status, initial_prompt
+                    job_id, agent_id, session_id, started, updated, status, prompt
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (job_id, agent_id, session_id, now, now, "queued", initial_prompt))
+                """, (job_id, session.agent_id, session.session_id, now, now, "queued", prompt))
                 conn.commit()
         except Exception as e:
             print(f"Error saving job {job_id}: {e}")
-
+ 
     def get_jobs(self, allowlist: List[str] = ["queued", "running", "error", "partial"]) -> List[Job]:
         filtered_jobs = []
         for job in self._jobs.values():

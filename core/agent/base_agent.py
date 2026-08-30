@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import discord
-from typing import List
+from typing import List, Optional, Any, Union
+from core.agent.session_identifier import SessionIdentifier
 
 class BaseAgent(ABC):
     def __init__(self, agent_id: str, config: dict):
@@ -8,9 +9,15 @@ class BaseAgent(ABC):
         self.config = config
 
     @abstractmethod
-    async def execute(self, content: str, source: str, job_id: str = None, channel: discord.TextChannel = None, callbacks: List = None, role: str = "user") -> str:
+    async def execute(
+        self,
+        prompt: Union[str, list],
+        session: SessionIdentifier,
+        callbacks: Optional[List] = None,
+        role: str = "user"
+    ) -> str:
         """
-        Execute the agent with the given content.
+        Execute the agent with the given prompt and SessionIdentifier.
         """
         pass
 

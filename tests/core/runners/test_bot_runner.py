@@ -232,6 +232,57 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader.get_agent.assert_called_with("main")
         mock_agent.execute_stream.assert_called_once()
 
+    @patch('core.knowledge.memory.sqlite_session_store.SqliteSessionStore.load_history', return_value=[])
+    @patch('core.runners.bot_runner.AgentsLoader')
+    @patch('core.runners.bot_runner.commands.Bot')
+    async def test_on_message_from_thread_seeds_starter_message(self, mock_bot_class, mock_agents_loader_class, mock_load_history):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        
+        runner = BotRunner("test_token", "main")
+        
+        mock_starter = MagicMock()
+        mock_starter.id = 1111111111111111111
+        mock_starter.author = MagicMock(display_name="Alva")
+        mock_starter.content = "Initial topic outline"
+
+        mock_thread = MagicMock(spec=discord.Thread)
+        mock_thread.id = 1541110915540324533
+        mock_thread.name = "AI thread"
+        mock_thread.parent = MagicMock()
+        mock_thread.parent.name = "topic-research"
+        mock_thread.starter_message = mock_starter
+
+        mock_message = MagicMock()
+        mock_message.id = 2222222222222222222
+        mock_message.author = MagicMock(bot=False)
+        mock_message.content = "Let's begin chapter 1"
+        mock_message.mentions = []
+        mock_message.channel = mock_thread
+        mock_message.attachments = []
+        
+        captured_payload = None
+        async def fake_stream(payload, *args, **kwargs):
+            nonlocal captured_payload
+            captured_payload = payload
+            if False:
+                yield None
+
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": ["topic-research"]}
+        mock_agent.execute_stream = MagicMock(side_effect=fake_stream)
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+        
+        await runner.on_message(mock_message)
+
+        mock_agent.execute_stream.assert_called_once()
+        self.assertIn('[Thread starter message from Alva: "Initial topic outline"]', captured_payload)
+        self.assertIn("Let's begin chapter 1", captured_payload)
+
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_run_bot_success(self, mock_bot_class):
         
@@ -330,7 +381,10 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.on_message(mock_message)
         
         # Verify that execute_stream was called with the stripped content
-        mock_agent.execute_stream.assert_called_once_with("i prefer option1", source="discord", channel=mock_message.channel, callbacks=unittest.mock.ANY)
+        mock_agent.execute_stream.assert_called_once_with("i prefer option1", session=unittest.mock.ANY, callbacks=unittest.mock.ANY)
+        called_session = mock_agent.execute_stream.call_args[1]["session"]
+        self.assertEqual(called_session.agent_id, "main")
+        self.assertEqual(called_session.source, "discord")
 
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')

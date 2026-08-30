@@ -13,6 +13,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from core.agent.context_pruner import ContextPruner
+from core.agent.session_manager import SessionManager
 from core.util.message_util import (
     estimate_message_tokens,
     estimate_total_tokens,
@@ -285,8 +286,9 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
     def test_auto_prune_session_prunes_and_updates_checkpoint(self, mock_put, mock_get_tuple):
+        session = SessionManager.get_session(agent_id="test", source="discord", channel="general")
         mock_tuple = MagicMock()
-        mock_tuple.config = {"configurable": {"thread_id": "test-session"}}
+        mock_tuple.config = {"configurable": {"thread_id": session.session_id}}
         mock_tuple.metadata = {}
         mock_tuple.checkpoint = {
             "channel_values": {
@@ -298,7 +300,7 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
 
         Config().context_max_tokens = 1000
         Config().context_window_messages = 5
-        res = self.pruner.auto_prune_session("test-session")
+        res = self.pruner.auto_prune_session(session)
         self.assertTrue(res)
         mock_put.assert_called_once()
         saved_messages = mock_tuple.checkpoint["channel_values"]["messages"]
@@ -308,6 +310,7 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
     def test_auto_prune_session_skips_when_under_threshold(self, mock_put, mock_get_tuple):
+        session = SessionManager.get_session(agent_id="test", source="discord", channel="general")
         mock_tuple = MagicMock()
         mock_tuple.checkpoint = {
             "channel_values": {
@@ -318,15 +321,16 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
 
         Config().context_max_tokens = 30000
         Config().context_window_messages = 15
-        res = self.pruner.auto_prune_session("test-session")
+        res = self.pruner.auto_prune_session(session)
         self.assertFalse(res)
         mock_put.assert_not_called()
 
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
     async def test_aauto_prune_session_prunes_checkpoint(self, mock_put, mock_get_tuple):
+        session = SessionManager.get_session(agent_id="test", source="discord", channel="general")
         mock_tuple = MagicMock()
-        mock_tuple.config = {"configurable": {"thread_id": "test-session"}}
+        mock_tuple.config = {"configurable": {"thread_id": session.session_id}}
         mock_tuple.metadata = {}
         mock_tuple.checkpoint = {
             "channel_values": {
@@ -338,7 +342,7 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
 
         Config().context_max_tokens = 1000
         Config().context_window_messages = 5
-        res = await self.pruner.aauto_prune_session("test-session")
+        res = await self.pruner.aauto_prune_session(session)
         self.assertTrue(res)
         mock_put.assert_called_once()
         saved_messages = mock_tuple.checkpoint["channel_values"]["messages"]
@@ -409,9 +413,10 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple', side_effect=Exception("Database lock error"))
     async def test_aauto_prune_session_handles_checkpointer_exception(self, mock_get_tuple):
+        session = SessionManager.get_session(agent_id="test", source="discord", channel="general")
         Config().context_max_tokens = 1000
         pruner = ContextPruner()
-        res = await pruner.aauto_prune_session("test-session")
+        res = await pruner.aauto_prune_session(session)
         self.assertFalse(res)
 
     def test_config_context_pruning_timeout(self):

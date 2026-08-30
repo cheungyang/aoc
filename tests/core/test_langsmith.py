@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from core.agent.agent import Agent
+from core.agent.session_manager import SessionManager
 from core.agent.script_executor_agent import ScriptExecutorAgent
 from tools.graph_call import graph_call
 from scripts.verify_langsmith import verify_langsmith
@@ -25,7 +26,8 @@ class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
         agent = Agent("software-coder", {})
         agent.graph = mock_graph
 
-        await agent.execute("Fix the bug", source="discord", role="user")
+        session = SessionManager.get_session(agent_id="software-coder", source="discord", channel="general")
+        await agent.execute("Fix the bug", session=session, role="user")
 
         mock_graph.ainvoke.assert_called_once()
         args, kwargs = mock_graph.ainvoke.call_args
@@ -64,7 +66,7 @@ class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.get("run_name"), "graph:coding")
         self.assertEqual(config.get("tags"), ["graph", "coding"])
         self.assertEqual(config.get("metadata", {}).get("graph_name"), "coding")
-        self.assertEqual(config.get("metadata", {}).get("thread_id"), "graph:coding:default")
+        self.assertEqual(config.get("metadata", {}).get("thread_id"), "coding:default")
         self.assertIn("Subgraph Done", result)
 
     @patch.dict(os.environ, {"LANGSMITH_TRACING": "false"}, clear=False)

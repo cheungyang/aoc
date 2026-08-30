@@ -10,7 +10,7 @@ from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt, Config
 from langgraph.types import interrupt
-from core.agent.job_manager import JobManager, current_job_id
+from core.agent.job_manager import JobManager, current_session_identifier
 
 class GraphBuilder:
     def __init__(self):
@@ -77,7 +77,8 @@ class GraphBuilder:
             
             @functools.wraps(original_run)
             def wrapper(*args, **kwargs):
-                job_id = current_job_id.get()
+                active_sess = current_session_identifier.get()
+                job_id = active_sess.job_id if active_sess else None
                 if job_id:
                     job = JobManager()._jobs.get(job_id)
                     if job and job.status == "killing":
@@ -90,7 +91,8 @@ class GraphBuilder:
             if original_arun is not None:
                 @functools.wraps(original_arun)
                 async def awrapper(*args, **kwargs):
-                    job_id = current_job_id.get()
+                    active_sess = current_session_identifier.get()
+                    job_id = active_sess.job_id if active_sess else None
                     if job_id:
                         job = JobManager()._jobs.get(job_id)
                         if job and job.status == "killing":

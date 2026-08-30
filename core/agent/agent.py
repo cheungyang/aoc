@@ -3,16 +3,17 @@ import os
 import sys
 import discord
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, Union
 
 from core.util import split_message, Config, format_error_message, save_agent_memory_log
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import current_job_id, current_agent_id, current_channel_name
+from core.agent.job_manager import current_session_identifier, JobManager
 from core.agent.logging_handler import LoggingHandler
 from core.agent.command_handler import CommandHandler
 from core.agent.context_pruner import ContextPruner
 from core.agent.discord_ui import PollButtonView, PollSelectView
 from core.agent.agent_response import AgentResponse
+from core.agent.session_identifier import SessionIdentifier
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 
 
@@ -22,92 +23,80 @@ class Agent(BaseAgent):
         self.graph = None
 
     @staticmethod
-    def _is_empty_content(content: str | list) -> bool:
+    def _is_empty_prompt(prompt: str | list) -> bool:
         """Checks if the user prompt is empty or blank whitespace."""
-        if not content:
+        if not prompt:
             return True
-        if isinstance(content, str) and not content.strip():
+        if isinstance(prompt, str) and not prompt.strip():
             return True
         return False
 
     async def _prepare_execution(
         self,
-        content: str | list,
-        source: str,
-        job_id: Optional[str] = None,
-        channel: Optional[discord.TextChannel] = None,
+        prompt: str | list,
+        session: SessionIdentifier,
         callbacks: Optional[list] = None,
         role: str = "user"
-    ) -> Optional[Tuple[str, str, str, Dict[str, Any], Dict[str, Any]]]:
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
         """
-        Validates session/job IDs, executes system commands, auto-prunes context,
-        ensures graph compilation, and returns (job_id, session_id, channel_name, config, inputs).
+        Executes system commands, auto-prunes context,
+        ensures graph compilation, and returns (config, inputs).
         Returns None if handled by a system command.
         """
-        from core.agent.job_manager import JobManager
-        from core.agent.session_manager import SessionManager
-        from core.agent.graph_builder import GraphBuilder
-
-        if job_id is None:
-            job_id = JobManager().new_job_id(self.agent_id)
-
-        is_stateless = self.config.get("stateless", False)
-        session_id = SessionManager().get_session_id(
-            self.agent_id, source, channel, job_id=job_id, stateless=is_stateless
-        )
+        session_id = session.session_id
+        channel_name = session.channel_name
+        job_id = session.job_id
 
         # Handle system commands ([new], [newall], [restart])
-        if await CommandHandler().handle_command(content, session_id=session_id, channel=channel):
+        if await CommandHandler().handle_command(prompt, session=session):
             return None
 
-        channel_name = ""
-        if channel is not None:
-            channel_name = channel.name if hasattr(channel, "name") else str(channel.id)
-            if isinstance(channel, discord.Thread) and channel.parent:
-                channel_name = channel.parent.name
-
         # Auto-prune session checkpoint in SQLite storage before execution if history exceeds thresholds
-        if not is_stateless:
+        if not session.is_stateless():
             try:
-                await ContextPruner().aauto_prune_session(session_id, channel=channel_name)
+                await ContextPruner().aauto_prune_session(session=session)
             except Exception as e:
                 print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
 
         # Lazy load langgraph graph object via GraphBuilder
         if self.graph is None:
+            from core.agent.graph_builder import GraphBuilder
             self.graph = await GraphBuilder().build_graph(self.agent_id, self.config)
 
-        JobManager().add_job(
-            job_id, self.agent_id, session_id,
-            initial_prompt=content if isinstance(content, str) else str(content)
-        )
+        prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+        JobManager().add_job(session=session, prompt=prompt_str)
 
-        logging_handler = LoggingHandler(session_id=session_id, role=role, human_message=content, agent_id=self.agent_id)
+        logging_handler = LoggingHandler(session=session, role=role, human_message=prompt)
         config = {
             "configurable": {
-                "thread_id": session_id,
-                "agent_id": self.agent_id
+                "agent_id": self.agent_id,
+                "session_id": session_id,
+                "thread_id": session.get_session_thread_id(),
+                "job_id": job_id,
             },
             "callbacks": [logging_handler] + (callbacks or []),
-            "recursion_limit": 100,
+            "recursion_limit": 50,
             "run_name": f"agent:{self.agent_id}",
-            "tags": [self.agent_id, source, f"role:{role}"],
+            "tags": [self.agent_id, session.source, f"role:{role}"],
             "metadata": {
                 "agent_id": self.agent_id,
                 "session_id": session_id,
-                "source": source,
+                "source": session.source,
                 "job_id": job_id,
                 "channel": channel_name,
-                "role": role
+                "role": role,
             }
         }
 
-        inputs = {"messages": [{"role": role, "content": content}]}
-        return job_id, session_id, channel_name, config, inputs
+        inputs = {"messages": [{"role": role, "content": prompt}]}
+        return config, inputs
 
-    def _update_job_status(self, job_id: str, config: Dict[str, Any]):
+    def _update_job_status(self, session: SessionIdentifier, config: Dict[str, Any]):
         """Updates job status based on final graph state."""
-        from core.agent.job_manager import JobManager
+        job_id = session.job_id
+        if not job_id:
+            return
+
         job = JobManager()._jobs.get(job_id)
         if job and job.status == "killed":
             return
@@ -140,11 +129,13 @@ class Agent(BaseAgent):
 
     async def _dispatch_discord_output(
         self,
-        channel: discord.TextChannel,
-        source: str,
+        session: SessionIdentifier,
         response: AgentResponse
     ):
         """Sends split message chunks, poll UI components, and media files to Discord."""
+        channel = session.channel_obj
+        source = session.source
+
         if channel is None or source not in ["discord", "scheduled"]:
             return
 
@@ -224,45 +215,42 @@ class Agent(BaseAgent):
         return msg
 
     @asynccontextmanager
-    async def _execution_context(self, job_id: str, channel_name: str):
+    async def _execution_context(self, session: SessionIdentifier):
         """Context manager managing ContextVars and initial job running status."""
-        from core.agent.job_manager import JobManager, current_job_id, current_agent_id, current_channel_name
-        token = current_job_id.set(job_id)
-        channel_token = current_channel_name.set(channel_name)
-        agent_token = current_agent_id.set(self.agent_id)
-        JobManager().update_job(job_id, "running")
+        session_token = current_session_identifier.set(session)
+
+        job_id = session.job_id or ""
+        if job_id:
+            JobManager().update_job(job_id, "running")
+
         try:
             yield
         finally:
-            current_job_id.reset(token)
-            current_channel_name.reset(channel_token)
-            current_agent_id.reset(agent_token)
+            current_session_identifier.reset(session_token)
 
     @staticmethod
     def _is_corrupt_checkpoint_error(error: Exception) -> bool:
         """Detects dangling tool call exceptions resulting from interrupted/corrupted checkpoints."""
         return "tool_calls that do not have a corresponding ToolMessage" in str(error)
 
-    def _recover_corrupt_checkpoint(self, session_id: str):
+    def _recover_corrupt_checkpoint(self, session: SessionIdentifier):
         """Rolls back the corrupt checkpoint step in SQLite storage to restore a valid state."""
+        session_id = session.session_id
         SqliteCheckpointer().rollback_last_step(session_id)
         print(f"[Agent:{self.agent_id}] Rolled back corrupt checkpoint for session: {session_id}, retrying...")
 
     async def _handle_execution_error(
         self,
-        job_id: str,
-        error: Exception,
-        channel: Optional[discord.TextChannel],
-        source: str
+        session: SessionIdentifier,
+        error: Exception
     ) -> str:
         """Updates job status to error, formats error message, and dispatches to channel."""
-        from core.agent.job_manager import JobManager
-        JobManager().update_job(job_id, "error")
+        JobManager().update_job(session.job_id, "error")
         err_msg = format_error_message(error)
         print(f"[Agent:{self.agent_id}] Error executing graph: {err_msg}")
-        if channel is not None and source in ["discord", "scheduled"]:
+        if session.channel is not None and session.source in ["discord", "scheduled"]:
             try:
-                await channel.send(err_msg)
+                await session.channel.send(err_msg)
             except Exception as se:
                 print(f"[Agent:{self.agent_id}] Error sending failure message: {se}")
         return err_msg
@@ -319,14 +307,14 @@ class Agent(BaseAgent):
             reply_message = result["messages"][-1]
             yield {"type": "token", "content": str(reply_message.content)}
 
-    async def _stream_graph_with_recovery(self, inputs: Dict[str, Any], config: Dict[str, Any], session_id: str):
+    async def _stream_graph_with_recovery(self, inputs: Dict[str, Any], config: Dict[str, Any], session: SessionIdentifier):
         """Streams graph events with automatic corrupt checkpoint recovery and retry."""
         try:
             async for event in self._stream_graph_events(inputs, config):
                 yield event
         except Exception as e:
             if self._is_corrupt_checkpoint_error(e):
-                self._recover_corrupt_checkpoint(session_id)
+                self._recover_corrupt_checkpoint(session)
                 async for event in self._stream_graph_events(inputs, config):
                     yield event
             else:
@@ -334,49 +322,45 @@ class Agent(BaseAgent):
 
     async def execute(
         self,
-        content: str | list,
-        source: str,
-        job_id: str = None,
-        channel: discord.TextChannel = None,
-        callbacks: list = None,
+        prompt: Union[str, list],
+        session: SessionIdentifier,
+        callbacks: Optional[list] = None,
         role: str = "user"
     ) -> str:
         """Executes the agent graph in batch mode and returns full response text."""
-        if self._is_empty_content(content):
-            return await self._handle_empty_content(channel, source)
+        if self._is_empty_prompt(prompt):
+            return await self._handle_empty_content(session.channel_obj, session.source)
 
-        prep = await self._prepare_execution(content, source, job_id, channel, callbacks, role)
+        prep = await self._prepare_execution(prompt, session, callbacks, role)
         if prep is None:
             return ""
-        job_id, session_id, channel_name, config, inputs = prep
+        config, inputs = prep
 
-        async with self._execution_context(job_id, channel_name):
+        async with self._execution_context(session):
             try:
                 print(f"Invoking graph for {self.agent_id}")
                 try:
                     result = await self.graph.ainvoke(inputs, config=config)
                 except Exception as e:
                     if self._is_corrupt_checkpoint_error(e):
-                        self._recover_corrupt_checkpoint(session_id)
+                        self._recover_corrupt_checkpoint(session)
                         result = await self.graph.ainvoke(inputs, config=config)
                     else:
                         raise e
-                self._update_job_status(job_id, config)
+                self._update_job_status(session, config)
             except Exception as e:
-                return await self._handle_execution_error(job_id, e, channel, source)
+                return await self._handle_execution_error(session, e)
 
         reply_message = result["messages"][-1]
         response = self._parse_final_response(reply_message.content)
-        await self._dispatch_discord_output(channel, source, response)
+        await self._dispatch_discord_output(session, response)
         return response.text
 
     async def execute_stream(
         self,
-        content: str | list,
-        source: str,
-        job_id: str = None,
-        channel: discord.TextChannel = None,
-        callbacks: list = None,
+        prompt: Union[str, list],
+        session: SessionIdentifier,
+        callbacks: Optional[list] = None,
         role: str = "user"
     ):
         """
@@ -387,27 +371,27 @@ class Agent(BaseAgent):
           - {"type": "tool_end", "tool_name": str, "output": str, "run_id": str}
           - {"type": "final_response", "text": str, "poll_data": dict, "image_paths": list, "video_paths": list, "system_memory_log": str, "response": AgentResponse}
         """
-        if self._is_empty_content(content):
-            msg = await self._handle_empty_content(channel, source)
+        if self._is_empty_prompt(prompt):
+            msg = await self._handle_empty_content(session.channel_obj, session.source)
             yield {"type": "final_response", "text": msg, "poll_data": None, "image_paths": [], "video_paths": [], "system_memory_log": None, "response": None}
             return
 
-        prep = await self._prepare_execution(content, source, job_id, channel, callbacks, role)
+        prep = await self._prepare_execution(prompt, session, callbacks, role)
         if prep is None:
             return
-        job_id, session_id, channel_name, config, inputs = prep
+        config, inputs = prep
 
         accumulated_tokens = []
-        async with self._execution_context(job_id, channel_name):
+        async with self._execution_context(session):
             try:
                 print(f"Streaming graph for {self.agent_id}")
-                async for event in self._stream_graph_with_recovery(inputs, config, session_id):
+                async for event in self._stream_graph_with_recovery(inputs, config, session):
                     if event.get("type") == "token":
                         accumulated_tokens.append(event.get("content", ""))
                     yield event
-                self._update_job_status(job_id, config)
+                self._update_job_status(session, config)
             except Exception as e:
-                err_msg = await self._handle_execution_error(job_id, e, channel, source)
+                err_msg = await self._handle_execution_error(session, e)
                 yield {"type": "error", "content": err_msg}
                 return
 

@@ -1,6 +1,6 @@
 import pytest
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import discord
 from core.voice.voice_manager import VoiceManager
 
@@ -256,9 +256,11 @@ async def test_voice_manager_on_speech_finished_pipeline(mock_bot_runner, tmp_pa
         # 3. Verify Agent executed with shared source='discord'
         mock_agent.execute_stream.assert_called_once_with(
             content="Check my tasks for today",
-            source="discord",
-            channel=mock_text_channel
+            session=ANY
         )
+        called_session = mock_agent.execute_stream.call_args[1]["session"]
+        assert called_session.agent_id == "main"
+        assert called_session.source == "discord"
         
         # 4. Verify TTS synthesized and queued
         vm.tts_engine.synthesize_to_file.assert_awaited_once_with("You have 2 tasks scheduled.")
