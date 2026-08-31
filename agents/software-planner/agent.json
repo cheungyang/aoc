@@ -1,7 +1,7 @@
 {
   "agent_id": "software-planner",
   "channels": [
-    "software_dev"
+    "software-dev"
   ],
   "name": "Elephant",
   "emoji": "🐘",
