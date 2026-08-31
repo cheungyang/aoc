@@ -7,4 +7,4 @@ def hello_world() -> str:
     """
     Returns a standardized hello world greeting message.
     """
-    return format_tool_response("hello_world", payload="Hello, World!", errors="None")
+    return format_tool_response("hello_world", payload="Hello world, Alva!", errors="None")
