@@ -13,16 +13,16 @@ class TestHelloWorldTool(unittest.TestCase):
 
     def test_hello_world_func(self):
         result = hello_world.func()
-        expected = format_tool_response("hello_world", payload="Hello, World!", errors="None")
+        expected = format_tool_response("hello_world", payload="Hello world, Alva!", errors="None")
         self.assertEqual(result, expected)
-        self.assertIn("<payload>Hello, World!</payload>", result)
+        self.assertIn("<payload>Hello world, Alva!</payload>", result)
         self.assertIn("<errors>None</errors>", result)
 
     def test_hello_world_invoke(self):
         result = hello_world.invoke({})
-        expected = format_tool_response("hello_world", payload="Hello, World!", errors="None")
+        expected = format_tool_response("hello_world", payload="Hello world, Alva!", errors="None")
         self.assertEqual(result, expected)
-        self.assertIn("<payload>Hello, World!</payload>", result)
+        self.assertIn("<payload>Hello world, Alva!</payload>", result)
         self.assertIn("<errors>None</errors>", result)
 
 
