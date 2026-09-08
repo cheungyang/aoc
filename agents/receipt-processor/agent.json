@@ -10,7 +10,7 @@
   "model": "gemini-3.5-flash-lite",
   "tools": {
     "filesystem": {
-      "pkm/vault/finance": [
+      "pkm/wallet/finance": [
         "read",
         "write",
         "append",
