@@ -35,6 +35,7 @@
       "channel": "topic-research",
       "cron": "0 8 * * *",
       "prompt": [
+        "<caller>main</caller>",
         "Execute Mode A: Queue Initialization.",
         "Read `pkm/wiki/topics/research_requests.md`.",
         "If empty, terminate your execution immediately and stay silent in the channel.",
@@ -47,6 +48,7 @@
       "channel": "topic-research",
       "cron": "0 17 * * *",
       "prompt": [
+        "<caller>main</caller>",
         "Execute Mode B: The Proactive Nudge.",
         "Scan `pkm/wiki/topics/pending/` for idle syllabi.",
         "If empty, terminate your execution immediately and stay silent in the channel.",

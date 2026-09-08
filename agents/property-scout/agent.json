@@ -27,6 +27,7 @@
       "channel": "real-estate",
       "cron": "0 8 * * 5",
       "prompt": [
+        "<caller>main</caller>",
         "Load your real_estate_scout skill. Read the user's constraints and target",
         "zip codes from `pkm/wallet/real-estate/criteria.md`.",
         "Use the zillow_query tool to pull active listings matching these baseline",

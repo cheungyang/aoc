@@ -19,6 +19,7 @@
       "channel": "pkm-wiki",
       "cron": "0 7 * * *",
       "prompt": [
+        "<caller>main</caller>",
         "Execute Workflow A: Daily Ingestion & Gap Analysis.",
         "Scan `pkm/inbox/` for new articles.",
         "If empty, terminate your execution immediately and stay silent in the channel.",
@@ -31,6 +32,7 @@
       "channel": "pkm-wiki",
       "cron": "0 10 * * 5",
       "prompt": [
+        "<caller>main</caller>",
         "Execute Workflow B: Weekly Linting & Taxonomy Cleanup.",
         "Review `pkm/wiki/pending_lint.json` for structural anomalies.",
         "If empty, terminate your execution immediately and stay silent in the channel.",

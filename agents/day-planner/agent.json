@@ -15,6 +15,7 @@
             "channel": "day-planning",
             "cron": "0 6 * * *",
             "prompt": [
+                "<caller>main</caller>",
                 "Good morning. It is time to generate the daily plan.",
                 "1. Use `list_impactful_actions` to retrieve project priorities.",
                 "2. Use `check_recurring_chores` for required maintenance.",
@@ -30,6 +31,7 @@
             "channel": "day-planning",
             "cron": "0 15 * * 5",
             "prompt": [
+                "<caller>main</caller>",
                 "Good afternoon. It is time for the weekly review.",
                 "Trigger the `weekly_review` skill and strictly follow its phased workflow.",
                 "CRITICAL ADDITION: During Phase 2 (Synthesize Wins), evaluate the past week's",
