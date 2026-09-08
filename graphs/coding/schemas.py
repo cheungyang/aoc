@@ -2,7 +2,7 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal
 from typing_extensions import TypedDict as ExtTypedDict
 from langchain_core.messages import AnyMessage
 
-TaskStatus = Literal["pending", "in_progress", "in_review", "completed", "failed", "blocked"]
+TaskStatus = Literal["pending", "in_progress", "in_review", "completed", "failed", "rejected", "blocked"]
 
 class TaskEnvelope(TypedDict, total=False):
     task_id: str

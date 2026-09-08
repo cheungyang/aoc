@@ -11,6 +11,7 @@ from graphs.coding.nodes.tester_node import tester_node
 from graphs.coding.nodes.critic_node import critic_node
 from graphs.coding.nodes.hitl_gate import hitl_gate_node, process_hitl_decision_node
 from graphs.coding.nodes.git_handoff import git_handoff_node
+from graphs.coding.nodes.termination_node import termination_node
 
 # Import adapters
 from graphs.coding.adapters import prepare_input, format_output
@@ -21,7 +22,7 @@ def create_graph(checkpointer=None, **kwargs):
     Compiles the autonomous EGM Stateless Coding Graph:
     DAG Scheduler -> Node 1 (Provisioner) -> Node 2 (Coder Worker) ->
     Node 3 (Deterministic Tester) -> Node 4 (Critic QA) ->
-    Node 5 (HITL Gate) -> Node 6 (Git Handoff & Teardown).
+    Node 5 (HITL Gate) -> Node 6 (Git Handoff & Teardown) / Node 7 (Termination Node).
     """
     if checkpointer is None:
         try:
@@ -44,6 +45,7 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("hitl_gate", hitl_gate_node)
     workflow.add_node("process_hitl_decision", process_hitl_decision_node)
     workflow.add_node("git_handoff", git_handoff_node)
+    workflow.add_node("termination_node", termination_node)
 
     # 2. Graph Wiring
     workflow.add_edge(START, "dag_scheduler")
@@ -77,7 +79,7 @@ def create_graph(checkpointer=None, **kwargs):
     # Worker always hands off to Deterministic Tester
     workflow.add_edge("worker_node", "tester_node")
 
-    # Router 3: tester_node -> critic_node or worker_node (retry) or END (abort)
+    # Router 3: tester_node -> critic_node or worker_node (retry) or termination_node (abort/failure)
     def tester_router(state: CodingState):
         if state.get("test_run_passed"):
             return "critic_node"
@@ -87,15 +89,15 @@ def create_graph(checkpointer=None, **kwargs):
         max_retries = state.get("max_retries", 3)
         if attempts < max_retries:
             return "worker_node"
-        return END
+        return "termination_node"
 
     workflow.add_conditional_edges(
         "tester_node",
         tester_router,
-        ["critic_node", "worker_node", END]
+        ["critic_node", "worker_node", "termination_node"]
     )
 
-    # Router 4: critic_node -> hitl_gate or worker_node (retry) or END (abort)
+    # Router 4: critic_node -> hitl_gate or worker_node (retry) or termination_node (abort/failure)
     def critic_router(state: CodingState):
         if state.get("critic_passed"):
             return "hitl_gate"
@@ -105,34 +107,38 @@ def create_graph(checkpointer=None, **kwargs):
         max_retries = state.get("max_retries", 3)
         if attempts < max_retries:
             return "worker_node"
-        return END
+        return "termination_node"
 
     workflow.add_conditional_edges(
         "critic_node",
         critic_router,
-        ["hitl_gate", "worker_node", END]
+        ["hitl_gate", "worker_node", "termination_node"]
     )
 
     # HITL Gate presentation leads into process_hitl_decision upon resumption
     workflow.add_edge("hitl_gate", "process_hitl_decision")
 
-    # Router 5: process_hitl_decision -> git_handoff or worker_node (revision) or END (abort)
+    # Router 5: process_hitl_decision -> git_handoff or worker_node (revision) or termination_node (abort)
     def hitl_router(state: CodingState):
         decision = state.get("hitl_decision", "")
         if decision == "approved":
             return "git_handoff"
         elif decision == "revise":
             return "worker_node"
-        return END
+        return "termination_node"
 
     workflow.add_conditional_edges(
         "process_hitl_decision",
         hitl_router,
-        ["git_handoff", "worker_node", END]
+        ["git_handoff", "worker_node", "termination_node"]
     )
 
     # Router 6: git_handoff -> dag_scheduler (check next task in queue)
     workflow.add_edge("git_handoff", "dag_scheduler")
+
+    # Router 7: termination_node -> END
+    workflow.add_edge("termination_node", END)
+
 
     return workflow.compile(
         checkpointer=checkpointer,

@@ -2,7 +2,7 @@ import os
 from typing import Dict, Any, List
 from langchain_core.messages import AIMessage
 from graphs.coding.schemas import CodingState
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path
 
 async def git_handoff_node(state: CodingState) -> Dict[str, Any]:

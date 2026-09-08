@@ -34,11 +34,8 @@ class TestGraphWorkerAgent(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         agent = loader.get_agent("graph-worker")
         
-        async def fake_stream(*args, **kwargs):
-            yield {"type": "token", "content": "<payload>executed successfully</payload>"}
-            yield {"type": "final_response", "text": "<payload>executed successfully</payload>"}
-
-        with patch.object(agent, "execute_stream", side_effect=fake_stream) as mock_exec:
+        with patch.object(agent, "execute", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = "<payload>executed successfully</payload>"
             res = await agent_call.ainvoke({
                 "agent_id": "graph-worker",
                 "prompt": "<playbook>Role</playbook><current_state>State</current_state><assigned_task>Task</assigned_task>",

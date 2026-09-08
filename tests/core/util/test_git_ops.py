@@ -4,7 +4,7 @@ import tempfile
 import json
 import asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
-from graphs.coding.utils.git_ops import (
+from core.util.git_ops import (
     run_cmd_async,
     run_cmd_sync,
     resolve_base_ref,
@@ -19,7 +19,7 @@ from graphs.coding.utils.git_ops import (
 )
 
 class TestGitOps(unittest.IsolatedAsyncioTestCase):
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_commit_and_push_with_author(self, mock_run):
         mock_run.side_effect = [
             (0, "", ""),  # git add .
@@ -45,7 +45,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(commit_kwargs["env"]["GIT_COMMITTER_EMAIL"], "worker@egm.internal")
             self.assertIn("BatchMode=yes", commit_kwargs["env"]["GIT_SSH_COMMAND"])
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_commit_and_push_remote_fallback(self, mock_run):
         mock_run.side_effect = [
             (0, "", ""),  # git add .
@@ -61,7 +61,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(ok)
             self.assertIn("Committed locally (remote origin push skipped", msg)
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_resolve_base_ref_master(self, mock_run):
         # 1. origin/main fails, 2. origin/master succeeds
         mock_run.side_effect = [
@@ -86,14 +86,14 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs.get("stdin"), asyncio.subprocess.DEVNULL)
         self.assertEqual(kwargs.get("env", {}).get("GIT_TERMINAL_PROMPT"), "0")
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_discover_target_repo(self, mock_run):
         mock_run.return_value = (0, "git@github.com:cheungyang/aoc.git\n", "")
         with tempfile.TemporaryDirectory() as tmp_dir:
             repo = await discover_target_repo(tmp_dir)
             self.assertEqual(repo, "cheungyang/aoc")
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_create_pull_request_success(self, mock_run):
         mock_run.return_value = (0, "https://github.com/cheungyang/aoc/pull/142\n", "")
         ok, pr_url, pr_num = await create_pull_request(
@@ -112,7 +112,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--repo", gh_call)
         self.assertIn("cheungyang/aoc", gh_call)
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_create_pull_request_already_exists(self, mock_run):
         mock_run.return_value = (1, "", "a pull request for branch \"feat/auth_1\" already exists:\nhttps://github.com/cheungyang/aoc/pull/99")
         ok, pr_url, pr_num = await create_pull_request(
@@ -126,7 +126,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pr_url, "https://github.com/cheungyang/aoc/pull/99")
         self.assertEqual(pr_num, 99)
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_create_pull_request_fallback(self, mock_run):
         mock_run.return_value = (1, "", "fatal: not logged in to gh")
         ok, pr_url, pr_num = await create_pull_request(
@@ -140,7 +140,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pr_url, "https://github.com/cheungyang/aoc/pull/feat/auth_1")
         self.assertIsNone(pr_num)
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_get_pull_request_status_success(self, mock_run):
         mock_data = {
             "state": "OPEN",
@@ -155,15 +155,15 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(status["comments"]), 1)
         self.assertEqual(status["comments"][0]["body"], "Looks great!")
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_get_pull_request_status_failure_fallback(self, mock_run):
         mock_run.return_value = (1, "", "gh: command not found")
         status = await get_pull_request_status("/tmp/ws", 42)
         self.assertEqual(status["state"], "OPEN")
         self.assertEqual(status["reviewDecision"], "")
 
-    @patch('graphs.coding.utils.git_ops.get_pull_request_status', new_callable=AsyncMock)
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.get_pull_request_status', new_callable=AsyncMock)
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_merge_pull_request_success(self, mock_run, mock_status):
         mock_run.return_value = (0, "Merged pull request #42", "")
         mock_status.return_value = {
@@ -175,7 +175,7 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(commit_url, "https://github.com/org/repo/commit/a1b2c3d4e5f6")
         self.assertIn("Merged", msg)
 
-    @patch('graphs.coding.utils.git_ops.run_cmd_async')
+    @patch('core.util.git_ops.run_cmd_async')
     async def test_teardown_worktree(self, mock_run):
         mock_run.return_value = (0, "", "")
         with tempfile.TemporaryDirectory() as tmp_repo:

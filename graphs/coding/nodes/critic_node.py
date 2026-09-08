@@ -18,10 +18,13 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
     2. Happy Path Bias (missing error handling)
     3. Silent Failure (swallowed catch/except blocks)
     4. Bloated Files (>150 lines without modularization)
+    Posts automated critique feedback to GitHub PR if QA rejects.
     """
     workspace_path = state.get("workspace_path", "")
     current_attempt = state.get("attempt_count", 0)
     modified_files = state.get("modified_files", [])
+    current_task = state.get("current_task") or {}
+    pr_url = state.get("pr_url") or current_task.get("pr_url")
 
     # 1. Fetch git diff
     raw_diff = await git_ops.get_git_diff(workspace_path)
@@ -32,6 +35,16 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
     if bloated:
         evidence_str = "\n".join(f"- {b['file']}: {b['evidence']}" for b in bloated)
         feedback = f"STATIC QA REJECTION (Bloated Files):\n{evidence_str}\nPlease modularize files exceeding 150 lines."
+        if pr_url:
+            try:
+                await git_ops.comment_pull_request(
+                    workspace_path=workspace_path,
+                    pr_url=pr_url,
+                    body=f"### ⚠️ Critic QA Rejection (Static Checks)\n\n{feedback}",
+                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                )
+            except Exception as e:
+                print(f"critic_node: Failed to post comment on PR: {e}")
         return {
             "critic_passed": False,
             "critic_feedback": feedback,
@@ -43,6 +56,16 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
     if silent_failures:
         evidence_str = "\n".join(f"- {s['file']} (L{s['line_numbers']}): {s['evidence']}" for s in silent_failures)
         feedback = f"STATIC QA REJECTION (Silent Failure):\n{evidence_str}\nDo not swallow errors silently. Implement proper error logging and bubbling."
+        if pr_url:
+            try:
+                await git_ops.comment_pull_request(
+                    workspace_path=workspace_path,
+                    pr_url=pr_url,
+                    body=f"### ⚠️ Critic QA Rejection (Static Checks)\n\n{feedback}",
+                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                )
+            except Exception as e:
+                print(f"critic_node: Failed to post comment on PR: {e}")
         return {
             "critic_passed": False,
             "critic_feedback": feedback,
@@ -51,7 +74,6 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
         }
 
     # 3. Read spec text / ground truth from pre-resolved spec_path
-    current_task = state.get("current_task") or {}
     task_id = current_task.get("task_id")
     if not task_id:
         return {
@@ -83,6 +105,16 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
 
     if not spec_content:
         feedback = f"Critic QA failed: No specification text or acceptance criteria available for task {task_id}."
+        if pr_url:
+            try:
+                await git_ops.comment_pull_request(
+                    workspace_path=workspace_path,
+                    pr_url=pr_url,
+                    body=f"### ⚠️ Critic QA Rejection\n\n{feedback}",
+                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                )
+            except Exception as e:
+                print(f"critic_node: Failed to post comment on PR: {e}")
         return {
             "critic_passed": False,
             "critic_feedback": feedback,
@@ -123,9 +155,26 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
 
     new_attempt = current_attempt if passed else current_attempt + 1
 
+    # Automated PR Feedback Loop (EGM-FEAT-03): Post critique to GitHub PR on rejection
+    if not passed and pr_url:
+        comment_body = (
+            f"### ⚠️ Critic QA Rejection (Attempt {new_attempt})\n\n"
+            f"{feedback}"
+        )
+        try:
+            await git_ops.comment_pull_request(
+                workspace_path=workspace_path,
+                pr_url=pr_url,
+                body=comment_body,
+                target_repo=state.get("target_repo") or current_task.get("target_repo")
+            )
+        except Exception as e:
+            print(f"critic_node: Failed to post comment on PR: {e}")
+
     return {
         "critic_passed": passed,
         "critic_feedback": feedback if not passed else "",
         "diff_summary": clean_diff,
         "attempt_count": new_attempt
     }
+

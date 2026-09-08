@@ -12,6 +12,7 @@ from graphs.coding.nodes.tester_node import tester_node as run_tester_node
 from graphs.coding.nodes.critic_node import critic_node
 from graphs.coding.nodes.hitl_gate import hitl_gate_node, process_hitl_decision_node, classify_hitl_intent
 from graphs.coding.nodes.git_handoff import git_handoff_node
+from graphs.coding.nodes.termination_node import termination_node
 
 class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
     async def test_dag_scheduler_node(self):
@@ -128,9 +129,20 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
 
     async def test_tester_node_pass_and_fail(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            # 1. Passing command
+            # 1. Gated check: missing pr_url fails fast
+            state_no_pr: CodingState = {
+                "workspace_path": temp_dir,
+                "current_task": {"verification_command": "echo 'ok'"},
+                "attempt_count": 0
+            }
+            res_gate = await run_tester_node(state_no_pr)
+            self.assertFalse(res_gate["test_run_passed"])
+            self.assertIn("pr_url is missing from state", res_gate["test_stderr"])
+
+            # 2. Passing command with pr_url
             state_pass: CodingState = {
                 "workspace_path": temp_dir,
+                "pr_url": "https://github.com/org/repo/pull/1",
                 "current_task": {"verification_command": "echo 'all tests pass'"},
                 "attempt_count": 0
             }
@@ -138,9 +150,10 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(res_pass["test_run_passed"])
             self.assertEqual(res_pass["attempt_count"], 0)
 
-            # 2. Failing command
+            # 3. Failing command with pr_url
             state_fail: CodingState = {
                 "workspace_path": temp_dir,
+                "pr_url": "https://github.com/org/repo/pull/1",
                 "current_task": {"verification_command": "sh -c 'exit 1'"},
                 "attempt_count": 0
             }
@@ -194,16 +207,12 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_hitl_intent("abort"), "abort")
         self.assertEqual(classify_hitl_intent("Add inline docstrings to line 30"), "revise")
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
-    async def test_hitl_gate_and_processor(self, mock_commit, mock_pr):
-        mock_commit.return_value = (True, "Committed")
-        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1", 1)
-
+    async def test_hitl_gate_and_processor(self):
         state: CodingState = {
             "workspace_path": "/tmp/ws",
             "branch_name": "feat/proj/auth_run_1",
-            "current_task": {"task_id": "TASK-01"},
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "current_task": {"task_id": "TASK-01", "pr_url": "https://github.com/org/repo/pull/1"},
             "latest_human_feedback": "Approved, looks clean to merge"
         }
         res_pause = await hitl_gate_node(state)
@@ -219,6 +228,7 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         res_revise = await process_hitl_decision_node(state_revise)
         self.assertEqual(res_revise["hitl_decision"], "revise")
         self.assertEqual(res_revise["latest_human_feedback"], "Please fix typo on line 12")
+
 
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
@@ -253,5 +263,84 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TASK-01", res["completed_tasks"])
         self.assertIsNone(res["current_task"])
 
+    @patch('graphs.coding.nodes.termination_node.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.termination_node.save_manifest')
+    async def test_termination_node_failure(self, mock_save, mock_teardown):
+        mock_teardown.return_value = (True, "Teardown complete")
+        mock_save.return_value = True
+
+        state: CodingState = {
+            "workspace_path": "/tmp/ws",
+            "branch_name": "feat/proj/auth_run_1",
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "test_stderr": "AssertionError: Expected 200 got 500",
+            "hitl_decision": "",
+            "current_task": {
+                "task_id": "TASK-FAIL-01",
+                "project_name": "proj",
+                "status": "in_progress"
+            },
+            "queue": [
+                {"task_id": "TASK-FAIL-01", "status": "in_progress"}
+            ],
+            "failed_tasks": []
+        }
+
+        res = await termination_node(state)
+        self.assertIsNone(res["current_task"])
+        self.assertEqual(res["workspace_path"], "")
+        self.assertIn("TASK-FAIL-01", res["failed_tasks"])
+        self.assertEqual(res["queue"][0]["status"], "failed")
+        self.assertIn("AssertionError", res["error_message"])
+
+    @patch('graphs.coding.nodes.termination_node.git_ops.teardown_worktree', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.termination_node.save_manifest')
+    async def test_termination_node_rejected_on_hitl_abort(self, mock_save, mock_teardown):
+        mock_teardown.return_value = (True, "Teardown complete")
+        mock_save.return_value = True
+
+        state: CodingState = {
+            "workspace_path": "/tmp/ws",
+            "branch_name": "feat/proj/auth_run_1",
+            "pr_url": "https://github.com/org/repo/pull/1",
+            "hitl_decision": "abort",
+            "current_task": {
+                "task_id": "TASK-ABORT-01",
+                "project_name": "proj",
+                "status": "in_review"
+            },
+            "queue": [
+                {"task_id": "TASK-ABORT-01", "status": "in_review"}
+            ],
+            "failed_tasks": []
+        }
+
+        res = await termination_node(state)
+        self.assertIsNone(res["current_task"])
+        self.assertIn("TASK-ABORT-01", res["failed_tasks"])
+        self.assertEqual(res["queue"][0]["status"], "rejected")
+        self.assertIn("rejected", res["error_message"])
+
+    @patch('graphs.coding.nodes.tester_node.git_ops.comment_pull_request', new_callable=AsyncMock)
+    async def test_tester_node_posts_pr_comment_on_failure(self, mock_comment):
+        mock_comment.return_value = (True, "Comment posted")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state: CodingState = {
+                "workspace_path": temp_dir,
+                "pr_url": "https://github.com/org/repo/pull/99",
+                "current_task": {
+                    "task_id": "TASK-TEST-FAIL",
+                    "verification_command": "sh -c 'echo \"Test failed!\" >&2; exit 1'"
+                },
+                "attempt_count": 0
+            }
+            res = await run_tester_node(state)
+            self.assertFalse(res["test_run_passed"])
+            self.assertTrue(mock_comment.called)
+            args, kwargs = mock_comment.call_args
+            self.assertEqual(kwargs.get("pr_url") or args[1], "https://github.com/org/repo/pull/99")
+            self.assertIn("Automated Test Failure", kwargs.get("body") or args[2])
+
 if __name__ == "__main__":
     unittest.main()
+

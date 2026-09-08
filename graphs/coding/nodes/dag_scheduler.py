@@ -32,7 +32,7 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
         project_name = project_name or manifest_data.get("project_name", "coding_project")
 
     completed_tasks = [t["task_id"] for t in queue if t.get("status") == "completed"]
-    failed_tasks = [t["task_id"] for t in queue if t.get("status") in ["failed", "blocked"]]
+    failed_tasks = [t["task_id"] for t in queue if t.get("status") in ["failed", "rejected", "blocked"]]
 
     # 2. Check if we have runnable tasks
     runnable = get_runnable_tasks(queue, max_count=1)

@@ -86,6 +86,10 @@ async def agent_call(
         if run_async:
             asyncio.create_task(agent.execute(formatted_prompt, session=target_session))
             return format_tool_response("agent_call", payload=f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {target_session.job_id}.", errors="None")
+        elif is_stateless:
+            res = await agent.execute(formatted_prompt, session=target_session)
+            payload_text = res if isinstance(res, str) else (res.text if hasattr(res, "text") else str(res or ""))
+            return format_tool_response("agent_call", payload=payload_text, errors="None")
         else:
             emoji = agent.config.get("emoji", "🤖")
             agent_name = agent.config.get("name", agent_id)

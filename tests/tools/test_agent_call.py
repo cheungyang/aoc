@@ -356,6 +356,38 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(header_call), 1)
         self.assertEqual(header_call[0].args[1]["content"], "🛠️ Software Planner: ")
 
+    @patch('core.loaders.bots_loader.BotsLoader')
+    @patch('tools.agent_call.AgentsLoader')
+    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    async def test_agent_call_stateless_uses_execute(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {
+            "channels": ["*"],
+            "emoji": "👷",
+            "name": "Graph Worker",
+            "stateless": True
+        }
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.execute = AsyncMock(return_value="<worker_handoff>output</worker_handoff>")
+        mock_agent.execute_stream = MagicMock()
+        mock_get_job_id.return_value = "job_stateless_1"
+        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
+
+        result = await agent_call.ainvoke({
+            "agent_id": "graph-worker",
+            "prompt": "run task",
+            "channel": "coding-pipeline"
+        })
+
+        mock_agent.execute.assert_called_once()
+        mock_agent.execute_stream.assert_not_called()
+        self.assertEqual(
+            result,
+            format_tool_response("agent_call", payload="<worker_handoff>output</worker_handoff>", errors="None")
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

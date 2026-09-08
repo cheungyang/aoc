@@ -3,7 +3,7 @@ import re
 from typing import Dict, Any, List
 from langchain_core.messages import AIMessage
 from graphs.coding.schemas import CodingState
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path
 
 APPROVAL_KEYWORDS = [
@@ -38,12 +38,10 @@ def classify_hitl_intent(feedback: str) -> str:
 
 async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
     """
-    PR Publisher & HITL Review Gate Node (v2):
-    1. Stages & commits verified code with author attribution: Graph Worker <worker@egm.internal>.
-    2. Pushes branch to remote origin.
-    3. Opens GitHub Pull Request via gh CLI tool.
-    4. Updates task status to 'in_review' in build_request.json.
-    5. Pauses execution via LangGraph checkpoint interrupt with the clickable PR link.
+    HITL Review Gate Node (v2):
+    Acts as a reviewer checkpoint assuming the PR is already open (created by worker_node).
+    1. Updates task status to 'in_review' in build_request.json.
+    2. Pauses execution via LangGraph checkpoint interrupt with the clickable PR link.
     """
     workspace_path = state.get("workspace_path", "")
     branch_name = state.get("branch_name", "")
@@ -64,49 +62,10 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
         or await git_ops.discover_target_repo(workspace_path, ".")
     )
 
-    existing_pr = state.get("pr_url")
-    existing_pr_num = state.get("pr_number")
+    existing_pr = state.get("pr_url") or current_task.get("pr_url") or ""
+    existing_pr_num = state.get("pr_number") or current_task.get("pr_number")
 
-    if not existing_pr and workspace_path and branch_name:
-        # 1. Commit and push with author attribution
-        commit_msg = f"feat({project_name}): implement {task_id} ({run_id})"
-        author = "Graph Worker <worker@egm.internal>"
-        commit_ok, commit_log = await git_ops.commit_and_push(
-            workspace_path=workspace_path,
-            branch_name=branch_name,
-            commit_msg=commit_msg,
-            author=author
-        )
-        if not commit_ok:
-            return {
-                "error_message": f"Git commit/push failed in HITL gate: {commit_log}"
-            }
-
-        # 2. Open GitHub Pull Request
-        pr_title = f"feat: {task_id}"
-        pr_body = (
-            f"Automated PR from EGM Coding Graph for spec: `{spec_path}`\n\n"
-            f"### Verification\n"
-            f"- **Tests**: ✅ Passing\n"
-            f"- **Critic**: ✅ Approved\n"
-            f"- **Author**: `Graph Worker <worker@egm.internal>`"
-        )
-        base_branch = state.get("base_branch") or "main"
-        if base_branch.startswith("origin/"):
-            base_branch = base_branch.replace("origin/", "")
-
-        pr_ok, pr_url, pr_num = await git_ops.create_pull_request(
-            workspace_path=workspace_path,
-            branch_name=branch_name,
-            title=pr_title,
-            body=pr_body,
-            base_branch=base_branch,
-            target_repo=target_repo
-        )
-        existing_pr = pr_url if pr_ok else ""
-        existing_pr_num = pr_num
-
-    # 3. Update queue status to in_review
+    # Update queue status to in_review
     queue = state.get("queue") or []
     updated_queue = update_task_in_queue(
         queue=queue,
@@ -116,6 +75,7 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
         branch_name=branch_name,
         pr_url=existing_pr
     )
+
 
     manifest_path = state.get("build_request_path") or resolve_manifest_path()
     save_manifest(manifest_path, {

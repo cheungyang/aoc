@@ -4,13 +4,14 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.prompts.coder_prompt import build_coder_prompt
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 from graphs.coding.utils.token_opt import sanitize_traceback
-from graphs.coding.utils.git_ops import run_cmd_async
+from graphs.coding.utils import git_ops
 
 async def worker_node(state: CodingState) -> Dict[str, Any]:
     """
     Coder Worker Node (Goldfish 1):
     Prompts the stateless graph-worker to implement code and tests strictly
     within the isolated worktree boundaries, injecting any failure/revision feedback.
+    Deterministically commits modified files and opens GitHub PR before handoff.
     """
     if state.get("error_message") and not state.get("workspace_path"):
         return {}
@@ -80,7 +81,7 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
 
     # Inspect git status if modified_files not explicitly listed in XML
     if not modified_files and workspace_path and os.path.exists(workspace_path):
-        code, out, _ = await run_cmd_async(["git", "status", "--porcelain"], cwd=workspace_path, timeout=10.0)
+        code, out, _ = await git_ops.run_cmd_async(["git", "status", "--porcelain"], cwd=workspace_path, timeout=10.0)
         if code == 0 and out.strip():
             for line in out.strip().splitlines():
                 parts = line.strip().split(maxsplit=1)
@@ -96,12 +97,60 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
         else:
             summary = "Worker completed without modifying files."
 
+    # Deterministic PR Shift (EGM-FEAT-02): Stage, commit, push, and create/update PR
+    branch_name = state.get("branch_name", "")
+    project_name = current_task.get("project_name") or state.get("project_name") or "coding_project"
+    run_id = state.get("run_id") or "run_default"
+    pr_url = state.get("pr_url") or current_task.get("pr_url") or ""
+    pr_number = state.get("pr_number") or current_task.get("pr_number")
+
+    if workspace_path and branch_name and os.path.exists(workspace_path):
+        commit_msg = f"feat({project_name}): implement {task_id} ({run_id})"
+        author = "Graph Worker <worker@egm.internal>"
+        commit_ok, commit_log = await git_ops.commit_and_push(
+            workspace_path=workspace_path,
+            branch_name=branch_name,
+            commit_msg=commit_msg,
+            author=author
+        )
+
+        if not pr_url:
+            pr_title = f"feat: {task_id}"
+            pr_body = (
+                f"Automated PR from EGM Coding Graph for spec: `{spec_path}`\n\n"
+                f"### Implementation Summary\n{summary}\n\n"
+                f"### Verification\n- **Author**: `Graph Worker <worker@egm.internal>`"
+            )
+            base_branch = state.get("base_branch") or "main"
+            if base_branch.startswith("origin/"):
+                base_branch = base_branch.replace("origin/", "")
+
+            target_repo = (
+                state.get("target_repo")
+                or current_task.get("target_repo")
+                or await git_ops.discover_target_repo(workspace_path, ".")
+            )
+            pr_ok, pr_url_res, pr_num_res = await git_ops.create_pull_request(
+                workspace_path=workspace_path,
+                branch_name=branch_name,
+                title=pr_title,
+                body=pr_body,
+                base_branch=base_branch,
+                target_repo=target_repo
+            )
+            if pr_ok and pr_url_res:
+                pr_url = pr_url_res
+                pr_number = pr_num_res
+
     return {
         "modified_files": modified_files,
         "implementation_summary": summary,
+        "pr_url": pr_url,
+        "pr_number": pr_number,
         # Clear prior retry flags now that worker has produced fresh code
         "test_stderr": "",
         "critic_feedback": "",
         "latest_human_feedback": "",
         "github_pr_comments": []
     }
+

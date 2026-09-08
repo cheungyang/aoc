@@ -47,8 +47,8 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
@@ -112,7 +112,12 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(final_state["pr_url"], "https://github.com/org/repo/pull/1")
             self.assertEqual(final_state["commit_url"], "https://github.com/org/repo/commit/commit_abc123")
 
-    async def test_coding_subgraph_retry_and_fail(self):
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
+    async def test_coding_subgraph_retry_and_fail(self, mock_commit, mock_pr):
+        mock_commit.return_value = (True, "Committed")
+        mock_pr.return_value = (True, "https://github.com/org/repo/pull/1", 1)
+
         async def fake_provision(repo_path, workspace_path, branch_name, base_ref=None):
             os.makedirs(workspace_path, exist_ok=True)
             self.addCleanup(shutil.rmtree, workspace_path, True)
@@ -132,6 +137,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
             from langgraph.checkpoint.memory import MemorySaver
             graph = create_graph(checkpointer=MemorySaver())
+
 
             inputs = prepare_input(
                 query="Run build",
@@ -153,7 +159,12 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(failed_state["test_run_passed"])
             self.assertGreaterEqual(failed_state["attempt_count"], 2)
-            self.assertFalse(failed_state.get("pr_url"))
+            # EGM-FEAT-02: PR is created early by worker_node
+            self.assertTrue(bool(failed_state.get("pr_url")))
+            # EGM-FEAT-01: Terminal state recorded and current_task cleared
+            self.assertIn("TASK-MATH-01", failed_state.get("failed_tasks", []))
+            self.assertIsNone(failed_state.get("current_task"))
+
 
 if __name__ == "__main__":
     unittest.main()

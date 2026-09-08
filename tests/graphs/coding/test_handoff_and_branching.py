@@ -50,8 +50,8 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
@@ -155,8 +155,8 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_hitl_intent("Change parameter type to string"), "revise")
         self.assertEqual(classify_hitl_intent("We found a bug in edge case handling"), "revise")
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
@@ -226,8 +226,8 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(paused_2["hitl_decision"], "pending_review")
             self.assertEqual(paused_2["implementation_summary"], "Attempt 2 with docstrings.")
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)

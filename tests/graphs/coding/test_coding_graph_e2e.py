@@ -58,8 +58,8 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
         inputs = prepare_input(query="Run coding build request without dir")
         self.assertIn("Initialization error: 'project_path' is required", inputs["error_message"])
 
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
@@ -142,8 +142,8 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
             self.assertIn("sha_commit_101", output_str)
 
     @patch('graphs.coding.nodes.hitl_gate.git_ops.get_pull_request_status', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.create_pull_request', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.hitl_gate.git_ops.commit_and_push', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.git_handoff.git_ops.teardown_worktree', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.critic_node.git_ops.get_git_diff', new_callable=AsyncMock)
@@ -269,8 +269,8 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
 
         with patch("graphs.coding.nodes.provisioner.git_ops.provision_worktree", side_effect=fake_provision), \
              patch("graphs.coding.nodes.critic_node.git_ops.get_git_diff", new_callable=AsyncMock) as mock_diff, \
-             patch("graphs.coding.nodes.hitl_gate.git_ops.create_pull_request", new_callable=AsyncMock) as mock_pr, \
-             patch("graphs.coding.nodes.hitl_gate.git_ops.commit_and_push", new_callable=AsyncMock) as mock_commit, \
+             patch("graphs.coding.nodes.worker_node.git_ops.create_pull_request", new_callable=AsyncMock) as mock_pr, \
+             patch("graphs.coding.nodes.worker_node.git_ops.commit_and_push", new_callable=AsyncMock) as mock_commit, \
              patch("graphs.coding.nodes.git_handoff.git_ops.merge_pull_request", new_callable=AsyncMock) as mock_merge, \
              patch("graphs.coding.nodes.git_handoff.git_ops.teardown_worktree", new_callable=AsyncMock) as mock_teardown, \
              patch("tools.agent_call.agent_call") as mock_agent:
