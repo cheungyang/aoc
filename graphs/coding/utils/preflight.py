@@ -14,49 +14,47 @@ from graphs.coding.utils.repo import resolve_push_identity
 WORKER_AGENT_ID = "graph-worker"
 
 
-def check_required_tools(graph_id: str, required: Dict[str, List[str]]) -> Tuple[bool, str]:
-    """Asserts each agent really receives the tools the graph promises it.
+def check_required_tools(graph_id: str, tool_names: List[str]) -> Tuple[bool, str]:
+    """Asserts the worker really receives the tools this graph grants it.
+
+    The names come from the graph's own `tools` block — the grant *is* the
+    requirement, so there is nothing to keep in sync.
 
     The roster an agent gets is the merge of its own `agent.json` and the active
     graph's grants. When that merge goes wrong the worker does not error — it
     writes files it cannot test, or reports "completed without modifying files".
     Checking it up front turns that into one line naming the missing tool.
     """
-    if not required:
+    if not tool_names:
         return True, ""
 
     from core.agent.session_manager import SessionManager
     from core.loaders.tools_loader import ToolsLoader
 
     loader = ToolsLoader()
-    problems: List[str] = []
 
-    for agent_id, tool_names in required.items():
-        ctx = SessionManager.get_session(
-            agent_id=agent_id, source="graph", stateless=True, graph_id=graph_id
+    ctx = SessionManager.get_session(
+        agent_id=WORKER_AGENT_ID, source="graph", stateless=True, graph_id=graph_id
+    )
+    try:
+        available = {getattr(t, "name", "") for t in loader.get_tools(ctx)}
+    except Exception as e:
+        return False, f"Preflight failed: could not resolve tools for `{WORKER_AGENT_ID}`: {e}"
+
+    missing = [name for name in tool_names if name not in available]
+    if missing:
+        return False, (
+            f"Preflight failed: `{WORKER_AGENT_ID}` is missing "
+            f"{', '.join(f'`{m}`' for m in missing)} under graph `{graph_id}` "
+            f"(has: {', '.join(sorted(available)) or 'nothing'})"
         )
-        try:
-            available = {getattr(t, "name", "") for t in loader.get_tools(ctx)}
-        except Exception as e:
-            problems.append(f"could not resolve tools for `{agent_id}`: {e}")
-            continue
-
-        missing = [name for name in tool_names if name not in available]
-        if missing:
-            problems.append(
-                f"`{agent_id}` is missing {', '.join(f'`{m}`' for m in missing)} "
-                f"under graph `{graph_id}` (has: {', '.join(sorted(available)) or 'nothing'})"
-            )
-
-    if problems:
-        return False, "Preflight failed: " + "; ".join(problems)
     return True, ""
 
 
 async def preflight_tick(
     repo_descriptor: Dict[str, Any],
     graph_id: str = "coding",
-    required_tools: Optional[Dict[str, List[str]]] = None,
+    required_tools: Optional[List[str]] = None,
     cwd: str = "."
 ) -> Tuple[bool, str, Optional[PushIdentity]]:
     """Runs every gate a tick depends on. Returns (ok, message, push_identity).
@@ -64,7 +62,7 @@ async def preflight_tick(
     Order matters: the local checks are free, so they run before anything that
     touches the network.
     """
-    ok, message = check_required_tools(graph_id, required_tools or {})
+    ok, message = check_required_tools(graph_id, list(required_tools or []))
     if not ok:
         return False, message, None
 

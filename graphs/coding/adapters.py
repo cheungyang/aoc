@@ -86,8 +86,11 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "thread_id": thread_id,
         "channel": channel,
         "graph_id": graph_config.get("graph_id", "coding"),
-        "required_tools": graph_config.get("required_tools") or {},
-        "audit_mode": kwargs.get("audit_mode") or graph_config.get("audit") or "advisory",
+        # The graph's `tools` grant is the requirement: preflight asserts the
+        # worker actually receives what this graph hands it. Deriving it here
+        # means there is no second list that can drift from the grant.
+        "required_tools": sorted((graph_config.get("tools") or {}).keys()),
+        "audit_mode": kwargs.get("audit_mode") or manifest_settings.get("audit") or "advisory",
         "queue": kwargs.get("queue") or [],
         "active_runs": {},
         "completed_tasks": [],
@@ -105,7 +108,7 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
 
 
 def _load_graph_config() -> Dict[str, Any]:
-    """Reads graph.json next to this module (topology, audit mode, required tools)."""
+    """Reads graph.json next to this module (graph id and the tool grant)."""
     import json
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph.json")
     try:
@@ -135,6 +138,9 @@ def _load_manifest_settings(build_request_path: str) -> Dict[str, Any]:
         "reviewers": manifest.get("reviewers") or [],
         "approval_signals": manifest.get("approval_signals"),
         "rejection_signals": manifest.get("rejection_signals"),
+        # How strict the audit is depends on the project, not on the graph, so
+        # it sits with the other per-project knobs rather than in graph.json.
+        "audit": manifest.get("audit"),
     }
 
 
@@ -180,11 +186,17 @@ def format_tick_report(state: Dict[str, Any]) -> str:
 
 
 def format_output(state: Dict[str, Any]) -> str:
-    """Extracts final reply text from CodingState."""
+    """Extracts final reply text from CodingState.
+
+    Which renderer to use is a property of the state, not of configuration: the
+    tick nodes set `route` on every return path and the v1 nodes never set it,
+    so the state itself says which graph produced it. Reading a config field
+    here meant the renderer could disagree with the graph that actually ran.
+    """
     if not isinstance(state, dict):
         return str(state)
 
-    if _load_graph_config().get("topology") == "v2":
+    if state.get("route"):
         if state.get("error_message"):
             return f"🛑 Coding tick error: {state['error_message']}"
         return format_tick_report(state)

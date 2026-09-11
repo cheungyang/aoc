@@ -9,11 +9,6 @@ from graphs.coding.adapters import (
 )
 
 
-def _v1_config():
-    """The v1 renderers are still reachable while topology 'v1' is supported."""
-    return patch("graphs.coding.adapters._load_graph_config", return_value={"topology": "v1"})
-
-
 class TestCodingAdapters(unittest.TestCase):
     def test_prepare_input_defaults(self):
         res = prepare_input(
@@ -43,6 +38,28 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertIsInstance(res["repo"], dict)
         self.assertIsInstance(res["reviewers"], list)
 
+    def test_required_tools_are_the_graphs_own_grant(self):
+        """The grant *is* the requirement — there is no second list to keep in sync."""
+        with patch("graphs.coding.adapters._load_graph_config", return_value={
+            "graph_id": "coding",
+            "tools": {"bash": {}, "filesystem": {}},
+        }):
+            res = prepare_input(query="tick")
+
+        self.assertEqual(res["required_tools"], ["bash", "filesystem"])
+
+    def test_a_graph_that_grants_nothing_requires_nothing(self):
+        with patch("graphs.coding.adapters._load_graph_config", return_value={}):
+            res = prepare_input(query="tick")
+
+        self.assertEqual(res["required_tools"], [])
+
+    def test_the_real_graph_config_grants_the_worker_its_tools(self):
+        res = prepare_input(query="tick")
+
+        self.assertIn("bash", res["required_tools"])
+        self.assertIn("filesystem", res["required_tools"])
+
     def test_prepare_input_project_path_resolution(self):
         res = prepare_input(
             query="Run build",
@@ -67,15 +84,27 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(format_tick_report({}), "")
 
     def test_format_output_v2_uses_tick_report(self):
-        out = format_output({"tick_report": ["AOC-01: published PR #9"]})
+        out = format_output({"route": "done", "tick_report": ["AOC-01: published PR #9"]})
         self.assertEqual(out, "AOC-01: published PR #9")
 
     def test_format_output_v2_silent_on_noop(self):
-        self.assertEqual(format_output({"tick_report": []}), "")
+        self.assertEqual(format_output({"route": "done", "tick_report": []}), "")
 
     def test_format_output_v2_error(self):
-        out = format_output({"error_message": "Disk full", "tick_report": []})
+        out = format_output({"route": "done", "error_message": "Disk full", "tick_report": []})
         self.assertIn("Coding tick error: Disk full", out)
+
+    def test_the_renderer_is_chosen_by_the_state_not_by_config(self):
+        """`route` is the discriminator: only the tick nodes ever set it.
+
+        Both topologies go through the same `prepare_input`, so the seeded keys
+        cannot tell them apart — but a v1 run never writes a route.
+        """
+        v1_state = {"tick_report": [], "error_message": "boom"}
+        v2_state = {"route": "done", "tick_report": [], "error_message": "boom"}
+
+        self.assertIn("Coding graph execution error", format_output(v1_state))
+        self.assertIn("Coding tick error", format_output(v2_state))
 
     def test_format_hitl_presentation_v2(self):
         state = {
@@ -101,8 +130,7 @@ class TestCodingAdapters(unittest.TestCase):
             "test_run_passed": True,
             "critic_passed": True
         }
-        with _v1_config():
-            out = format_output(state)
+        out = format_output(state)
         self.assertIn("### 🔍 Coding Graph HITL Review Gate", out)
 
     def test_format_output_completed_with_commit_url(self):
@@ -111,16 +139,14 @@ class TestCodingAdapters(unittest.TestCase):
             "pr_url": "https://github.com/org/repo/pull/99",
             "commit_url": "https://github.com/org/repo/commit/sha123"
         }
-        with _v1_config():
-            out = format_output(state)
+        out = format_output(state)
         self.assertIn("Coding Execution Completed & Merged!", out)
         self.assertIn("https://github.com/org/repo/commit/sha123", out)
         self.assertIn("https://github.com/org/repo/pull/99", out)
 
     def test_format_output_error_message(self):
         state = {"error_message": "Disk full"}
-        with _v1_config():
-            out = format_output(state)
+        out = format_output(state)
         self.assertIn("Coding graph execution error: Disk full", out)
 
 if __name__ == '__main__':

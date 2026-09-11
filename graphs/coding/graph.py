@@ -1,7 +1,3 @@
-import json
-import os
-from typing import Any, Dict, Optional
-
 from langgraph.graph import StateGraph, START, END
 
 from graphs.coding.schemas import CodingState
@@ -14,7 +10,7 @@ from graphs.coding.nodes.audit import audit_node
 from graphs.coding.nodes.publish import publish_node
 from graphs.coding.nodes.sync_review import sync_review_node
 
-# v1 (interrupt-driven) nodes, kept for one release behind graph.json "topology"
+# v1 (interrupt-driven) nodes, kept for one release behind `create_graph(topology="v1")`
 from graphs.coding.nodes.dag_scheduler import dag_scheduler_node
 from graphs.coding.nodes.provisioner import provisioner_node
 from graphs.coding.nodes.worker_node import worker_node
@@ -27,27 +23,20 @@ from graphs.coding.nodes.termination_node import termination_node
 # Import adapters
 from graphs.coding.adapters import prepare_input, format_output
 
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph.json")
 
-
-def _configured_topology(default: str = "v2") -> str:
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f).get("topology", default)
-    except Exception:
-        return default
-
-
-def create_graph(checkpointer=None, topology: Optional[str] = None, **kwargs):
+def create_graph(checkpointer=None, topology: str = "v2", **kwargs):
     """Compiles the coding graph.
 
-    `topology="v2"` (default) builds the tick reconciler: six nodes, no
+    `topology="v2"` (the default) builds the tick reconciler: six nodes, no
     interrupts, no checkpointer. A tick advances what it can and returns; retry
-    is another tick. `topology="v1"` builds the previous interrupt-driven graph,
-    kept for one release as an escape hatch.
+    is another tick.
+
+    `topology="v1"` builds the previous interrupt-driven graph, kept for one
+    release as an escape hatch. It is a code-level argument rather than a
+    config field on purpose — which graph gets built is the graph module's
+    decision, and a JSON field only added a way for the two to disagree.
     """
-    resolved = (topology or _configured_topology()).lower()
-    if resolved == "v1":
+    if str(topology).lower() == "v1":
         return _create_v1_graph(checkpointer)
     return _create_v2_graph()
 

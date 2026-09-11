@@ -153,7 +153,7 @@ class CodingState(TypedDict, total=False):
     route: str                       # "implement"|"verify"|"audit"|"publish"|"sync_review"|"scheduler"|"done"
     stage: TaskStage
     graph_id: str
-    required_tools: Dict[str, List[str]]
+    required_tools: List[str]        # derived from graph.json's `tools` grant
     audit_mode: str                  # "off" | "advisory" | "blocking"
     audit_passed: bool
     audit_feedback: str

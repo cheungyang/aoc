@@ -5,7 +5,7 @@ catching a fake implementation that passes its own tests, and bad at judging
 whether a 200-line file is a problem — so it writes its opinion into the PR for
 the human reviewer instead of blocking the pipeline on it.
 
-`audit_mode` (manifest `audit` or graph config):
+`audit_mode` (manifest `audit`):
   off       skip entirely
   advisory  record the verdict, always continue  (default)
   blocking  a rejection sends the task back to implement

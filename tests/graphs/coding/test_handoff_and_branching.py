@@ -6,14 +6,8 @@ import json
 from unittest.mock import patch, AsyncMock, MagicMock
 from langgraph.checkpoint.memory import MemorySaver
 from graphs.coding.graph import create_graph
-from graphs.coding.adapters import prepare_input, format_output as _format_output
+from graphs.coding.adapters import prepare_input, format_output
 from graphs.coding.nodes.hitl_gate import classify_hitl_intent
-
-
-def format_output(state):
-    """format_output dispatches on graph.json topology; this suite drives v1."""
-    with patch("graphs.coding.adapters._load_graph_config", return_value={"topology": "v1"}):
-        return _format_output(state)
 
 
 
