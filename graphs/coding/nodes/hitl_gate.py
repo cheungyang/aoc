@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from graphs.coding.schemas import CodingState
 from core.util import git_ops
 from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path
+from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
 
 APPROVAL_KEYWORDS = [
     "approved", "approve", "lgtm", "yes", "proceed", "go ahead",
@@ -53,11 +54,12 @@ async def hitl_gate_node(state: CodingState) -> Dict[str, Any]:
     spec_path = state.get("spec_path") or current_task.get("spec_path", "")
     project_path = state.get("project_path", "")
 
-    # Discover target repository for GitHub routing
+    # Discover target repository for GitHub routing. `state["repo"]` is the manifest's
+    # repo descriptor (a dict), so the slug is read out of it rather than used directly.
     target_repo = (
-        state.get("target_repo")
+        get_repo_descriptor(state).get("slug")
+        or state.get("target_repo")
         or current_task.get("target_repo")
-        or state.get("repo")
         or current_task.get("repo")
         or await git_ops.discover_target_repo(workspace_path, ".")
     )
@@ -121,14 +123,21 @@ async def process_hitl_decision_node(state: CodingState) -> Dict[str, Any]:
     pr_number = state.get("pr_number")
     pr_url = state.get("pr_url", "")
     target_pr = pr_number if pr_number is not None else pr_url
-    target_repo = state.get("target_repo") or await git_ops.discover_target_repo(workspace_path, ".")
+    push_identity = get_push_identity(state)
+    target_repo = (
+        get_repo_descriptor(state).get("slug")
+        or state.get("target_repo")
+        or await git_ops.discover_target_repo(workspace_path, ".")
+    )
 
     github_comments: List[str] = []
     gh_decision = ""
 
     target_dir = workspace_path or "."
     if target_pr:
-        pr_status = await git_ops.get_pull_request_status(target_dir, str(target_pr), target_repo=target_repo)
+        pr_status = await git_ops.get_pull_request_status(
+            target_dir, str(target_pr), target_repo=target_repo, push_identity=push_identity
+        )
         gh_decision = (pr_status.get("reviewDecision") or "").upper()
         raw_comments = pr_status.get("comments") or []
         for c in raw_comments:

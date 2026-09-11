@@ -5,6 +5,13 @@ import asyncio
 import subprocess
 from typing import Tuple, Optional, List, Dict, Any
 
+from core.util.push_identity import (
+    PushIdentity,
+    git_commit_args,
+    git_credential_args,
+    subprocess_env,
+)
+
 # Several operations used to report success when the remote was unreachable or `gh` was
 # unauthenticated: a push that never left the machine, a fabricated PR URL, a "simulated"
 # merge and a "simulated" comment. Downstream nodes trusted those results and carried on,
@@ -16,6 +23,23 @@ _SIMULATION_ENV_VAR = "ALLOW_SIMULATED_GIT"
 def simulated_git_allowed() -> bool:
     """True only when ALLOW_SIMULATED_GIT is explicitly enabled."""
     return os.environ.get(_SIMULATION_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _with_identity_env(
+    identity: Optional[PushIdentity],
+    env: Optional[dict] = None
+) -> Optional[dict]:
+    """Merges the machine user's token into one subprocess's environment.
+
+    The token is scoped to the subprocess rather than exported globally, so the
+    human's own `gh auth login` session is never overridden.
+    """
+    overrides = subprocess_env(identity)
+    if not overrides:
+        return env
+    merged = dict(env or {})
+    merged.update(overrides)
+    return merged
 
 
 
@@ -185,9 +209,15 @@ async def commit_and_push(
     workspace_path: str,
     branch_name: str,
     commit_msg: str,
-    author: Optional[str] = "Graph Worker <worker@egm.internal>"
+    author: Optional[str] = "Graph Worker <worker@egm.internal>",
+    push_identity: Optional[PushIdentity] = None
 ) -> Tuple[bool, str]:
-    """Stages all modified files, commits with author attribution, and pushes branch to origin."""
+    """Stages all modified files, commits with author attribution, and pushes branch to origin.
+
+    When `push_identity` is supplied the commit is attributed to that machine user
+    and the push authenticates with its token, so the PR is authored by the bot and
+    the human reviewer can use GitHub's native Approve.
+    """
     if not os.path.exists(workspace_path):
         return False, f"Workspace path does not exist: {workspace_path}"
 
@@ -201,9 +231,11 @@ async def commit_and_push(
         "GIT_ASKPASS": "",
         "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10",
     }
-    if author:
+    # The machine user owns the history it creates, so it outranks the caller's default.
+    effective_author = push_identity.author if push_identity else author
+    if effective_author:
         import re
-        m = re.match(r"^(.*?)\s*<([^>]+)>$", author.strip())
+        m = re.match(r"^(.*?)\s*<([^>]+)>$", effective_author.strip())
         if m:
             name, email = m.group(1).strip(), m.group(2).strip()
             if name:
@@ -213,20 +245,24 @@ async def commit_and_push(
                 commit_env["GIT_AUTHOR_EMAIL"] = email
                 commit_env["GIT_COMMITTER_EMAIL"] = email
 
+    commit_env = _with_identity_env(push_identity, commit_env)
+    identity_cfg = git_commit_args(push_identity)
+    credential_cfg = git_credential_args(push_identity)
+
     # 1. git add .
     code, out, err = await run_cmd_async(["git", "add", "."], cwd=workspace_path, timeout=15.0, env=commit_env)
     if code != 0:
         return False, f"git add failed: {err or out}"
 
     # 2. git commit -m with --no-verify and --no-gpg-sign
-    commit_cmd = ["git", "commit", "--no-verify", "--no-gpg-sign", "-m", commit_msg]
-    if author:
-        commit_cmd.append(f"--author={author}")
+    commit_cmd = ["git"] + identity_cfg + ["commit", "--no-verify", "--no-gpg-sign", "-m", commit_msg]
+    if effective_author:
+        commit_cmd.append(f"--author={effective_author}")
 
     code, out, err = await run_cmd_async(commit_cmd, cwd=workspace_path, timeout=15.0, env=commit_env)
     if code != 0 and "nothing to commit" not in (out + err).lower():
         # Fallback: retry commit using GIT_AUTHOR_* / GIT_COMMITTER_* environment variables
-        retry_cmd = ["git", "commit", "--no-verify", "--no-gpg-sign", "-m", commit_msg]
+        retry_cmd = ["git"] + identity_cfg + ["commit", "--no-verify", "--no-gpg-sign", "-m", commit_msg]
         code2, out2, err2 = await run_cmd_async(retry_cmd, cwd=workspace_path, timeout=15.0, env=commit_env)
         if code2 == 0 or "nothing to commit" in (out2 + err2).lower():
             code, out, err = code2, out2, err2
@@ -234,7 +270,8 @@ async def commit_and_push(
             return False, f"git commit failed: {err or out}"
 
     # 3. git push -u origin <branch>
-    code, out, err = await run_cmd_async(["git", "push", "-u", "origin", branch_name], cwd=workspace_path, timeout=30.0, env=commit_env)
+    push_cmd = ["git"] + credential_cfg + ["push", "-u", "origin", branch_name]
+    code, out, err = await run_cmd_async(push_cmd, cwd=workspace_path, timeout=30.0, env=commit_env)
     if code != 0:
         detail = (err.strip() or out.strip())
         if simulated_git_allowed():
@@ -276,7 +313,8 @@ async def create_pull_request(
     title: str,
     body: str,
     base_branch: str = "main",
-    target_repo: Optional[str] = None
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None
 ) -> Tuple[bool, str, Optional[int]]:
     """Creates a GitHub PR using gh CLI tool and returns (success, pr_url, pr_number)."""
     resolved_repo = target_repo or await discover_target_repo(workspace_path)
@@ -284,7 +322,9 @@ async def create_pull_request(
     if resolved_repo:
         cmd.extend(["--repo", resolved_repo])
 
-    code, out, err = await run_cmd_async(cmd, cwd=workspace_path, timeout=30.0)
+    code, out, err = await run_cmd_async(
+        cmd, cwd=workspace_path, timeout=30.0, env=_with_identity_env(push_identity)
+    )
     combined = out + " " + err
     import re
 
@@ -323,7 +363,8 @@ async def create_pull_request(
 async def get_pull_request_status(
     workspace_path: str,
     pr_number_or_url: str,
-    target_repo: Optional[str] = None
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None
 ) -> Dict[str, Any]:
     """Queries GitHub PR state, reviewDecision, and comments via gh CLI."""
     import json
@@ -332,7 +373,9 @@ async def get_pull_request_status(
     if resolved_repo and not str(pr_number_or_url).startswith("http"):
         cmd.extend(["--repo", resolved_repo])
 
-    code, out, err = await run_cmd_async(cmd, cwd=workspace_path, timeout=15.0)
+    code, out, err = await run_cmd_async(
+        cmd, cwd=workspace_path, timeout=15.0, env=_with_identity_env(push_identity)
+    )
     if code == 0:
         try:
             return json.loads(out)
@@ -353,7 +396,8 @@ async def merge_pull_request(
     pr_url_or_number: str,
     squash: bool = True,
     delete_branch: bool = True,
-    target_repo: Optional[str] = None
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None
 ) -> Tuple[bool, str, str]:
     """
     Merges a GitHub PR using gh pr merge and returns (success, commit_url, log_or_error).
@@ -367,13 +411,17 @@ async def merge_pull_request(
     if resolved_repo and not str(pr_url_or_number).startswith("http"):
         cmd.extend(["--repo", resolved_repo])
 
-    code, out, err = await run_cmd_async(cmd, cwd=workspace_path, timeout=30.0)
+    code, out, err = await run_cmd_async(
+        cmd, cwd=workspace_path, timeout=30.0, env=_with_identity_env(push_identity)
+    )
     if code == 0:
         # Attempt to discover the merged commit SHA or construct commit URL
         import re
         commit_url = ""
         # Check if merge commit SHA is in output or query gh pr view
-        status = await get_pull_request_status(workspace_path, pr_url_or_number, target_repo=resolved_repo)
+        status = await get_pull_request_status(
+            workspace_path, pr_url_or_number, target_repo=resolved_repo, push_identity=push_identity
+        )
         commit_sha = status.get("mergeCommit", {}).get("oid") if isinstance(status.get("mergeCommit"), dict) else None
         
         pr_url = status.get("url") or str(pr_url_or_number)
@@ -416,7 +464,8 @@ async def comment_pull_request(
     workspace_path: str,
     pr_url: str,
     body: str,
-    target_repo: Optional[str] = None
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None
 ) -> Tuple[bool, str]:
     """
     Posts a comment to a GitHub Pull Request using gh pr comment.
@@ -430,7 +479,12 @@ async def comment_pull_request(
     if resolved_repo and not str(pr_url).startswith("http"):
         cmd.extend(["--repo", resolved_repo])
 
-    code, out, err = await run_cmd_async(cmd, cwd=workspace_path if os.path.exists(workspace_path) else ".", timeout=30.0)
+    code, out, err = await run_cmd_async(
+        cmd,
+        cwd=workspace_path if os.path.exists(workspace_path) else ".",
+        timeout=30.0,
+        env=_with_identity_env(push_identity)
+    )
     if code == 0:
         return True, out.strip() or "Comment posted successfully."
 
@@ -441,4 +495,90 @@ async def comment_pull_request(
         return True, "Simulated PR comment in local/offline test environment."
 
     return False, f"gh pr comment failed: {err.strip() or out.strip()}"
+
+
+async def preflight_push_access(
+    target_repo: Optional[str],
+    cwd: str = ".",
+    push_identity: Optional[PushIdentity] = None
+) -> Tuple[bool, str]:
+    """Verifies the active credential can actually push to `target_repo`.
+
+    Run before any LLM work: an expired token or a bot that was never added as a
+    collaborator then costs zero tokens instead of a full implementation run that
+    dies at the push. Returns (ok, message) and never raises.
+    """
+    if not target_repo:
+        target_repo = await discover_target_repo(cwd, ".")
+    if not target_repo:
+        return False, (
+            "Preflight failed: could not determine the target repository "
+            "(no `repo.slug` in the manifest and no github.com remote named origin)."
+        )
+
+    env = _with_identity_env(push_identity)
+
+    # 1. Who are we? A mismatch here is the difference between the bot opening the
+    #    PR (approvable) and the human opening it (not approvable by themselves).
+    code, out, err = await run_cmd_async(
+        ["gh", "api", "user", "--jq", ".login"], cwd=cwd, timeout=15.0, env=env
+    )
+    if code != 0:
+        detail = (err.strip() or out.strip())
+        return False, (
+            f"Preflight failed: `gh` is not authenticated for {target_repo} ({detail}). "
+            f"Check the machine-user token, or run `gh auth login`."
+        )
+    login = out.strip()
+
+    if push_identity and login and login.lower() != push_identity.login.lower():
+        return False, (
+            f"Preflight failed: token authenticates as `{login}` but the manifest "
+            f"declares `repo.push_identity: {push_identity.login}`. "
+            f"PRs would be opened by the wrong account."
+        )
+
+    # 2. Can that account push? `permissions.push` covers both collaborator role
+    #    and fine-grained PAT scope, which is exactly the pair that goes wrong.
+    code, out, err = await run_cmd_async(
+        ["gh", "api", f"repos/{target_repo}", "--jq", ".permissions.push"],
+        cwd=cwd, timeout=15.0, env=env
+    )
+    if code != 0:
+        detail = (err.strip() or out.strip())
+        return False, (
+            f"Preflight failed: `{login}` cannot read {target_repo} ({detail}). "
+            f"Add the account as a collaborator and grant the token Metadata: Read."
+        )
+
+    if out.strip().lower() != "true":
+        return False, (
+            f"Preflight failed: `{login}` has no push permission on {target_repo}. "
+            f"Grant Write access to the account and Contents: Read and write to its token."
+        )
+
+    return True, f"Preflight OK: `{login}` can push to {target_repo}."
+
+
+async def ensure_label(
+    target_repo: str,
+    name: str = "approved",
+    cwd: str = ".",
+    description: str = "Approved by the reviewer: the coding graph may merge this PR.",
+    color: str = "0E8A16",
+    push_identity: Optional[PushIdentity] = None
+) -> Tuple[bool, str]:
+    """Creates a repo label if it does not exist. Idempotent."""
+    cmd = ["gh", "label", "create", name, "--repo", target_repo,
+           "--description", description, "--color", color]
+    code, out, err = await run_cmd_async(
+        cmd, cwd=cwd, timeout=15.0, env=_with_identity_env(push_identity)
+    )
+    combined = (out + " " + err)
+    if code == 0:
+        return True, f"Created label `{name}` on {target_repo}."
+    if "already exists" in combined.lower():
+        return True, f"Label `{name}` already exists on {target_repo}."
+    return False, f"gh label create failed: {err.strip() or out.strip()}"
+
 

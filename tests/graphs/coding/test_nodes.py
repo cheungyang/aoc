@@ -237,7 +237,13 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(classify_hitl_intent("abort"), "abort")
         self.assertEqual(classify_hitl_intent("Add inline docstrings to line 30"), "revise")
 
-    async def test_hitl_gate_and_processor(self):
+    @patch('graphs.coding.nodes.hitl_gate.git_ops.get_pull_request_status', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.hitl_gate.save_manifest')
+    async def test_hitl_gate_and_processor(self, mock_save, mock_pr_status):
+        # Without these patches the node resolves the *default* manifest path and
+        # rewrites the developer's real build_request.json, and reaches out to
+        # github.com for a PR that does not exist.
+        mock_pr_status.return_value = {"state": "OPEN", "reviewDecision": "", "comments": []}
         state: CodingState = {
             "workspace_path": "/tmp/ws",
             "branch_name": "feat/proj/auth_run_1",
@@ -258,6 +264,7 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
         res_revise = await process_hitl_decision_node(state_revise)
         self.assertEqual(res_revise["hitl_decision"], "revise")
         self.assertEqual(res_revise["latest_human_feedback"], "Please fix typo on line 12")
+
 
 
     @patch('graphs.coding.nodes.git_handoff.git_ops.merge_pull_request', new_callable=AsyncMock)

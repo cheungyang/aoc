@@ -237,13 +237,14 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             current_execution_context.reset(token)
 
     @patch('tools.graph_call.GraphsLoader')
-    async def test_graph_call_sets_current_graph_id_context(self, mock_graphs_loader_class):
+    async def test_graph_call_sets_execution_context_graph_id(self, mock_graphs_loader_class):
         from core.agent.execution_context import current_execution_context
-        
-        captured_graph_id = None
+
+        captured_ctx = None
+
         async def mock_ainvoke(*args, **kwargs):
-            nonlocal captured_graph_id
-            captured_graph_id = current_graph_id.get()
+            nonlocal captured_ctx
+            captured_ctx = current_execution_context.get()
             return {"messages": [MagicMock(content="Done")]}
 
         mock_loader = MagicMock()
@@ -256,6 +257,13 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             "graph": mock_graph,
             "metadata": {"name": "coding", "graph_id": "coding"}
         }
+
+        await graph_call.ainvoke({"graph_name": "coding", "query": "build it"})
+
+        # The callee runs under a context bound to the target graph, which is what
+        # decides its tool roster and its graph-granted skills.
+        self.assertIsNotNone(captured_ctx)
+        self.assertEqual(captured_ctx.graph_id, "coding")
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_with_thread_context(self, mock_graphs_loader_class):

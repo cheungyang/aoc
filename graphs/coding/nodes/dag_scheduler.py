@@ -9,6 +9,7 @@ from graphs.coding.utils.dag import (
     get_runnable_tasks,
     update_task_in_queue
 )
+from graphs.coding.utils.repo import get_repo_descriptor
 
 async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
     """
@@ -21,15 +22,21 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
     project_path = state.get("project_path", "")
 
     manifest_path = resolve_manifest_path(state.get("build_request_path"))
-    
+
+    # The manifest is always read: besides the queue it carries the repo descriptor
+    # (target repository and machine user), and it is also what gets written back,
+    # so keys this node does not manage must survive the round trip.
+    manifest_data = load_manifest(manifest_path)
+
     # 1. Obtain current queue
     queue = state.get("queue")
     project_name = state.get("project_name")
-    
+
     if not queue:
-        manifest_data = load_manifest(manifest_path)
         queue = manifest_data.get("queue", [])
         project_name = project_name or manifest_data.get("project_name", "coding_project")
+
+    repo_descriptor = state.get("repo") or get_repo_descriptor(manifest_data)
 
     completed_tasks = [t["task_id"] for t in queue if t.get("status") == "completed"]
     failed_tasks = [t["task_id"] for t in queue if t.get("status") in ["failed", "rejected", "blocked"]]
@@ -48,6 +55,7 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
         return {
             "build_request_path": manifest_path,
             "project_name": project_name,
+            "repo": repo_descriptor,
             "queue": queue,
             "completed_tasks": completed_tasks,
             "failed_tasks": failed_tasks,
@@ -83,13 +91,16 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
     # Update queue
     updated_queue = update_task_in_queue(queue, task_id, status="in_progress", run_id=run_id)
     
-    # Sync manifest to disk
-    save_manifest(manifest_path, {
-        "version": "1.0",
+    # Sync manifest to disk, keeping every key the manifest already had. Rewriting it
+    # from memory used to drop the repo descriptor and reset `version` to "1.0".
+    persisted = dict(manifest_data)
+    persisted.update({
+        "version": manifest_data.get("version", "2.0"),
         "project_name": project_name,
-        "max_concurrency": state.get("max_concurrency", 1),
+        "max_concurrency": state.get("max_concurrency", manifest_data.get("max_concurrency", 1)),
         "queue": updated_queue
     })
+    save_manifest(manifest_path, persisted)
 
     workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
     spec_path = selected_task.get("spec_path", "")
@@ -97,6 +108,7 @@ async def dag_scheduler_node(state: CodingState) -> Dict[str, Any]:
     return {
         "build_request_path": manifest_path,
         "project_name": selected_task.get("project_name") or project_name,
+        "repo": repo_descriptor,
         "queue": updated_queue,
         "completed_tasks": completed_tasks,
         "failed_tasks": failed_tasks,

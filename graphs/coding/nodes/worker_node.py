@@ -4,6 +4,7 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.prompts.coder_prompt import build_coder_prompt
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 from graphs.coding.utils.token_opt import sanitize_traceback
+from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
 from core.util import git_ops
 
 async def worker_node(state: CodingState) -> Dict[str, Any]:
@@ -106,13 +107,17 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
 
     push_error = ""
     if workspace_path and branch_name and os.path.exists(workspace_path):
+        # When the manifest names a machine user, the commit and the PR belong to it,
+        # which is what leaves GitHub's native Approve available to the human reviewer.
+        push_identity = get_push_identity(state)
         commit_msg = f"feat({project_name}): implement {task_id} ({run_id})"
-        author = "Graph Worker <worker@egm.internal>"
+        author = push_identity.author if push_identity else "Graph Worker <worker@egm.internal>"
         commit_ok, commit_log = await git_ops.commit_and_push(
             workspace_path=workspace_path,
             branch_name=branch_name,
             commit_msg=commit_msg,
-            author=author
+            author=author,
+            push_identity=push_identity
         )
 
         if not commit_ok:
@@ -125,14 +130,15 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
             pr_body = (
                 f"Automated PR from EGM Coding Graph for spec: `{spec_path}`\n\n"
                 f"### Implementation Summary\n{summary}\n\n"
-                f"### Verification\n- **Author**: `Graph Worker <worker@egm.internal>`"
+                f"### Verification\n- **Author**: `{author}`"
             )
             base_branch = state.get("base_branch") or "main"
             if base_branch.startswith("origin/"):
                 base_branch = base_branch.replace("origin/", "")
 
             target_repo = (
-                state.get("target_repo")
+                get_repo_descriptor(state).get("slug")
+                or state.get("target_repo")
                 or current_task.get("target_repo")
                 or await git_ops.discover_target_repo(workspace_path, ".")
             )
@@ -142,7 +148,8 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
                 title=pr_title,
                 body=pr_body,
                 base_branch=base_branch,
-                target_repo=target_repo
+                target_repo=target_repo,
+                push_identity=push_identity
             )
             if pr_ok and pr_url_res:
                 pr_url = pr_url_res

@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 from graphs.coding.schemas import CodingState
 from core.util import git_ops
 from graphs.coding.utils.dag import update_task_in_queue, save_manifest, resolve_manifest_path
+from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
 
 async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
     """
@@ -31,7 +32,12 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
     pr_number = state.get("pr_number")
 
     # 1. Automated Squash-Merge
-    target_repo = state.get("target_repo") or await git_ops.discover_target_repo(workspace_path, project_path)
+    push_identity = get_push_identity(state)
+    target_repo = (
+        get_repo_descriptor(state).get("slug")
+        or state.get("target_repo")
+        or await git_ops.discover_target_repo(workspace_path, project_path)
+    )
     target_pr = pr_url or (str(pr_number) if pr_number else "")
     commit_url = ""
     target_dir = workspace_path or project_path or "."
@@ -41,7 +47,8 @@ async def git_handoff_node(state: CodingState) -> Dict[str, Any]:
             pr_url_or_number=target_pr,
             squash=True,
             delete_branch=True,
-            target_repo=target_repo
+            target_repo=target_repo,
+            push_identity=push_identity
         )
         if merge_ok and merge_commit:
             commit_url = merge_commit

@@ -9,6 +9,7 @@ from graphs.coding.utils.token_opt import (
     check_static_silent_failures
 )
 from core.util import git_ops
+from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
 
 async def critic_node(state: CodingState) -> Dict[str, Any]:
     """
@@ -41,7 +42,12 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
                     workspace_path=workspace_path,
                     pr_url=pr_url,
                     body=f"### ⚠️ Critic QA Rejection (Static Checks)\n\n{feedback}",
-                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                    target_repo=(
+                        get_repo_descriptor(state).get("slug")
+                        or state.get("target_repo")
+                        or current_task.get("target_repo")
+                    ),
+                    push_identity=get_push_identity(state)
                 )
             except Exception as e:
                 print(f"critic_node: Failed to post comment on PR: {e}")
@@ -62,7 +68,12 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
                     workspace_path=workspace_path,
                     pr_url=pr_url,
                     body=f"### ⚠️ Critic QA Rejection (Static Checks)\n\n{feedback}",
-                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                    target_repo=(
+                        get_repo_descriptor(state).get("slug")
+                        or state.get("target_repo")
+                        or current_task.get("target_repo")
+                    ),
+                    push_identity=get_push_identity(state)
                 )
             except Exception as e:
                 print(f"critic_node: Failed to post comment on PR: {e}")
@@ -111,7 +122,12 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
                     workspace_path=workspace_path,
                     pr_url=pr_url,
                     body=f"### ⚠️ Critic QA Rejection\n\n{feedback}",
-                    target_repo=state.get("target_repo") or current_task.get("target_repo")
+                    target_repo=(
+                        get_repo_descriptor(state).get("slug")
+                        or state.get("target_repo")
+                        or current_task.get("target_repo")
+                    ),
+                    push_identity=get_push_identity(state)
                 )
             except Exception as e:
                 print(f"critic_node: Failed to post comment on PR: {e}")
@@ -166,7 +182,12 @@ async def critic_node(state: CodingState) -> Dict[str, Any]:
                 workspace_path=workspace_path,
                 pr_url=pr_url,
                 body=comment_body,
-                target_repo=state.get("target_repo") or current_task.get("target_repo")
+                target_repo=(
+                    get_repo_descriptor(state).get("slug")
+                    or state.get("target_repo")
+                    or current_task.get("target_repo")
+                ),
+                push_identity=get_push_identity(state)
             )
         except Exception as e:
             print(f"critic_node: Failed to post comment on PR: {e}")

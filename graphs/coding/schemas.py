@@ -21,11 +21,22 @@ class TaskEnvelope(TypedDict, total=False):
     commit_url: Optional[str]
     error_message: Optional[str]
 
+class RepoDescriptor(TypedDict, total=False):
+    """The repository the graph works against, declared in the manifest."""
+    mode: Literal["self", "existing", "create"]
+    slug: Optional[str]              # owner/repo on GitHub
+    default_branch: str
+    visibility: Literal["private", "public"]
+    push_identity: Optional[str]     # GitHub login of the machine user, if any
+    push_identity_email: Optional[str]
+
+
 class CodingState(TypedDict, total=False):
     # 1. Queue & Manifest Context
     build_request_path: str
     project_name: str
     target_repo: str
+    repo: RepoDescriptor
     max_concurrency: int
     queue: List[TaskEnvelope]
     active_runs: Dict[str, TaskEnvelope]
