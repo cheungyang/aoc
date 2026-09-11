@@ -2,7 +2,47 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal
 from typing_extensions import TypedDict as ExtTypedDict
 from langchain_core.messages import AnyMessage
 
-TaskStatus = Literal["pending", "in_progress", "in_review", "completed", "failed", "rejected", "blocked"]
+# Manifest v3 vocabulary. The v2 names are still accepted on read and mapped by
+# utils/manifest.migrate_manifest, because the current (v1 topology) nodes still
+# write them; they disappear when phase 2 lands.
+TaskStatusV3 = Literal["queued", "active", "awaiting_review", "done", "failed", "halted", "blocked"]
+TaskStatusLegacy = Literal["pending", "in_progress", "in_review", "completed", "rejected"]
+TaskStatus = Literal[
+    "queued", "active", "awaiting_review", "done", "failed", "halted", "blocked",
+    "pending", "in_progress", "in_review", "completed", "rejected"
+]
+
+# Where a task got to. Every stage is the output of exactly one node, so a tick can
+# resume at the recorded stage instead of restarting the task — this is what makes
+# "never redo the LLM part" true after an infrastructure failure.
+TaskStage = Literal[
+    "queued",           # nothing done yet
+    "provisioned",      # worktree exists on the right branch
+    "implemented",      # code written in the worktree
+    "verified",         # verification_command passed
+    "audited",          # advisory review done
+    "published",        # committed, pushed, PR open
+    "awaiting_review",  # waiting on a human decision on GitHub
+    "merged",           # PR merged
+    "done"              # merged, worktree torn down, manifest updated
+]
+
+STAGE_ORDER: List[str] = [
+    "queued", "provisioned", "implemented", "verified", "audited",
+    "published", "awaiting_review", "merged", "done"
+]
+
+
+class TaskError(TypedDict, total=False):
+    """The last failure, classified so retries can target the right stage."""
+    stage: str
+    # "llm" | "verification" | "git" | "github" | "config" | "unknown".
+    # Infrastructure failures must not consume the LLM budget, which is the
+    # single-attempt_count defect (B1) this replaces.
+    kind: str
+    message: str
+    at: float
+
 
 class TaskEnvelope(TypedDict, total=False):
     task_id: str
@@ -20,6 +60,28 @@ class TaskEnvelope(TypedDict, total=False):
     pr_url: Optional[str]
     commit_url: Optional[str]
     error_message: Optional[str]
+
+    # --- v3 durable model -------------------------------------------------
+    stage: TaskStage
+    # Per stage, e.g. {"implement": 2, "publish": 1}: a flaky `gh` no longer
+    # burns the LLM budget, and a genuinely failing test still stops at 3.
+    attempts: Dict[str, int]
+    lease_owner: Optional[str]
+    lease_expires_at: Optional[float]
+    # Digest of the worktree after `implement`. Unchanged digest means the code
+    # is still there, so implement is skipped and verify can reuse its result.
+    impl_digest: Optional[str]
+    verified_digest: Optional[str]
+    head_sha: Optional[str]
+    # Highest review comment id already actioned, so a resume does not re-read
+    # the whole thread (E5).
+    review_cursor: Optional[str]
+    # While now < poll_until the scheduled tick keeps checking GitHub for this
+    # task; otherwise the tick exits without touching the network.
+    poll_until: Optional[float]
+    last_error: Optional[TaskError]
+    updated_at: float
+
 
 class RepoDescriptor(TypedDict, total=False):
     """The repository the graph works against, declared in the manifest."""

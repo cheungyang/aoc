@@ -2,8 +2,14 @@ import os
 import json
 from typing import List, Dict, Any, Optional, Tuple
 from graphs.coding.schemas import TaskEnvelope, TaskStatus
+from graphs.coding.utils import manifest as manifest_store
 
 DEFAULT_MANIFEST_PATH = "pkm/wiki/software/build_request.json"
+
+# A task is finished under either vocabulary: v2 wrote "completed", v3 writes "done".
+COMPLETED_STATUSES = {"completed", "done"}
+# Likewise for "ready to be picked up".
+RUNNABLE_STATUSES = {"pending", "queued"}
 
 def resolve_path(path: Optional[str], default: Optional[str] = None, must_exist: bool = False) -> str:
     """
@@ -31,18 +37,14 @@ def resolve_manifest_path(path: Optional[str] = None, *args, **kwargs) -> str:
 
 
 def load_manifest(manifest_path: str) -> Dict[str, Any]:
-    """Loads build request manifest from disk."""
-    if not os.path.exists(manifest_path):
-        return {
-            "version": "2.0",
-            "project_name": "unknown_project",
-            "max_concurrency": 1,
-            "queue": []
-        }
+    """Loads the build request manifest as written, without migrating it.
+
+    The v1-topology nodes still speak the v2 vocabulary, so this deliberately does
+    not upgrade statuses; `utils.manifest.load_manifest` is the migrating reader
+    used by the v3 tick.
+    """
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data
+        return manifest_store.load_manifest(manifest_path, migrate=False)
     except Exception as e:
         print(f"Error loading manifest from {manifest_path}: {e}")
         return {
@@ -54,39 +56,40 @@ def load_manifest(manifest_path: str) -> Dict[str, Any]:
 
 
 def save_manifest(manifest_path: str, data: Dict[str, Any]) -> bool:
-    """Saves build request manifest back to disk."""
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(manifest_path)), exist_ok=True)
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"Error saving manifest to {manifest_path}: {e}")
-        return False
+    """Saves the manifest atomically (temp file + os.replace)."""
+    return manifest_store.save_manifest(manifest_path, data)
 
 
 def get_completed_task_ids(queue: List[TaskEnvelope]) -> set[str]:
-    """Returns set of task_ids with status 'completed'."""
+    """Returns set of task_ids that finished successfully (v2 'completed' or v3 'done')."""
     return {
         t["task_id"]
         for t in queue
-        if t.get("status") == "completed"
+        if t.get("status") in COMPLETED_STATUSES
     }
 
 
 def get_runnable_tasks(queue: List[TaskEnvelope], max_count: int = 1) -> List[TaskEnvelope]:
     """
-    Evaluates topological dependencies and returns up to max_count tasks
-    that have status 'pending' and all dependencies 'completed'.
+    Evaluates topological dependencies and returns up to max_count tasks that are
+    ready to run: status 'queued'/'pending', all dependencies finished, and not
+    currently leased by another run.
+
+    Dependencies gate on completion rather than on the prerequisite's branch
+    existing, so a dependent cannot start against a branch the merge deleted (F3).
     """
     completed_ids = get_completed_task_ids(queue)
     runnable = []
 
     for task in queue:
         status = task.get("status", "pending")
-        if status != "pending":
+        if status not in RUNNABLE_STATUSES:
             continue
-        
+
+        # Another live tick already owns this one.
+        if manifest_store.lease_is_active(task):
+            continue
+
         deps = task.get("dependencies") or []
         # Check if all dependencies are completed
         if all(dep in completed_ids for dep in deps):
