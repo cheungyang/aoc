@@ -1,11 +1,16 @@
 {
   "graph_id": "coding",
   "name": "coding",
-  "description": "Orchestrates stateless Goldfish workers to execute tasks in isolated Git worktrees, run dynamic tests, audit anti-patterns, and submit PRs with HITL approval.",
+  "description": "Runs one reconciliation tick over the coding manifest: provisions a worktree, has a stateless worker implement the task, verifies it, opens a PR, and syncs the review decision from GitHub.",
   "emoji": "💻",
+  "topology": "v2",
+  "audit": "advisory",
   "max_concurrency": 1,
   "timeout_seconds": 300,
   "max_retries": 3,
+  "required_tools": {
+    "graph-worker": ["bash", "filesystem"]
+  },
   "tools": {
     "bash": {
       "workspaces/runs": ["execute"],

@@ -184,6 +184,27 @@ def persist_task(manifest_path: str, task_id: str, **fields: Any) -> Optional[Ta
     return updated
 
 
+def yield_task(manifest_path: str, task_id: str, **fields: Any) -> Optional[TaskEnvelope]:
+    """Hands an unfinished task back to the queue, at the stage it reached.
+
+    Any tick that stops without finishing a task must call this. Two failure
+    modes it exists to prevent:
+
+    - keeping the lease would hide the task until the lease expired, so a
+      30-second network blip would stall it for the full 30 minutes;
+    - clearing the lease but leaving the status `active` would hide it from the
+      runnable set forever, because only `pending`/`queued` are runnable.
+
+    The stage is deliberately untouched: the next tick resumes, it does not
+    restart.
+    """
+    fields.setdefault("status", "queued")
+    fields["lease_owner"] = None
+    fields["lease_expires_at"] = None
+    return persist_task(manifest_path, task_id, **fields)
+
+
+
 def bump_attempt(manifest_path: str, task_id: str, stage: str) -> int:
     """Increments the attempt counter for one stage and returns the new value."""
     count = 0

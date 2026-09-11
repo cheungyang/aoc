@@ -56,10 +56,10 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     thread_id = kwargs.get("thread_id") or session_id
     channel = kwargs.get("channel") or "coding-pipeline"
 
-    # Validation: project_path must be explicitly provided or resolvable from project_name
+    # In v2 the manifest carries each task's spec_path, so a tick does not need a
+    # project directory. Requiring one used to make the scheduled tick — which has
+    # no project in mind — fail before it started.
     error_msg = ""
-    if not project_path:
-        error_msg = "Initialization error: 'project_path' is required and must be explicitly provided at graph initialization."
 
     # Check for human feedback / resume message
     human_feedback = kwargs.get("latest_human_feedback") or kwargs.get("feedback") or ""
@@ -68,20 +68,32 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         if any(w in clean_q.lower() for w in ["approve", "lgtm", "yes", "revise", "abort", "cancel", "proceed"]):
             human_feedback = clean_q
 
+    graph_config = _load_graph_config()
+    manifest_settings = _load_manifest_settings(build_request_path)
+
     return {
         "build_request_path": build_request_path,
-        "project_name": project_name,
+        "project_name": project_name or manifest_settings.get("project_name", ""),
         "target_repo": target_repo,
+        "repo": manifest_settings.get("repo") or {},
+        "reviewers": kwargs.get("reviewers") or manifest_settings.get("reviewers") or [],
+        "approval_signals": manifest_settings.get("approval_signals"),
+        "rejection_signals": manifest_settings.get("rejection_signals"),
         "project_path": project_path,
         "max_concurrency": max_concurrency,
         "max_retries": max_retries,
         "session_id": session_id,
         "thread_id": thread_id,
         "channel": channel,
+        "graph_id": graph_config.get("graph_id", "coding"),
+        "required_tools": graph_config.get("required_tools") or {},
+        "audit_mode": kwargs.get("audit_mode") or graph_config.get("audit") or "advisory",
         "queue": kwargs.get("queue") or [],
         "active_runs": {},
         "completed_tasks": [],
         "failed_tasks": [],
+        "tick_report": [],
+        "tick_handled": [],
         "attempt_count": 0,
         "test_run_passed": False,
         "critic_passed": False,
@@ -90,6 +102,41 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "messages": [HumanMessage(content=formatted_query)],
         "error_message": error_msg
     }
+
+
+def _load_graph_config() -> Dict[str, Any]:
+    """Reads graph.json next to this module (topology, audit mode, required tools)."""
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _load_manifest_settings(build_request_path: str) -> Dict[str, Any]:
+    """Reads the review-related settings the manifest owns.
+
+    Read-only and failure-tolerant: a missing manifest simply means no reviewers
+    configured, and the scheduler reports the empty queue.
+    """
+    from graphs.coding.utils.manifest import load_manifest
+    from graphs.coding.utils.repo import get_repo_descriptor
+
+    try:
+        manifest = load_manifest(build_request_path)
+    except Exception:
+        return {}
+
+    return {
+        "project_name": manifest.get("project_name", ""),
+        "repo": get_repo_descriptor(manifest),
+        "reviewers": manifest.get("reviewers") or [],
+        "approval_signals": manifest.get("approval_signals"),
+        "rejection_signals": manifest.get("rejection_signals"),
+    }
+
 
 
 def format_hitl_presentation(state: Dict[str, Any]) -> str:
@@ -119,10 +166,28 @@ def format_hitl_presentation(state: Dict[str, Any]) -> str:
     )
 
 
+def format_tick_report(state: Dict[str, Any]) -> str:
+    """Renders the v2 tick report.
+
+    Returns an empty string when the tick did nothing. The scheduled runner
+    treats empty stdout as "post nothing", so a quiet pipeline stays quiet
+    instead of spamming a channel every five minutes.
+    """
+    lines = [str(line).rstrip() for line in (state.get("tick_report") or []) if str(line).strip()]
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 def format_output(state: Dict[str, Any]) -> str:
     """Extracts final reply text from CodingState."""
     if not isinstance(state, dict):
         return str(state)
+
+    if _load_graph_config().get("topology") == "v2":
+        if state.get("error_message"):
+            return f"🛑 Coding tick error: {state['error_message']}"
+        return format_tick_report(state)
 
     if state.get("error_message"):
         return f"🛑 Coding graph execution error: {state['error_message']}"

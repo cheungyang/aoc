@@ -6,8 +6,16 @@ import json
 from unittest.mock import patch, AsyncMock, MagicMock
 from langgraph.checkpoint.memory import MemorySaver
 from graphs.coding.graph import create_graph
-from graphs.coding.adapters import prepare_input, format_output
+from graphs.coding.adapters import prepare_input, format_output as _format_output
 from graphs.coding.nodes.hitl_gate import classify_hitl_intent
+
+
+def format_output(state):
+    """format_output dispatches on graph.json topology; this suite drives v1."""
+    with patch("graphs.coding.adapters._load_graph_config", return_value={"topology": "v1"}):
+        return _format_output(state)
+
+
 
 class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
     """
@@ -98,7 +106,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
 
             mock_agent.ainvoke = AsyncMock(side_effect=[raw_worker_xml, raw_critic_xml])
 
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
             inputs = prepare_input(
                 query="Run build",
                 build_request_path=self.manifest_path,
@@ -192,7 +200,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
                 "<critic_verdict><verdict>APPROVE</verdict><anti_patterns_detected></anti_patterns_detected><feedback_for_worker></feedback_for_worker></critic_verdict>"
             ])
 
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
             inputs = prepare_input(
                 query="Run build",
                 build_request_path=self.manifest_path,
@@ -273,7 +281,7 @@ class TestCodingHandoffAndBranching(unittest.IsolatedAsyncioTestCase):
                 "<critic_verdict><verdict>APPROVE</verdict><anti_patterns_detected></anti_patterns_detected><feedback_for_worker>Looks good.</feedback_for_worker></critic_verdict>"
             ])
 
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
             inputs = prepare_input(
                 query="Run build",
                 build_request_path=self.manifest_path,

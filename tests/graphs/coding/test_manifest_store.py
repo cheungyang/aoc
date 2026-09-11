@@ -22,6 +22,7 @@ from graphs.coding.utils.manifest import (
     release_lease,
     save_manifest,
     stage_at_or_past,
+    yield_task,
 )
 
 
@@ -207,6 +208,39 @@ class TestLeases(ManifestTestCase):
         self.assertFalse(lease_is_active({}))
         self.assertFalse(lease_is_active({"lease_owner": "x", "lease_expires_at": time.time() - 1}))
         self.assertTrue(lease_is_active({"lease_owner": "x", "lease_expires_at": time.time() + 60}))
+
+
+class TestYieldTask(ManifestTestCase):
+    """A tick that stops mid-task must leave it visible to the next tick."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(_manifest([{"task_id": "A", "status": "queued"}]))
+
+    def test_yield_clears_the_lease_and_requeues_at_the_same_stage(self):
+        acquire_lease(self.path, "A", owner="tick-1")
+        persist_task(self.path, "A", status="active", stage="audited")
+
+        yield_task(self.path, "A")
+
+        task = self.read()["queue"][0]
+        self.assertIsNone(task["lease_owner"])
+        self.assertIsNone(task["lease_expires_at"])
+        # Runnable again — `active` without a lease would be invisible forever.
+        self.assertEqual(task["status"], "queued")
+        # And resumable — publish re-enters at publish, not at the LLM.
+        self.assertEqual(task["stage"], "audited")
+
+    def test_yield_carries_the_fields_it_is_given(self):
+        yield_task(self.path, "A", last_error={"kind": "github"}, head_sha="abc")
+
+        task = self.read()["queue"][0]
+        self.assertEqual(task["last_error"]["kind"], "github")
+        self.assertEqual(task["head_sha"], "abc")
+
+    def test_an_explicit_status_still_wins(self):
+        yield_task(self.path, "A", status="blocked")
+        self.assertEqual(self.read()["queue"][0]["status"], "blocked")
 
 
 class TestStageHelpers(unittest.TestCase):

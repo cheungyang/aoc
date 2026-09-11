@@ -145,3 +145,27 @@ class CodingState(TypedDict, total=False):
     commit_url: str
     error_message: str
     messages: List[AnyMessage]
+
+    # 7. Tick reconciler (v2)
+    # These are channels, not decoration: LangGraph carries only what the schema
+    # declares, so an undeclared `route` would be dropped between nodes and every
+    # conditional edge would fall through to END.
+    route: str                       # "implement"|"verify"|"audit"|"publish"|"sync_review"|"scheduler"|"done"
+    stage: TaskStage
+    graph_id: str
+    required_tools: Dict[str, List[str]]
+    audit_mode: str                  # "off" | "advisory" | "blocking"
+    audit_passed: bool
+    audit_feedback: str
+    reviewers: List[str]
+    approval_signals: Optional[List[str]]
+    rejection_signals: Optional[List[str]]
+    lease_owner: str
+    impl_digest: Optional[str]
+    head_sha: str
+    poll_until: Optional[float]
+    # Accumulated across the tick: the lines the runner posts, and the tasks it
+    # has already touched, so one tick cannot work the same task twice.
+    tick_report: List[str]
+    tick_handled: List[str]
+

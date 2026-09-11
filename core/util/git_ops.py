@@ -366,9 +366,12 @@ async def get_pull_request_status(
     target_repo: Optional[str] = None,
     push_identity: Optional[PushIdentity] = None
 ) -> Dict[str, Any]:
-    """Queries GitHub PR state, reviewDecision, and comments via gh CLI."""
+    """Queries GitHub PR state, review decision, labels, reviews and comments via gh CLI."""
     import json
-    cmd = ["gh", "pr", "view", str(pr_number_or_url), "--json", "state,reviewDecision,comments,url,number,mergeCommit"]
+    cmd = [
+        "gh", "pr", "view", str(pr_number_or_url),
+        "--json", "state,reviewDecision,comments,url,number,mergeCommit,labels,latestReviews"
+    ]
     resolved_repo = target_repo or await discover_target_repo(workspace_path)
     if resolved_repo and not str(pr_number_or_url).startswith("http"):
         cmd.extend(["--repo", resolved_repo])

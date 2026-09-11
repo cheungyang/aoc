@@ -1,9 +1,20 @@
+import json
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from langgraph.graph import StateGraph, START, END
+
 from graphs.coding.schemas import CodingState
 
-# Import all nodes
+# v2 (tick reconciler) nodes
+from graphs.coding.nodes.scheduler import scheduler_node
+from graphs.coding.nodes.implement import implement_node
+from graphs.coding.nodes.verify import verify_node
+from graphs.coding.nodes.audit import audit_node
+from graphs.coding.nodes.publish import publish_node
+from graphs.coding.nodes.sync_review import sync_review_node
+
+# v1 (interrupt-driven) nodes, kept for one release behind graph.json "topology"
 from graphs.coding.nodes.dag_scheduler import dag_scheduler_node
 from graphs.coding.nodes.provisioner import provisioner_node
 from graphs.coding.nodes.worker_node import worker_node
@@ -16,14 +27,95 @@ from graphs.coding.nodes.termination_node import termination_node
 # Import adapters
 from graphs.coding.adapters import prepare_input, format_output
 
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph.json")
 
-def create_graph(checkpointer=None, **kwargs):
+
+def _configured_topology(default: str = "v2") -> str:
+    try:
+        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("topology", default)
+    except Exception:
+        return default
+
+
+def create_graph(checkpointer=None, topology: Optional[str] = None, **kwargs):
+    """Compiles the coding graph.
+
+    `topology="v2"` (default) builds the tick reconciler: six nodes, no
+    interrupts, no checkpointer. A tick advances what it can and returns; retry
+    is another tick. `topology="v1"` builds the previous interrupt-driven graph,
+    kept for one release as an escape hatch.
     """
-    Compiles the autonomous EGM Stateless Coding Graph:
-    DAG Scheduler -> Node 1 (Provisioner) -> Node 2 (Coder Worker) ->
-    Node 3 (Deterministic Tester) -> Node 4 (Critic QA) ->
-    Node 5 (HITL Gate) -> Node 6 (Git Handoff & Teardown) / Node 7 (Termination Node).
+    resolved = (topology or _configured_topology()).lower()
+    if resolved == "v1":
+        return _create_v1_graph(checkpointer)
+    return _create_v2_graph()
+
+
+def _create_v2_graph():
+    """The tick reconciler of §4.2.
+
+    No checkpointer on purpose: durable state lives in the manifest, git and
+    GitHub. A checkpoint keyed by the caller's session was the reason a halted
+    run could not be resumed from anywhere else (C4/C5).
     """
+    workflow = StateGraph(CodingState)
+
+    workflow.add_node("scheduler", scheduler_node)
+    workflow.add_node("implement", implement_node)
+    workflow.add_node("verify", verify_node)
+    workflow.add_node("audit", audit_node)
+    workflow.add_node("publish", publish_node)
+    workflow.add_node("sync_review", sync_review_node)
+
+    workflow.add_edge(START, "scheduler")
+
+    # `route` is a channel, so it survives until a node overwrites it. Every
+    # router below therefore reads it as an explicit instruction and ends the
+    # tick when it is not one of its own options — a node that forgets to set a
+    # route stops the tick instead of re-running whatever the last one asked for.
+    def _router(allowed):
+        def route(state: CodingState):
+            value = state.get("route")
+            return value if value in allowed else END
+        return route
+
+    workflow.add_conditional_edges(
+        "scheduler", _router({"implement", "publish", "sync_review"}),
+        ["implement", "publish", "sync_review", END]
+    )
+
+    # A worker that produced nothing ends the tick rather than testing an
+    # unchanged tree; the next tick retries within the implement budget.
+    workflow.add_conditional_edges(
+        "implement", _router({"verify"}), ["verify", END]
+    )
+
+    workflow.add_conditional_edges(
+        "verify", _router({"audit", "implement"}), ["implement", "audit", END]
+    )
+
+    workflow.add_conditional_edges(
+        "audit", _router({"publish", "implement"}), ["implement", "publish", END]
+    )
+
+    # publish never loops in-process: a transient failure is retried by the next
+    # tick, so one tick cannot spin on a GitHub outage.
+    workflow.add_conditional_edges(
+        "publish", _router({"scheduler"}), ["scheduler", END]
+    )
+
+    workflow.add_conditional_edges(
+        "sync_review", _router({"implement", "publish", "scheduler"}),
+        ["implement", "publish", "scheduler", END]
+    )
+
+
+    return workflow.compile(checkpointer=None)
+
+
+def _create_v1_graph(checkpointer=None):
+    """The previous topology: LLM and git fused, approval via a LangGraph interrupt."""
     if checkpointer is None:
         try:
             from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer

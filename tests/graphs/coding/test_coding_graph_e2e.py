@@ -7,8 +7,16 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from langgraph.checkpoint.memory import MemorySaver
 from core.loaders.graphs_loader import GraphsLoader
 from graphs.coding.graph import create_graph
-from graphs.coding.adapters import prepare_input, format_output, format_hitl_presentation
+from graphs.coding.adapters import prepare_input, format_output as _format_output, format_hitl_presentation
 from tools.spec_validator import spec_validator
+
+
+def format_output(state):
+    """format_output dispatches on graph.json topology; this suite drives v1."""
+    with patch("graphs.coding.adapters._load_graph_config", return_value={"topology": "v1"}):
+        return _format_output(state)
+
+
 
 class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -53,10 +61,16 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(info["prepare_input"])
         self.assertIsNotNone(info["format_output"])
 
-    def test_missing_project_path_fails_initialization_fast(self):
-        """Verifies that missing project_path does not infer or guess and fails immediately."""
+    def test_missing_project_path_is_accepted(self):
+        """A scheduled tick has no project in mind; each task carries its own spec_path.
+
+        The old fail-fast made the cron tick impossible to start, so the
+        requirement was dropped rather than worked around.
+        """
         inputs = prepare_input(query="Run coding build request without dir")
-        self.assertIn("Initialization error: 'project_path' is required", inputs["error_message"])
+        self.assertEqual(inputs["error_message"], "")
+        self.assertEqual(inputs["project_path"], "")
+
 
     @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
     @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
@@ -95,7 +109,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
 
             from langgraph.checkpoint.memory import MemorySaver
             cp = MemorySaver()
-            graph = create_graph(checkpointer=cp)
+            graph = create_graph(checkpointer=cp, topology="v1")
 
             inputs = prepare_input(
                 query="Run coding build request",
@@ -181,7 +195,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
             ])
 
             cp = MemorySaver()
-            graph = create_graph(checkpointer=cp)
+            graph = create_graph(checkpointer=cp, topology="v1")
 
             inputs = prepare_input(
                 query="Run coding build request",
@@ -284,7 +298,7 @@ class TestCodingGraphE2E(unittest.IsolatedAsyncioTestCase):
                 "<critic_verdict><verdict>APPROVE</verdict><anti_patterns_detected></anti_patterns_detected><feedback_for_worker>Good.</feedback_for_worker></critic_verdict>"
             ])
 
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
             inputs = prepare_input(
                 query="Run multi build",
                 build_request_path=manifest_file,

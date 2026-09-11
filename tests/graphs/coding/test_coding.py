@@ -80,7 +80,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
             ])
 
             from langgraph.checkpoint.memory import MemorySaver
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
 
             inputs = prepare_input(
                 query="Run build",
@@ -136,7 +136,7 @@ class TestCodingSubgraph(unittest.IsolatedAsyncioTestCase):
             ])
 
             from langgraph.checkpoint.memory import MemorySaver
-            graph = create_graph(checkpointer=MemorySaver())
+            graph = create_graph(checkpointer=MemorySaver(), topology="v1")
 
 
             inputs = prepare_input(
