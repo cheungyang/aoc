@@ -1,6 +1,7 @@
 browser-use
 croniter
 discord.py
+langchain-core
 langchain-google-genai
 langchain-mcp-adapters
 langchain-ollama
@@ -10,6 +11,7 @@ langsmith>=0.1.0
 playwright
 pytest
 python-dotenv
+pyyaml
 lancedb
 tantivy
 pyarrow
