@@ -16,12 +16,10 @@
   "schedules": [
     {
       "channel": "meal-planning",
-      "cron": "0 6 * * *",
+      "cron": "0 21 * * *",
       "prompt": [
-        "<caller>main</caller>",
-        "Wake up and ask the user what they cooked for dinner last night. Once they",
-        "reply, deduce the ingredients, update the inventory, and immediately propose",
-        "3 new dinner suggestions for tonight."
+        "Ask meal-planner to ask the user what they cooked for dinner tonight.",
+        "Upon reply, deduce ingredients, update inventory, and propose 3 new dinner ideas."
       ]
     }
   ]

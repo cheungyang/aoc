@@ -13,9 +13,8 @@
             "channel": "weekend-planning",
             "cron": "0 8 * * 0",
             "prompt": [
-                "<caller>main</caller>",
-                "Help me plan for next 3 weekends based on my location and my existing calendar events.",
-                "Also tell me excellent events opportunities that I could prepare for now."
+                "Ask excursion-planner to help plan for the next 3 weekends based on location",
+                "and existing calendar events, and tell excellent event opportunities to prep for."
             ]
         }
     ],

@@ -1,0 +1,16 @@
+{
+  "skill_id": "triage_tasks",
+  "name": "Triage Tasks",
+  "description": "Systematically processes and tags untriaged tasks in the vault, interacting with the user for priority.",
+  "emoji": "📋",
+  "tools": {
+    "task_query": {},
+    "project_query": {},
+    "filesystem": {
+      "pkm": [
+        "read",
+        "replace_block"
+      ]
+    }
+  }
+}

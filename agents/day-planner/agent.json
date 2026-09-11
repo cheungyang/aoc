@@ -15,16 +15,14 @@
             "channel": "day-planning",
             "cron": "0 6 * * *",
             "prompt": [
-                "<caller>main</caller>",
-                "Execute your morning routine to generate the daily plan."
+                "Ask day-planner to execute morning routine to generate the daily plan."
             ]
         },
         {
             "channel": "day-planning",
             "cron": "0 15 * * 5",
             "prompt": [
-                "<caller>main</caller>",
-                "Trigger the `weekly_review` skill for a weekly review."
+                "Ask day-planner to trigger the `weekly_review` skill for a weekly review."
             ]
         }
     ],

@@ -9,7 +9,9 @@
       "pkm/vault/journals": [
         "read",
         "write",
-        "append"
+        "append",
+        "overwrite",
+        "replace_block"
       ]
     }
   }

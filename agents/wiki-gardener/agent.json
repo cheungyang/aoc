@@ -12,32 +12,34 @@
   "skills": [
     "wiki_lint",
     "wiki_ingest",
-    "wiki_query"
+    "wiki_query",
+    "triage_tasks"
   ],
   "schedules": [
     {
       "channel": "pkm-wiki",
       "cron": "0 7 * * *",
       "prompt": [
-        "<caller>main</caller>",
-        "Execute Workflow A: Daily Ingestion & Gap Analysis.",
-        "Scan `pkm/inbox/` for new articles.",
-        "If empty, terminate your execution immediately and stay silent in the channel.",
-        "If populated, ingest using `wiki_ingest` and `wiki_query` to weave",
-        "connections. Pause and prompt the user in the channel for Phase 2",
-        "(The Sparring Prompt)."
+        "Ask wiki-gardener to execute Workflow A: scan inbox for new articles.",
+        "If empty, terminate silently. If populated, ingest using wiki_ingest & wiki_query",
+        "to weave connections, then pause and prompt user for Phase 2 (Sparring)."
       ]
     },
     {
       "channel": "pkm-wiki",
       "cron": "0 10 * * 5",
       "prompt": [
-        "<caller>main</caller>",
-        "Execute Workflow B: Weekly Linting & Taxonomy Cleanup.",
-        "Review `pkm/wiki/pending_lint.json` for structural anomalies.",
-        "If empty, terminate your execution immediately and stay silent in the channel.",
-        "If populated, execute the `wiki_lint` skill and propose a cleanup agenda",
-        "to the user."
+        "Ask wiki-gardener to execute Workflow B: review pending_lint for anomalies.",
+        "If empty, terminate silently. If populated, execute wiki_lint skill and propose",
+        "a cleanup agenda to the user."
+      ]
+    },
+    {
+      "channel": "pkm-wiki",
+      "cron": "0 17 * * *",
+      "prompt": [
+        "Ask wiki-gardener to initiate the triage_tasks loop to process untriaged tasks in the vault.",
+        "If untriaged tasks are zero, terminate silently."
       ]
     }
   ]

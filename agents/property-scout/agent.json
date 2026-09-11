@@ -27,15 +27,9 @@
       "channel": "real-estate",
       "cron": "0 8 * * 5",
       "prompt": [
-        "<caller>main</caller>",
-        "Load your real_estate_scout skill. Read the user's constraints and target",
-        "zip codes from `pkm/wallet/real-estate/criteria.md`.",
-        "Use the zillow_query tool to pull active listings matching these baseline",
-        "parameters. Run the strict Cap Rate and Price/SqFt math against every",
-        "result. Discard any properties that fail the tests or trigger red flags.",
-        "If no properties pass the tests, terminate your execution immediately and stay",
-        "silent in the channel. Output the top 3 passing properties to the channel,",
-        "and save their full reports to `pkm/wallet/real-estate/properties/`."
+        "Ask property-scout to load real_estate_scout skill, read criteria, pull listings",
+        "via zillow_query, and run Cap Rate/Price math. Discard failing properties.",
+        "Output top 3 passes and save full reports, or terminate silently if none pass."
       ]
     }
   ]
