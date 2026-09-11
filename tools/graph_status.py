@@ -6,6 +6,32 @@ from core.agent.job_manager import JobManager
 from core.agent.execution_context import try_context
 from core.util import format_tool_response
 
+def _coding_queue_status() -> str:
+    """The coding graph's status, read from the manifest rather than a checkpoint.
+
+    The tick reconciler runs without a checkpointer on purpose: its durable
+    state is the manifest, git and GitHub. So the checkpoint probe above finds
+    nothing for it, and without this the tool would report "no active
+    subgraphs" while a queue full of work was in flight.
+    """
+    try:
+        from graphs.coding.utils.control import status_report
+        from graphs.coding.utils.dag import resolve_manifest_path
+
+        manifest_path = resolve_manifest_path(None)
+        if not os.path.exists(manifest_path):
+            return ""
+
+        report = status_report(manifest_path)
+        if report == "The queue is empty.":
+            return ""
+        return report
+    except Exception:
+        # A missing or malformed manifest must not take down the status of
+        # every other graph.
+        return ""
+
+
 @tool
 def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None) -> str:
     """
@@ -102,7 +128,11 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
         except Exception:
             pass
 
-        if not active_graphs and not running_jobs:
+        coding_queue = ""
+        if not graph_name or graph_name == "coding":
+            coding_queue = _coding_queue_status()
+
+        if not active_graphs and not running_jobs and not coding_queue:
             ch_str = f"#{channel_name}" if channel_name else "default channel"
             payload = (
                 f"No active or paused subgraphs found in the current conversation context ({ch_str}).\n"
@@ -110,7 +140,9 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
             )
             return format_tool_response("graph_status", payload=payload, errors="None")
 
-        lines = ["=== Active Subgraph Status ==="]
+        lines = []
+        if active_graphs:
+            lines.append("=== Active Subgraph Status ===")
         for ag in active_graphs:
             gname = ag["graph_name"]
             nodes = ", ".join(ag["next_nodes"])
@@ -121,6 +153,18 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
             lines.append(
                 f"  - Routing Guidance: The user's next message in this conversation will be relayed "
                 f"directly to the '{gname}' graph via graph_call to resume execution."
+            )
+
+        if coding_queue:
+            if lines:
+                lines.append("")
+            lines.append("=== Coding Queue (manifest) ===")
+            lines.append(coding_queue)
+            # There is no interrupt to resume: the queue advances on its own
+            # schedule, and an operator steers it through the manifest.
+            lines.append(
+                "  - Routing Guidance: the coding graph advances on a 5-minute tick. "
+                "It is not waiting on a reply here; use scripts/coding_admin.py to steer it."
             )
 
         if running_jobs:

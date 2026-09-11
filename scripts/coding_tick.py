@@ -18,41 +18,11 @@ import asyncio
 import os
 import sys
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(script_dir)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _bootstrap import ensure_project_interpreter, enter_project_root  # noqa: E402
 
-# The graph resolves the manifest and the worktree root relative to the working
-# directory, so a cron invocation from anywhere must still act on the repo.
-os.chdir(project_root)
-
-
-def _reexec_in_venv_if_needed():
-    """Re-runs this script under the repo's own interpreter when it has to.
-
-    `#!/usr/bin/env python3` resolves against whatever PATH the cron happens to
-    have, which on macOS is usually the system python — no langgraph, no
-    langchain. Failing that way would post an import traceback every five
-    minutes, so hop into `.venv` once instead.
-    """
-    if os.environ.get("AOC_TICK_REEXEC"):
-        return  # Already re-executed once; do not loop.
-
-    import importlib.util
-    if importlib.util.find_spec("langgraph") is not None:
-        return
-
-    venv_python = os.path.join(project_root, ".venv", "bin", "python")
-    if not os.path.exists(venv_python) or os.path.realpath(venv_python) == os.path.realpath(sys.executable):
-        return
-
-    os.environ["AOC_TICK_REEXEC"] = "1"
-    os.execv(venv_python, [venv_python, os.path.abspath(__file__)] + sys.argv[1:])
-
-
-_reexec_in_venv_if_needed()
-
+ensure_project_interpreter()
+project_root = enter_project_root()
 
 
 def parse_args():

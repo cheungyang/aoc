@@ -128,6 +128,25 @@ async def resolve_base_ref(repo_path: str) -> str:
     return "HEAD"
 
 
+_repo_locks: Dict[str, asyncio.Lock] = {}
+
+
+def repo_lock(repo_path: str) -> asyncio.Lock:
+    """One lock per repository, for the operations that contend on `.git/index.lock`.
+
+    `git worktree add/remove/prune` and `git fetch` all take that lock, so two
+    concurrent ticks against the same repo fail with a lock error rather than
+    queueing. Concurrency is 1 today, but the lease model is built for N and
+    this is the piece that makes N safe.
+    """
+    key = os.path.realpath(repo_path)
+    lock = _repo_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _repo_locks[key] = lock
+    return lock
+
+
 async def provision_worktree(
     repo_path: str,
     workspace_path: str,
@@ -140,49 +159,46 @@ async def provision_worktree(
     """
     abs_repo = os.path.abspath(repo_path)
     abs_ws = os.path.abspath(workspace_path)
-    
-    # 1. Fetch remote if remote origin exists (optional, non-blocking failure)
-    await run_cmd_async(["git", "fetch", "origin"], cwd=abs_repo, timeout=10.0)
 
-    # 2. Resolve base reference
-    target_base = base_ref or await resolve_base_ref(abs_repo)
+    async with repo_lock(abs_repo):
+        # 1. Fetch remote if remote origin exists (optional, non-blocking failure)
+        await run_cmd_async(["git", "fetch", "origin"], cwd=abs_repo, timeout=10.0)
 
-    # 3. Clean up stale worktree / directory if it already exists
-    if os.path.exists(abs_ws):
-        await run_cmd_async(["git", "worktree", "remove", "--force", abs_ws], cwd=abs_repo, timeout=15.0)
-        await run_cmd_async(["git", "worktree", "prune"], cwd=abs_repo, timeout=10.0)
+        # 2. Resolve base reference
+        target_base = base_ref or await resolve_base_ref(abs_repo)
+
+        # 3. Clean up stale worktree / directory if it already exists
         if os.path.exists(abs_ws):
-            try:
-                shutil.rmtree(abs_ws, ignore_errors=True)
-            except Exception:
-                pass
+            await run_cmd_async(["git", "worktree", "remove", "--force", abs_ws], cwd=abs_repo, timeout=15.0)
+            await run_cmd_async(["git", "worktree", "prune"], cwd=abs_repo, timeout=10.0)
+            if os.path.exists(abs_ws):
+                try:
+                    shutil.rmtree(abs_ws, ignore_errors=True)
+                except Exception:
+                    pass
 
-    # 4. Also delete any existing local branch with same name to ensure clean start
-    await run_cmd_async(["git", "branch", "-D", branch_name], cwd=abs_repo, timeout=5.0)
+        # 4. Also delete any existing local branch with same name to ensure clean start
+        await run_cmd_async(["git", "branch", "-D", branch_name], cwd=abs_repo, timeout=5.0)
 
-    # 5. Ensure parent directory exists
-    os.makedirs(os.path.dirname(abs_ws), exist_ok=True)
+        # 5. Ensure parent directory exists
+        os.makedirs(os.path.dirname(abs_ws), exist_ok=True)
 
-    # 6. Run git worktree add
-    code, out, err = await run_cmd_async(
-        ["git", "worktree", "add", "-b", branch_name, abs_ws, target_base],
-        cwd=abs_repo,
-        timeout=30.0
-    )
-
-    if code != 0:
-        # Fallback: try from HEAD if target_base failed
-        if target_base != "HEAD":
-            code, out, err = await run_cmd_async(
-                ["git", "worktree", "add", "-b", branch_name, abs_ws, "HEAD"],
-                cwd=abs_repo,
-                timeout=30.0
-            )
+        # 6. Run git worktree add.
+        #    No fallback to HEAD on failure: branching from whatever happens to be
+        #    checked out silently builds the work on the wrong commit (F3). A
+        #    missing base ref is a real problem and is reported as one.
+        code, out, err = await run_cmd_async(
+            ["git", "worktree", "add", "-b", branch_name, abs_ws, target_base],
+            cwd=abs_repo,
+            timeout=30.0
+        )
 
     if code == 0 and os.path.exists(abs_ws):
         return True, f"Successfully provisioned worktree at {abs_ws} (branch: {branch_name})"
-    else:
-        return False, f"Failed to provision worktree at {abs_ws}: {err or out}"
+    return False, (
+        f"Failed to provision worktree at {abs_ws} from base ref `{target_base}`: {err or out}"
+    )
+
 
 
 async def get_git_diff(workspace_path: str) -> str:
@@ -548,8 +564,11 @@ async def teardown_worktree(repo_path: str, workspace_path: str) -> Tuple[bool, 
     abs_repo = os.path.abspath(repo_path)
     abs_ws = os.path.abspath(workspace_path)
 
-    await run_cmd_async(["git", "worktree", "remove", "--force", abs_ws], cwd=abs_repo, timeout=20.0)
-    await run_cmd_async(["git", "worktree", "prune"], cwd=abs_repo, timeout=10.0)
+    # Same lock as provisioning: both drive `git worktree`, which contends on
+    # `.git/index.lock`.
+    async with repo_lock(abs_repo):
+        await run_cmd_async(["git", "worktree", "remove", "--force", abs_ws], cwd=abs_repo, timeout=20.0)
+        await run_cmd_async(["git", "worktree", "prune"], cwd=abs_repo, timeout=10.0)
 
     if os.path.exists(abs_ws):
         try:
@@ -558,6 +577,78 @@ async def teardown_worktree(repo_path: str, workspace_path: str) -> Tuple[bool, 
             pass
 
     return True, f"Teardown complete for {abs_ws}"
+
+
+async def close_pull_request(
+    workspace_path: str,
+    pr_url_or_number: str,
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None,
+    comment: str = "Closed by a coding graph reset."
+) -> Tuple[bool, str]:
+    """Closes a PR without merging. Returns (success, log_or_error).
+
+    A PR that is already closed or merged counts as success: reset has to be
+    repeatable, and "it is already in the state you asked for" is not a failure.
+    """
+    cmd = ["gh", "pr", "close", str(pr_url_or_number), "--comment", comment]
+    if target_repo and not str(pr_url_or_number).startswith("http"):
+        cmd.extend(["--repo", target_repo])
+
+    code, out, err = await run_cmd_async(
+        cmd, cwd=workspace_path, timeout=20.0, env=_with_identity_env(push_identity)
+    )
+    if code == 0:
+        return True, out.strip() or "closed"
+
+    combined = f"{out} {err}".lower()
+    if "already closed" in combined or "was merged" in combined or "not found" in combined:
+        return True, "already closed"
+    return False, (err or out).strip()
+
+
+async def delete_branch(
+    repo_path: str,
+    branch_name: str,
+    target_repo: Optional[str] = None,
+    push_identity: Optional[PushIdentity] = None,
+    delete_remote: bool = True
+) -> Tuple[bool, str]:
+    """Deletes a branch locally and on the remote. Returns (success, log_or_error).
+
+    A branch that does not exist on either side is success, for the same reason
+    as above. The local delete is forced: the branch is being discarded, so
+    "not fully merged" is the expected state, not a warning to respect.
+    """
+    abs_repo = os.path.abspath(repo_path)
+    problems: List[str] = []
+
+    code, out, err = await run_cmd_async(
+        ["git", "branch", "-D", branch_name], cwd=abs_repo, timeout=15.0
+    )
+    if code != 0 and "not found" not in f"{out}{err}".lower():
+        problems.append(f"local: {(err or out).strip()}")
+
+    if delete_remote:
+        # Same credential helper as the push that created it, or the delete
+        # authenticates as the wrong account and is refused.
+        push_cmd = ["git"] + git_credential_args(push_identity) + [
+            "push", "origin", "--delete", branch_name
+        ]
+        code, out, err = await run_cmd_async(
+            push_cmd,
+            cwd=abs_repo,
+            timeout=30.0,
+            env=_with_identity_env(push_identity)
+        )
+        combined = f"{out} {err}".lower()
+        if code != 0 and "remote ref does not exist" not in combined and "not found" not in combined:
+            problems.append(f"remote: {(err or out).strip()}")
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, f"deleted {branch_name}"
+
 
 
 async def comment_pull_request(

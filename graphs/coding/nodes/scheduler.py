@@ -21,7 +21,7 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import get_runnable_tasks, resolve_manifest_path
 from graphs.coding.utils.preflight import preflight_tick
-from graphs.coding.utils.repo import get_repo_descriptor
+from graphs.coding.utils.repo import ensure_repo_available, get_repo_descriptor
 from core.util import git_ops
 
 # Routes the scheduler can emit. `done` ends the tick.
@@ -98,9 +98,8 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     if state.get("repo"):
         repo_descriptor = {**repo_descriptor, **dict(state["repo"])}
 
-    task, route = select_task(queue, handled, now)
-    if task is None:
-        return {
+    def _idle(**extra: Any) -> Dict[str, Any]:
+        base = {
             "build_request_path": manifest_path,
             "project_name": project_name,
             "repo": repo_descriptor,
@@ -110,13 +109,31 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
             "lease_owner": owner,
             "tick_handled": handled,
             "tick_report": report,
-            "completed_tasks": [t["task_id"] for t in queue if t.get("status") == "done"],
-            "failed_tasks": [t["task_id"] for t in queue
-                             if t.get("status") in ("failed", "halted", "blocked")],
             "error_message": ""
         }
+        base.update(extra)
+        return base
 
-    # 2. Preflight once we know there is work. Running it earlier would make an
+    # 2. Respect the concurrency bound before picking anything up. Counting live
+    #    leases is what makes the bound real across processes — a per-process
+    #    counter would let two ticks each believe they were the only one.
+    max_concurrency = int(
+        state.get("max_concurrency") or manifest.get("max_concurrency") or 1
+    )
+    in_flight = [t for t in queue
+                 if manifest_store.lease_is_active(t, now) and t.get("lease_owner") != owner]
+    if len(in_flight) >= max_concurrency:
+        return _idle(completed_tasks=[], failed_tasks=[])
+
+    task, route = select_task(queue, handled, now)
+    if task is None:
+        return _idle(
+            completed_tasks=[t["task_id"] for t in queue if t.get("status") == "done"],
+            failed_tasks=[t["task_id"] for t in queue
+                          if t.get("status") in ("failed", "halted", "blocked")]
+        )
+
+    # 3. Preflight once we know there is work. Running it earlier would make an
     #    empty queue cost a network round trip on every scheduled tick.
     ok, message, push_identity = await preflight_tick(
         repo_descriptor=repo_descriptor,
@@ -125,45 +142,32 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     )
     if not ok:
         report.append(f"⚠️ {message}")
-        return {
-            "build_request_path": manifest_path,
-            "project_name": project_name,
-            "repo": repo_descriptor,
-            "queue": queue,
-            "current_task": None,
-            "route": ROUTE_DONE,
-            "tick_report": report,
-            "error_message": message
-        }
+        return _idle(error_message=message)
+
+    # 4. Resolve the repository the mode asks for: this process's own checkout,
+    #    a managed clone, or a repository created on the spot.
+    repo_root, repo_error = await ensure_repo_available(repo_descriptor, push_identity)
+    if repo_error:
+        report.append(f"⚠️ {repo_error}")
+        return _idle(error_message=repo_error)
 
     task_id = task["task_id"]
 
-    # 3. Claim it. Losing the race simply means another tick owns it; this tick
+    # 5. Claim it. Losing the race simply means another tick owns it; this tick
     #    moves on rather than doing the work twice.
     if not manifest_store.acquire_lease(manifest_path, task_id, owner=owner, now=now):
         report.append(f"⏭️ `{task_id}` is claimed by another run; skipping.")
         handled.append(task_id)
-        return {
-            "build_request_path": manifest_path,
-            "project_name": project_name,
-            "repo": repo_descriptor,
-            "queue": queue,
-            "current_task": None,
-            "route": ROUTE_DONE,
-            "lease_owner": owner,
-            "tick_handled": handled,
-            "tick_report": report,
-            "error_message": ""
-        }
+        return _idle()
 
     handled.append(task_id)
 
     run_id = task.get("run_id") or f"run_{uuid.uuid4().hex[:4].upper()}"
     branch_name = task.get("branch_name") or _branch_name(task, run_id, project_name)
-    workspace_path = os.path.abspath(os.path.join("workspaces", "runs", run_id))
+    workspace_path = os.path.join(repo_root, "workspaces", "runs", run_id)
     stage = task.get("stage") or "queued"
 
-    # 4. Provision. Idempotent, and only for work that still needs a worktree —
+    # 6. Provision. Idempotent, and only for work that still needs a worktree —
     #    re-creating it under a task waiting on review would throw the code away.
     if route != ROUTE_SYNC and (
         not manifest_store.stage_at_or_past(task, "provisioned")
@@ -171,7 +175,7 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     ):
         base_ref = _resolve_base_ref(task, queue, state, repo_descriptor)
         success, message = await git_ops.provision_worktree(
-            repo_path=".",
+            repo_path=repo_root,
             workspace_path=workspace_path,
             branch_name=branch_name,
             base_ref=base_ref
@@ -184,16 +188,7 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
                 lease_owner=None, lease_expires_at=None
             )
             report.append(f"⚠️ `{task_id}` halted: {message}")
-            return {
-                "build_request_path": manifest_path,
-                "project_name": project_name,
-                "repo": repo_descriptor,
-                "current_task": None,
-                "route": ROUTE_DONE,
-                "tick_handled": handled,
-                "tick_report": report,
-                "error_message": message
-            }
+            return _idle(error_message=message)
         # Provisioning wipes the worktree, so any digest recorded against the old
         # one is stale; keeping it would skip an implement that must happen.
         stage = "provisioned" if stage == "queued" else stage
@@ -213,6 +208,7 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         "build_request_path": manifest_path,
         "project_name": project_name,
         "repo": repo_descriptor,
+        "repo_root": repo_root,
         "queue": queue,
         "current_task": updated_task,
         "route": route,
@@ -227,6 +223,7 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         "tick_report": report,
         "error_message": ""
     }
+
 
 
 def _resolve_base_ref(

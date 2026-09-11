@@ -55,9 +55,11 @@ class ManifestFixture(unittest.IsolatedAsyncioTestCase):
         self.workspace = os.path.join(self.tmp.name, "ws")
         os.makedirs(self.workspace, exist_ok=True)
 
-    def write_manifest(self, tasks):
+    def write_manifest(self, tasks, **manifest_fields):
+        manifest = {"version": "3.0", "project_name": "demo", "queue": tasks}
+        manifest.update(manifest_fields)
         with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump({"version": "3.0", "project_name": "demo", "queue": tasks}, f)
+            json.dump(manifest, f)
 
     def stored(self, task_id="T1"):
         return manifest_store.find_task(
@@ -829,6 +831,99 @@ class TestSchedulerNode(ManifestFixture):
 
         self.assertEqual(result["route"], ROUTE_PUBLISH)
         self.mock_provision.assert_not_called()
+
+    async def test_the_tick_idles_when_the_concurrency_bound_is_already_met(self):
+        """Counting live leases is what makes the bound hold across processes.
+
+        A per-process counter would let two ticks each believe they were the
+        only one running.
+        """
+        self.write_manifest([
+            _task(task_id="busy", status="active",
+                  lease_owner="other_tick", lease_expires_at=time.time() + 600),
+            _task(task_id="waiting"),
+        ], max_concurrency=1)
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["route"], ROUTE_DONE)
+        self.assertIsNone(result["current_task"])
+        self.mock_provision.assert_not_called()
+
+    async def test_an_expired_lease_does_not_count_against_the_bound(self):
+        # Otherwise one crashed tick would block the queue until its lease aged
+        # out, which is exactly the stall the reclaim exists to prevent.
+        self.write_manifest([
+            _task(task_id="dead", status="active",
+                  lease_owner="crashed", lease_expires_at=time.time() - 1),
+            _task(task_id="waiting"),
+        ], max_concurrency=1)
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertIsNotNone(result["current_task"])
+
+    async def test_a_higher_bound_lets_a_second_task_start(self):
+        self.write_manifest([
+            _task(task_id="busy", status="active",
+                  lease_owner="other_tick", lease_expires_at=time.time() + 600),
+            _task(task_id="waiting"),
+        ], max_concurrency=2)
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["current_task"]["task_id"], "waiting")
+
+    async def test_this_tick_s_own_lease_does_not_block_it(self):
+        # A tick that claimed a task earlier in the same run must still be able
+        # to continue; only *other* owners count as in-flight.
+        self.write_manifest([
+            _task(task_id="mine", status="active",
+                  lease_owner="tick_me", lease_expires_at=time.time() + 600),
+            _task(task_id="waiting"),
+        ], max_concurrency=1)
+
+        result = await scheduler_node(self.tick_state(lease_owner="tick_me"))
+
+        self.assertEqual(result["current_task"]["task_id"], "waiting")
+
+    async def test_the_worktree_is_provisioned_from_the_resolved_repo_root(self):
+        self.write_manifest([_task()])
+
+        with patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                   AsyncMock(return_value=("/tmp/managed_clone", ""))):
+            result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["repo_root"], "/tmp/managed_clone")
+        self.assertEqual(
+            self.mock_provision.await_args.kwargs["repo_path"], "/tmp/managed_clone"
+        )
+        self.assertTrue(
+            result["workspace_path"].startswith("/tmp/managed_clone"),
+            f"worktree escaped the repo root: {result['workspace_path']}"
+        )
+
+    async def test_a_repo_that_cannot_be_reached_idles_instead_of_provisioning(self):
+        self.write_manifest([_task()])
+
+        with patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                   AsyncMock(return_value=("", "Could not clone `owner/repo`: denied"))):
+            result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["route"], ROUTE_DONE)
+        self.mock_provision.assert_not_called()
+        self.assertIn("denied", " ".join(result["tick_report"]))
+
+    async def test_a_repo_failure_does_not_leave_the_task_claimed(self):
+        # The lease is taken after the repo is resolved, so a failure here must
+        # leave the task exactly as it found it.
+        self.write_manifest([_task()])
+
+        with patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                   AsyncMock(return_value=("", "no network"))):
+            await scheduler_node(self.tick_state())
+
+        self.assertIsNone(self.stored().get("lease_owner"))
 
 
 class TestNodeSeparation(unittest.TestCase):

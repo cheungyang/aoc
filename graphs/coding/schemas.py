@@ -164,6 +164,10 @@ class CodingState(TypedDict, total=False):
     impl_digest: Optional[str]
     head_sha: str
     poll_until: Optional[float]
+    # Absolute path of the checkout the tick works against. Under repo mode
+    # `self` this is the project root; under `existing`/`create` it is the
+    # cached clone, so worktrees are provisioned from the right repository.
+    repo_root: str
     # Accumulated across the tick: the lines the runner posts, and the tasks it
     # has already touched, so one tick cannot work the same task twice.
     tick_report: List[str]
