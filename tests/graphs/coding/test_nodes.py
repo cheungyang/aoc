@@ -127,6 +127,36 @@ class TestCodingNodes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res["modified_files"], ["src/auth.py"])
             self.assertIn("Implemented auth", res["implementation_summary"])
 
+    @patch('graphs.coding.nodes.worker_node.git_ops.create_pull_request', new_callable=AsyncMock)
+    @patch('graphs.coding.nodes.worker_node.git_ops.commit_and_push', new_callable=AsyncMock)
+    async def test_worker_node_does_not_open_pr_when_push_fails(self, mock_push, mock_pr):
+        """The worker used to ignore commit_and_push's result and open a PR regardless."""
+        mock_push.return_value = (False, "git push failed for branch feat/x: permission denied.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("tools.agent_call.agent_call") as mock_agent:
+                mock_agent.ainvoke = AsyncMock(return_value="""
+                <worker_handoff>
+                  <status>READY_FOR_TEST</status>
+                  <modified_files><file>src/auth.py</file></modified_files>
+                  <implementation_summary>Implemented auth handler.</implementation_summary>
+                </worker_handoff>
+                """)
+                state: CodingState = {
+                    "workspace_path": temp_dir,
+                    "branch_name": "feat/x",
+                    "current_task": {
+                        "task_id": "TASK-01",
+                        "allowed_files": ["src/auth.py"],
+                        "acceptance_criteria": "Given token When verify Then True",
+                        "verification_command": "pytest"
+                    }
+                }
+                res = await worker_node(state)
+
+            mock_pr.assert_not_called()
+            self.assertEqual(res["pr_url"], "")
+            self.assertIn("git push failed", res["error_message"])
+
     async def test_tester_node_pass_and_fail(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             # 1. Gated check: missing pr_url fails fast

@@ -4,7 +4,7 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.prompts.coder_prompt import build_coder_prompt
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 from graphs.coding.utils.token_opt import sanitize_traceback
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 
 async def worker_node(state: CodingState) -> Dict[str, Any]:
     """
@@ -104,6 +104,7 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
     pr_url = state.get("pr_url") or current_task.get("pr_url") or ""
     pr_number = state.get("pr_number") or current_task.get("pr_number")
 
+    push_error = ""
     if workspace_path and branch_name and os.path.exists(workspace_path):
         commit_msg = f"feat({project_name}): implement {task_id} ({run_id})"
         author = "Graph Worker <worker@egm.internal>"
@@ -114,7 +115,12 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
             author=author
         )
 
-        if not pr_url:
+        if not commit_ok:
+            # Opening a PR for a branch that never reached the remote produces either a
+            # failure or, worse, a URL for a PR nobody can review. Stop here instead.
+            push_error = commit_log
+            print(f"worker_node: {commit_log}")
+        elif not pr_url:
             pr_title = f"feat: {task_id}"
             pr_body = (
                 f"Automated PR from EGM Coding Graph for spec: `{spec_path}`\n\n"
@@ -141,12 +147,18 @@ async def worker_node(state: CodingState) -> Dict[str, Any]:
             if pr_ok and pr_url_res:
                 pr_url = pr_url_res
                 pr_number = pr_num_res
+            else:
+                push_error = pr_url_res or "gh pr create failed"
+                print(f"worker_node: {push_error}")
 
     return {
         "modified_files": modified_files,
         "implementation_summary": summary,
         "pr_url": pr_url,
         "pr_number": pr_number,
+        # Records why there is no PR, so the failure downstream is the real one rather than
+        # a bare "pr_url is missing from state".
+        "error_message": push_error,
         # Clear prior retry flags now that worker has produced fresh code
         "test_stderr": "",
         "critic_feedback": "",

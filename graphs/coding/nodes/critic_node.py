@@ -8,7 +8,7 @@ from graphs.coding.utils.token_opt import (
     check_static_bloated_files,
     check_static_silent_failures
 )
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 
 async def critic_node(state: CodingState) -> Dict[str, Any]:
     """

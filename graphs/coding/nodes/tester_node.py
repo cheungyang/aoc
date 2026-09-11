@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Dict, Any
 from graphs.coding.schemas import CodingState
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 from graphs.coding.utils.token_opt import sanitize_traceback
 
 async def tester_node(state: CodingState) -> Dict[str, Any]:

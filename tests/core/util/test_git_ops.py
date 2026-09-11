@@ -15,7 +15,8 @@ from core.util.git_ops import (
     create_pull_request,
     get_pull_request_status,
     merge_pull_request,
-    teardown_worktree
+    teardown_worktree,
+    comment_pull_request
 )
 
 class TestGitOps(unittest.IsolatedAsyncioTestCase):
@@ -46,11 +47,34 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
             self.assertIn("BatchMode=yes", commit_kwargs["env"]["GIT_SSH_COMMAND"])
 
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_commit_and_push_remote_fallback(self, mock_run):
+    async def test_commit_and_push_reports_push_failure(self, mock_run):
+        """A push that never reached the remote must not be reported as success: the old
+        code returned True whenever the error merely contained the substring "remote",
+        which matches nearly every real push error."""
         mock_run.side_effect = [
             (0, "", ""),  # git add .
             (0, "[main 12345] feat: done", ""),  # git commit
             (1, "", "fatal: Could not read from remote repository: Permission denied (publickey)")  # git push
+        ]
+        with tempfile.TemporaryDirectory() as tmp_ws:
+            ok, msg = await commit_and_push(
+                workspace_path=tmp_ws,
+                branch_name="feat/test/auth_run_1",
+                commit_msg="feat(test): implement auth"
+            )
+            self.assertFalse(ok)
+            self.assertIn("git push failed", msg)
+            # The message still tells the operator where the work survived.
+            self.assertIn("feat/test/auth_run_1", msg)
+            self.assertIn(tmp_ws, msg)
+
+    @patch.dict(os.environ, {"ALLOW_SIMULATED_GIT": "1"})
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_commit_and_push_local_fallback_is_opt_in(self, mock_run):
+        mock_run.side_effect = [
+            (0, "", ""),
+            (0, "[main 12345] feat: done", ""),
+            (1, "", "fatal: Could not read from remote repository: Permission denied (publickey)")
         ]
         with tempfile.TemporaryDirectory() as tmp_ws:
             ok, msg = await commit_and_push(
@@ -127,7 +151,24 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pr_num, 99)
 
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_create_pull_request_fallback(self, mock_run):
+    async def test_create_pull_request_unauthenticated_fails(self, mock_run):
+        """A URL that reaches Discord has to be a PR that exists. The old fallback invented
+        `.../pull/<branch_name>`, which is not even a valid PR URL shape."""
+        mock_run.return_value = (1, "", "fatal: not logged in to gh")
+        ok, pr_url, pr_num = await create_pull_request(
+            workspace_path="/tmp/ws",
+            branch_name="feat/auth_1",
+            title="feat: auth",
+            body="Automated PR",
+            target_repo="cheungyang/aoc"
+        )
+        self.assertFalse(ok)
+        self.assertIn("gh pr create failed", pr_url)
+        self.assertIsNone(pr_num)
+
+    @patch.dict(os.environ, {"ALLOW_SIMULATED_GIT": "1"})
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_create_pull_request_fabricated_url_is_opt_in(self, mock_run):
         mock_run.return_value = (1, "", "fatal: not logged in to gh")
         ok, pr_url, pr_num = await create_pull_request(
             workspace_path="/tmp/ws",
@@ -139,6 +180,30 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok)
         self.assertEqual(pr_url, "https://github.com/cheungyang/aoc/pull/feat/auth_1")
         self.assertIsNone(pr_num)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_merge_pull_request_unauthenticated_fails(self, mock_run):
+        mock_run.return_value = (1, "", "not logged in to any GitHub hosts")
+        ok, commit_url, log = await merge_pull_request(
+            workspace_path="/tmp/ws",
+            pr_url_or_number="https://github.com/cheungyang/aoc/pull/142",
+            target_repo="cheungyang/aoc"
+        )
+        self.assertFalse(ok)
+        self.assertEqual(commit_url, "")
+        self.assertIn("gh pr merge failed", log)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_comment_pull_request_unauthenticated_fails(self, mock_run):
+        mock_run.return_value = (1, "", "fatal: not logged in to gh")
+        ok, log = await comment_pull_request(
+            workspace_path="/tmp/ws",
+            pr_url="https://github.com/cheungyang/aoc/pull/142",
+            body="hello",
+            target_repo="cheungyang/aoc"
+        )
+        self.assertFalse(ok)
+        self.assertIn("gh pr comment failed", log)
 
     @patch('core.util.git_ops.run_cmd_async')
     async def test_get_pull_request_status_success(self, mock_run):

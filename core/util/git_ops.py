@@ -5,6 +5,20 @@ import asyncio
 import subprocess
 from typing import Tuple, Optional, List, Dict, Any
 
+# Several operations used to report success when the remote was unreachable or `gh` was
+# unauthenticated: a push that never left the machine, a fabricated PR URL, a "simulated"
+# merge and a "simulated" comment. Downstream nodes trusted those results and carried on,
+# so a run could report a merged PR that did not exist. Honest failure is now the default;
+# the old behaviour is opt-in for offline experiments only.
+_SIMULATION_ENV_VAR = "ALLOW_SIMULATED_GIT"
+
+
+def simulated_git_allowed() -> bool:
+    """True only when ALLOW_SIMULATED_GIT is explicitly enabled."""
+    return os.environ.get(_SIMULATION_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+
 async def run_cmd_async(
     cmd: List[str],
     cwd: str,
@@ -222,22 +236,14 @@ async def commit_and_push(
     # 3. git push -u origin <branch>
     code, out, err = await run_cmd_async(["git", "push", "-u", "origin", branch_name], cwd=workspace_path, timeout=30.0, env=commit_env)
     if code != 0:
-        err_lower = (err + " " + out).lower()
-        # If remote push is not possible (no remote, auth failure, network timeout, etc.), fallback to local commit
-        if (
-            "fatal: 'origin' does not appear to be a 'git' repository" in err_lower
-            or "remote" in err_lower
-            or "permission denied" in err_lower
-            or "authentication" in err_lower
-            or "could not read from remote" in err_lower
-            or "host key" in err_lower
-            or "timed out" in err_lower
-            or "repository not found" in err_lower
-            or "unable to access" in err_lower
-            or "could not resolve host" in err_lower
-        ):
-            return True, f"Committed locally (remote origin push skipped: {err.strip() or out.strip()})"
-        return False, f"git push failed: {err or out}"
+        detail = (err.strip() or out.strip())
+        if simulated_git_allowed():
+            return True, f"Committed locally (remote origin push skipped: {detail})"
+        # The commit is safe on the local branch; the caller must not treat this as published.
+        return False, (
+            f"git push failed for branch {branch_name}: {detail}. "
+            f"The commit is preserved locally at {workspace_path}."
+        )
 
     return True, f"Successfully committed and pushed branch {branch_name}"
 
@@ -304,11 +310,12 @@ async def create_pull_request(
             pr_number = int(m.group(1))
             return True, pr_url, pr_number
 
-    # 3. Fallback for offline / test environments without gh auth
+    # 3. Offline / unauthenticated environments: only ever fabricate a URL on explicit opt-in.
     if "not logged in" in combined.lower() or "no default repository" in combined.lower() or "fatal" in combined.lower():
-        repo_slug = resolved_repo or "local-repo"
-        fallback_url = f"https://github.com/{repo_slug}/pull/{branch_name}"
-        return True, fallback_url, None
+        if simulated_git_allowed():
+            repo_slug = resolved_repo or "local-repo"
+            return True, f"https://github.com/{repo_slug}/pull/{branch_name}", None
+        return False, f"gh pr create failed: {(err or out).strip()}", None
 
     return False, f"gh pr create failed: {err or out}", None
 
@@ -381,10 +388,10 @@ async def merge_pull_request(
 
         return True, commit_url, out or "PR squashed and merged successfully."
     else:
-        # If gh merge fails due to simulated/offline test environment
-        if "not logged in" in (err + out).lower() or "no default repository" in (err + out).lower():
-            fallback_commit = f"{pr_url_or_number}/commit/simulated_squash_merge"
-            return True, fallback_commit, "Simulated merge in local test environment."
+        if simulated_git_allowed() and (
+            "not logged in" in (err + out).lower() or "no default repository" in (err + out).lower()
+        ):
+            return True, f"{pr_url_or_number}/commit/simulated_squash_merge", "Simulated merge in local test environment."
         return False, "", f"gh pr merge failed: {err or out}"
 
 
@@ -428,7 +435,9 @@ async def comment_pull_request(
         return True, out.strip() or "Comment posted successfully."
 
     combined = (out + " " + err).lower()
-    if "not logged in" in combined or "no default repository" in combined or "fatal" in combined:
+    if simulated_git_allowed() and (
+        "not logged in" in combined or "no default repository" in combined or "fatal" in combined
+    ):
         return True, "Simulated PR comment in local/offline test environment."
 
     return False, f"gh pr comment failed: {err.strip() or out.strip()}"

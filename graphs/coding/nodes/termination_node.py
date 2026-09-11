@@ -8,7 +8,7 @@ from graphs.coding.utils.dag import (
     save_manifest,
     update_task_in_queue,
 )
-from graphs.coding.utils import git_ops
+from core.util import git_ops
 
 async def termination_node(state: CodingState) -> Dict[str, Any]:
     """
