@@ -2,7 +2,8 @@ import os
 from typing import Optional, Dict, Any, List
 from langchain_core.tools import tool
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import current_session_identifier, JobManager
+from core.agent.job_manager import JobManager
+from core.agent.execution_context import try_context
 from core.util import format_tool_response
 
 @tool
@@ -20,7 +21,7 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
     """
     try:
         loader = GraphsLoader()
-        active_sess = current_session_identifier.get()
+        active_sess = try_context()
         channel_name = channel or (active_sess.channel_name if active_sess else "") or ""
         job_id = (active_sess.job_id if active_sess else None) or "default"
         

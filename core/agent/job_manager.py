@@ -6,10 +6,8 @@ import os
 import json
 import sqlite3
 from contextlib import contextmanager
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
-current_session_identifier = contextvars.ContextVar("current_session_identifier", default=None)
-current_graph_id = contextvars.ContextVar("current_graph_id", default=None)
 
 SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
 DEFAULT_DB_PATH = os.path.join(SESSIONS_DIR, "memory.db")
@@ -187,15 +185,15 @@ class JobManager:
 
     def add_job(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         prompt: str = "",
     ):
         if len(self._job_ids) > 50:
             self._clean_jobs()
         now = time.time()
 
-        if not isinstance(session, SessionIdentifier):
-            raise TypeError(f"session must be an instance of SessionIdentifier, got {type(session).__name__}")
+        if not isinstance(session, ExecutionContext):
+            raise TypeError(f"session must be an instance of ExecutionContext, got {type(session).__name__}")
 
         job_id = session.job_id
         job = Job(

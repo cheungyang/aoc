@@ -8,13 +8,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools.agent_call import agent_call
 from core.util import format_tool_response
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_success(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -41,7 +41,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_wildcard_channel(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -77,7 +77,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_async(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -101,7 +101,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_with_caller_param(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -134,9 +134,9 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_with_contextvar_caller(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -159,7 +159,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         
         from core.agent.session_manager import SessionManager
         sess = SessionManager.get_session(agent_id="software-orchestrator", source="discord", channel="software-dev")
-        token = current_session_identifier.set(sess)
+        token = current_execution_context.set(sess)
         try:
             result = await agent_call.ainvoke({
                 "agent_id": "agent1",
@@ -170,11 +170,11 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(called_prompt, "<caller>software-orchestrator</caller>\nhello")
             self.assertEqual(result, format_tool_response("agent_call", payload="agent response", errors="None"))
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_does_not_duplicate_caller_tag(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -207,10 +207,10 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_in_thread_preserves_thread_context(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         import discord
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         from core.agent.session_manager import SessionManager
         
         mock_loader = MagicMock()
@@ -239,7 +239,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_thread.parent.name = "topic-research"
         
         caller_sess = SessionManager.get_session(agent_id="test-caller", source="discord", channel=mock_thread)
-        token = current_session_identifier.set(caller_sess)
+        token = current_execution_context.set(caller_sess)
         try:
             result = await agent_call.ainvoke({
                 "agent_id": "topic-researcher",
@@ -256,14 +256,14 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(called_session.channel_obj, mock_thread)
             self.assertEqual(result, format_tool_response("agent_call", payload="agent thread response", errors="None"))
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_in_channel_preserves_channel_context(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         import discord
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         from core.agent.session_manager import SessionManager
         
         mock_loader = MagicMock()
@@ -291,7 +291,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         mock_channel.parent = None
         
         caller_sess = SessionManager.get_session(agent_id="test-caller", source="discord", channel=mock_channel)
-        token = current_session_identifier.set(caller_sess)
+        token = current_execution_context.set(caller_sess)
         try:
             result = await agent_call.ainvoke({
                 "agent_id": "topic-researcher",
@@ -306,7 +306,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(called_session.channel_obj, mock_channel)
             self.assertEqual(result, format_tool_response("agent_call", payload="agent channel response", errors="None"))
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     async def test_missing_args(self):
         with self.assertRaises(Exception):
@@ -318,7 +318,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     @patch('tools.agent_call._safe_dispatch_custom_event')
     async def test_agent_call_dispatches_streaming_events(self, mock_dispatch, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         from core.agent.agent_response import AgentResponse
@@ -358,7 +358,7 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')
-    @patch('tools.agent_call.SessionIdentifier.new_job_id')
+    @patch('tools.agent_call.ExecutionContext.new_job_id')
     async def test_agent_call_stateless_uses_execute(self, mock_get_job_id, mock_agents_loader, mock_bots_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader

@@ -5,7 +5,7 @@ import discord
 from typing import Optional, List, Any, Dict, Callable
 from core.agent.agent_response import AgentResponse
 from core.agent.discord_ui import PollButtonView
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 # Event Type Constants
 EVENT_TOKEN = "token"
@@ -97,8 +97,8 @@ class StreamHandler:
         graph: Any,
         inputs: Dict[str, Any],
         config: Dict[str, Any],
-        session: SessionIdentifier,
-        recover_checkpoint_fn: Callable[[SessionIdentifier], None],
+        session: ExecutionContext,
+        recover_checkpoint_fn: Callable[[ExecutionContext], None],
         is_corrupt_checkpoint_fn: Callable[[Exception], bool]
     ):
         """Streams graph events with automatic corrupt checkpoint recovery and retry."""

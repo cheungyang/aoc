@@ -6,6 +6,7 @@ import json
 from unittest.mock import patch
 
 from tools.project_query import project_query
+from tests.helpers import execution_context
 from core.knowledge.projects.db import get_connection, init_db, upsert_projects
 
 
@@ -75,40 +76,37 @@ class TestProjectQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        # Search all
-        resp = project_query.func(
-            agent_id="day-planner",
-            action="search",
-            status="all"
-        )
-        self.assertIn('"count": 2', resp)
+        with execution_context(agent_id="day-planner"):
+            # Search all
+            resp = project_query.func(
+                action="search",
+                status="all"
+            )
+            self.assertIn('"count": 2', resp)
 
-        # Search by status
-        resp_exec = project_query.func(
-            agent_id="day-planner",
-            action="search",
-            status="executing"
-        )
-        self.assertIn("Alpha Project", resp_exec)
-        self.assertNotIn("Beta Project", resp_exec)
+            # Search by status
+            resp_exec = project_query.func(
+                action="search",
+                status="executing"
+            )
+            self.assertIn("Alpha Project", resp_exec)
+            self.assertNotIn("Beta Project", resp_exec)
 
-        # Search by commitment_year
-        resp_year = project_query.func(
-            agent_id="day-planner",
-            action="search",
-            commitment_year=2026
-        )
-        self.assertIn("Alpha Project", resp_year)
-        self.assertNotIn("raw_status", resp_year)
+            # Search by commitment_year
+            resp_year = project_query.func(
+                action="search",
+                commitment_year=2026
+            )
+            self.assertIn("Alpha Project", resp_year)
+            self.assertNotIn("raw_status", resp_year)
 
-        # Full non-compact search
-        resp_full = project_query.func(
-            agent_id="day-planner",
-            action="search",
-            commitment_year=2026,
-            compact=False
-        )
-        self.assertIn("raw_status", resp_full)
+            # Full non-compact search
+            resp_full = project_query.func(
+                action="search",
+                commitment_year=2026,
+                compact=False
+            )
+            self.assertIn("raw_status", resp_full)
 
     @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
@@ -116,21 +114,20 @@ class TestProjectQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        resp = project_query.func(
-            agent_id="day-planner",
-            action="get",
-            name="Alpha Project"
-        )
-        self.assertIn("Alpha Project", resp)
-        self.assertIn("vault/projects/alpha.md", resp)
+        with execution_context(agent_id="day-planner"):
+            resp = project_query.func(
+                action="get",
+                name="Alpha Project"
+            )
+            self.assertIn("Alpha Project", resp)
+            self.assertIn("vault/projects/alpha.md", resp)
 
-        # Not found
-        resp_nf = project_query.func(
-            agent_id="day-planner",
-            action="get",
-            id="nonexistent"
-        )
-        self.assertIn("Error: Project not found", resp_nf)
+            # Not found
+            resp_nf = project_query.func(
+                action="get",
+                id="nonexistent"
+            )
+            self.assertIn("Error: Project not found", resp_nf)
 
     @patch("core.knowledge.projects.db.get_db_path")
     @patch("tools.project_query.get_db_path")
@@ -138,10 +135,10 @@ class TestProjectQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        resp = project_query.func(
-            agent_id="day-planner",
-            action="stats"
-        )
+        with execution_context(agent_id="day-planner"):
+            resp = project_query.func(
+                action="stats"
+            )
         self.assertIn('"total_projects": 2', resp)
 
     @patch("core.knowledge.projects.db.get_db_path")
@@ -150,20 +147,20 @@ class TestProjectQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        resp = project_query.func(
-            agent_id="day-planner",
-            action="sql",
-            sql="SELECT name, status FROM projects ORDER BY name"
-        )
+        with execution_context(agent_id="day-planner"):
+            resp = project_query.func(
+                action="sql",
+                sql="SELECT name, status FROM projects ORDER BY name"
+            )
         self.assertIn("Alpha Project", resp)
         self.assertIn("Beta Project", resp)
 
-    def test_missing_agent_id(self):
+    def test_missing_execution_context(self):
+        # No ambient ExecutionContext: the tool cannot derive an identity and must refuse.
         resp = project_query.func(
-            agent_id="",
             action="stats"
         )
-        self.assertIn("Error: agent_id is required.", resp)
+        self.assertIn("no active execution context", resp)
 
 
 if __name__ == "__main__":

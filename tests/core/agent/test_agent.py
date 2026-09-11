@@ -87,7 +87,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         # Run
@@ -107,7 +107,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(side_effect=Exception(err_msg))
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -127,7 +127,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": []})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         # Run and Expect IndexError
@@ -146,7 +146,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         ]
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         # Run
@@ -170,7 +170,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [mock_message]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         # Run
@@ -203,7 +203,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         # Run with list content
@@ -244,7 +244,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_images)]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -276,7 +276,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_images)]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -310,7 +310,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_images)]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -345,7 +345,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_videos)]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -377,7 +377,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_videos)]})
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -396,16 +396,16 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.send.assert_any_call("Video file not found: assets/test.mp4")
 
     @patch('core.agent.agent.LoggingHandler')
-    @patch('core.agent.agent.current_session_identifier')
+    @patch('core.agent.agent.current_execution_context')
     @patch('core.agent.agent.JobManager')
-    async def test_execute_handles_killed_status(self, mock_job_manager_class, mock_current_session_identifier, mock_logging_handler_class):
+    async def test_execute_handles_killed_status(self, mock_job_manager_class, mock_current_execution_context, mock_logging_handler_class):
         # Setup mocks
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
         mock_graph.get_state.return_value = MagicMock(next=["some_node"])
         
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         mock_job_manager = MagicMock()
         mock_job_manager_class.return_value = mock_job_manager
@@ -441,7 +441,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
         
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
         
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general", job_id="test-job-id")
         await agent.execute("hello world", session=session)
@@ -456,7 +456,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Subagent internal response")]})
 
         agent = Agent("sub-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -479,7 +479,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Scheduled report")]})
 
         agent = Agent("cron-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -557,7 +557,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 </poll>"""
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_poll)]})
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -585,7 +585,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 </poll>"""
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_poll)]})
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -611,7 +611,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 </system_memory_log>"""
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content=reply_with_mem)]})
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -631,7 +631,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph = MagicMock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Done")]})
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         await agent.execute("test prompt", session=session)

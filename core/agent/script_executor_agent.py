@@ -5,9 +5,10 @@ import discord
 from typing import List, Optional, Any
 import subprocess
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import JobManager, current_session_identifier
+from core.agent.job_manager import JobManager
+from core.agent.execution_context import current_execution_context
 from core.agent.session_manager import SessionManager
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 from core.util import split_message
 
 class ScriptExecutorAgent(BaseAgent):
@@ -17,7 +18,7 @@ class ScriptExecutorAgent(BaseAgent):
     async def execute(
         self,
         prompt: str,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: List = None,
         role: str = "user"
     ) -> str:
@@ -28,7 +29,7 @@ class ScriptExecutorAgent(BaseAgent):
         JobManager().add_job(session=session, prompt=prompt)
         JobManager().update_job(job_id, "running")
 
-        session_token = current_session_identifier.set(session)
+        session_token = current_execution_context.set(session)
 
         lines = prompt.strip().split('\n')
         results = []
@@ -121,7 +122,7 @@ class ScriptExecutorAgent(BaseAgent):
             JobManager().update_job(job_id, "error")
             results.append(f"Unexpected error during execution: {str(e)}")
         finally:
-            current_session_identifier.reset(session_token)
+            current_execution_context.reset(session_token)
 
         final_output = "\n".join(results)
         

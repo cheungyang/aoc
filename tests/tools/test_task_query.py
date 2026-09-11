@@ -6,6 +6,7 @@ import shutil
 import json
 
 from tools.task_query import task_query
+from tests.helpers import execution_context
 from core.knowledge.tasks.db import get_connection, init_db, upsert_tasks
 
 
@@ -68,26 +69,27 @@ class TestTaskQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        # Search todo tasks
-        res = task_query.func(agent_id="day-planner", action="search", status="todo")
-        self.assertIn("tt_001", res)
-        self.assertNotIn("tt_002", res)
+        with execution_context(agent_id="day-planner"):
+            # Search todo tasks
+            res = task_query.func(action="search", status="todo")
+            self.assertIn("tt_001", res)
+            self.assertNotIn("tt_002", res)
 
-        # Search by tag
-        res_tag = task_query.func(agent_id="day-planner", action="search", status="all", tags=["p/team"])
-        self.assertIn("tt_002", res_tag)
-        self.assertNotIn("tt_001", res_tag)
+            # Search by tag
+            res_tag = task_query.func(action="search", status="all", tags=["p/team"])
+            self.assertIn("tt_002", res_tag)
+            self.assertNotIn("tt_001", res_tag)
 
-        # Search by keyword
-        res_query = task_query.func(agent_id="day-planner", action="search", status="all", query="MCP")
-        self.assertIn("tt_001", res_query)
-        self.assertNotIn("content_hash", res_query)
-        self.assertNotIn("raw_line", res_query)
+            # Search by keyword
+            res_query = task_query.func(action="search", status="all", query="MCP")
+            self.assertIn("tt_001", res_query)
+            self.assertNotIn("content_hash", res_query)
+            self.assertNotIn("raw_line", res_query)
 
-        # Full non-compact search
-        res_full = task_query.func(agent_id="day-planner", action="search", status="all", query="MCP", compact=False)
-        self.assertIn("content_hash", res_full)
-        self.assertIn("raw_line", res_full)
+            # Full non-compact search
+            res_full = task_query.func(action="search", status="all", query="MCP", compact=False)
+            self.assertIn("content_hash", res_full)
+            self.assertIn("raw_line", res_full)
 
     @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
@@ -95,13 +97,14 @@ class TestTaskQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        res = task_query.func(agent_id="day-planner", action="get", task_id="tt_001")
-        self.assertIn("Adopt MCP tools in LangGraph", res)
-        self.assertIn("vault/projects/AOC.md", res)
+        with execution_context(agent_id="day-planner"):
+            res = task_query.func(action="get", task_id="tt_001")
+            self.assertIn("Adopt MCP tools in LangGraph", res)
+            self.assertIn("vault/projects/AOC.md", res)
 
-        # Invalid ID
-        res_inv = task_query.func(agent_id="day-planner", action="get", task_id="nonexistent")
-        self.assertIn("Error: Task not found with ID 'nonexistent'", res_inv)
+            # Invalid ID
+            res_inv = task_query.func(action="get", task_id="nonexistent")
+            self.assertIn("Error: Task not found with ID 'nonexistent'", res_inv)
 
     @patch("core.knowledge.tasks.db.get_db_path")
     @patch("tools.task_query.get_db_path")
@@ -109,7 +112,8 @@ class TestTaskQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        res = task_query.func(agent_id="day-planner", action="stats")
+        with execution_context(agent_id="day-planner"):
+            res = task_query.func(action="stats")
         self.assertIn('"total_tasks": 2', res)
 
     @patch("core.knowledge.tasks.db.get_db_path")
@@ -118,17 +122,19 @@ class TestTaskQueryTool(unittest.TestCase):
         mock_db_path1.return_value = self.db_path
         mock_db_path2.return_value = self.db_path
 
-        # Valid SELECT
-        res = task_query.func(agent_id="day-planner", action="sql", sql="SELECT title FROM tasks WHERE id='tt_001'")
-        self.assertIn("Adopt MCP tools in LangGraph", res)
+        with execution_context(agent_id="day-planner"):
+            # Valid SELECT
+            res = task_query.func(action="sql", sql="SELECT title FROM tasks WHERE id='tt_001'")
+            self.assertIn("Adopt MCP tools in LangGraph", res)
 
-        # Rejected mutation
-        res_mut = task_query.func(agent_id="day-planner", action="sql", sql="DELETE FROM tasks")
-        self.assertIn("Error: Only read-only SELECT queries are permitted.", res_mut)
+            # Rejected mutation
+            res_mut = task_query.func(action="sql", sql="DELETE FROM tasks")
+            self.assertIn("Error: Only read-only SELECT queries are permitted.", res_mut)
 
-    def test_missing_agent_id(self):
-        res = task_query.func(agent_id="", action="search")
-        self.assertIn("Error: agent_id is required.", res)
+    def test_missing_execution_context(self):
+        # No ambient ExecutionContext: the tool cannot derive an identity and must refuse.
+        res = task_query.func(action="search")
+        self.assertIn("no active execution context", res)
 
 
 if __name__ == "__main__":

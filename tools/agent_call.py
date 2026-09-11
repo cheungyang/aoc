@@ -3,7 +3,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from langchain_core.callbacks import adispatch_custom_event
 from core.loaders.agents_loader import AgentsLoader
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 from core.agent.session_manager import SessionManager
 from core.util import format_tool_response
 from core.agent.stream_handler import (
@@ -59,11 +59,11 @@ async def agent_call(
                 errors=f"Error: Agent '{agent_id}' cannot be called in channel '{channel}'. Allowed channels: {allowed_channels}"
             )
             
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import try_context
         from core.agent.session_manager import SessionManager
         from core.loaders.bots_loader import BotsLoader
 
-        active_sess = current_session_identifier.get()
+        active_sess = try_context()
         if active_sess and active_sess.matches_channel(channel):
             discord_channel = active_sess.channel_obj
         else:
@@ -76,11 +76,14 @@ async def agent_call(
             formatted_prompt = prompt
 
         is_stateless = agent.config.get("stateless", False)
+        # Inherit the caller's graph binding: an agent invoked from inside a graph must be
+        # evaluated against that graph's grants, and that must travel explicitly.
         target_session = SessionManager().get_session(
             agent_id=agent_id,
             source="tool",
             channel=discord_channel or channel,
-            stateless=is_stateless
+            stateless=is_stateless,
+            graph_id=active_sess.graph_id if active_sess else None
         )
 
         if run_async:

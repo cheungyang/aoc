@@ -134,10 +134,10 @@ class GraphsLoader:
         config = self.get_graph_config(graph_id)
         return config.get("skills", [])
 
-    def get_graphs_overview(self, agent_id: str = None) -> str:
-        if agent_id:
+    def get_graphs_overview(self, ctx=None) -> str:
+        if ctx is not None:
             from core.loaders.tools_loader import ToolsLoader
-            if not ToolsLoader().check_permission(agent_id, "graph_call"):
+            if not ToolsLoader().check_permission(ctx, "graph_call"):
                 return ""
         self.load_graphs()
         overview = "<subgraphs_list>\n"

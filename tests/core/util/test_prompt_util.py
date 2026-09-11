@@ -51,21 +51,21 @@ class TestPromptUtil(unittest.TestCase):
         self.assertIn("Discord channel: #software-dev", prompt)
 
     def test_get_channel_prompt_context_var(self):
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         from core.agent.session_manager import SessionManager
         sess = SessionManager.get_session(agent_id="test", source="discord", channel="weekend-planning")
-        token = current_session_identifier.set(sess)
+        token = current_execution_context.set(sess)
         try:
             prompt = get_channel_prompt()
             self.assertIn("<current_channel_context>", prompt)
             self.assertIn("Discord channel: #weekend-planning", prompt)
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     def test_get_channel_prompt_thread(self):
         import discord
         from unittest.mock import MagicMock
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         from core.agent.session_manager import SessionManager
         mock_thread = MagicMock(spec=discord.Thread)
         mock_thread.id = 999
@@ -73,22 +73,22 @@ class TestPromptUtil(unittest.TestCase):
         mock_thread.parent = MagicMock(spec=discord.TextChannel)
         mock_thread.parent.name = "software-dev"
         sess = SessionManager.get_session(agent_id="test", source="discord", channel=mock_thread)
-        token = current_session_identifier.set(sess)
+        token = current_execution_context.set(sess)
         try:
             prompt = get_channel_prompt()
             self.assertIn("<current_channel_context>", prompt)
             self.assertIn("Discord thread 'sub-topic' within channel: #software-dev", prompt)
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     def test_get_channel_prompt_empty(self):
-        from core.agent.job_manager import current_session_identifier
-        token = current_session_identifier.set(None)
+        from core.agent.execution_context import current_execution_context
+        token = current_execution_context.set(None)
         try:
             prompt = get_channel_prompt()
             self.assertEqual(prompt, "")
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open)

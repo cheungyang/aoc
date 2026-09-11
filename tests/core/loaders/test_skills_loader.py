@@ -18,6 +18,7 @@ except ImportError:
     sys.modules['discord.ui'] = mock_ui
 
 from core.loaders.skills_loader import SkillsLoader
+from tests.helpers import make_context
 import core.loaders.agents_loader
 
 class TestSkillsLoader(unittest.TestCase):
@@ -42,7 +43,7 @@ class TestSkillsLoader(unittest.TestCase):
         skill_content = '{"name": "Dummy", "description": "This is a dummy skill.", "skill_id": "dummy_skill"}'
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
-            result = self.loader.get_skills_overview('agent_1')
+            result = self.loader.get_skills_overview(make_context(agent_id="agent_1"))
 
         self.assertIn("<skills_list>", result)
         self.assertIn("- Dummy (id:dummy_skill): This is a dummy skill.", result)
@@ -75,7 +76,7 @@ Body content of skill.
         }
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
-            result = self.loader.get_skill_prompt('agent_1', 'dummy_skill')
+            result = self.loader.get_skill_prompt(make_context(agent_id="agent_1"), 'dummy_skill')
 
         self.assertIn("<skill>", result)
         self.assertIn("Body content of skill.", result)
@@ -97,7 +98,7 @@ Body content of skill.
         skill_content = '{"name": "Dummy", "description": "Desc", "skill_id": "skill1"}'
         
         with patch('core.loaders.skills_loader.open', mock_open(read_data=skill_content)):
-            result = self.loader.get_skills_overview('agent_1')
+            result = self.loader.get_skills_overview(make_context(agent_id="agent_1"))
 
         self.assertIn("- Dummy (id:skill1): Desc", result)
 
@@ -107,7 +108,7 @@ Body content of skill.
         mock_agent.config = {"skills": ["skill1"]}
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
         
-        allowed_skills = self.loader.get_allowed_skills('agent_1')
+        allowed_skills = self.loader.get_allowed_skills(make_context(agent_id="agent_1"))
         
         self.assertIn("skill1", allowed_skills)
         self.assertIn("dream", allowed_skills)
@@ -121,7 +122,7 @@ Body content of skill.
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
         mock_get_graph_skills.return_value = ["graph_skill_1"]
         
-        allowed_skills = self.loader.get_allowed_skills('agent_1')
+        allowed_skills = self.loader.get_allowed_skills(make_context(agent_id="agent_1"))
         
         self.assertIn("skill1", allowed_skills)
         self.assertIn("graph_skill_1", allowed_skills)
@@ -144,7 +145,7 @@ Body content of skill.
             "skill_id": "apple_skill"
         }
 
-        result = self.loader.get_skills_overview('agent_1')
+        result = self.loader.get_skills_overview(make_context(agent_id="agent_1"))
         pos_apple = result.find("Apple Skill")
         pos_zebra = result.find("Zebra Skill")
         self.assertNotEqual(pos_apple, -1)

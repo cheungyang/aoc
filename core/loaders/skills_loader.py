@@ -42,15 +42,29 @@ class SkillsLoader:
             return {}
         return info.get("tools", {})
 
-    def get_allowed_skills(self, agent_id: str, graph_id: str = None):
+    @staticmethod
+    def _require_ctx(ctx, caller: str):
+        from core.agent.execution_context import ExecutionContext
+        if not isinstance(ctx, ExecutionContext):
+            raise TypeError(
+                f"SkillsLoader.{caller}() expects an ExecutionContext, got {type(ctx).__name__}."
+            )
+        return ctx
+
+    def resolve_allowed_skills(self, agent_id: str, graph_id: str = None):
+        """
+        Resolves the skill list for an already-resolved (agent_id, graph_id) pair.
+
+        Internal entry point for callers that have already decided which graph is active
+        (e.g. ToolsLoader). Public callers should use get_allowed_skills(ctx).
+        """
         from core.loaders.agents_loader import AgentsLoader
-        from core.agent.job_manager import current_graph_id
         from core.loaders.graphs_loader import GraphsLoader
 
         agent = AgentsLoader().get_agent(agent_id)
         allowed_skills = agent.config.get("skills", []).copy()
 
-        active_graph = graph_id or current_graph_id.get() or agent.config.get("graph", "main")
+        active_graph = graph_id or agent.config.get("graph", "main")
         if active_graph:
             graph_skills = GraphsLoader().get_graph_skills(active_graph)
             for skill in graph_skills:
@@ -59,13 +73,18 @@ class SkillsLoader:
 
         return allowed_skills
 
-    def get_skills_overview(self, agent_id: str):
-        allowed_skills = self.get_allowed_skills(agent_id)
-        
+    def get_allowed_skills(self, ctx):
+        self._require_ctx(ctx, "get_allowed_skills")
+        return self.resolve_allowed_skills(ctx.agent_id, ctx.graph_id)
+
+    def get_skills_overview(self, ctx):
+        self._require_ctx(ctx, "get_skills_overview")
+        allowed_skills = self.get_allowed_skills(ctx)
+
         self._load_skills(allowed_skills)
-        overview = f"<skills_list>\nThe following lists the names and descriptions of the skills \n\
+        overview = "<skills_list>\nThe following lists the names and descriptions of the skills \n\
             that you have access to. To use a skill, use the `load_skill` tool with the \n\
-            skill name to load the skill into your memory. Your agent_id is '{agent_id}'.\n"
+            skill name to load the skill into your memory.\n"
 
         for skill_id in sorted(allowed_skills):
             info = self._skills_cache.get(skill_id)
@@ -78,11 +97,12 @@ class SkillsLoader:
         overview += "</skills_list>"
         return overview
 
-    def get_skill_prompt(self, agent_id: str, skill_id: str):
-        allowed_skills = self.get_allowed_skills(agent_id)
-        
+    def get_skill_prompt(self, ctx, skill_id: str):
+        self._require_ctx(ctx, "get_skill_prompt")
+        allowed_skills = self.get_allowed_skills(ctx)
+
         if skill_id not in allowed_skills:
-            return f"Error: Agent {agent_id} does not have access to skill {skill_id}."
+            return f"Error: Agent {ctx.agent_id} does not have access to skill {skill_id}."
             
         self._load_skills(allowed_skills)
         

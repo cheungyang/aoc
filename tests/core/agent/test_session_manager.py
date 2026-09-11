@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.agent.session_manager import SessionManager
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 
 class TestSessionManager(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestSessionManager(unittest.TestCase):
         message.channel.id = 123
         
         session = SessionManager.get_session("agent1", "discord", message.channel)
-        self.assertIsInstance(session, SessionIdentifier)
+        self.assertIsInstance(session, ExecutionContext)
         self.assertEqual(session.session_id, "agent1:discord:general")
 
     def test_get_session_access_session_id(self):

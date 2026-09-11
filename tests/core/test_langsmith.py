@@ -24,7 +24,7 @@ class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply")]})
 
         agent = Agent("software-coder", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="software-coder", source="discord", channel="general")
         await agent.execute("Fix the bug", session=session, role="user")

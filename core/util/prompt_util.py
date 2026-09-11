@@ -51,8 +51,8 @@ Format:
 
 
 def get_channel_prompt(channel_name: Optional[str] = None) -> str:
-    from core.agent.job_manager import current_session_identifier
-    sess = current_session_identifier.get()
+    from core.agent.execution_context import try_context
+    sess = try_context()
 
     if channel_name is None and sess:
         channel_name = sess.channel_name

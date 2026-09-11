@@ -7,16 +7,16 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 from core.agent.session_manager import SessionManager
 
 
-class TestSessionIdentifier(unittest.TestCase):
+class TestExecutionContext(unittest.TestCase):
     
     def test_direct_instantiation_raises_runtime_error(self):
         with self.assertRaises(RuntimeError) as ctx:
-            SessionIdentifier(agent_id="test-agent", source="discord", channel="general")
-        self.assertIn("Direct instantiation of SessionIdentifier is prohibited", str(ctx.exception))
+            ExecutionContext(agent_id="test-agent", source="discord", channel="general")
+        self.assertIn("Direct instantiation of ExecutionContext is prohibited", str(ctx.exception))
 
     def test_session_identifier_creation_via_session_manager(self):
         ident = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
@@ -85,10 +85,10 @@ class TestSessionIdentifier(unittest.TestCase):
         self.assertEqual(ident.get_session_id(), "main:discord:general")
 
     def test_session_identifier_new_job_id(self):
-        job_id = SessionIdentifier.new_job_id()
+        job_id = ExecutionContext.new_job_id()
         self.assertEqual(len(job_id), 8)
         self.assertIsInstance(job_id, str)
-        self.assertNotEqual(job_id, SessionIdentifier.new_job_id())
+        self.assertNotEqual(job_id, ExecutionContext.new_job_id())
 
     def test_matches_channel(self):
         # 1. Text channel match

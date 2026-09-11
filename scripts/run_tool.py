@@ -12,12 +12,15 @@ load_dotenv(os.path.join(workspace_root, ".env"))
 sys.path.append(workspace_root)
 
 from core.loaders.tools_loader import ToolsLoader
+from core.agent.session_manager import SessionManager
+from core.agent.execution_context import current_execution_context
 
 def main():
     print("Loading tools...")
     # ToolsLoader prints "Loaded X tools..." to stderr/stdout, so it will show up.
     loader = ToolsLoader()
-    tools = loader.get_tools()
+    ctx = SessionManager().get_session(agent_id="main", source="job")
+    tools = loader.get_tools(ctx)
     
     if not tools:
         print("No tools found.")
@@ -58,12 +61,17 @@ def main():
              input_args[arg_name] = user_val
              
     print(f"\nInvoking {selected_tool.name} with args: {input_args}")
+    # Tools read their identity from the ambient execution context, so it has to be bound
+    # around the invoke, not just used to build the roster.
+    token = current_execution_context.set(ctx)
     try:
         # Use invoke for LangChain tools
         result = selected_tool.invoke(input_args)
         print(f"\n==== Result ====\n{result}\n================")
     except Exception as e:
         print(f"Error executing tool: {e}")
+    finally:
+        current_execution_context.reset(token)
 
 if __name__ == "__main__":
     main()

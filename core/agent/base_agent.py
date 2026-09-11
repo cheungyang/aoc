@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import discord
 from typing import List, Optional, Any, Union
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 class BaseAgent(ABC):
     def __init__(self, agent_id: str, config: dict):
@@ -12,19 +12,19 @@ class BaseAgent(ABC):
     async def execute(
         self,
         prompt: Union[str, list],
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: Optional[List] = None,
         role: str = "user"
     ) -> str:
         """
-        Execute the agent with the given prompt and SessionIdentifier.
+        Execute the agent with the given prompt and ExecutionContext.
         """
         pass
 
     async def execute_stream(
         self,
         prompt: Union[str, list],
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: Optional[List] = None,
         role: str = "user"
     ):

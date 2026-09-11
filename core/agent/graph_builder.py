@@ -10,25 +10,28 @@ from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt, Config
 from langgraph.types import interrupt
-from core.agent.job_manager import JobManager, current_session_identifier
+from core.agent.job_manager import JobManager
+from core.agent.execution_context import try_context
 
 class GraphBuilder:
     def __init__(self):
         pass
 
-    def _get_prompt_template(self, agent_id):
+    def _get_prompt_template(self, ctx):
+        agent_id = ctx.agent_id
+
         def dynamic_prompt(state):
             # 1. Agent Prompt
             agent_prompt = get_agent_prompt(agent_id)
 
             # 2. Skills Prompt
             skills_loader = SkillsLoader()
-            skills_prompt = skills_loader.get_skills_overview(agent_id=agent_id)
+            skills_prompt = skills_loader.get_skills_overview(ctx)
 
             # 2.5. Subgraphs Prompt
             from core.loaders.graphs_loader import GraphsLoader
             graphs_loader = GraphsLoader()
-            subgraphs_prompt = graphs_loader.get_graphs_overview(agent_id=agent_id)
+            subgraphs_prompt = graphs_loader.get_graphs_overview(ctx)
 
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()
@@ -57,10 +60,11 @@ class GraphBuilder:
             return prompt.format_messages(messages=state.get("messages", []))
         return dynamic_prompt
 
-    async def build_graph(self, agent_id, config):
+    async def build_graph(self, ctx, config):
         if config is None:
-            raise ValueError(f"Agent configuration not found for: {agent_id}")
+            raise ValueError(f"Agent configuration not found for: {getattr(ctx, 'agent_id', None)}")
 
+        agent_id = ctx.agent_id
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
@@ -68,22 +72,35 @@ class GraphBuilder:
         provider = config.get("provider", "google")
         
         loader = ToolsLoader()
-        allowed_tools = loader.get_tools(agent_id=agent_id)
+        allowed_tools = loader.get_tools(ctx)
 
         def make_interruptible(t):
             import functools
+
+            # Wrap a per-build copy. The tools returned by ToolsLoader are module-level @tool
+            # singletons shared by every agent; mutating them in place made the wrappers nest
+            # and accumulate on each build.
+            try:
+                t = t.model_copy()
+            except AttributeError:
+                import copy as _copy
+                t = _copy.copy(t)
+
             original_run = t._run
             original_arun = t._arun
-            
-            @functools.wraps(original_run)
-            def wrapper(*args, **kwargs):
-                active_sess = current_session_identifier.get()
+
+            def _abort_if_killed():
+                active_sess = try_context()
                 job_id = active_sess.job_id if active_sess else None
                 if job_id:
                     job = JobManager()._jobs.get(job_id)
                     if job and job.status == "killing":
                         JobManager().update_job(job_id, "killed")
                         interrupt("Job was killed")
+
+            @functools.wraps(original_run)
+            def wrapper(*args, **kwargs):
+                _abort_if_killed()
                 return original_run(*args, **kwargs)
             
             t._run = wrapper
@@ -91,13 +108,7 @@ class GraphBuilder:
             if original_arun is not None:
                 @functools.wraps(original_arun)
                 async def awrapper(*args, **kwargs):
-                    active_sess = current_session_identifier.get()
-                    job_id = active_sess.job_id if active_sess else None
-                    if job_id:
-                        job = JobManager()._jobs.get(job_id)
-                        if job and job.status == "killing":
-                            JobManager().update_job(job_id, "killed")
-                            interrupt("Job was killed")
+                    _abort_if_killed()
                     return await original_arun(*args, **kwargs)
                 t._arun = awrapper
                 
@@ -113,7 +124,7 @@ class GraphBuilder:
             llm = ChatGoogleGenerativeAI(model=model_name)
         checkpointer = SqliteCheckpointer()
 
-        prompt = self._get_prompt_template(agent_id)
+        prompt = self._get_prompt_template(ctx)
 
         graph_name = config.get("graph", "main")
         from core.loaders.graphs_loader import GraphsLoader

@@ -3,7 +3,7 @@ import sys
 import asyncio
 import concurrent.futures
 from typing import List, Sequence, Any, Optional, Tuple, Union
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 from langchain_core.messages import (
     BaseMessage,
@@ -416,7 +416,7 @@ class ContextPruner:
 
     def auto_prune_session(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         force: bool = False
     ) -> bool:
         """Inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
@@ -435,7 +435,7 @@ class ContextPruner:
 
     async def aauto_prune_session(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         force: bool = False
     ) -> bool:
         """Asynchronously inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""

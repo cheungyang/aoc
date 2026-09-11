@@ -3,6 +3,7 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 from core.knowledge.vector.db import (
     init_knowledge_db,
     hybrid_search_vault,
@@ -17,7 +18,6 @@ from core.knowledge.vector.sync import sync_knowledge
 
 @tool
 def vault_search(
-    agent_id: str,
     query: str = "",
     search_type: str = "hybrid",
     category: str = "all",
@@ -39,7 +39,6 @@ def vault_search(
     - 'sync': Triggers an immediate incremental synchronization of ~/pkm into LanceDB.
 
     Args:
-        agent_id: The ID of the agent executing the tool.
         query: The natural language question, topic, or keyword to search for.
         search_type: Search mode ('hybrid', 'semantic', 'keyword'). Defaults to 'hybrid'.
         category: Note category filter ('all', 'vault', 'wiki'). Defaults to 'all'.
@@ -47,13 +46,14 @@ def vault_search(
         limit: Maximum number of results to return (defaults to 5).
         action: Action to perform ('search' or 'sync'). Defaults to 'search'.
     """
-    if not agent_id:
-        return format_tool_response("vault_search", payload="", errors="Error: agent_id is required.")
+    ctx = try_context()
+    if ctx is None:
+        return format_tool_response("vault_search", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
 
     tools_loader = ToolsLoader()
     # Check permissions if configured
     try:
-        merged_perms = tools_loader._merge_tool_permissions(agent_id)
+        merged_perms = tools_loader._merge_tool_permissions(ctx)
         if "vault_search" in merged_perms:
             perms = merged_perms["vault_search"]
             if isinstance(perms, list) and perms:
@@ -61,7 +61,7 @@ def vault_search(
                     return format_tool_response(
                         "vault_search",
                         payload="",
-                        errors=f"Error: Agent {agent_id} does not have permission to execute action '{action}' on vault_search."
+                        errors=f"Error: Agent {ctx.agent_id} does not have permission to execute action '{action}' on vault_search."
                     )
     except Exception:
         # If agent is not configured or in unit test, proceed without restrictions

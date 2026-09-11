@@ -7,6 +7,7 @@ from langchain_core.tools import tool
 import requests
 
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 from core.util.config import Config
 
 
@@ -33,7 +34,6 @@ def zillow_query(
     wait_for_results: bool = True,
     timeout_seconds: int = 30,
     poll_interval: float = 2.0,
-    agent_id: str = "",
 ) -> str:
     """
     Search and inspect active real estate listings, property data, rent estimates, and valuations
@@ -70,20 +70,21 @@ def zillow_query(
         wait_for_results: When True (default), automatically polls until job completes and returns data.
         timeout_seconds: Maximum seconds to wait when polling for results (default: 30).
         poll_interval: Seconds between poll attempts (default: 2.0).
-        agent_id: Optional agent ID for permission checking.
 
     Returns:
         Structured XML-wrapped JSON response with properties, metrics, and any errors.
     """
-    # Permission verification if agent_id is passed
-    if agent_id:
+    # Permission verification. Identity comes from the execution context, so this can no
+    # longer be skipped by omitting an argument.
+    ctx = try_context()
+    if ctx is not None:
         from core.loaders.tools_loader import ToolsLoader
         tools_loader = ToolsLoader()
-        if not tools_loader.check_permission(agent_id, "zillow_query", action):
+        if not tools_loader.check_permission(ctx, "zillow_query", action):
             return format_tool_response(
                 "zillow_query",
                 payload="",
-                errors=f"Error: Agent '{agent_id}' does not have permission to execute action '{action}' on zillow_query."
+                errors=f"Error: Agent '{ctx.agent_id}' does not have permission to execute action '{action}' on zillow_query."
             )
 
     api_key = Config().rapidapi_key

@@ -4,10 +4,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.job_manager import (
-    current_session_identifier,
-    current_graph_id,
-)
+from core.agent.execution_context import current_execution_context
 from core.util import format_tool_response
 
 @tool
@@ -36,7 +33,7 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         if graph is None and graph_info.get("create_graph") is not None:
             graph = graph_info["create_graph"]()
             
-        active_sess = current_session_identifier.get()
+        active_sess = current_execution_context.get()
         triggering_agent = caller or (active_sess.agent_id if active_sess else None)
         
         # 1. Adapt input
@@ -86,7 +83,20 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
             except Exception:
                 is_interrupted = False
 
-        graph_token = current_graph_id.set(target_graph)
+        # Derive a child context bound to the target graph. Everything executed inside the graph
+        # (including agents reached via agent_call) is then evaluated against this graph's grants.
+        if active_sess is not None:
+            child_ctx = active_sess.with_graph(target_graph)
+        else:
+            # No ambient caller (e.g. a scheduled or programmatic invocation): synthesize a
+            # stateless context so the graph still has an unambiguous identity.
+            from core.agent.session_manager import SessionManager
+            child_ctx = SessionManager().get_session(
+                agent_id=triggering_agent or "system",
+                source="job",
+                graph_id=target_graph,
+            )
+        graph_token = current_execution_context.set(child_ctx)
         try:
             if is_interrupted:
                 # Resuming an existing thread from interrupt with user feedback
@@ -123,7 +133,7 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
             else:
                 result = await graph.ainvoke(inputs, config=config)
         finally:
-            current_graph_id.reset(graph_token)
+            current_execution_context.reset(graph_token)
         
         # 2. Adapt output
         format_output_fn = graph_info.get("format_output")

@@ -4,6 +4,7 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 from core.knowledge.projects.db import (
     get_connection,
     init_db,
@@ -19,7 +20,6 @@ from core.knowledge.projects.sync import sync_projects
 
 @tool
 def project_query(
-    agent_id: str,
     action: str = "search",
     status: str = "",
     query: str = "",
@@ -51,7 +51,6 @@ def project_query(
     - 'sync': Triggers an immediate synchronization from Obsidian markdown files into projects.db.
 
     Args:
-        agent_id: The ID of the agent executing the tool.
         action: The action to perform ('search', 'get', 'stats', 'sql', 'sync'). Defaults to 'search'.
         status: Project status filter ('executing', 'planning', 'considering', 'paused', 'done', 'discontinued', 'all').
         query: Keyword to search within project name, tags, aliases, category, or file path.
@@ -66,13 +65,14 @@ def project_query(
         sql: Custom read-only SELECT query (required when action='sql').
         limit: Maximum number of records to return (defaults to 50).
     """
-    if not agent_id:
-        return format_tool_response("project_query", payload="", errors="Error: agent_id is required.")
+    ctx = try_context()
+    if ctx is None:
+        return format_tool_response("project_query", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
 
     tools_loader = ToolsLoader()
     # Check permissions if configured
     try:
-        merged_perms = tools_loader._merge_tool_permissions(agent_id)
+        merged_perms = tools_loader._merge_tool_permissions(ctx)
         if "project_query" in merged_perms:
             perms = merged_perms["project_query"]
             if isinstance(perms, list) and perms:
@@ -80,7 +80,7 @@ def project_query(
                     return format_tool_response(
                         "project_query",
                         payload="",
-                        errors=f"Error: Agent {agent_id} does not have permission to execute action '{action}' on project_query."
+                        errors=f"Error: Agent {ctx.agent_id} does not have permission to execute action '{action}' on project_query."
                     )
     except Exception:
         pass

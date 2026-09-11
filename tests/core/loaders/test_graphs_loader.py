@@ -10,6 +10,7 @@ import shutil
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.loaders.graphs_loader import GraphsLoader
+from tests.helpers import make_context
 from tools.graph_call import graph_call
 
 class TestGraphsLoader(unittest.TestCase):
@@ -45,14 +46,16 @@ class TestGraphsLoader(unittest.TestCase):
         
         # Agent with graph_call permission
         mock_check_permission.return_value = True
-        overview = loader.get_graphs_overview(agent_id="main")
+        overview = loader.get_graphs_overview(make_context(agent_id="main"))
         self.assertIn("<subgraphs_list>", overview)
         self.assertIn("coding", overview)
-        mock_check_permission.assert_called_with("main", "graph_call")
+        called_ctx, called_tool = mock_check_permission.call_args[0]
+        self.assertEqual(called_ctx.agent_id, "main")
+        self.assertEqual(called_tool, "graph_call")
 
         # Agent without graph_call permission
         mock_check_permission.return_value = False
-        overview_empty = loader.get_graphs_overview(agent_id="restricted_agent")
+        overview_empty = loader.get_graphs_overview(make_context(agent_id="restricted_agent"))
         self.assertEqual(overview_empty, "")
 
     def test_graphs_hot_reloading(self):

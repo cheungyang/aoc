@@ -41,22 +41,38 @@ class ToolsLoader:
         self._discovered_tools = discovered
         return discovered
 
-    def _merge_tool_permissions(self, agent_id: str, graph_id: str = None) -> dict:
-        from core.agent.job_manager import current_graph_id
+    @staticmethod
+    def _require_ctx(ctx, caller: str):
+        """Rejects the legacy `(agent_id, graph_id)` string form loudly instead of guessing."""
+        from core.agent.execution_context import ExecutionContext
+        if not isinstance(ctx, ExecutionContext):
+            raise TypeError(
+                f"ToolsLoader.{caller}() expects an ExecutionContext, got {type(ctx).__name__}. "
+                "Identity must be derived from the execution context, not passed as a string."
+            )
+        return ctx
+
+    def _merge_tool_permissions(self, ctx) -> dict:
         from core.loaders.agents_loader import AgentsLoader
         from core.loaders.skills_loader import SkillsLoader
         from core.loaders.graphs_loader import GraphsLoader
         import copy
 
+        self._require_ctx(ctx, "_merge_tool_permissions")
+        agent_id = ctx.agent_id
         agent = AgentsLoader().get_agent(agent_id)
         config = agent.config
-        
-        active_graph = graph_id or current_graph_id.get() or config.get("graph")
+
+        # The graph binding comes from the context, or the agent's own configured graph.
+        # There is deliberately no ambient fallback: a stale contextvar used to freeze the
+        # tool roster of the first graph that happened to build this agent.
+        active_graph = ctx.graph_id or config.get("graph")
         from core.util.config import Config
         pkm_dir = Config().pkm_dir
         cache_key = f"{agent_id}::{active_graph or ''}::{pkm_dir}"
         if cache_key in self._agent_permissions_cache:
             return self._agent_permissions_cache[cache_key]
+
 
         # Start with tool list from agent.json
         merged_tools = copy.deepcopy(config.get("tools", {}))
@@ -81,12 +97,11 @@ class ToolsLoader:
                 else:
                     merged_tools[tool_name] = copy.deepcopy(tool_scope)
 
-        # Fetch allowed skills (including graph skills) and merge their tools
+        # Fetch allowed skills (including graph skills) and merge their tools.
+        # `active_graph` is already resolved above, so the skills list and the tool roster
+        # always agree on which graph is in effect.
         skills_loader = SkillsLoader()
-        if active_graph:
-            allowed_skills = skills_loader.get_allowed_skills(agent_id, graph_id=active_graph)
-        else:
-            allowed_skills = skills_loader.get_allowed_skills(agent_id)
+        allowed_skills = skills_loader.resolve_allowed_skills(agent_id, active_graph)
         
         for skill in allowed_skills:
             skill_tools = skills_loader.get_skill_tools(skill)
@@ -110,9 +125,11 @@ class ToolsLoader:
         self._agent_permissions_cache[cache_key] = merged_tools
         return merged_tools
 
-    def check_permission(self, agent_id: str, tool_id: str, action_name: str = None, path: str = None, graph_id: str = None, **kwargs) -> bool:
+    def check_permission(self, ctx, tool_id: str, action_name: str = None, path: str = None, **kwargs) -> bool:
         import os
-        merged = self._merge_tool_permissions(agent_id, graph_id=graph_id)
+        self._require_ctx(ctx, "check_permission")
+        agent_id = ctx.agent_id
+        merged = self._merge_tool_permissions(ctx)
         if tool_id not in merged:
             return False
             
@@ -145,19 +162,17 @@ class ToolsLoader:
             
         return False
 
-    def get_tools(self, agent_id: str, graph_id: str = None):
-        """Loads and returns all tool functions for a specific agent."""
-        from core.loaders.agents_loader import AgentsLoader
-        agent = AgentsLoader().get_agent(agent_id)
-        config = agent.config
-        
-        merged_tools = self._merge_tool_permissions(agent_id, graph_id=graph_id)
+    def get_tools(self, ctx):
+        """Loads and returns all tool functions for the agent/graph pair described by `ctx`."""
+        self._require_ctx(ctx, "get_tools")
+        agent_id = ctx.agent_id
+
+        merged_tools = self._merge_tool_permissions(ctx)
         allowed_tool_names = list(merged_tools.keys())
         
         # Auto-include load_skill if agent has skills
         from core.loaders.skills_loader import SkillsLoader
-        has_skills = SkillsLoader().get_allowed_skills(agent_id, graph_id=graph_id) if graph_id else SkillsLoader().get_allowed_skills(agent_id)
-        if has_skills:
+        if SkillsLoader().get_allowed_skills(ctx):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
                 

@@ -4,9 +4,10 @@ import shlex
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 
 @tool
-def bash(command_string: str, cwd: str, agent_id: str) -> str:
+def bash(command_string: str, cwd: str) -> str:
     """
     Run a bash command in a specified directory.
     Usage Guidelines:
@@ -15,8 +16,9 @@ def bash(command_string: str, cwd: str, agent_id: str) -> str:
     - The command is executed directly without a shell for security.
     - `cwd` must be specified and you must have permission to access it.
     """
-    if not agent_id:
-        return format_tool_response("bash", payload="", errors="Error: agent_id is required to verify permissions.")
+    ctx = try_context()
+    if ctx is None:
+        return format_tool_response("bash", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
 
     if not command_string:
         return format_tool_response("bash", payload="", errors="Error: command_string is required.")
@@ -36,8 +38,8 @@ def bash(command_string: str, cwd: str, agent_id: str) -> str:
 
         # Check permission
         # We pass the command_name as action_name, and cwd as path
-        if not tools_loader.check_permission(agent_id, "bash", command_name, path=cwd):
-            return format_tool_response("bash", payload="", errors=f"Error: Agent {agent_id} does not have permission to run '{command_name}' in {cwd}")
+        if not tools_loader.check_permission(ctx, "bash", command_name, path=cwd):
+            return format_tool_response("bash", payload="", errors=f"Error: Agent {ctx.agent_id} does not have permission to run '{command_name}' in {cwd}")
 
         # Run the command
         print(f"DEBUG: Running bash command: {args} in {cwd}")

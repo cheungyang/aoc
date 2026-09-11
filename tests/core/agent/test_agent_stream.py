@@ -41,7 +41,7 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         mock_graph.get_state.return_value = mock_state
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
@@ -69,7 +69,7 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         mock_graph.astream_events = mock_astream_events_failing
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
@@ -96,7 +96,7 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         mock_graph.astream_events = mock_astream_events_failing
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
@@ -133,7 +133,7 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         mock_graph.get_state.return_value = mock_state
 
         agent = Agent("test-agent", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         events = []
@@ -178,7 +178,7 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
 
         mock_graph.astream_events = mock_astream_events
         agent = Agent("main", {})
-        agent.graph = mock_graph
+        agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="main", source="discord", channel="general")
         events = []

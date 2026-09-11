@@ -131,14 +131,27 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
 
         payload = "\n".join(formatted_lines) + "\n"
 
-        result = filesystem.invoke({
-            "agent_id": agent_id,
-            "instructions": [{
-                "action": "append",
-                "path": log_file,
-                "content": payload
-            }]
-        })
+        # This runs after the agent's execution context has been torn down (it is reached from
+        # Agent._parse_final_response), so mint one. The agent_id comes from the Agent instance,
+        # not from the model, so asserting this identity is legitimate.
+        from core.agent.execution_context import current_execution_context, try_context
+        from core.agent.session_manager import SessionManager
+
+        ctx = try_context()
+        if ctx is None or ctx.agent_id != agent_id:
+            ctx = SessionManager().get_session(agent_id=agent_id, source="job")
+
+        token = current_execution_context.set(ctx)
+        try:
+            result = filesystem.invoke({
+                "instructions": [{
+                    "action": "append",
+                    "path": log_file,
+                    "content": payload
+                }]
+            })
+        finally:
+            current_execution_context.reset(token)
 
         result_str = str(result)
         errors_match = re.search(r'<errors>(.*?)</errors>', result_str, re.DOTALL)

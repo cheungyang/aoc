@@ -2,11 +2,11 @@ import os
 import shutil
 import fnmatch
 from langchain_core.tools import tool
-from core.loaders.agents_loader import AgentsLoader
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 
 @tool
-def filesystem(agent_id: str, instructions: list[dict]) -> str:
+def filesystem(instructions: list[dict]) -> str:
     """
     Perform file operations (read, write, overwrite, append, replace_block, ls, move, delete, rmdir, find, grep) with scoped permissions.
     Supports executing multiple actions in a single call.
@@ -38,11 +38,11 @@ def filesystem(agent_id: str, instructions: list[dict]) -> str:
         Requires: 'path' (directory or file to search), 'search_string' (or 'query'/'content').
 
     Args:
-        agent_id: The ID of the agent running this tool.
         instructions: A list of dictionaries, where each dictionary represents an action to perform.
     """
-    if not agent_id:
-        return format_tool_response("filesystem", payload="", errors="Error: agent_id is required to verify permissions.")
+    ctx = try_context()
+    if ctx is None:
+        return format_tool_response("filesystem", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
 
     from core.loaders.tools_loader import ToolsLoader
     tools_loader = ToolsLoader()
@@ -62,8 +62,8 @@ def filesystem(agent_id: str, instructions: list[dict]) -> str:
             continue
 
         # Path Permission check for primary path
-        if not tools_loader.check_permission(agent_id, "filesystem", action, path):
-            error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Agent {agent_id} does not have permission to perform \'{action}\' on path {path}</instruction_error>')
+        if not tools_loader.check_permission(ctx, "filesystem", action, path):
+            error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Agent {ctx.agent_id} does not have permission to perform \'{action}\' on path {path}</instruction_error>')
             continue
 
         # For move action, also check destination permission
@@ -72,8 +72,8 @@ def filesystem(agent_id: str, instructions: list[dict]) -> str:
             if not destination:
                 error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: \'destination\' is required for \'move\' action.</instruction_error>')
                 continue
-            if not tools_loader.check_permission(agent_id, "filesystem", action, destination):
-                error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Agent {agent_id} does not have permission to perform \'{action}\' on destination {destination}</instruction_error>')
+            if not tools_loader.check_permission(ctx, "filesystem", action, destination):
+                error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Agent {ctx.agent_id} does not have permission to perform \'{action}\' on destination {destination}</instruction_error>')
                 continue
 
         p, e = _execute_single_action(inst)

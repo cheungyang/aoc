@@ -8,8 +8,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools.filesystem import filesystem
 from core.util import format_tool_response
+from tests.helpers import execution_context, make_context
 
 class TestFilesystemTool(unittest.TestCase):
+
+    def _run(self, instructions, agent_id="software-coder"):
+        """Invokes the filesystem tool inside an ambient ExecutionContext for `agent_id`."""
+        with execution_context(agent_id=agent_id):
+            return filesystem.func(instructions=instructions)
 
     # --- Permission Tests ---
 
@@ -20,11 +26,13 @@ class TestFilesystemTool(unittest.TestCase):
         mock_loader.check_permission.return_value = False
         
         instructions = [{"action": "read", "path": "secret/file.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_errors = '<instruction_error action="read" path="secret/file.txt">Error: Agent software-coder does not have permission to perform \'read\' on path secret/file.txt</instruction_error>'
         expected = format_tool_response("filesystem", payload="", errors=expected_errors)
         self.assertEqual(result, expected)
+        # Identity is now derived from the ambient context, which is passed as the first argument.
+        self.assertEqual(mock_loader.check_permission.call_args[0][0].agent_id, "software-coder")
 
     # --- Read Tests ---
 
@@ -40,7 +48,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "read", "path": "allowed_folder/file.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="read" path="allowed_folder/file.txt">line 1\nline 2\nline 3\nline 4\n</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -58,7 +66,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "read", "path": "allowed_folder/file.txt", "start_line": 2, "end_line": 3}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="read" path="allowed_folder/file.txt">2: line 2\n3: line 3</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -76,7 +84,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "read", "path": "allowed_folder/file.txt", "start_line": 5, "end_line": 6}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("Error: Invalid line range", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -94,7 +102,7 @@ class TestFilesystemTool(unittest.TestCase):
         
         with patch('builtins.open', mock_open(read_data=large_content)):
             instructions = [{"action": "read", "path": "allowed_folder/large_file.txt"}]
-            result = filesystem.func(agent_id="software-coder", instructions=instructions)
+            result = self._run(instructions)
             
             self.assertIn("--- [TRUNCATED: File has 500 lines", result)
             self.assertIn("Use 'start_line' and 'end_line' parameters to inspect specific sections.", result)
@@ -125,7 +133,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_image_open.return_value.__enter__.return_value = mock_img
         
         instructions = [{"action": "read_image", "path": "images/photo.png"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         import base64
         expected_base64 = base64.b64encode(b"fake_jpeg_data").decode("utf-8")
@@ -141,7 +149,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = False
         
         instructions = [{"action": "read_image", "path": "images/missing.png"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("Error: File not found at images/missing.png", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -155,7 +163,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = False
         
         instructions = [{"action": "read_image", "path": "images/folder"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("Error: Path images/folder is not a file.", result)
 
     # --- Write, Overwrite, Append Tests ---
@@ -171,7 +179,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = False
         
         instructions = [{"action": "write", "path": "allowed_folder/new_dir/file.txt", "content": "data"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="write" path="allowed_folder/new_dir/file.txt">Successfully wrote to allowed_folder/new_dir/file.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -187,7 +195,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = True
         
         instructions = [{"action": "write", "path": "allowed_folder/file.txt", "content": "data"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_errors = '<instruction_error action="write" path="allowed_folder/file.txt">Error: File already exists at allowed_folder/file.txt. Use \'overwrite\' if intentional.</instruction_error>'
         expected = format_tool_response("filesystem", payload="", errors=expected_errors)
@@ -204,7 +212,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = True
         
         instructions = [{"action": "overwrite", "path": "allowed_folder/file.txt", "content": "data"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="overwrite" path="allowed_folder/file.txt">Successfully overwrote allowed_folder/file.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -222,7 +230,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "append", "path": "allowed_folder/file.txt", "content": "new_line\n"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="append" path="allowed_folder/file.txt">Successfully appended to allowed_folder/file.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -240,7 +248,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = False
         
         instructions = [{"action": "append", "path": "allowed_folder/nested/new_file.txt", "content": "hello\n"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="append" path="allowed_folder/nested/new_file.txt">Successfully appended to allowed_folder/nested/new_file.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -259,7 +267,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = False
         
         instructions = [{"action": "append", "path": "allowed_folder/existing_directory", "content": "hello\n"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_errors = '<instruction_error action="append" path="allowed_folder/existing_directory">Error: Path allowed_folder/existing_directory is not a file.</instruction_error>'
         expected = format_tool_response("filesystem", payload="", errors=expected_errors)
@@ -303,7 +311,7 @@ class TestFilesystemTool(unittest.TestCase):
             "old_block": "    return 1",
             "new_block": "    return 2"
         }]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="replace_block" path="file.py">Successfully replaced block in file.py</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -328,7 +336,7 @@ class TestFilesystemTool(unittest.TestCase):
             "old_block": "def foo():\n    return 1",
             "new_block": "def foo():\n    return 42"
         }]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="replace_block" path="file.py">Successfully replaced block in file.py</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -351,7 +359,7 @@ class TestFilesystemTool(unittest.TestCase):
             "old_block": "val = 1",
             "new_block": "val = 2"
         }]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("ambiguous", result)
 
     # --- Ls, Move, Delete, Rmdir Tests ---
@@ -369,7 +377,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_listdir.return_value = ["file1.txt", "folder1"]
         
         instructions = [{"action": "ls", "path": "allowed_folder/"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="ls" path="allowed_folder/">file1.txt\nfolder1</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -386,7 +394,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_exists.return_value = True
         
         instructions = [{"action": "move", "path": "source.txt", "destination": "dest/target.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="move" path="source.txt">Successfully moved source.txt to dest/target.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -405,7 +413,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "delete", "path": "allowed_folder/file.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="delete" path="allowed_folder/file.txt">Successfully deleted file allowed_folder/file.txt</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -423,7 +431,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isdir.return_value = True
         
         instructions = [{"action": "rmdir", "path": "empty_folder"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         expected_payload = '<instruction_result action="rmdir" path="empty_folder">Successfully removed directory empty_folder</instruction_result>'
         expected = format_tool_response("filesystem", payload=expected_payload, errors="None")
@@ -442,7 +450,7 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isdir.return_value = True
         
         instructions = [{"action": "rmdir", "path": "non_empty_folder"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         self.assertIn("Directory not empty or cannot be removed", result)
 
@@ -465,7 +473,7 @@ class TestFilesystemTool(unittest.TestCase):
         ]
         
         instructions = [{"action": "find", "path": "src", "pattern": "*.py"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         self.assertIn("main.py", result)
         self.assertIn("helper.py", result)
@@ -490,7 +498,7 @@ class TestFilesystemTool(unittest.TestCase):
         ]
         
         instructions = [{"action": "find", "path": "src", "pattern": "*.py"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         
         self.assertIn("Error: Your search returned 55 results. This is too broad and will exceed your context window. Please refine your search_string or specify a deeper directory path.", result)
 
@@ -512,7 +520,7 @@ class TestFilesystemTool(unittest.TestCase):
         ]
         
         instructions = [{"action": "grep", "path": "src", "search_string": "TARGET_STRING"}]
-        result = filesystem.func(agent_id="software-qa", instructions=instructions)
+        result = self._run(instructions, agent_id="software-qa")
         
         self.assertIn("main.py:2: TARGET_STRING in line 2", result)
 
@@ -535,7 +543,7 @@ class TestFilesystemTool(unittest.TestCase):
         
         with patch('builtins.open', mock_open(read_data="MATCH\n")):
             instructions = [{"action": "grep", "path": "src", "search_string": "MATCH"}]
-            result = filesystem.func(agent_id="software-coder", instructions=instructions)
+            result = self._run(instructions)
             self.assertIn("This is too broad and will exceed your context window", result)
 
     # --- Additional Edge Case & Batch Tests ---
@@ -547,18 +555,18 @@ class TestFilesystemTool(unittest.TestCase):
         mock_loader.check_permission.return_value = True
         
         instructions = [{"action": "move", "path": "source.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("Error: 'destination' is required for 'move' action.", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
     def test_move_destination_permission_denied(self, mock_tools_loader):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
-        # Source allowed, destination denied
-        mock_loader.check_permission.side_effect = lambda aid, tool, act, path: path == "source.txt"
+        # Source allowed, destination denied. First arg is now the ExecutionContext.
+        mock_loader.check_permission.side_effect = lambda ctx, tool, act, path: path == "source.txt"
         
         instructions = [{"action": "move", "path": "source.txt", "destination": "forbidden/target.txt"}]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("does not have permission to perform 'move' on destination forbidden/target.txt", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -578,7 +586,7 @@ class TestFilesystemTool(unittest.TestCase):
             "old_block": "nonexistent block",
             "new_block": "replacement"
         }]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn("Error: old_block not found in file.py", result)
 
     @patch('core.loaders.tools_loader.ToolsLoader')
@@ -593,12 +601,13 @@ class TestFilesystemTool(unittest.TestCase):
         mock_isfile.return_value = True
         
         instructions = [{"action": "grep", "path": "file.py", "search_string": "line 2"}]
-        result = filesystem.func(agent_id="software-qa", instructions=instructions)
+        result = self._run(instructions, agent_id="software-qa")
         self.assertIn("file.py:2: line 2", result)
 
-    def test_missing_agent_id(self):
-        result = filesystem.func(agent_id="", instructions=[{"action": "read", "path": "a.txt"}])
-        self.assertIn("Error: agent_id is required", result)
+    def test_missing_execution_context(self):
+        # No ambient ExecutionContext: the tool must refuse to act.
+        result = filesystem.func(instructions=[{"action": "read", "path": "a.txt"}])
+        self.assertIn("Error: no active execution context; this tool must be called from an agent run.", result)
 
     def test_permission_denied_single_instruction_in_batch(self):
         instructions = [
@@ -608,11 +617,11 @@ class TestFilesystemTool(unittest.TestCase):
         with patch('core.loaders.tools_loader.ToolsLoader') as mock_tools_loader:
             mock_loader = MagicMock()
             mock_tools_loader.return_value = mock_loader
-            # Allow read on a.txt, deny delete on b.txt
-            mock_loader.check_permission.side_effect = lambda aid, tool, act, path: act == "read"
+            # Allow read on a.txt, deny delete on b.txt. First arg is now the ExecutionContext.
+            mock_loader.check_permission.side_effect = lambda ctx, tool, act, path: act == "read"
             
             with patch('os.path.exists', return_value=True), patch('os.path.isfile', return_value=True), patch('builtins.open', mock_open(read_data="content")):
-                result = filesystem.func(agent_id="software-coder", instructions=instructions)
+                result = self._run(instructions)
                 self.assertIn('<instruction_result action="read"', result)
                 self.assertIn('<instruction_error action="delete" path="b.txt">Error: Agent software-coder does not have permission to perform \'delete\' on path b.txt</instruction_error>', result)
 
@@ -629,7 +638,7 @@ class TestFilesystemTool(unittest.TestCase):
             {"action": "read", "path": "file1.txt"},
             {"action": "append", "path": "file2.txt", "content": "more"}
         ]
-        result = filesystem.func(agent_id="software-coder", instructions=instructions)
+        result = self._run(instructions)
         self.assertIn('<instruction_result action="read" path="file1.txt">data</instruction_result>', result)
         self.assertIn('<instruction_result action="append" path="file2.txt">Successfully appended to file2.txt</instruction_result>', result)
 
@@ -638,17 +647,19 @@ class TestFilesystemTool(unittest.TestCase):
         tools_loader = ToolsLoader()
         tools_loader.clear_permissions_cache()
         
+        # check_permission now takes the ExecutionContext (identity) as its first argument.
+        planner_ctx = make_context(agent_id="software-planner")
+        
         # software-planner has full permissions on pkm/wiki/software
         planner_path = "pkm/wiki/software/spec.md"
-        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "write", planner_path))
-        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "read", planner_path))
-        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "ls", planner_path))
+        self.assertTrue(tools_loader.check_permission(planner_ctx, "filesystem", "write", planner_path))
+        self.assertTrue(tools_loader.check_permission(planner_ctx, "filesystem", "read", planner_path))
+        self.assertTrue(tools_loader.check_permission(planner_ctx, "filesystem", "ls", planner_path))
         
         # software-planner only has read/find/grep/ls on root . (no write)
         root_file = "README.md"
-        self.assertTrue(tools_loader.check_permission("software-planner", "filesystem", "read", root_file))
-        self.assertFalse(tools_loader.check_permission("software-planner", "filesystem", "write", root_file))
+        self.assertTrue(tools_loader.check_permission(planner_ctx, "filesystem", "read", root_file))
+        self.assertFalse(tools_loader.check_permission(planner_ctx, "filesystem", "write", root_file))
 
 if __name__ == '__main__':
     unittest.main()
-

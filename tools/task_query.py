@@ -4,6 +4,7 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 from core.knowledge.tasks.db import (
     get_connection,
     init_db,
@@ -18,7 +19,6 @@ from core.knowledge.tasks.sync import sync_tasks
 
 @tool
 def task_query(
-    agent_id: str,
     action: str = "search",
     status: str = "todo",
     query: str = "",
@@ -50,7 +50,6 @@ def task_query(
     - 'sync': Triggers an immediate synchronization from Obsidian markdown files into tasks.db.
 
     Args:
-        agent_id: The ID of the agent executing the tool.
         action: The action to perform ('search', 'get', 'stats', 'sql', 'sync'). Defaults to 'search'.
         status: Task status filter ('todo', 'completed', 'dropped', 'all'). Defaults to 'todo'.
         query: Keyword to search within task title, tags, or source file path.
@@ -65,12 +64,13 @@ def task_query(
         sql: Custom read-only SELECT query (required when action='sql').
         limit: Maximum number of records to return (defaults to 50).
     """
-    if not agent_id:
-        return format_tool_response("task_query", payload="", errors="Error: agent_id is required.")
+    ctx = try_context()
+    if ctx is None:
+        return format_tool_response("task_query", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
 
     tools_loader = ToolsLoader()
     # Check permissions if configured
-    merged_perms = tools_loader._merge_tool_permissions(agent_id)
+    merged_perms = tools_loader._merge_tool_permissions(ctx)
     if "task_query" in merged_perms:
         perms = merged_perms["task_query"]
         if isinstance(perms, list) and perms:
@@ -78,7 +78,7 @@ def task_query(
                 return format_tool_response(
                     "task_query",
                     payload="",
-                    errors=f"Error: Agent {agent_id} does not have permission to execute action '{action}' on task_query."
+                    errors=f"Error: Agent {ctx.agent_id} does not have permission to execute action '{action}' on task_query."
                 )
 
     try:

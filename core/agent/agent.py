@@ -7,13 +7,14 @@ from typing import Any, Dict, Optional, Tuple, List, Union
 
 from core.util import split_message, Config, format_error_message, save_agent_memory_log
 from core.agent.base_agent import BaseAgent
-from core.agent.job_manager import current_session_identifier, JobManager
+from core.agent.job_manager import JobManager
+from core.agent.execution_context import current_execution_context
 from core.agent.logging_handler import LoggingHandler
 from core.agent.command_handler import CommandHandler
 from core.agent.context_pruner import ContextPruner
 from core.agent.discord_ui import PollButtonView, PollSelectView
 from core.agent.agent_response import AgentResponse
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from core.agent.stream_handler import (
     StreamHandler,
@@ -29,7 +30,9 @@ from core.agent.stream_handler import (
 class Agent(BaseAgent):
     def __init__(self, agent_id: str, config: Dict[str, Any]):
         super().__init__(agent_id, config)
-        self.graph = None
+        # Compiled graphs are cached per graph binding: the same agent invoked under two
+        # different graphs gets two different tool rosters, so it needs two compiled graphs.
+        self._graphs: Dict[str, Any] = {}
 
     @staticmethod
     def _is_empty_prompt(prompt: str | list) -> bool:
@@ -40,16 +43,24 @@ class Agent(BaseAgent):
             return True
         return False
 
+    async def _get_graph(self, ctx: ExecutionContext):
+        """Returns the compiled graph for this agent under `ctx`'s graph binding, building it once."""
+        cache_key = ctx.graph_id or ""
+        if cache_key not in self._graphs:
+            from core.agent.graph_builder import GraphBuilder
+            self._graphs[cache_key] = await GraphBuilder().build_graph(ctx, self.config)
+        return self._graphs[cache_key]
+
     async def _prepare_execution(
         self,
         prompt: str | list,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: Optional[list] = None,
         role: str = "user"
-    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], Any]]:
         """
         Executes system commands, auto-prunes context,
-        ensures graph compilation, and returns (config, inputs).
+        ensures graph compilation, and returns (config, inputs, graph).
         Returns None if handled by a system command.
         """
         session_id = session.session_id
@@ -68,12 +79,14 @@ class Agent(BaseAgent):
                 print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
 
         # Lazy load langgraph graph object via GraphBuilder
-        if self.graph is None:
-            from core.agent.graph_builder import GraphBuilder
-            self.graph = await GraphBuilder().build_graph(self.agent_id, self.config)
+        graph = await self._get_graph(session)
 
         prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+        # add_job inserts the job as "queued"; the transition to "running" has to happen after it,
+        # otherwise the insert clobbers the status back to "queued" for the whole run.
         JobManager().add_job(session=session, prompt=prompt_str)
+        if job_id:
+            JobManager().update_job(job_id, "running")
 
         logging_handler = LoggingHandler(session=session, role=role, human_message=prompt)
         config = {
@@ -98,9 +111,9 @@ class Agent(BaseAgent):
         }
 
         inputs = {"messages": [{"role": role, "content": prompt}]}
-        return config, inputs
+        return config, inputs, graph
 
-    def _update_job_status(self, session: SessionIdentifier, config: Dict[str, Any]):
+    def _update_job_status(self, session: ExecutionContext, config: Dict[str, Any], graph: Any = None):
         """Updates job status based on final graph state."""
         job_id = session.job_id
         if not job_id:
@@ -110,7 +123,7 @@ class Agent(BaseAgent):
         if job and job.status == "killed":
             return
 
-        state = self.graph.get_state(config) if hasattr(self.graph, "get_state") else None
+        state = graph.get_state(config) if (graph is not None and hasattr(graph, "get_state")) else None
         if state and getattr(state, "next", None):
             JobManager().update_job(job_id, "partial")
         else:
@@ -138,7 +151,7 @@ class Agent(BaseAgent):
 
     async def _dispatch_discord_output(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         response: AgentResponse
     ):
         """Sends split message chunks, poll UI components, and media files to Discord."""
@@ -224,25 +237,24 @@ class Agent(BaseAgent):
         return msg
 
     @asynccontextmanager
-    async def _execution_context(self, session: SessionIdentifier):
-        """Context manager managing ContextVars and initial job running status."""
-        session_token = current_session_identifier.set(session)
+    async def _execution_context(self, session: ExecutionContext):
+        """Binds the execution context for the duration of the run.
 
-        job_id = session.job_id or ""
-        if job_id:
-            JobManager().update_job(job_id, "running")
-
+        This deliberately has no job-status side effect: it is entered *before* preparation
+        (so graph construction sees the right identity), and preparation registers the job.
+        """
+        session_token = current_execution_context.set(session)
         try:
             yield
         finally:
-            current_session_identifier.reset(session_token)
+            current_execution_context.reset(session_token)
 
     @staticmethod
     def _is_corrupt_checkpoint_error(error: Exception) -> bool:
         """Detects dangling tool call exceptions resulting from interrupted/corrupted checkpoints."""
         return "tool_calls that do not have a corresponding ToolMessage" in str(error)
 
-    def _recover_corrupt_checkpoint(self, session: SessionIdentifier):
+    def _recover_corrupt_checkpoint(self, session: ExecutionContext):
         """Rolls back the corrupt checkpoint step in SQLite storage to restore a valid state."""
         session_id = session.session_id
         SqliteCheckpointer().rollback_last_step(session_id)
@@ -250,7 +262,7 @@ class Agent(BaseAgent):
 
     async def _handle_execution_error(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         error: Exception
     ) -> str:
         """Updates job status to error, formats error message, and dispatches to channel."""
@@ -267,7 +279,7 @@ class Agent(BaseAgent):
     async def execute(
         self,
         prompt: Union[str, list],
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: Optional[list] = None,
         role: str = "user"
     ) -> str:
@@ -275,23 +287,26 @@ class Agent(BaseAgent):
         if self._is_empty_prompt(prompt):
             return await self._handle_empty_content(session.channel_obj, session.source)
 
-        prep = await self._prepare_execution(prompt, session, callbacks, role)
-        if prep is None:
-            return ""
-        config, inputs = prep
-
+        # The context is entered *before* preparation: _prepare_execution builds the graph, and
+        # graph construction resolves this agent's tool roster and skills. Entering afterwards
+        # meant construction ran under the caller's identity (or none at all).
         async with self._execution_context(session):
+            prep = await self._prepare_execution(prompt, session, callbacks, role)
+            if prep is None:
+                return ""
+            config, inputs, graph = prep
+
             try:
                 print(f"Invoking graph for {self.agent_id}")
                 try:
-                    result = await self.graph.ainvoke(inputs, config=config)
+                    result = await graph.ainvoke(inputs, config=config)
                 except Exception as e:
                     if self._is_corrupt_checkpoint_error(e):
                         self._recover_corrupt_checkpoint(session)
-                        result = await self.graph.ainvoke(inputs, config=config)
+                        result = await graph.ainvoke(inputs, config=config)
                     else:
                         raise e
-                self._update_job_status(session, config)
+                self._update_job_status(session, config, graph)
             except Exception as e:
                 return await self._handle_execution_error(session, e)
 
@@ -303,7 +318,7 @@ class Agent(BaseAgent):
     async def execute_stream(
         self,
         prompt: Union[str, list],
-        session: SessionIdentifier,
+        session: ExecutionContext,
         callbacks: Optional[list] = None,
         role: str = "user"
     ):
@@ -328,18 +343,19 @@ class Agent(BaseAgent):
             }
             return
 
-        prep = await self._prepare_execution(prompt, session, callbacks, role)
-        if prep is None:
-            return
-        config, inputs = prep
-
         accumulated_tokens = []
         subagent_final_response = None
+        # Context entered before preparation — see the note in execute().
         async with self._execution_context(session):
+            prep = await self._prepare_execution(prompt, session, callbacks, role)
+            if prep is None:
+                return
+            config, inputs, graph = prep
+
             try:
                 print(f"Streaming graph for {self.agent_id}")
                 async for event in StreamHandler.stream_with_recovery(
-                    graph=self.graph,
+                    graph=graph,
                     inputs=inputs,
                     config=config,
                     session=session,
@@ -351,7 +367,7 @@ class Agent(BaseAgent):
                     elif event.get("type") == EVENT_SUBAGENT_FINAL:
                         subagent_final_response = event.get("response")
                     yield event
-                self._update_job_status(session, config)
+                self._update_job_status(session, config, graph)
             except Exception as e:
                 err_msg = await self._handle_execution_error(session, e)
                 yield {"type": EVENT_ERROR, "content": err_msg}
@@ -361,7 +377,7 @@ class Agent(BaseAgent):
         if not response:
             """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
             response = StreamHandler.resolve_final_response(
-                graph=self.graph,
+                graph=graph,
                 config=config,
                 accumulated_tokens=accumulated_tokens,
                 parse_fn=self._parse_final_response

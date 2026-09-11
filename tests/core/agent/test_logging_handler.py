@@ -122,20 +122,20 @@ class TestLoggingHandler(unittest.TestCase):
 
     def test_on_tool_start_with_contextvar_agent_id(self):
         from unittest.mock import patch
-        from core.agent.job_manager import current_session_identifier
+        from core.agent.execution_context import current_execution_context
         handler = LoggingHandler(session=self.session)
         handler.agent_id = None
         handler.manager = MagicMock()
         
         sess = SessionManager.get_session(agent_id="graph-worker", source="discord", channel="general")
-        token = current_session_identifier.set(sess)
+        token = current_execution_context.set(sess)
         try:
             input_str = "{'instructions': [{'action': 'ls', 'path': '{file}'}]}"
             with patch("builtins.print") as mock_print:
                 handler.on_tool_start({"name": "filesystem"}, input_str)
                 mock_print.assert_called_once_with('[Agent:graph-worker] Tool use: filesystem [action "ls" on {file}]')
         finally:
-            current_session_identifier.reset(token)
+            current_execution_context.reset(token)
 
     def test_on_tool_start_with_input_agent_id(self):
         from unittest.mock import patch

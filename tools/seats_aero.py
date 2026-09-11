@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 import requests
 
 from core.util import format_tool_response
+from core.agent.execution_context import try_context
 from core.util.config import Config
 
 
@@ -38,7 +39,6 @@ def seats_aero(
     include_filtered: bool = False,
     disable_filters: bool = False,
     show_dynamic_pricing: bool = False,
-    agent_id: str = "",
 ) -> str:
     """
     Search and inspect award flight availability across 20+ mileage programs using the Seats.aero partner API.
@@ -88,17 +88,18 @@ def seats_aero(
         include_filtered: Include dynamically-priced/raw results.
         disable_filters: Disable dynamic price filtering in live search.
         show_dynamic_pricing: Show dynamic pricing in live search.
-        agent_id: Optional agent ID for permission checking.
     """
-    # Permission verification if agent_id is passed
-    if agent_id:
+    # Permission verification. Identity comes from the execution context, so this can no
+    # longer be skipped by omitting an argument.
+    ctx = try_context()
+    if ctx is not None:
         from core.loaders.tools_loader import ToolsLoader
         tools_loader = ToolsLoader()
-        if not tools_loader.check_permission(agent_id, "seats_aero", action):
+        if not tools_loader.check_permission(ctx, "seats_aero", action):
             return format_tool_response(
                 "seats_aero",
                 payload="",
-                errors=f"Error: Agent '{agent_id}' does not have permission to execute action '{action}' on seats_aero."
+                errors=f"Error: Agent '{ctx.agent_id}' does not have permission to execute action '{action}' on seats_aero."
             )
 
     api_key = Config().seats_aero_api_key

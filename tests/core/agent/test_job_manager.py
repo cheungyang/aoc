@@ -129,15 +129,15 @@ class TestJobManager(unittest.TestCase):
         legacy_temp_dir.cleanup()
 
     def test_clean_jobs(self):
-        from core.agent.session_identifier import SessionIdentifier
+        from core.agent.execution_context import ExecutionContext
         # Populate manager with 50 jobs
         for i in range(50):
-            jid = SessionIdentifier.new_job_id()
+            jid = ExecutionContext.new_job_id()
             self.manager._job_ids.append(jid)
             self.manager._jobs[jid] = Job(jid, "agent1", "session", time.time(), time.time(), "running")
 
         # Add one that should be cleaned
-        jid_to_clean = SessionIdentifier.new_job_id()
+        jid_to_clean = ExecutionContext.new_job_id()
         self.manager._job_ids.append(jid_to_clean)
         self.manager._jobs[jid_to_clean] = Job(jid_to_clean, "completed_agent", "session", time.time(), time.time(), "completed")
 
@@ -180,17 +180,17 @@ class TestJobManager(unittest.TestCase):
             cursor = conn.execute("SELECT status FROM jobs WHERE job_id = ?", ("job_to_kill",))
             self.assertEqual(cursor.fetchone()["status"], "killing")
 
-    def test_current_session_identifier(self):
-        from core.agent.job_manager import current_session_identifier
+    def test_current_execution_context(self):
+        from core.agent.execution_context import current_execution_context
         from core.agent.session_manager import SessionManager
-        self.assertIsNone(current_session_identifier.get())
+        self.assertIsNone(current_execution_context.get())
 
         sess = SessionManager.get_session(agent_id="main", source="discord", channel="general", job_id="job123")
-        token = current_session_identifier.set(sess)
-        self.assertEqual(current_session_identifier.get(), sess)
+        token = current_execution_context.set(sess)
+        self.assertEqual(current_execution_context.get(), sess)
 
-        current_session_identifier.reset(token)
-        self.assertIsNone(current_session_identifier.get())
+        current_execution_context.reset(token)
+        self.assertIsNone(current_execution_context.get())
 
 
 if __name__ == "__main__":

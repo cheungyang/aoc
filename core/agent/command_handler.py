@@ -2,20 +2,20 @@ import os
 import sys
 import asyncio
 from typing import Union
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 from core.agent.session_manager import SessionManager
 from core.util import split_message
 
 class CommandHandler:
     """
     Handles system-level bracket commands (e.g. [new], [newall], [restart], [compact])
-    sent to the agent using SessionIdentifier.
+    sent to the agent using ExecutionContext.
     """
 
     async def handle_command(
         self,
         content: Union[str, list],
-        session: SessionIdentifier,
+        session: ExecutionContext,
     ) -> bool:
         """
         Checks if content is a recognized command and executes it.
@@ -40,13 +40,13 @@ class CommandHandler:
 
         return False
 
-    async def _handle_new(self, session: SessionIdentifier):
+    async def _handle_new(self, session: ExecutionContext):
         archive_status = SessionManager().clear_session(session)
         channel = session.channel_obj
         if channel is not None and hasattr(channel, "send"):
             await channel.send(f"Session context cleared. {archive_status}")
 
-    async def _handle_newall(self, session: SessionIdentifier):
+    async def _handle_newall(self, session: ExecutionContext):
         archive_status = SessionManager().clear_sessions()
         full_msg = f"All session contexts cleared. {archive_status}"
         chunks = split_message(full_msg)
@@ -57,14 +57,14 @@ class CommandHandler:
             if channel is not None and hasattr(channel, "send"):
                 await channel.send(chunk)
 
-    async def _handle_restart(self, session: SessionIdentifier):
+    async def _handle_restart(self, session: ExecutionContext):
         channel = session.channel_obj
         if channel is not None and hasattr(channel, "send"):
             await channel.send("System is restarting...")
         await asyncio.sleep(0.5)
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-    async def _handle_compact(self, session: SessionIdentifier):
+    async def _handle_compact(self, session: ExecutionContext):
         channel = session.channel_obj
         session_id = session.session_id
 

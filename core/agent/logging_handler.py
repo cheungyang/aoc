@@ -6,7 +6,7 @@ import ast
 from typing import Any, Optional, Union
 from langchain_core.callbacks import BaseCallbackHandler
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-from core.agent.session_identifier import SessionIdentifier
+from core.agent.execution_context import ExecutionContext
 
 def format_tool_extra_str(input_str: Any, tool_name: Optional[str] = None) -> str:
     """
@@ -98,7 +98,7 @@ def format_tool_extra_str(input_str: Any, tool_name: Optional[str] = None) -> st
 class LoggingHandler(BaseCallbackHandler):
     def __init__(
         self,
-        session: SessionIdentifier,
+        session: ExecutionContext,
         human_message: Optional[Union[str, list]] = None,
         role: str = "user",
     ):
@@ -192,8 +192,8 @@ class LoggingHandler(BaseCallbackHandler):
         agent_id = self.agent_id
         if not agent_id:
             try:
-                from core.agent.job_manager import current_session_identifier
-                sess = current_session_identifier.get()
+                from core.agent.execution_context import try_context
+                sess = try_context()
                 agent_id = sess.agent_id if sess else None
             except Exception:
                 pass

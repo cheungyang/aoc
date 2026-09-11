@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.agent.agent import Agent
+from tests.helpers import make_context
 
 class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      def setUp(self):
@@ -51,13 +52,13 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          builder = GraphBuilder()
          
          # Run
-         graph = await builder.build_graph("main", config={"tools": {"tool1": {}}})
+         graph = await builder.build_graph(make_context(agent_id="main"), config={"tools": {"tool1": {}}})
          
          # Assertions
          self.assertEqual(graph, "MockGraph")
          self.mock_create_graph.assert_called_once_with(
              llm=mock_llm_class.return_value,
-             tools=[mock_tool1],
+             tools=[mock_tool1.model_copy.return_value],
              prompt=unittest.mock.ANY,
              checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="main",
@@ -85,11 +86,11 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          
          from core.agent.graph_builder import GraphBuilder
          builder = GraphBuilder()
-         graph = await builder.build_graph("test_agent", config={"tools": {"tool1": {}}, "skills": ["skill1"]})
+         graph = await builder.build_graph(make_context(agent_id="test_agent"), config={"tools": {"tool1": {}}, "skills": ["skill1"]})
  
          self.mock_create_graph.assert_called_once_with(
              llm=unittest.mock.ANY,
-             tools=[mock_tool1],
+             tools=[mock_tool1.model_copy.return_value],
              prompt=unittest.mock.ANY,
              checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="test_agent",
@@ -101,17 +102,25 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.agent.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.agent.graph_builder.SqliteCheckpointer')
-     @patch('core.agent.graph_builder.current_session_identifier')
+     @patch('core.agent.graph_builder.try_context')
      @patch('core.agent.graph_builder.JobManager')
      @patch('core.agent.graph_builder.interrupt')
-     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_current_session_identifier, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_try_context, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
          # Setup mocks
          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
-         mock_tool1._run = MagicMock(return_value="tool_output")
+         original_run = MagicMock(return_value="tool_output")
+         mock_tool1._run = original_run
          mock_tool1._arun = None
+
+         # build_graph wraps a copy so the shared @tool singleton is never mutated.
+         mock_tool_copy = MagicMock()
+         mock_tool_copy.name = "tool1"
+         mock_tool_copy._run = MagicMock(return_value="tool_output")
+         mock_tool_copy._arun = None
+         mock_tool1.model_copy.return_value = mock_tool_copy
          
          mock_loader = MagicMock()
          mock_tool_loader_class.return_value = mock_loader
@@ -125,14 +134,18 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          builder = GraphBuilder()
          
          # Run
-         await builder.build_graph("main", config={"tools": {"tool1": {}}})
+         await builder.build_graph(make_context(agent_id="main"), config={"tools": {"tool1": {}}})
          
          # Get the wrapped tool passed to create_graph
          wrapped_tools = self.mock_create_graph.call_args.kwargs["tools"]
          wrapped_tool = wrapped_tools[0]
+
+         # The copy is what gets wrapped; the original is left untouched.
+         self.assertIs(wrapped_tool, mock_tool_copy)
+         self.assertIs(mock_tool1._run, original_run)
          
          # Test normal execution
-         mock_current_session_identifier.get.return_value = MagicMock(job_id="job1")
+         mock_try_context.return_value = MagicMock(job_id="job1")
          mock_job_manager = MagicMock()
          mock_job_manager_class.return_value = mock_job_manager
          mock_job = MagicMock()
@@ -180,13 +193,14 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          
          with patch.dict('sys.modules', {'langchain_ollama': mock_ollama}):
              # Run
-             graph = await builder.build_graph("main", config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}})
+             graph = await builder.build_graph(make_context(agent_id="main"), config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}})
          
          # Assertions
          self.assertEqual(graph, "MockGraph")
          self.mock_create_graph.assert_called_once_with(
              llm=mock_ollama_class.return_value,
-             tools=[mock_tool1],
+             # build_graph wraps a copy of each tool, never the shared singleton.
+             tools=[mock_tool1.model_copy.return_value],
              prompt=unittest.mock.ANY,
              checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="main",
@@ -206,7 +220,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           from core.agent.graph_builder import GraphBuilder
           builder = GraphBuilder()
           
-          prompt_fn = builder._get_prompt_template("main")
+          prompt_fn = builder._get_prompt_template(make_context(agent_id="main"))
           self.assertTrue(callable(prompt_fn))
           
           # Call the dynamic prompt function with a mock state
@@ -233,7 +247,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
           builder = GraphBuilder()
 
-          prompt_fn = builder._get_prompt_template("main")
+          prompt_fn = builder._get_prompt_template(make_context(agent_id="main"))
 
           input_messages = [
               HumanMessage(content="Hello"),
@@ -265,7 +279,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           from core.agent.graph_builder import GraphBuilder
           from langchain_core.messages import HumanMessage, SystemMessage
           builder = GraphBuilder()
-          prompt_fn = builder._get_prompt_template("main")
+          prompt_fn = builder._get_prompt_template(make_context(agent_id="main"))
           formatted = prompt_fn({"messages": [HumanMessage(content="Hello")]})
 
           system_contents = [m.content for m in formatted if isinstance(m, SystemMessage)]
