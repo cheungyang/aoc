@@ -578,6 +578,12 @@ class TestSyncReviewNode(ManifestFixture):
         patch("graphs.coding.nodes.sync_review.get_push_identity", return_value=None).start()
         self.addCleanup(patch.stopall)
         patch("graphs.coding.nodes.sync_review._teardown", AsyncMock()).start()
+        # Inline threads are a separate API call; the tests below drive the
+        # issue-comment path unless they say otherwise.
+        self.threads = patch(
+            "graphs.coding.nodes.sync_review.git_ops.get_unresolved_review_threads",
+            AsyncMock(return_value=[])
+        ).start()
 
     def review_state(self, task):
         return self.base_state(
@@ -655,6 +661,23 @@ class TestSyncReviewNode(ManifestFixture):
         self.assertEqual(stored["stage"], "provisioned")
         self.assertEqual(stored["review_cursor"], "4")
         self.assertIsNone(stored["impl_digest"])
+
+    async def test_an_inline_only_review_is_still_acted_on(self):
+        """Comments on the line itself are not in `comments`; they used to be missed."""
+        task = _task(status="awaiting_review", stage="awaiting_review",
+                     pr_url="https://github.com/org/repo/pull/7", pr_number=7)
+        self.write_manifest([task])
+        self.threads.return_value = [
+            {"author": {"login": "alice"}, "body": "[app.py:12] extract this", "databaseId": 8}
+        ]
+
+        with patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value={"state": "OPEN", "comments": []})):
+            result = await sync_review_node(self.review_state(task))
+
+        self.assertEqual(result["route"], "implement")
+        self.assertEqual(result["github_pr_comments"], ["@alice: [app.py:12] extract this"])
+        self.assertEqual(self.stored()["review_cursor"], "8")
 
     async def test_a_pending_review_releases_the_lease_and_does_nothing_else(self):
         task = _task(status="awaiting_review", stage="awaiting_review",

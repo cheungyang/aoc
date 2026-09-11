@@ -205,8 +205,18 @@ async def sync_review_node(state: CodingState) -> Dict[str, Any]:
         report.append(f"🛑 `{task_id}`: {evidence} Task marked failed and worktree removed.")
         return {"route": "scheduler", "tick_report": report, "error_message": ""}
 
+    # Inline review threads live in a different API from issue comments, and a
+    # review written entirely on the lines themselves would otherwise look like
+    # silence. Resolved and outdated threads are already filtered out.
+    thread_comments = await git_ops.get_unresolved_review_threads(
+        workspace_path,
+        target_repo=target_repo,
+        pr_number=current_task.get("pr_number") or pr_status.get("number"),
+        push_identity=push_identity
+    )
+
     comments, new_cursor = harvest_comments(
-        pr_status,
+        {**pr_status, "comments": list(pr_status.get("comments") or []) + thread_comments},
         reviewers=reviewers,
         review_cursor=current_task.get("review_cursor"),
         bot_login=push_identity.login if push_identity else None

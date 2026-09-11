@@ -394,6 +394,103 @@ async def get_pull_request_status(
     }
 
 
+_REVIEW_THREADS_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          comments(first: 20) {
+            nodes {
+              databaseId
+              body
+              path
+              line
+              author { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+async def get_unresolved_review_threads(
+    workspace_path: str,
+    target_repo: Optional[str],
+    pr_number: Optional[int],
+    push_identity: Optional[PushIdentity] = None
+) -> List[Dict[str, Any]]:
+    """Returns the comments of unresolved inline review threads.
+
+    Inline comments — the usual way to ask for a change, written on the line
+    itself — do not appear in `gh pr view --json comments` at all, so a review
+    made entirely of them looked like silence. Only the REST/GraphQL review
+    thread API exposes them along with their resolution state.
+
+    Resolved and outdated threads are dropped: a conversation the reviewer has
+    already closed must not be sent back to the worker a second time.
+
+    Each entry has the same shape as an issue comment (`author`, `body`,
+    `databaseId`) so callers can treat both alike, with the file and line
+    prefixed onto the body so the worker knows where to look.
+    """
+    import json
+
+    if not pr_number or not target_repo or "/" not in str(target_repo):
+        return []
+
+    owner, _, repo = str(target_repo).partition("/")
+    code, out, _ = await run_cmd_async(
+        [
+            "gh", "api", "graphql",
+            "-f", f"query={_REVIEW_THREADS_QUERY}",
+            "-F", f"owner={owner}",
+            "-F", f"repo={repo}",
+            "-F", f"number={int(pr_number)}",
+        ],
+        cwd=workspace_path,
+        timeout=20.0,
+        env=_with_identity_env(push_identity)
+    )
+    if code != 0 or not out.strip():
+        return []
+
+    try:
+        payload = json.loads(out)
+        threads = (
+            payload["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+        )
+    except Exception:
+        return []
+
+    collected: List[Dict[str, Any]] = []
+    for thread in threads or []:
+        if not isinstance(thread, dict) or thread.get("isResolved") or thread.get("isOutdated"):
+            continue
+        for comment in (thread.get("comments") or {}).get("nodes") or []:
+            body = (comment.get("body") or "").strip()
+            if not body:
+                continue
+            location = comment.get("path") or ""
+            if location:
+                line = comment.get("line")
+                location = f"{location}:{line}" if line else location
+                body = f"[{location}] {body}"
+            collected.append({
+                "author": comment.get("author") or {},
+                "body": body,
+                "databaseId": comment.get("databaseId"),
+            })
+
+    return collected
+
+
+
 async def merge_pull_request(
     workspace_path: str,
     pr_url_or_number: str,

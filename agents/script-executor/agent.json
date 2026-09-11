@@ -32,6 +32,14 @@
         "script sync_git.py",
         "script wiki_scanner.py"
       ]
+    },
+    {
+      "channel": "general",
+      "thread": "cronjobs",
+      "cron": "*/5 * * * *",
+      "prompt": [
+        "script coding_tick.py"
+      ]
     }
   ]
 }

@@ -109,7 +109,12 @@ class ScriptExecutorAgent(BaseAgent):
                             args[0] = os.path.join("scripts", args[0])
                         expanded_args = [os.path.expanduser(arg) for arg in args]
                         res = await asyncio.to_thread(subprocess.run, expanded_args, capture_output=True, text=True, check=True)
-                        results.append(f"Script '{rest}' executed successfully:\n{res.stdout}")
+                        # A script that succeeded and said nothing gets no message,
+                        # not even the wrapper: on a five-minute schedule the
+                        # "executed successfully" line is the noise.
+                        stdout = (res.stdout or "").strip()
+                        if stdout:
+                            results.append(f"Script '{rest}' executed successfully:\n{stdout}")
                     except subprocess.CalledProcessError as e:
                         results.append(f"Error executing script '{rest}': {e.stderr}")
                     except Exception as e:
@@ -124,11 +129,12 @@ class ScriptExecutorAgent(BaseAgent):
         finally:
             current_execution_context.reset(session_token)
 
-        final_output = "\n".join(results)
-        
-        if channel_obj is not None:
+        final_output = "\n".join(r for r in results if r and r.strip())
+
+        # Nothing to say: post nothing. An empty tick must not surface at all.
+        if channel_obj is not None and final_output.strip():
             chunks = split_message(final_output)
             for chunk in chunks:
                 await channel_obj.send(chunk)
-                
+
         return final_output

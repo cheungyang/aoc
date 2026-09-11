@@ -108,5 +108,66 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
             session=session, prompt="script echo hello"
         )
 
+    @patch('subprocess.run')
+    async def test_a_script_that_says_nothing_produces_no_message(self, mock_run):
+        """A five-minute cron must be silent when there is nothing to report.
+
+        The wrapper line was the noise: "executed successfully" with nothing
+        after it, 288 times a day.
+        """
+        mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+
+        agent = ScriptExecutorAgent("script-executor")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("script coding_tick.py", session=session)
+
+        self.assertEqual(output, "")
+
+    @patch('subprocess.run')
+    async def test_whitespace_only_output_is_also_silence(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="\n  \n", stderr="", returncode=0)
+
+        agent = ScriptExecutorAgent("script-executor")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("script coding_tick.py", session=session)
+
+        self.assertEqual(output, "")
+
+    @patch('subprocess.run')
+    async def test_nothing_is_posted_to_the_channel_when_there_is_nothing_to_say(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+        # ExecutionContext derives channel_obj from a non-string channel.
+        channel = AsyncMock()
+        channel.name = "general"
+
+        agent = ScriptExecutorAgent("script-executor")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel=channel)
+        self.assertIsNotNone(session.channel_obj)
+        await agent.execute("script coding_tick.py", session=session)
+
+        channel.send.assert_not_called()
+
+    @patch('subprocess.run')
+    async def test_a_failing_script_is_never_silent(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, "coding_tick.py", stderr="manifest is not readable JSON"
+        )
+
+        agent = ScriptExecutorAgent("script-executor")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
+        output = await agent.execute("script coding_tick.py", session=session)
+
+        self.assertIn("manifest is not readable JSON", output)
+
+    async def test_the_coding_tick_is_scheduled_every_five_minutes(self):
+        loader = AgentsLoader()
+        agent = loader.get_agent("script-executor")
+        entries = [s for s in agent.config.get("schedules", [])
+                   if "script coding_tick.py" in s.get("prompt", [])]
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["cron"], "*/5 * * * *")
+
+
 if __name__ == "__main__":
     unittest.main()
