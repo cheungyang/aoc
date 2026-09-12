@@ -2,9 +2,9 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal
 from typing_extensions import TypedDict as ExtTypedDict
 from langchain_core.messages import AnyMessage
 
-# Manifest v3 vocabulary. The v2 names are still accepted on read and mapped by
-# utils/manifest.migrate_manifest, because the current (v1 topology) nodes still
-# write them; they disappear when phase 2 lands.
+# Manifest v3 vocabulary. The legacy names are still accepted on read and mapped
+# by utils/manifest.migrate_manifest — nothing writes them any more, but a
+# manifest on disk may predate the migration.
 TaskStatusV3 = Literal["queued", "active", "awaiting_review", "done", "failed", "halted", "blocked"]
 TaskStatusLegacy = Literal["pending", "in_progress", "in_review", "completed", "rejected"]
 TaskStatus = Literal[
@@ -37,8 +37,8 @@ class TaskError(TypedDict, total=False):
     """The last failure, classified so retries can target the right stage."""
     stage: str
     # "llm" | "verification" | "git" | "github" | "config" | "unknown".
-    # Infrastructure failures must not consume the LLM budget, which is the
-    # single-attempt_count defect (B1) this replaces.
+    # Infrastructure failures must not consume the LLM budget, so the manifest
+    # counts attempts per stage rather than once per task (B1).
     kind: str
     message: str
     at: float
@@ -101,7 +101,6 @@ class CodingState(TypedDict, total=False):
     repo: RepoDescriptor
     max_concurrency: int
     queue: List[TaskEnvelope]
-    active_runs: Dict[str, TaskEnvelope]
     completed_tasks: List[str]
     failed_tasks: List[str]
 
@@ -118,35 +117,26 @@ class CodingState(TypedDict, total=False):
     base_ref: str
     spec_path: str
 
-    # 3. Spec Validation (Goldfish 0)
-    spec_validation_passed: bool
-    spec_validation_feedback: str
-
-    # 4. Execution & QA Flags (Goldfish 1 & 2 + Subprocess Tester)
+    # 3. Implement & verify
     implementation_summary: str
     test_run_passed: bool
     test_stdout: str
     test_stderr: str
-    attempt_count: int
-    max_retries: int
-    critic_passed: bool
-    critic_feedback: str
     modified_files: List[str]
     diff_summary: str
 
-    # 5. HITL Review Gate (Interruption)
+    # 4. Review
     pr_url: str
     pr_number: Optional[int]
-    hitl_decision: str  # "approved" | "revise" | "abort"
     latest_human_feedback: str
     github_pr_comments: List[str]
 
-    # 6. Finalization & System Delivery
+    # 5. Finalization & System Delivery
     commit_url: str
     error_message: str
     messages: List[AnyMessage]
 
-    # 7. Tick reconciler (v2)
+    # 6. Tick reconciler
     # These are channels, not decoration: LangGraph carries only what the schema
     # declares, so an undeclared `route` would be dropped between nodes and every
     # conditional edge would fall through to END.

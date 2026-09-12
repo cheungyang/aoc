@@ -39,9 +39,9 @@ def resolve_manifest_path(path: Optional[str] = None, *args, **kwargs) -> str:
 def load_manifest(manifest_path: str) -> Dict[str, Any]:
     """Loads the build request manifest as written, without migrating it.
 
-    The v1-topology nodes still speak the v2 vocabulary, so this deliberately does
-    not upgrade statuses; `utils.manifest.load_manifest` is the migrating reader
-    used by the v3 tick.
+    This is the read-only view used for inspection and scheduling queries, so it
+    deliberately does not upgrade statuses on disk; `utils.manifest.load_manifest`
+    is the migrating reader used by the tick.
     """
     try:
         return manifest_store.load_manifest(manifest_path, migrate=False)

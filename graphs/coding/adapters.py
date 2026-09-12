@@ -51,17 +51,17 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
             target_repo = m_repo.group(1).strip()
 
     max_concurrency = int(kwargs.get("max_concurrency") or 1)
-    max_retries = int(kwargs.get("max_retries") or 3)
     session_id = kwargs.get("session_id") or ""
     thread_id = kwargs.get("thread_id") or session_id
     channel = kwargs.get("channel") or "coding-pipeline"
 
-    # In v2 the manifest carries each task's spec_path, so a tick does not need a
+    # The manifest carries each task's spec_path, so a tick does not need a
     # project directory. Requiring one used to make the scheduled tick — which has
     # no project in mind — fail before it started.
     error_msg = ""
 
-    # Check for human feedback / resume message
+    # A nudge in chat is not an approval — approval is read off GitHub — but it
+    # does reopen the polling window and is passed to the worker as feedback.
     human_feedback = kwargs.get("latest_human_feedback") or kwargs.get("feedback") or ""
     if not human_feedback and query:
         clean_q = query.replace("<caller>", "").replace("</caller>", "").strip()
@@ -81,7 +81,6 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "rejection_signals": manifest_settings.get("rejection_signals"),
         "project_path": project_path,
         "max_concurrency": max_concurrency,
-        "max_retries": max_retries,
         "session_id": session_id,
         "thread_id": thread_id,
         "channel": channel,
@@ -92,16 +91,12 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "required_tools": sorted((graph_config.get("tools") or {}).keys()),
         "audit_mode": kwargs.get("audit_mode") or manifest_settings.get("audit") or "advisory",
         "queue": kwargs.get("queue") or [],
-        "active_runs": {},
         "completed_tasks": [],
         "failed_tasks": [],
         "tick_report": [],
         "tick_handled": [],
-        "attempt_count": 0,
         "test_run_passed": False,
-        "critic_passed": False,
         "latest_human_feedback": human_feedback,
-        "hitl_decision": "",
         "messages": [HumanMessage(content=formatted_query)],
         "error_message": error_msg
     }
@@ -144,36 +139,8 @@ def _load_manifest_settings(build_request_path: str) -> Dict[str, Any]:
     }
 
 
-
-def format_hitl_presentation(state: Dict[str, Any]) -> str:
-    """Generates the Markdown presentation string for HITL Review Gate (v2)."""
-    current_task = state.get("current_task") or {}
-    task_id = current_task.get("task_id", "Unknown Task")
-    run_id = state.get("run_id", "run_default")
-    branch = state.get("branch_name", "feat/unknown")
-    pr_url = state.get("pr_url") or current_task.get("pr_url", "(PR pending creation)")
-
-    test_passed = state.get("test_run_passed", False)
-    test_status_str = "✅ ALL TESTS PASSING" if test_passed else "❌ TESTS FAILED"
-
-    critic_passed = state.get("critic_passed", False)
-    critic_status_str = "✅ APPROVED" if critic_passed else "⚠️ REJECTED"
-
-    return (
-        f"### 🔍 Coding Graph HITL Review Gate\n\n"
-        f"- **Task ID**: `{task_id}`\n"
-        f"- **Branch**: `{branch}`\n"
-        f"- **GitHub PR**: 🔗 [{pr_url}]({pr_url})\n"
-        f"- **Test Suite**: {test_status_str}\n"
-        f"- **Critic Verdict**: {critic_status_str}\n\n"
-        f"Please review the changes on GitHub.\n"
-        f"- **Approve**: Click **\"Approve\"** on GitHub PR OR reply `Approve` in chat to merge into `origin/main`.\n"
-        f"- **Revise**: Leave review comments on the GitHub PR or reply with feedback here to request updates."
-    )
-
-
 def format_tick_report(state: Dict[str, Any]) -> str:
-    """Renders the v2 tick report.
+    """Renders the lines a tick produced.
 
     Returns an empty string when the tick did nothing. The scheduled runner
     treats empty stdout as "post nothing", so a quiet pipeline stays quiet
@@ -186,53 +153,16 @@ def format_tick_report(state: Dict[str, Any]) -> str:
 
 
 def format_output(state: Dict[str, Any]) -> str:
-    """Extracts final reply text from CodingState.
+    """Renders the result of a tick.
 
-    Which renderer to use is a property of the state, not of configuration: the
-    tick nodes set `route` on every return path and the v1 nodes never set it,
-    so the state itself says which graph produced it. Reading a config field
-    here meant the renderer could disagree with the graph that actually ran.
+    Empty output is meaningful, not a bug: the scheduled runner treats empty
+    stdout as "post nothing", which is what keeps a channel usable when the
+    queue is idle 287 times out of 288 a day.
     """
     if not isinstance(state, dict):
         return str(state)
 
-    if state.get("route"):
-        if state.get("error_message"):
-            return f"🛑 Coding tick error: {state['error_message']}"
-        return format_tick_report(state)
-
     if state.get("error_message"):
-        return f"🛑 Coding graph execution error: {state['error_message']}"
+        return f"🛑 Coding tick error: {state['error_message']}"
 
-    # If currently paused at HITL Gate
-    if state.get("hitl_decision") == "pending_review":
-        return format_hitl_presentation(state)
-
-    # If completed and Commit URL exists
-    if state.get("commit_url"):
-        completed = state.get("completed_tasks", [])
-        return (
-            f"🎉 **Coding Execution Completed & Merged!**\n\n"
-            f"- **Tasks Completed**: `{', '.join(completed)}`\n"
-            f"- **Pull Request**: {state.get('pr_url')}\n"
-            f"- **Merged Commit on Main**: {state.get('commit_url')}\n"
-            f"- **Status**: ✅ Completed & Verified."
-        )
-
-    if state.get("pr_url") and not state.get("current_task"):
-        completed = state.get("completed_tasks", [])
-        return (
-            f"🎉 **Coding Execution Completed!**\n\n"
-            f"- **Tasks Completed**: `{', '.join(completed)}`\n"
-            f"- **Pull Request**: {state['pr_url']}\n"
-            f"- **Status**: ✅ Ready for merge."
-        )
-
-    if "messages" in state and state["messages"]:
-        for msg in reversed(state["messages"]):
-            if isinstance(msg, AIMessage):
-                return msg.content
-            elif isinstance(msg, dict) and msg.get("role") == "assistant":
-                return msg.get("content", "")
-
-    return str(state)
+    return format_tick_report(state)

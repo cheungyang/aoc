@@ -67,7 +67,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         verification_command=current_task.get("verification_command", ""),
         spec_content=spec_content,
         test_stderr=_clean(state.get("test_stderr")),
-        critic_feedback=state.get("audit_feedback") or state.get("critic_feedback"),
+        critic_feedback=state.get("audit_feedback"),
         human_feedback=_review_feedback(state)
     )
 
@@ -128,7 +128,6 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         # Consumed: the next implement must not be re-prompted with stale feedback.
         "test_stderr": "",
         "audit_feedback": "",
-        "critic_feedback": "",
         "latest_human_feedback": "",
         "github_pr_comments": [],
         "tick_report": report,

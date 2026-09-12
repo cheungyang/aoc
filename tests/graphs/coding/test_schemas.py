@@ -32,18 +32,18 @@ class TestCodingSchemas(unittest.TestCase):
             "max_concurrency": 1,
             "queue": [],
             "run_id": "run_8F2A",
-            "attempt_count": 0,
             "test_run_passed": True,
-            "critic_passed": True,
+            "audit_passed": True,
             "pr_url": "https://github.com/org/repo/pull/1",
             "pr_number": 1,
             "commit_url": "https://github.com/org/repo/commit/sha123",
             "github_pr_comments": ["Great work, please add comment"],
-            "hitl_decision": "approved"
+            "route": "publish"
         }
         self.assertEqual(state["run_id"], "run_8F2A")
         self.assertTrue(state["test_run_passed"])
-        self.assertEqual(state["hitl_decision"], "approved")
+        self.assertTrue(state["audit_passed"])
+        self.assertEqual(state["route"], "publish")
         self.assertEqual(state["pr_number"], 1)
         self.assertEqual(state["commit_url"], "https://github.com/org/repo/commit/sha123")
         self.assertEqual(len(state["github_pr_comments"]), 1)

@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from graphs.coding.nodes.provisioner import provisioner_node
 from graphs.coding.utils.repo import (
     DEFAULT_REPO_DESCRIPTOR,
     cache_path_for,
@@ -68,65 +67,6 @@ class TestResolvePushIdentity(unittest.TestCase):
         with patch.dict(os.environ, {"AOC_BOT_TOKEN_FILE": self.token_path}):
             identity = get_push_identity({"repo": {"push_identity": "bot"}})
         self.assertEqual(identity.login, "bot")
-
-
-class TestProvisionerPreflight(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.token_path = os.path.join(self.tmpdir, "bot_token")
-        with open(self.token_path, "w", encoding="utf-8") as f:
-            f.write("ghp_secret")
-        os.chmod(self.token_path, 0o600)
-        self.state = {
-            "run_id": "run_TEST",
-            "project_name": "proj",
-            "current_task": {"task_id": "T-1", "feature_name": "auth", "project_name": "proj"},
-            "repo": {"slug": "owner/repo", "push_identity": "bot"}
-        }
-
-    @patch('graphs.coding.nodes.provisioner.git_ops.provision_worktree', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.provisioner.git_ops.preflight_push_access', new_callable=AsyncMock)
-    async def test_halts_before_provisioning_when_bot_cannot_push(self, mock_preflight, mock_provision):
-        mock_preflight.return_value = (False, "Preflight failed: `bot` has no push permission on owner/repo.")
-        with patch.dict(os.environ, {"AOC_BOT_TOKEN_FILE": self.token_path}):
-            res = await provisioner_node(self.state)
-
-        self.assertIn("no push permission", res["error_message"])
-        # Nothing is provisioned and, crucially, the worker never runs.
-        mock_provision.assert_not_called()
-
-    @patch('graphs.coding.nodes.provisioner.git_ops.provision_worktree', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.provisioner.git_ops.preflight_push_access', new_callable=AsyncMock)
-    async def test_missing_token_halts_without_touching_github(self, mock_preflight, mock_provision):
-        with patch.dict(os.environ, {"AOC_BOT_TOKEN_FILE": os.path.join(self.tmpdir, "gone")}):
-            res = await provisioner_node(self.state)
-
-        self.assertIn("Preflight failed", res["error_message"])
-        mock_preflight.assert_not_called()
-        mock_provision.assert_not_called()
-
-    @patch('graphs.coding.nodes.provisioner.git_ops.provision_worktree', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.provisioner.git_ops.preflight_push_access', new_callable=AsyncMock)
-    async def test_proceeds_when_preflight_passes(self, mock_preflight, mock_provision):
-        mock_preflight.return_value = (True, "Preflight OK")
-        mock_provision.return_value = (True, "provisioned")
-        with patch.dict(os.environ, {"AOC_BOT_TOKEN_FILE": self.token_path}):
-            res = await provisioner_node(self.state)
-
-        self.assertEqual(res["error_message"], "")
-        mock_provision.assert_called_once()
-
-    @patch('graphs.coding.nodes.provisioner.git_ops.provision_worktree', new_callable=AsyncMock)
-    @patch('graphs.coding.nodes.provisioner.git_ops.preflight_push_access', new_callable=AsyncMock)
-    async def test_no_machine_user_skips_the_network_check(self, mock_preflight, mock_provision):
-        mock_provision.return_value = (True, "provisioned")
-        state = dict(self.state)
-        state.pop("repo")
-        res = await provisioner_node(state)
-
-        self.assertEqual(res["error_message"], "")
-        mock_preflight.assert_not_called()
-        mock_provision.assert_called_once()
 
 
 class TestProjectRoot(unittest.TestCase):

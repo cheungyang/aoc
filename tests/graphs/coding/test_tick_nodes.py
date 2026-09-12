@@ -707,23 +707,40 @@ class TestSyncReviewNode(ManifestFixture):
 
 
 class TestGraphTopology(unittest.TestCase):
-    def test_v2_compiles_without_a_checkpointer(self):
+    def test_the_graph_compiles_without_a_checkpointer(self):
         """Durable state lives in the manifest, git and GitHub — not a checkpoint."""
         from graphs.coding.graph import create_graph
 
-        graph = create_graph(topology="v2")
+        graph = create_graph()
         self.assertIsNone(graph.checkpointer)
         self.assertEqual(
             {"scheduler", "implement", "verify", "audit", "publish", "sync_review"},
             set(graph.nodes) - {"__start__"},
         )
 
-    def test_v1_is_still_reachable_for_one_release(self):
+    def test_a_supplied_checkpointer_is_ignored_not_honoured(self):
+        """The loader hands every graph a checkpointer; this one must refuse it.
+
+        Honouring it would key durable state to the caller's session again,
+        which is the reason a halted run could not be resumed from anywhere
+        else (C4/C5).
+        """
         from langgraph.checkpoint.memory import MemorySaver
         from graphs.coding.graph import create_graph
 
-        graph = create_graph(checkpointer=MemorySaver(), topology="v1")
-        self.assertIn("hitl_gate", set(graph.nodes))
+        graph = create_graph(checkpointer=MemorySaver())
+
+        self.assertIsNone(graph.checkpointer)
+
+    def test_the_interrupt_driven_graph_is_gone(self):
+        from graphs.coding.graph import create_graph
+
+        nodes = set(create_graph().nodes)
+
+        self.assertNotIn("hitl_gate", nodes)
+        self.assertNotIn("worker_node", nodes)
+        self.assertNotIn("git_handoff", nodes)
+
 
 
 class TestSchedulerNode(ManifestFixture):
@@ -1023,7 +1040,7 @@ class TestTickEndToEnd(ManifestFixture):
 
     async def run_tick(self):
         from graphs.coding.graph import create_graph
-        return await create_graph(topology="v2").ainvoke(self.inputs())
+        return await create_graph().ainvoke(self.inputs())
 
     async def test_a_full_tick_walks_implement_to_awaiting_review(self):
         self.write_manifest([_task(stage="queued")])

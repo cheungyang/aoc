@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 from graphs.coding.adapters import (
     prepare_input,
-    format_hitl_presentation,
     format_output,
     format_tick_report,
 )
@@ -19,7 +18,6 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(res["project_path"], "/path/to/project")
         self.assertEqual(res["thread_id"], "thread_123")
         self.assertEqual(res["max_concurrency"], 1)
-        self.assertEqual(res["max_retries"], 3)
         self.assertEqual(res["error_message"], "")
 
     def test_prepare_input_without_project_path_is_valid(self):
@@ -83,71 +81,21 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(format_tick_report({"tick_report": []}), "")
         self.assertEqual(format_tick_report({}), "")
 
-    def test_format_output_v2_uses_tick_report(self):
-        out = format_output({"route": "done", "tick_report": ["AOC-01: published PR #9"]})
+    def test_format_output_renders_the_tick_report(self):
+        out = format_output({"tick_report": ["AOC-01: published PR #9"]})
         self.assertEqual(out, "AOC-01: published PR #9")
 
-    def test_format_output_v2_silent_on_noop(self):
-        self.assertEqual(format_output({"route": "done", "tick_report": []}), "")
+    def test_format_output_is_silent_on_a_noop_tick(self):
+        """Empty output is the signal to post nothing; a quiet queue stays quiet."""
+        self.assertEqual(format_output({"tick_report": []}), "")
 
-    def test_format_output_v2_error(self):
-        out = format_output({"route": "done", "error_message": "Disk full", "tick_report": []})
+    def test_format_output_reports_the_error(self):
+        out = format_output({"error_message": "Disk full", "tick_report": []})
         self.assertIn("Coding tick error: Disk full", out)
 
-    def test_the_renderer_is_chosen_by_the_state_not_by_config(self):
-        """`route` is the discriminator: only the tick nodes ever set it.
+    def test_format_output_survives_a_non_dict(self):
+        self.assertEqual(format_output("not a state"), "not a state")
 
-        Both topologies go through the same `prepare_input`, so the seeded keys
-        cannot tell them apart — but a v1 run never writes a route.
-        """
-        v1_state = {"tick_report": [], "error_message": "boom"}
-        v2_state = {"route": "done", "tick_report": [], "error_message": "boom"}
-
-        self.assertIn("Coding graph execution error", format_output(v1_state))
-        self.assertIn("Coding tick error", format_output(v2_state))
-
-    def test_format_hitl_presentation_v2(self):
-        state = {
-            "current_task": {"task_id": "AOC-01"},
-            "run_id": "run_A1B2",
-            "branch_name": "feat/aoc/test_run_A1B2",
-            "pr_url": "https://github.com/org/repo/pull/99",
-            "test_run_passed": True,
-            "critic_passed": True
-        }
-        out = format_hitl_presentation(state)
-        self.assertIn("### 🔍 Coding Graph HITL Review Gate", out)
-        self.assertIn("AOC-01", out)
-        self.assertIn("https://github.com/org/repo/pull/99", out)
-        self.assertIn("ALL TESTS PASSING", out)
-        self.assertIn("APPROVED", out)
-
-    def test_format_output_pending_review(self):
-        state = {
-            "hitl_decision": "pending_review",
-            "current_task": {"task_id": "AOC-01"},
-            "pr_url": "https://github.com/org/repo/pull/99",
-            "test_run_passed": True,
-            "critic_passed": True
-        }
-        out = format_output(state)
-        self.assertIn("### 🔍 Coding Graph HITL Review Gate", out)
-
-    def test_format_output_completed_with_commit_url(self):
-        state = {
-            "completed_tasks": ["AOC-01"],
-            "pr_url": "https://github.com/org/repo/pull/99",
-            "commit_url": "https://github.com/org/repo/commit/sha123"
-        }
-        out = format_output(state)
-        self.assertIn("Coding Execution Completed & Merged!", out)
-        self.assertIn("https://github.com/org/repo/commit/sha123", out)
-        self.assertIn("https://github.com/org/repo/pull/99", out)
-
-    def test_format_output_error_message(self):
-        state = {"error_message": "Disk full"}
-        out = format_output(state)
-        self.assertIn("Coding graph execution error: Disk full", out)
 
 if __name__ == '__main__':
     unittest.main()

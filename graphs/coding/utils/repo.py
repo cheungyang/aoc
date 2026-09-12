@@ -82,7 +82,7 @@ def resolve_push_identity(
 def get_push_identity(state: Optional[Dict[str, Any]]) -> Optional[PushIdentity]:
     """Best-effort identity lookup for a node that already passed preflight.
 
-    Preflight (in the provisioner) is what turns a broken credential into a halt;
+    Preflight (in the scheduler) is what turns a broken credential into a halt;
     by the time downstream nodes run, a failure here means the token file changed
     mid-run, so the node proceeds with ambient credentials and the push fails
     honestly rather than the node crashing.

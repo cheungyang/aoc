@@ -3,9 +3,6 @@
   "name": "coding",
   "description": "Runs one reconciliation tick over the coding manifest: provisions a worktree, has a stateless worker implement the task, verifies it, opens a PR, and syncs the review decision from GitHub.",
   "emoji": "💻",
-  "max_concurrency": 1,
-  "timeout_seconds": 300,
-  "max_retries": 3,
   "tools": {
     "bash": {
       "workspaces/runs": ["execute"],
