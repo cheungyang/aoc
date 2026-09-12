@@ -189,7 +189,7 @@ def split_markdown_into_chunks(
     return chunks
 
 
-def get_embedding_client():
+def get_embedding_client(model_name: Optional[str] = None):
     """
     Returns a GoogleGenerativeAIEmbeddings client if Gemini API key is configured.
     """
@@ -200,12 +200,17 @@ def get_embedding_client():
 
     try:
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        model = config.embedding_model
+        model = model_name or config.embedding_model
         if not model or model == "text-embedding-3-small":
             model = "models/text-embedding-004"
         elif not model.startswith("models/"):
             model = f"models/{model}"
-        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=gemini_key)
+
+        kwargs = {"model": model, "google_api_key": gemini_key}
+        if "gemini-embedding" in model:
+            kwargs["output_dimensionality"] = config.embedding_dimensions
+
+        return GoogleGenerativeAIEmbeddings(**kwargs)
     except Exception as e:
         print(f"Warning: Could not initialize GoogleGenerativeAIEmbeddings: {e}")
         return None
