@@ -730,24 +730,36 @@ async def preflight_push_access(
             f"PRs would be opened by the wrong account."
         )
 
-    # 2. Can that account push? `permissions.push` covers both collaborator role
-    #    and fine-grained PAT scope, which is exactly the pair that goes wrong.
+    # 2. Can that *token* push? Asking the API for `.permissions.push` does not
+    #    answer this: it reports the authenticated account's collaborator role,
+    #    and returns true for a token that is not scoped to the repo at all.
+    #    That false positive is expensive — it passes the gate, the graph spends
+    #    a full implementation run, and the push dies at the very end.
+    #
+    #    The honest probe is a push. `--dry-run` still opens git-receive-pack on
+    #    the remote, which is the endpoint that requires write, so a token
+    #    without it is refused here exactly as it would be for real — while no
+    #    ref is created or updated.
     code, out, err = await run_cmd_async(
-        ["gh", "api", f"repos/{target_repo}", "--jq", ".permissions.push"],
-        cwd=cwd, timeout=15.0, env=env
+        ["git"] + git_credential_args(push_identity) + [
+            "push", "--dry-run", f"https://github.com/{target_repo}.git",
+            "HEAD:refs/heads/aoc-preflight-probe"
+        ],
+        cwd=cwd, timeout=30.0, env={**(env or os.environ), "GIT_TERMINAL_PROMPT": "0"}
     )
     if code != 0:
         detail = (err.strip() or out.strip())
-        return False, (
-            f"Preflight failed: `{login}` cannot read {target_repo} ({detail}). "
-            f"Add the account as a collaborator and grant the token Metadata: Read."
-        )
-
-    if out.strip().lower() != "true":
-        return False, (
-            f"Preflight failed: `{login}` has no push permission on {target_repo}. "
-            f"Grant Write access to the account and Contents: Read and write to its token."
-        )
+        if "denied" in detail.lower() or "403" in detail:
+            return False, (
+                f"Preflight failed: `{login}` cannot push to {target_repo}.\n"
+                f"  {detail.splitlines()[0] if detail else ''}\n"
+                f"  If the token is fine-grained (github_pat_…), this is expected and cannot be\n"
+                f"  fixed by changing its permissions: GitHub does not support fine-grained PATs\n"
+                f"  for repositories where the account is a collaborator rather than the owner.\n"
+                f"  Use a classic PAT (ghp_…) with the `repo` scope, or move the repo to an org\n"
+                f"  that `{login}` belongs to."
+            )
+        return False, f"Preflight failed: could not reach {target_repo} as `{login}` ({detail})."
 
     return True, f"Preflight OK: `{login}` can push to {target_repo}."
 

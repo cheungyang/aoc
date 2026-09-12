@@ -14,9 +14,15 @@ from core.agent.execution_context import ExecutionContext
 
 class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
+    @patch('tools.graph_status._coding_queue_status', return_value="")
     @patch('tools.graph_status.GraphsLoader')
     @patch('tools.graph_status.JobManager')
-    def test_graph_status_no_active_graphs(self, mock_job_manager_class, mock_graphs_loader_class):
+    def test_graph_status_no_active_graphs(self, mock_job_manager_class, mock_graphs_loader_class,
+                                           _mock_coding_queue):
+        # The coding queue is read from the real build_request.json, so without
+        # this patch the test asserts "nothing is active" against whatever the
+        # pipeline happens to be working on — it passed only while the queue
+        # was empty and went red the first time a task was queued.
         mock_loader = MagicMock()
         mock_graphs_loader_class.return_value = mock_loader
         mock_loader.list_graph_names.return_value = ["content_creation", "coding"]

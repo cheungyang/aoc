@@ -115,14 +115,23 @@ class TestGhOperationsCarryToken(unittest.IsolatedAsyncioTestCase):
 
 class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_passes_when_bot_can_push(self, mock_run):
+    async def test_passes_when_the_dry_run_push_is_accepted(self, mock_run):
         mock_run.side_effect = [
             (0, "cheungyang-bot\n", ""),   # gh api user
-            (0, "true\n", "")              # gh api repos/<slug> .permissions.push
+            (0, "", "To https://github.com/owner/repo.git"),  # git push --dry-run
         ]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
         self.assertTrue(ok, msg)
         self.assertIn("can push", msg)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_the_probe_is_a_push_and_does_not_update_a_ref(self, mock_run):
+        mock_run.side_effect = [(0, "cheungyang-bot\n", ""), (0, "", "")]
+        await preflight_push_access("owner/repo", push_identity=BOT)
+        argv = mock_run.await_args_list[1].args[0]
+        self.assertIn("push", argv)
+        # Without --dry-run this gate would litter the remote with probe branches.
+        self.assertIn("--dry-run", argv)
 
     @patch('core.util.git_ops.run_cmd_async')
     async def test_fails_when_unauthenticated(self, mock_run):
@@ -141,14 +150,43 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cheungyang-bot", msg)
 
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_fails_without_push_permission(self, mock_run):
+    async def test_a_denied_push_is_caught_before_any_llm_work(self, mock_run):
+        # Regression: the old gate asked the API for `.permissions.push`, which
+        # reports the *account's* collaborator role. A fine-grained PAT that is
+        # not scoped to the repo answers "true" there and 403s at the real push,
+        # so this case used to pass preflight and burn a full implementation run.
         mock_run.side_effect = [
             (0, "cheungyang-bot\n", ""),
-            (0, "false\n", "")
+            (1, "", "remote: Permission to owner/repo.git denied to cheungyang-bot.\n"
+                    "fatal: unable to access ...: The requested URL returned error: 403"),
         ]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
         self.assertFalse(ok)
-        self.assertIn("no push permission", msg)
+        self.assertIn("cannot push", msg)
+        self.assertIn("denied", msg)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_a_denied_push_names_the_fine_grained_pat_trap(self, mock_run):
+        mock_run.side_effect = [
+            (0, "cheungyang-bot\n", ""),
+            (1, "", "remote: Permission to owner/repo.git denied to cheungyang-bot."),
+        ]
+        _, msg = await preflight_push_access("owner/repo", push_identity=BOT)
+        # Widening the token's permissions cannot fix this, so the message must
+        # not send the reader back to the PAT settings page.
+        self.assertIn("fine-grained", msg)
+        self.assertIn("classic PAT", msg)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_an_unreachable_remote_is_not_reported_as_a_permission_problem(self, mock_run):
+        mock_run.side_effect = [
+            (0, "cheungyang-bot\n", ""),
+            (1, "", "fatal: unable to access ...: Could not resolve host: github.com"),
+        ]
+        ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
+        self.assertFalse(ok)
+        self.assertIn("could not reach", msg)
+        self.assertNotIn("classic PAT", msg)
 
     @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
     async def test_fails_without_a_repo(self, mock_discover):
