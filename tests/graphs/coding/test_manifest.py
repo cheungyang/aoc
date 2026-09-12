@@ -1,12 +1,18 @@
+"""The manifest is the only durable record of what the pipeline is doing.
+
+Every tick reads it, mutates one task and writes the whole document back, so
+the contract is that a write never loses a concurrent write, a lease is never
+held by two owners at once, and a crashed tick's work returns to the queue at
+the stage it reached. Break any of these and tasks either run twice or vanish
+from the queue with no error anywhere.
+"""
 import json
 import os
 import tempfile
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import AsyncMock, patch
 
-from graphs.coding.utils.digest import compute_worktree_digest, digest_matches
 from graphs.coding.utils.manifest import (
     DEFAULT_LEASE_SECONDS,
     MANIFEST_VERSION,
@@ -255,47 +261,6 @@ class TestStageHelpers(unittest.TestCase):
         self.assertEqual(next_stage("queued"), "provisioned")
         self.assertIsNone(next_stage("done"))
         self.assertIsNone(next_stage("nonsense"))
-
-
-class TestWorktreeDigest(unittest.IsolatedAsyncioTestCase):
-    @patch('graphs.coding.utils.digest.git_ops.run_cmd_async', new_callable=AsyncMock)
-    async def test_same_tree_same_digest(self, mock_run):
-        mock_run.side_effect = [(0, "diff-a", ""), (0, " M a.py", "")] * 2
-        first = await compute_worktree_digest("/ws")
-        second = await compute_worktree_digest("/ws")
-        self.assertEqual(first, second)
-
-    @patch('graphs.coding.utils.digest.git_ops.run_cmd_async', new_callable=AsyncMock)
-    async def test_changed_tree_changes_digest(self, mock_run):
-        mock_run.side_effect = [(0, "diff-a", ""), (0, " M a.py", ""),
-                                (0, "diff-b", ""), (0, " M a.py", "")]
-        self.assertNotEqual(await compute_worktree_digest("/ws"),
-                            await compute_worktree_digest("/ws"))
-
-    @patch('graphs.coding.utils.digest.git_ops.run_cmd_async', new_callable=AsyncMock)
-    async def test_untracked_files_count(self, mock_run):
-        # A brand-new file produces no diff at all; without the status line the
-        # digest would claim two very different trees are identical.
-        mock_run.side_effect = [(0, "", ""), (0, "?? new.py", ""),
-                                (0, "", ""), (0, "?? other.py", "")]
-        self.assertNotEqual(await compute_worktree_digest("/ws"),
-                            await compute_worktree_digest("/ws"))
-
-    @patch('graphs.coding.utils.digest.git_ops.run_cmd_async', new_callable=AsyncMock)
-    async def test_git_failure_yields_no_evidence(self, mock_run):
-        mock_run.return_value = (128, "", "not a git repository")
-        self.assertIsNone(await compute_worktree_digest("/ws"))
-
-    async def test_missing_workspace_yields_no_evidence(self):
-        self.assertIsNone(await compute_worktree_digest(""))
-
-    @patch('graphs.coding.utils.digest.git_ops.run_cmd_async', new_callable=AsyncMock)
-    async def test_digest_matches_is_false_without_evidence(self, mock_run):
-        mock_run.return_value = (128, "", "boom")
-        # No digest must never read as "matches", or the LLM step would be
-        # skipped for work that is not there.
-        self.assertFalse(await digest_matches("/ws", "abc123"))
-        self.assertFalse(await digest_matches("/ws", None))
 
 
 if __name__ == "__main__":

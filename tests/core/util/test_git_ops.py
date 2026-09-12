@@ -4,13 +4,11 @@ import tempfile
 import json
 import asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
+from core.util import git_ops
 from core.util.git_ops import (
     run_cmd_async,
-    run_cmd_sync,
     resolve_base_ref,
     discover_target_repo,
-    provision_worktree,
-    get_git_diff,
     commit_and_push,
     create_pull_request,
     get_pull_request_status,
@@ -248,6 +246,70 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
                 ok, msg = await teardown_worktree(tmp_repo, tmp_ws)
                 self.assertTrue(ok)
                 self.assertIn("Teardown complete", msg)
+
+
+class TestRepoLocking(unittest.IsolatedAsyncioTestCase):
+    async def test_the_same_repo_gets_the_same_lock(self):
+        # `git worktree` and `git fetch` contend on .git/index.lock, so two
+        # ticks against one repo must queue rather than fail.
+        path = tempfile.mkdtemp()
+
+        self.assertIs(git_ops.repo_lock(path), git_ops.repo_lock(path))
+
+    async def test_the_lock_is_keyed_by_the_real_path(self):
+        # A worktree reached via a symlink is still the same repository.
+        real = tempfile.mkdtemp()
+        link = os.path.join(tempfile.mkdtemp(), "link")
+        os.symlink(real, link)
+
+        self.assertIs(git_ops.repo_lock(real), git_ops.repo_lock(link))
+
+    async def test_different_repos_get_different_locks(self):
+        self.assertIsNot(
+            git_ops.repo_lock(tempfile.mkdtemp()),
+            git_ops.repo_lock(tempfile.mkdtemp())
+        )
+
+    async def test_provisioning_holds_the_repo_lock(self):
+        repo = tempfile.mkdtemp()
+        workspace = os.path.join(tempfile.mkdtemp(), "ws")
+        held = []
+
+        async def record(*args, **kwargs):
+            held.append(git_ops.repo_lock(repo).locked())
+            os.makedirs(workspace, exist_ok=True)
+            return (0, "", "")
+
+        with patch("core.util.git_ops.run_cmd_async", new=AsyncMock(side_effect=record)):
+            await git_ops.provision_worktree(repo, workspace, "feat/x", base_ref="origin/main")
+
+        self.assertTrue(all(held), "worktree commands ran outside the repo lock")
+
+
+class TestProvisionHasNoHeadFallback(unittest.IsolatedAsyncioTestCase):
+    async def test_a_missing_base_ref_fails_instead_of_branching_from_head(self):
+        # F3: falling back to HEAD builds the work on whatever happened to be
+        # checked out, and the result looks successful.
+        repo = tempfile.mkdtemp()
+        workspace = os.path.join(tempfile.mkdtemp(), "ws")
+
+        async def fail_worktree_add(cmd, *args, **kwargs):
+            if "worktree" in cmd and "add" in cmd:
+                return (1, "", "invalid reference: origin/gone")
+            return (0, "", "")
+
+        with patch("core.util.git_ops.run_cmd_async",
+                   new=AsyncMock(side_effect=fail_worktree_add)) as mock_run:
+            success, message = await git_ops.provision_worktree(
+                repo, workspace, "feat/x", base_ref="origin/gone"
+            )
+
+        self.assertFalse(success)
+        self.assertIn("origin/gone", message)
+        adds = [c.args[0] for c in mock_run.await_args_list
+                if "worktree" in c.args[0] and "add" in c.args[0]]
+        self.assertEqual(len(adds), 1, "a second attempt means the HEAD fallback is back")
+
 
 if __name__ == '__main__':
     unittest.main()
