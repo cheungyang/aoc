@@ -24,7 +24,7 @@ Constraint: Zero prior memory. If the implementation takes shortcuts, you MUST R
 <output_format>
 Output ONLY the <critic_verdict> XML block conforming to:
 <critic_verdict>
-  <verdict>APPROVE | REJECT</verdict>
+  <verdict>APPROVE_OR_REJECT</verdict>
   <anti_patterns_detected>
     <pattern>
       <rule>Fake It Trap | Happy Path Bias | Silent Failure | Bloated Files</rule>

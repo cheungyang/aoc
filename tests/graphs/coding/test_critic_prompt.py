@@ -130,20 +130,27 @@ class CriticPromptOutputContractTestCase(unittest.TestCase):
         self.assertEqual(parsed["anti_patterns_detected"][0]["file"], "core/a.py")
 
 
-    def test_an_unfilled_template_verdict_parses_as_APPROVE_today(self):
-        """Documents current behaviour, not desired behaviour.
+    def test_an_unfilled_template_verdict_does_not_approve(self):
+        """An echoed placeholder is a rejection, not an approval.
 
-        parse_critic_verdict_xml decides with `"APPROVE" if "APPROVE" in v`, so
-        a model that echoes the literal placeholder "APPROVE | REJECT" is read
-        as an approval. The audit is advisory and already fails open on errors,
-        so this is consistent rather than dangerous here — but it is pinned so
-        that changing it is a deliberate act with a red test.
+        This previously returned APPROVE: `"APPROVE" if "APPROVE" in v` matched
+        the placeholder's own text, so a model that simply parroted the template
+        it was shown produced the most permissive possible result. The verdict
+        is exact-matched now and the placeholder renamed to APPROVE_OR_REJECT.
         """
         prompt = build_critic_prompt(spec_text="spec", git_diff_text="diff")
         example = re.search(r"<critic_verdict>.*?</critic_verdict>", prompt, re.DOTALL).group(0)
         parsed = parse_critic_verdict_xml(example)
-        self.assertEqual(parsed["verdict"], "APPROVE")
-        self.assertTrue(parsed["passed"])
+        self.assertEqual(parsed["verdict"], "REJECT")
+        self.assertFalse(parsed["passed"])
+
+    def test_a_verdict_that_merely_contains_the_word_approve_does_not_approve(self):
+        """Guards the exact-match rule directly, independent of the template."""
+        for hedge in ("APPROVE | REJECT", "APPROVE with changes", "do not APPROVE"):
+            with self.subTest(hedge=hedge):
+                parsed = parse_critic_verdict_xml(f"<verdict>{hedge}</verdict>")
+                self.assertEqual(parsed["verdict"], "REJECT")
+                self.assertFalse(parsed["passed"])
 
 
 if __name__ == "__main__":

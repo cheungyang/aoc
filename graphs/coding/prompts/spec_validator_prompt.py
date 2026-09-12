@@ -20,8 +20,8 @@ Constraint: You have NO prior conversational memory. If any requirement, schema,
 <output_format>
 Emit ONLY the <spec_validation_result> XML block conforming to:
 <spec_validation_result>
-  <verdict>PASS | FAIL</verdict>
-  <unambiguous>true | false</unambiguous>
+  <verdict>PASS_OR_FAIL</verdict>
+  <unambiguous>TRUE_OR_FALSE</unambiguous>
   <missing_assumptions>
     <item>Description of missing interface, missing schema, or unstated constraint (if any)</item>
   </missing_assumptions>

@@ -112,30 +112,37 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         template = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         ).group(0)
-        filled = template.replace("PASS | FAIL", "PASS").replace("true | false", "true")
+        filled = template.replace("PASS_OR_FAIL", "PASS").replace("TRUE_OR_FALSE", "true")
         parsed = parse_spec_validation_xml(filled)
         self.assertEqual(parsed["verdict"], "PASS")
         self.assertTrue(parsed["passed"])
         self.assertTrue(parsed["unambiguous"])
 
-    def test_an_unfilled_template_verdict_parses_as_PASS_today(self):
-        """Documents current behaviour, not desired behaviour.
+    def test_an_unfilled_template_verdict_does_not_pass(self):
+        """The laziest possible output must not be the most permissive one.
 
-        The parser decides with `"PASS" if "PASS" in v`, so a model that echoes
-        the literal placeholder "PASS | FAIL" is read as a pass — the gate fails
-        open on exactly the sloppiest output it is likely to receive. The
-        neighbouring <unambiguous> placeholder does not fail open, because that
-        check is an equality test. Pinned here so a fix is a deliberate change
-        with a red test, not an accident.
+        The parser exact-matches the verdict, so a model that echoes the
+        placeholder it was shown reads as FAIL. This previously returned PASS:
+        `"PASS" if "PASS" in v` matched the placeholder's own text, so the
+        sloppiest response cleared the check. Renaming the placeholder to
+        `PASS_OR_FAIL` removes the temptation as well.
         """
         prompt = build_spec_validator_prompt("spec")
         example = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         ).group(0)
         parsed = parse_spec_validation_xml(example)
-        self.assertEqual(parsed["verdict"], "PASS")
-        self.assertTrue(parsed["passed"])
+        self.assertEqual(parsed["verdict"], "FAIL")
+        self.assertFalse(parsed["passed"])
         self.assertFalse(parsed["unambiguous"])
+
+    def test_a_verdict_that_merely_contains_the_word_pass_does_not_pass(self):
+        """Guards the exact-match rule directly, independent of the template."""
+        for hedge in ("PASS | FAIL", "probably PASS", "PASS with reservations", "NOT A PASS"):
+            with self.subTest(hedge=hedge):
+                parsed = parse_spec_validation_xml(f"<verdict>{hedge}</verdict>")
+                self.assertEqual(parsed["verdict"], "FAIL")
+                self.assertFalse(parsed["passed"])
 
 
 if __name__ == "__main__":

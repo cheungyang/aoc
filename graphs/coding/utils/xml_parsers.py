@@ -8,8 +8,8 @@ def parse_spec_validation_xml(text: str) -> Dict[str, Any]:
     
     Expected format:
     <spec_validation_result>
-      <verdict>PASS | FAIL</verdict>
-      <unambiguous>true | false</unambiguous>
+      <verdict>PASS_OR_FAIL</verdict>
+      <unambiguous>TRUE_OR_FALSE</unambiguous>
       <missing_assumptions>
         <item>Description of missing interface</item>
       </missing_assumptions>
@@ -30,8 +30,13 @@ def parse_spec_validation_xml(text: str) -> Dict[str, Any]:
     # 1. Regex tag extraction (fast & resilient to surrounding text/markdown)
     verdict_m = re.search(r"<verdict>(.*?)</verdict>", text, re.IGNORECASE | re.DOTALL)
     if verdict_m:
+        # Exact match, never substring: the prompt shows the model a
+        # `PASS_OR_FAIL` placeholder, and anything that is not literally PASS —
+        # an echoed template, a hedge, a sentence containing the word — has to
+        # read as FAIL. Substring matching made the laziest possible output the
+        # most permissive one.
         v = verdict_m.group(1).strip().upper()
-        res["verdict"] = "PASS" if "PASS" in v else "FAIL"
+        res["verdict"] = "PASS" if v == "PASS" else "FAIL"
         res["passed"] = (res["verdict"] == "PASS")
 
     unambiguous_m = re.search(r"<unambiguous>(.*?)</unambiguous>", text, re.IGNORECASE | re.DOTALL)
@@ -107,7 +112,7 @@ def parse_critic_verdict_xml(text: str) -> Dict[str, Any]:
     
     Expected format:
     <critic_verdict>
-      <verdict>APPROVE | REJECT</verdict>
+      <verdict>APPROVE_OR_REJECT</verdict>
       <anti_patterns_detected>
         <pattern>
           <rule>Fake It Trap | Happy Path Bias | Silent Failure | Bloated Files</rule>
@@ -131,8 +136,10 @@ def parse_critic_verdict_xml(text: str) -> Dict[str, Any]:
 
     verdict_m = re.search(r"<verdict>(.*?)</verdict>", text, re.IGNORECASE | re.DOTALL)
     if verdict_m:
+        # Exact match, never substring — see parse_spec_validation_xml. Only a
+        # literal APPROVE approves; an echoed placeholder is a rejection.
         v = verdict_m.group(1).strip().upper()
-        res["verdict"] = "APPROVE" if "APPROVE" in v else "REJECT"
+        res["verdict"] = "APPROVE" if v == "APPROVE" else "REJECT"
         res["passed"] = (res["verdict"] == "APPROVE")
 
     feedback_m = re.search(r"<feedback_for_worker>(.*?)</feedback_for_worker>", text, re.IGNORECASE | re.DOTALL)
