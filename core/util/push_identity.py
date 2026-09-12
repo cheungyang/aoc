@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 
 # Kept outside the repo on purpose: anything under the working tree can be read
 # by the agent itself, committed by accident, or synced somewhere unintended.
-DEFAULT_TOKEN_PATH = "~/.config/aoc/bot_token"
+DEFAULT_TOKEN_PATH = "~/github_bot_token"
 
 # Override for tests and for anyone who keeps credentials elsewhere.
 TOKEN_PATH_ENV_VAR = "AOC_BOT_TOKEN_FILE"

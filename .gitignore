@@ -1,5 +1,8 @@
 .DS_Store
 .env
+.env.*
+github_bot_token
+*bot_token*
 .gemini
 .git
 .pytest_cache
