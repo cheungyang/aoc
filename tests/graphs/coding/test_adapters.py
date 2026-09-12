@@ -32,7 +32,7 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(res["tick_report"], [])
         self.assertEqual(res["tick_handled"], [])
         self.assertEqual(res["graph_id"], "coding")
-        self.assertIn(res["audit_mode"], ("off", "advisory", "blocking"))
+        self.assertNotIn("audit_mode", res)
         self.assertIsInstance(res["repo"], dict)
         self.assertIsInstance(res["reviewers"], list)
 

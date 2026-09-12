@@ -144,7 +144,6 @@ class CodingState(TypedDict, total=False):
     stage: TaskStage
     graph_id: str
     required_tools: List[str]        # derived from graph.json's `tools` grant
-    audit_mode: str                  # "off" | "advisory" | "blocking"
     audit_passed: bool
     audit_feedback: str
     reviewers: List[str]

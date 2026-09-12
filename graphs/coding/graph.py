@@ -63,8 +63,10 @@ def create_graph(checkpointer=None, **kwargs):
         "verify", _router({"audit", "implement"}), ["implement", "audit", END]
     )
 
+    # The audit is advisory, so it has no way back to the worker: its verdict
+    # rides along to the PR and the tick carries on to publish.
     workflow.add_conditional_edges(
-        "audit", _router({"publish", "implement"}), ["implement", "publish", END]
+        "audit", _router({"publish"}), ["publish", END]
     )
 
     # publish never loops in-process: a transient failure is retried by the next

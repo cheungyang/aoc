@@ -89,7 +89,6 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         # worker actually receives what this graph hands it. Deriving it here
         # means there is no second list that can drift from the grant.
         "required_tools": sorted((graph_config.get("tools") or {}).keys()),
-        "audit_mode": kwargs.get("audit_mode") or manifest_settings.get("audit") or "advisory",
         "queue": kwargs.get("queue") or [],
         "completed_tasks": [],
         "failed_tasks": [],
@@ -133,9 +132,6 @@ def _load_manifest_settings(build_request_path: str) -> Dict[str, Any]:
         "reviewers": manifest.get("reviewers") or [],
         "approval_signals": manifest.get("approval_signals"),
         "rejection_signals": manifest.get("rejection_signals"),
-        # How strict the audit is depends on the project, not on the graph, so
-        # it sits with the other per-project knobs rather than in graph.json.
-        "audit": manifest.get("audit"),
     }
 
 
