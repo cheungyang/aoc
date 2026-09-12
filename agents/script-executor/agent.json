@@ -34,8 +34,7 @@
       ]
     },
     {
-      "channel": "general",
-      "thread": "cronjobs",
+      "channel": "software-dev",
       "cron": "*/5 * * * *",
       "prompt": [
         "script coding_tick.py"

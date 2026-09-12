@@ -35,4 +35,4 @@ After saving the specification document, you must alert the backend orchestratio
 ```
 
 ### 3. Notification
-Inform the user in `#software_dev` that the specification is finalized, saved, and queued for the Goldfish swarm.
+Inform the user in `#software-dev` that the specification is finalized, saved, and queued for the Goldfish swarm.

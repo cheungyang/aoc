@@ -168,6 +168,40 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["cron"], "*/5 * * * *")
 
+    async def test_the_coding_tick_reports_into_the_software_dev_channel(self):
+        """The tick is the pipeline's only unprompted voice, so it has to speak
+        where the work is being discussed rather than in the general cron log."""
+        loader = AgentsLoader()
+        agent = loader.get_agent("script-executor")
+        entry = next(s for s in agent.config.get("schedules", [])
+                     if "script coding_tick.py" in s.get("prompt", []))
+
+        self.assertEqual(entry["channel"], "software-dev")
+
+    async def test_the_tick_channel_is_one_an_agent_actually_hosts(self):
+        """`ScheduleRunner` resolves the channel by looking for an agent whose
+        `channel_hosts` claims it. A name that nobody hosts falls through to a
+        global search and then to posting nowhere, silently, every five minutes.
+        """
+        loader = AgentsLoader()
+        entry = next(s for s in loader.get_agent("script-executor").config["schedules"]
+                     if "script coding_tick.py" in s.get("prompt", []))
+
+        hosts = set()
+        for agent_id in loader.list_agent_ids():
+            hosts.update(loader.get_agent(agent_id).get_config("channel_hosts", []))
+
+        self.assertIn(entry["channel"], hosts)
+
+    async def test_the_tick_posts_to_the_channel_not_a_thread(self):
+        """A `thread` that does not exist in the target channel makes the runner
+        log a fallback line on every single run -- 288 of them a day."""
+        loader = AgentsLoader()
+        entry = next(s for s in loader.get_agent("script-executor").config["schedules"]
+                     if "script coding_tick.py" in s.get("prompt", []))
+
+        self.assertIsNone(entry.get("thread"))
+
 
 if __name__ == "__main__":
     unittest.main()
