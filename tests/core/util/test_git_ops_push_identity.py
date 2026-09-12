@@ -159,19 +159,55 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
 
 
 class TestEnsureLabel(unittest.IsolatedAsyncioTestCase):
+    """The existence probe is a read, so a push-only token gets a real answer."""
+
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_creates_label(self, mock_run):
-        mock_run.return_value = (0, "", "")
+    async def test_creates_the_label_when_the_lookup_404s(self, mock_run):
+        mock_run.side_effect = [(1, "", "Not Found"), (0, "", "")]
         ok, msg = await ensure_label("owner/repo")
         self.assertTrue(ok)
         self.assertIn("Created label", msg)
+        self.assertEqual(mock_run.await_count, 2)
 
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_existing_label_is_not_an_error(self, mock_run):
-        mock_run.return_value = (1, "", "label already exists")
+    async def test_an_existing_label_is_never_written_to(self, mock_run):
+        mock_run.return_value = (0, "", "")
         ok, msg = await ensure_label("owner/repo")
         self.assertTrue(ok)
         self.assertIn("already exists", msg)
+        # The whole point: no `gh label create` is attempted, so a token
+        # without Issues write cannot turn a satisfied precondition into a
+        # setup failure.
+        mock_run.assert_awaited_once()
+        self.assertNotIn("create", mock_run.await_args.args[0])
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_the_lookup_reads_the_label_by_name(self, mock_run):
+        mock_run.return_value = (0, "", "")
+        await ensure_label("owner/repo", name="needs review")
+        # Encoded, or gh reads the space as the start of the next argument.
+        self.assertIn("repos/owner/repo/labels/needs%20review", mock_run.await_args.args[0])
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_a_creation_race_is_not_an_error(self, mock_run):
+        mock_run.side_effect = [(1, "", "Not Found"), (1, "", "label already exists")]
+        ok, msg = await ensure_label("owner/repo")
+        self.assertTrue(ok)
+        self.assertIn("already exists", msg)
+
+    @patch('core.util.git_ops.run_cmd_async')
+    async def test_a_denied_creation_says_who_can_do_it(self, mock_run):
+        mock_run.side_effect = [
+            (1, "", "HTTP 404"),
+            (1, "", "HTTP 403: Resource not accessible by personal access token"),
+        ]
+        ok, msg = await ensure_label("owner/repo", name="approved")
+        self.assertFalse(ok)
+        self.assertIn("403", msg)
+        # A bare 403 sends the reader to the wrong place — the token looks
+        # broken when it is correctly scoped and the job is the owner's.
+        self.assertIn("as the repo owner", msg)
+        self.assertIn("gh label create approved --repo owner/repo", msg)
 
 
 if __name__ == "__main__":

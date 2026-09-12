@@ -4,6 +4,7 @@ import shutil
 import asyncio
 import subprocess
 from typing import Tuple, Optional, List, Dict, Any
+from urllib.parse import quote
 
 from core.util.push_identity import (
     PushIdentity,
@@ -759,17 +760,37 @@ async def ensure_label(
     color: str = "0E8A16",
     push_identity: Optional[PushIdentity] = None
 ) -> Tuple[bool, str]:
-    """Creates a repo label if it does not exist. Idempotent."""
+    """Ensures a repo label exists, reading before it writes.
+
+    `gh label create` cannot double as the existence probe. Labels are an
+    Issues-scoped resource, and a machine user scoped to push has no business
+    holding Issues write — so GitHub answers 403 whether or not the label is
+    already there, and the "already exists" string never arrives. Asking
+    instead of guessing also answers the question the caller actually has:
+    not "can this token create labels", but "is the approval signal wired up".
+    """
+    env = _with_identity_env(push_identity)
+    code, _, _ = await run_cmd_async(
+        ["gh", "api", f"repos/{target_repo}/labels/{quote(name, safe='')}", "--silent"],
+        cwd=cwd, timeout=15.0, env=env
+    )
+    if code == 0:
+        return True, f"Label `{name}` already exists on {target_repo}."
+
     cmd = ["gh", "label", "create", name, "--repo", target_repo,
            "--description", description, "--color", color]
-    code, out, err = await run_cmd_async(
-        cmd, cwd=cwd, timeout=15.0, env=_with_identity_env(push_identity)
-    )
+    code, out, err = await run_cmd_async(cmd, cwd=cwd, timeout=15.0, env=env)
     combined = (out + " " + err)
     if code == 0:
         return True, f"Created label `{name}` on {target_repo}."
     if "already exists" in combined.lower():
         return True, f"Label `{name}` already exists on {target_repo}."
-    return False, f"gh label create failed: {err.strip() or out.strip()}"
+    return False, (
+        f"gh label create failed: {err.strip() or out.strip()}\n"
+        f"  Creating a label needs Issues write, which the machine user should not have.\n"
+        f"  Create it once as the repo owner:\n"
+        f"    gh label create {name} --repo {target_repo} "
+        f'--description "{description}" --color {color}'
+    )
 
 
