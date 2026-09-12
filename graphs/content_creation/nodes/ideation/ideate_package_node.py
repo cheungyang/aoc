@@ -12,6 +12,14 @@ async def ideate_package_node(state: dict) -> dict:
     if state.get("error_message"):
         return {}
 
+    # The spend gate. A message the gate could not parse arrives here carrying
+    # a clarification card and nothing else: re-present it and return before
+    # any generator runs. This node is an interrupt point, so returning the
+    # card is exactly equivalent to re-asking.
+    pending_notice = state.get("pending_notice")
+    if pending_notice:
+        return {"messages": [AIMessage(content=pending_notice)]}
+
     project_path = state.get("project_path")
     output_path = state.get("output_path")
     if not project_path or not output_path:
@@ -24,12 +32,11 @@ async def ideate_package_node(state: dict) -> dict:
 
     working_state = dict(state)
 
-    human_feedback = state.get("latest_human_feedback")
-    gate1_decision = state.get("gate1_decision")
-    if human_feedback and (not gate1_decision or gate1_decision == "approved"):
-        from graphs.content_creation.utils.classifiers import classify_gate1_intent
-        gate1_decision = classify_gate1_intent(human_feedback)
-        working_state["gate1_decision"] = gate1_decision
+    # The decision is whatever `process_gate1_decision` recorded, and it is
+    # read from `working_state` by each task. It is not re-derived from
+    # `latest_human_feedback` here: two classifiers reading the same message
+    # and disagreeing is how a "revise the plot" request ended up regenerating
+    # the image.
 
     # Step 2a: Generate or reuse Base Image
     img_res = await generate_image_task(working_state)

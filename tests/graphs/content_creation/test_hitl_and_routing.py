@@ -120,7 +120,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 v1_plot = state_turn1["video_plot_path"]
 
                 # Turn 2: User requests image modification (costume change)
-                image_feedback = "Change the character costume to an orange cat onesie."
+                image_feedback = "revise image: change the character costume to an orange cat onesie"
                 graph.update_state(config, {
                     "latest_human_feedback": image_feedback,
                     "messages": [HumanMessage(content=image_feedback)]
@@ -175,7 +175,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 # Turn 2: User requests plot revision
                 mock_img.reset_mock()
                 mock_agent_call.ainvoke = AsyncMock(side_effect=_mock_agent_call_side_effect("# Dog Plot v2 with Zoom", {}))
-                plot_feedback = "Update the video plot motion: add a slow camera push-in."
+                plot_feedback = "revise plot: add a slow camera push-in"
                 graph.update_state(config, {
                     "latest_human_feedback": plot_feedback,
                     "messages": [HumanMessage(content=plot_feedback)]
@@ -319,7 +319,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 copy_v1 = state_turn2["copy_path"]
 
                 # Turn 3: Video animation revision requested
-                video_feedback = "Re-render the video animation with smoother toddler motion."
+                video_feedback = "revise video: smoother toddler motion"
                 graph.update_state(config, {
                     "latest_human_feedback": video_feedback,
                     "messages": [HumanMessage(content=video_feedback)]
@@ -402,7 +402,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
 
                 # Turn 3: User requests remix/subtitle update
                 mock_veo.reset_mock()
-                remix_feedback = "Adjust subtitle overlay font size and change audio track timing."
+                remix_feedback = "revise remix: subtitle font size 64 and audio at 2s"
                 graph.update_state(config, {
                     "latest_human_feedback": remix_feedback,
                     "messages": [HumanMessage(content=remix_feedback)]
@@ -488,7 +488,7 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
                 mock_veo.reset_mock()
                 mock_remix.reset_mock()
                 mock_agent_call.ainvoke = AsyncMock(side_effect=_mock_agent_call_side_effect(plot_text, copy_v2_dict))
-                copy_feedback = "Update the copy caption and add #ToddlerLearning."
+                copy_feedback = "revise copy: update the caption and add #ToddlerLearning"
                 graph.update_state(config, {
                     "latest_human_feedback": copy_feedback,
                     "messages": [HumanMessage(content=copy_feedback)]

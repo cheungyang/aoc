@@ -3,7 +3,6 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate2_intent, extract_remix_parameters
 from tools.remix_video import remix_video
 
 async def remix_video_task(state: dict) -> dict:
@@ -16,12 +15,11 @@ async def remix_video_task(state: dict) -> dict:
     output_path = state.get("output_path", "")
     raw_video_path = state.get("raw_video_path") or (os.path.join(output_path, f"{topic}_raw_video.mp4") if output_path else "")
 
-    human_feedback = state.get("latest_human_feedback", "")
-    gate2_decision = state.get("gate2_decision") or classify_gate2_intent(human_feedback)
-    needs_remix_revision = (
-        state.get("gate2_decision") in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"] or
-        bool(human_feedback and gate2_decision in ["revise_remix", "revise_video", "revise_audio", "revise_subtitles"])
-    )
+    # Recorded by `process_gate2_decision`; not re-derived here.
+    gate2_decision = state.get("gate2_decision")
+    needs_remix_revision = gate2_decision in [
+        "revise_remix", "revise_video", "revise_audio", "revise_subtitles"
+    ]
 
     video_path, should_generate = resolve_task_asset(output_path, topic, "video", needs_revision=needs_remix_revision)
     if not should_generate and state.get("video_qc_passed"):
@@ -73,9 +71,13 @@ async def remix_video_task(state: dict) -> dict:
         if cands:
             audio_path = cands[0]
 
-    # Extract dynamic remix parameters from human feedback, state channels, and plot_data
-    remix_params = state.get("remix_params") or state.get("remix_parameters") or {}
-    feedback_params = extract_remix_parameters(human_feedback) if human_feedback else {}
+    # Remix parameters, highest priority first. `remix_params` is what
+    # `process_gate2_decision` parsed out of an explicit
+    # `revise remix: ...` instruction -- it is no longer re-extracted from the
+    # raw message here, where any stray number in an unrelated sentence could
+    # reach ffmpeg.
+    feedback_params = state.get("remix_params") or {}
+    remix_params = state.get("remix_parameters") or {}
 
     # Audio Start Time (audio plays until its natural end)
     audio_start = (

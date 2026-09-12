@@ -3,7 +3,6 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from graphs.content_creation.prompts import build_draft_copy_prompt
 
 async def draft_copy_task(state: dict) -> dict:
@@ -16,8 +15,11 @@ async def draft_copy_task(state: dict) -> dict:
     output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     human_feedback = state.get("latest_human_feedback")
+    # Recorded by `process_gate2_decision`; not re-derived here. The second
+    # half of this expression used to be `human_feedback and gate2_decision ==
+    # "revise_copy"`, which is the same condition twice.
     gate2_decision = state.get("gate2_decision")
-    needs_copy_revision = (gate2_decision == "revise_copy" or bool(human_feedback and gate2_decision == "revise_copy"))
+    needs_copy_revision = gate2_decision == "revise_copy"
 
     copy_path, should_generate = resolve_task_asset(output_path, topic, "copy", needs_revision=needs_copy_revision)
     if not should_generate:

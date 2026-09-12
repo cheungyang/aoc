@@ -3,7 +3,6 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate2_intent
 from tools.generate_animation_veo3 import generate_animation_veo3
 
 async def render_plate_task(state: dict) -> dict:
@@ -17,15 +16,12 @@ async def render_plate_task(state: dict) -> dict:
     image_path = state.get("image_path") or (os.path.join(output_path, f"{topic}_image.jpg") if output_path else "")
     video_plot_path = state.get("video_plot_path") or (os.path.join(output_path, f"{topic}_video_plot.md") if output_path else "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
-    human_feedback = state.get("latest_human_feedback")
+    # Recorded by `process_gate2_decision`; not re-derived here.
     gate2_decision = state.get("gate2_decision")
-    if human_feedback and (not gate2_decision or gate2_decision == "approved"):
-        gate2_decision = classify_gate2_intent(human_feedback)
 
     needs_plate_revision = (
         gate2_decision in ["revise_video", "revise_animation"] or
-        state.get("video_qc_rejection_target") == "visual_plate" or
-        bool(human_feedback and gate2_decision in ["revise_video", "revise_animation"])
+        state.get("video_qc_rejection_target") == "visual_plate"
     )
 
     raw_video_path, should_generate = resolve_task_asset(output_path, topic, "raw_video", needs_revision=needs_plate_revision)

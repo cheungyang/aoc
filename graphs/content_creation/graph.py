@@ -39,6 +39,12 @@ class ContentCreationState(TypedDict, total=False):
     gate1_decision: str
     gate2_decision: str
     latest_human_feedback: str
+    # Set when the human's message could not be parsed deterministically. The
+    # macro nodes short-circuit on it: the gate is re-presented and nothing is
+    # generated. `pending_feedback` preserves the original wording so that
+    # answering the menu with an ordinal does not lose it.
+    pending_notice: str
+    pending_feedback: str
     remix_params: Dict[str, Any]
     remix_actions: List[Dict[str, Any]]
     audio_start_time: float
@@ -101,11 +107,18 @@ def create_graph(checkpointer=None, **kwargs):
     # Gate 1 Wiring: ideate_package -> process_gate1_decision -> router
     workflow.add_edge("ideate_package", "process_gate1_decision")
 
+    # Decisions that route back to the presenting node without producing
+    # anything. `ideate_package` / `produce_deliverables` short-circuit on
+    # `pending_notice`, so this re-presents the gate for free.
+    NO_WORK = ("unclear", "status")
+
     def gate1_router(state: ContentCreationState):
+        decision = state.get("gate1_decision", "approved")
+        if decision == "abort":
+            return END
         if state.get("error_message"):
             return END
-        decision = state.get("gate1_decision", "approved")
-        if decision in ["revise_image", "revise_plot"]:
+        if decision in ("revise_image", "revise_plot", "retry") or decision in NO_WORK:
             return "ideate_package"
         return "produce_deliverables"
 
@@ -119,10 +132,12 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_edge("produce_deliverables", "process_gate2_decision")
 
     def gate2_router(state: ContentCreationState):
+        decision = state.get("gate2_decision", "approved")
+        if decision == "abort":
+            return END
         if state.get("error_message"):
             return END
-        decision = state.get("gate2_decision", "approved")
-        if decision in ["revise_copy", "revise_video", "revise_remix"]:
+        if decision in ("revise_copy", "revise_video", "revise_remix", "retry") or decision in NO_WORK:
             return "produce_deliverables"
         return END
 

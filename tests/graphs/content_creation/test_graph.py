@@ -75,7 +75,8 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.next, ("process_gate1_decision",))
 
             # Simulate User providing revision feedback at HITL Gate 1 (as graph_call does)
-            user_feedback = "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
+            user_feedback = "revise image: have ayla wear a cat costume, pretending to crawl like a cat. Do not include any actual cats."
+            instruction = user_feedback.split(":", 1)[1].strip()
             graph.update_state(config, {
                 "latest_human_feedback": user_feedback,
                 "messages": [HumanMessage(content=user_feedback)]
@@ -102,7 +103,69 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
                         # Verify working state had the classified intent
                         called_state = mock_gen_img_2.call_args[0][0]
                         self.assertEqual(called_state.get("gate1_decision"), "revise_image")
-                        self.assertEqual(called_state.get("latest_human_feedback"), user_feedback)
+                        # The instruction is what survives, not the whole message.
+                        self.assertEqual(called_state.get("latest_human_feedback"), instruction)
+
+    async def test_unparseable_gate1_reply_spends_nothing(self):
+        """The spend gate, end to end.
+
+        An ambiguous message must re-present Gate 1 without invoking a single
+        generator. Before this change the same message classified as
+        `revise_image` and paid for a new image on the spot.
+        """
+        from unittest.mock import patch, AsyncMock
+        from langgraph.checkpoint.memory import MemorySaver
+        from graphs.content_creation.graph import create_graph
+        from langchain_core.messages import HumanMessage
+
+        checkpointer = MemorySaver()
+        graph = create_graph(checkpointer=checkpointer)
+        config = {"configurable": {"thread_id": "test_spend_gate"}}
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            v1_img = os.path.join(temp_dir, "cat_image.jpg")
+            with open(v1_img, "wb") as f: f.write(b"V1")
+            v1_plot = os.path.join(temp_dir, "cat_video_plot.md")
+            with open(v1_plot, "w") as f: f.write("Plot v1")
+
+            initial_state = {
+                "project_path": temp_dir,
+                "output_path": temp_dir,
+                "topic": "cat",
+                "style": "3D",
+                "source_audio_path": "tests/fake_audio.m4a",
+                "image_path": v1_img,
+                "video_plot_path": v1_plot,
+                "gate1_decision": "approved",
+                "latest_human_feedback": ""
+            }
+
+            with patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.ingest_audio_node", new=AsyncMock(return_value={"source_audio_path": "tests/fake_audio.m4a"})):
+                with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock(return_value={"image_path": v1_img})):
+                    with patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock(return_value={"video_plot_path": v1_plot})):
+                        with patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock(return_value={"video_plot_qc_passed": True})):
+                            await graph.ainvoke(initial_state, config=config)
+
+            ambiguous = "the hat should be red and the camera slower, also try ghibli"
+            graph.update_state(config, {
+                "latest_human_feedback": ambiguous,
+                "messages": [HumanMessage(content=ambiguous)]
+            }, as_node="ideate_package")
+
+            with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock()) as img, \
+                 patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock()) as plot, \
+                 patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock()) as audit:
+                state2 = await graph.ainvoke(None, config=config)
+
+                img.assert_not_called()
+                plot.assert_not_called()
+                audit.assert_not_called()
+
+            self.assertEqual(state2["gate1_decision"], "unclear")
+            self.assertIn("Clarification needed", state2["messages"][-1].content)
+            # And we are parked at the same gate, ready for the answer.
+            self.assertEqual(graph.get_state(config).next, ("process_gate1_decision",))
 
 if __name__ == "__main__":
     unittest.main()

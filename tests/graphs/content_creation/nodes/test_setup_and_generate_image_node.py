@@ -149,13 +149,47 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("DYNAMIC_3D_CHARACTER_SHEET", call_prompt)
                 self.assertIn("Ayla should wear a cozy kitten onesie.", call_prompt)
 
-    async def test_generates_v2_when_feedback_provided_even_if_gate1_decision_was_approved(self):
+    async def test_reuses_image_when_decision_is_approved_even_with_feedback(self):
+        """A task may not overrule the gate.
+
+        This used to be `test_generates_v2_when_feedback_provided_even_if_
+        gate1_decision_was_approved`: the presence of *any* feedback text made
+        the task regenerate regardless of the recorded decision, because it
+        re-classified the raw message itself and its classifier's default was
+        `revise_image`. The decision is now made once, at the gate.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_image_path = os.path.join(output_path, "cat_image.jpg")
+            with open(existing_image_path, "w") as f:
+                f.write("existing_image_bytes")
+
+            state = {
+                "topic": "cat",
+                "style": "3D",
+                "project_path": temp_dir,
+                "output_path": output_path,
+                "gate1_decision": "approved",
+                "latest_human_feedback": "have ayla wear a cat costume",
+            }
+
+            with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
+                mock_gen.ainvoke = AsyncMock()
+
+                result = await generate_image_task(state)
+
+                mock_gen.ainvoke.assert_not_called()
+                self.assertEqual(result["image_path"], existing_image_path)
+                self.assertFalse(os.path.exists(os.path.join(output_path, "cat_image_v1.jpg")))
+
+    async def test_revision_archives_v1_and_uses_the_reference_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "cat")
             char_dir = os.path.join(temp_dir, "character")
             os.makedirs(output_path, exist_ok=True)
             os.makedirs(char_dir, exist_ok=True)
-            
+
             existing_image_path = os.path.join(output_path, "cat_image.jpg")
             with open(existing_image_path, "w") as f:
                 f.write("existing_image_bytes")
@@ -169,7 +203,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "style": "3D",
                 "project_path": temp_dir,
                 "output_path": output_path,
-                "gate1_decision": "approved",
+                "gate1_decision": "revise_image",
                 "latest_human_feedback": "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
             }
 

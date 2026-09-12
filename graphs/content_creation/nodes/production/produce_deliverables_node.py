@@ -13,6 +13,12 @@ async def produce_deliverables_node(state: dict) -> dict:
     if state.get("error_message"):
         return {}
 
+    # The spend gate — see `ideate_package_node`. A message the gate could not
+    # parse re-presents Gate 2 and returns before Veo or ffmpeg are touched.
+    pending_notice = state.get("pending_notice")
+    if pending_notice:
+        return {"messages": [AIMessage(content=pending_notice)]}
+
     project_path = state.get("project_path")
     output_path = state.get("output_path")
     if not project_path or not output_path:
@@ -25,12 +31,8 @@ async def produce_deliverables_node(state: dict) -> dict:
 
     working_state = dict(state)
 
-    human_feedback = state.get("latest_human_feedback")
-    gate2_decision = state.get("gate2_decision")
-    if human_feedback and (not gate2_decision or gate2_decision == "approved"):
-        from graphs.content_creation.utils.classifiers import classify_gate2_intent
-        gate2_decision = classify_gate2_intent(human_feedback)
-        working_state["gate2_decision"] = gate2_decision
+    # The decision is whatever `process_gate2_decision` recorded; the tasks
+    # read it from `working_state`. Not re-derived here.
 
     # Step 3a: Generate or reuse raw visual plate
     plate_res = await render_plate_task(working_state)

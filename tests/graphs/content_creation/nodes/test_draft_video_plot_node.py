@@ -219,7 +219,12 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("video_plot_path", result)
                 self.assertEqual(result["overlay_text"], "")
 
-    async def test_generates_v2_when_plot_feedback_provided_even_if_gate1_decision_was_approved(self):
+    async def test_reuses_plot_when_decision_is_approved_even_with_feedback(self):
+        """A task may not overrule the gate — see the image-task twin of this.
+
+        Previously named `test_generates_v2_when_plot_feedback_provided_even_
+        if_gate1_decision_was_approved`.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "cat")
             os.makedirs(output_path, exist_ok=True)
@@ -232,7 +237,37 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 "project_path": temp_dir,
                 "output_path": output_path,
                 "gate1_decision": "approved",
-                "latest_human_feedback": "Change the video plot motion: add rapid zoom and camera pan.",
+                "video_plot_qc_passed": True,
+                "latest_human_feedback": "add rapid zoom and camera pan",
+                "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
+            }
+
+            with open(state["creator_instructions_path"], "w") as f:
+                f.write("Instructions")
+
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock()
+
+                result = await draft_plot_task(state)
+
+                mock_agent_call.ainvoke.assert_not_called()
+                self.assertEqual(result["video_plot_path"], existing_plot_path)
+                self.assertFalse(os.path.exists(os.path.join(output_path, "cat_video_plot_v1.md")))
+
+    async def test_generates_v2_when_gate_records_a_plot_revision(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "cat")
+            os.makedirs(output_path, exist_ok=True)
+            existing_plot_path = os.path.join(output_path, "cat_video_plot.md")
+            with open(existing_plot_path, "w") as f:
+                f.write("Initial plot")
+
+            state = {
+                "topic": "cat",
+                "project_path": temp_dir,
+                "output_path": output_path,
+                "gate1_decision": "revise_plot",
+                "latest_human_feedback": "add rapid zoom and camera pan",
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
             }
 

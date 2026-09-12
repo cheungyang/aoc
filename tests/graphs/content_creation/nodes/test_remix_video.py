@@ -97,7 +97,11 @@ class TestRemixVideoTask(unittest.IsolatedAsyncioTestCase):
                 "source_audio_path": audio_file,
                 "overlay_text": "貓咪 (maau1 mi1)",
                 "gate2_decision": "revise_remix",
-                "latest_human_feedback": "Remix: audio should be inserted at 4s .  The text should also appear at 4s"
+                # As produced by `process_gate2_decision` for
+                # "revise remix: audio at 4s, text at 4s". The task no longer
+                # re-parses the raw message.
+                "remix_params": {"audio_start_time": 4.0, "text_start_time": 4.0},
+                "latest_human_feedback": "audio at 4s. The text should also appear at 4s"
             }
 
             captured_args = {}

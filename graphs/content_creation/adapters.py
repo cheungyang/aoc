@@ -161,6 +161,8 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
         "gate1_decision": "approved",
         "gate2_decision": "approved",
         "latest_human_feedback": "",
+        "pending_notice": "",
+        "pending_feedback": "",
         "final_package": {},
         "messages": [HumanMessage(content=formatted_query)],
         "error_message": error_msg
@@ -228,7 +230,9 @@ def format_gate1_presentation(state: Dict[str, Any]) -> str:
         f"- **Approved Video Plot**: `{video_plot_path}`\n\n"
         f"<images>\n  <image path=\"{image_path}\"/>\n</images>\n\n"
         f"```markdown\n{plot_content}\n```\n\n"
-        f"Reply **'approved'** to generate video, or enter revision instructions for the image or video plot."
+        f"**What next?**\n\n"
+        f"{render_menu('gate1')}\n\n"
+        f"Reply with a number, `approve`, or `revise <target>: <what to change>`."
     )
 
 
@@ -271,8 +275,76 @@ def format_gate2_presentation(state: Dict[str, Any]) -> str:
         f"{video_xml}"
         f"### 📱 Publication Copy Preview\n"
         f"```markdown\n{copy_text}\n```\n\n"
-        f"Reply **'approved'** to finalize delivery, or specify changes for copy, text/audio remix, or video animation."
+        f"**What next?**\n\n"
+        f"{render_menu('gate2')}\n\n"
+        f"Reply with a number, `approve`, or `revise <target>: <what to change>`."
     )
 
 
 
+def render_menu(gate: str, has_pending: bool = False) -> str:
+    """Renders the numbered options for a gate.
+
+    The list comes from :func:`classifiers.gate_menu`, which is also what
+    resolves an ordinal reply — so the card and the parser cannot disagree
+    about what "2" means.
+    """
+    from graphs.content_creation.utils.classifiers import gate_menu
+
+    lines = [
+        f"**{index}.** {option.label}"
+        for index, option in enumerate(gate_menu(gate, has_pending), start=1)
+    ]
+    return "\n".join(lines)
+
+
+def format_clarification_card(
+    gate: str,
+    message: str,
+    reason: str = "",
+    has_pending: bool = False,
+) -> str:
+    """The card shown when a message does not match the deterministic grammar.
+
+    This is the cheap half of the spend gate: the graph would rather ask than
+    guess, because every wrong guess used to cost an image or a Veo render.
+    """
+    explanation = reason or "I couldn't map that to a specific change."
+    quoted = (message or "").strip()
+    if len(quoted) > 300:
+        quoted = quoted[:297] + "…"
+
+    return (
+        f"❓ **Clarification needed — nothing has been generated.**\n\n"
+        f"> {quoted}\n\n"
+        f"{explanation}\n\n"
+        f"{render_menu(gate, has_pending)}\n\n"
+        f"Reply with a number, or be explicit — "
+        f"`revise <target>: <what to change>`."
+    )
+
+
+def format_status_card(state: Dict[str, Any], gate: str = "gate1") -> str:
+    """A read-only summary of the run. Touches nothing."""
+    topic = str(state.get("topic") or state.get("word") or "scene").strip().lower()
+    rows = [
+        ("Topic", topic),
+        ("Output", state.get("output_path", "") or "—"),
+        ("Style", state.get("style", "") or "—"),
+        ("Audio", state.get("source_audio_path", "") or "—"),
+        ("Image", state.get("image_path", "") or "—"),
+        ("Video plot", state.get("video_plot_path", "") or "—"),
+        ("Raw plate", state.get("raw_video_path", "") or "—"),
+        ("Remixed video", state.get("remixed_video_path", "") or "—"),
+        ("Copy", state.get("copy_path", "") or "—"),
+        ("Plot QC", "✅" if state.get("video_plot_qc_passed") else "❌"),
+        ("Video QC", "✅" if state.get("video_qc_passed") else "❌"),
+    ]
+    if state.get("error_message"):
+        rows.append(("Error", str(state["error_message"])))
+
+    body = "\n".join(f"- **{label}**: {value}" for label, value in rows)
+    return (
+        f"📋 **Status — {'Gate 1' if gate == 'gate1' else 'Gate 2'}** "
+        f"(nothing was run)\n\n{body}\n\n{render_menu(gate)}"
+    )

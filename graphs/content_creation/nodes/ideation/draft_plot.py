@@ -3,7 +3,6 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from graphs.content_creation.prompts import build_draft_plot_prompt
 
 async def draft_plot_task(state: dict) -> dict:
@@ -18,17 +17,15 @@ async def draft_plot_task(state: dict) -> dict:
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
     feedback = state.get("video_plot_feedback")
     human_feedback = state.get("latest_human_feedback")
+    # Recorded by `process_gate1_decision`; not re-derived here.
     gate1_decision = state.get("gate1_decision")
-    if human_feedback and (not gate1_decision or gate1_decision == "approved"):
-        gate1_decision = classify_gate1_intent(human_feedback)
 
     needs_plot_revision = (
         gate1_decision == "revise_plot" or
         state.get("qc_rejection_target") == "plot" or
         bool(feedback and not state.get("video_plot_qc_passed")) or
         "TARGET: PLOT" in str(feedback or "").upper() or
-        "VIDEO PLOT" in str(feedback or "").upper() or
-        bool(human_feedback and gate1_decision == "revise_plot")
+        "VIDEO PLOT" in str(feedback or "").upper()
     )
 
     video_plot_path, should_generate = resolve_task_asset(output_path, topic, "video_plot", needs_revision=needs_plot_revision)

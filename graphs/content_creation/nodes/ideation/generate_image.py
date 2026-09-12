@@ -2,7 +2,6 @@ import os
 import re
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.utils.classifiers import classify_gate1_intent
 from tools.generate_image import generate_image
 
 async def generate_image_task(state: dict) -> dict:
@@ -15,17 +14,23 @@ async def generate_image_task(state: dict) -> dict:
     project_path = state.get("project_path", "")
     output_path = state.get("output_path", "")
     execution_log_path = state.get("execution_log_path") or (os.path.join(output_path, "execution_log.md") if output_path else "")
+    # Retained as the revision *instruction* for the prompt below -- it is no
+    # longer used to decide whether to regenerate.
     human_feedback = state.get("latest_human_feedback")
     gate1_decision = state.get("gate1_decision")
-    if human_feedback and (not gate1_decision or gate1_decision == "approved"):
-        gate1_decision = classify_gate1_intent(human_feedback)
 
+    # Only an explicit, parsed "revise the image" regenerates the image.
+    #
+    # The clause that used to sit at the end of this expression --
+    #   bool(human_feedback and gate1_decision not in ["approved", "revise_plot"])
+    # -- meant *any* message the classifier could not place regenerated the
+    # image, because the classifier's default was `revise_image`. An
+    # unparseable message now stops at the gate and never reaches this task.
     needs_image_revision = (
         gate1_decision == "revise_image" or
         state.get("qc_rejection_target") == "image" or
         "TARGET: IMAGE" in str(state.get("video_plot_feedback") or "").upper() or
-        "BASE IMAGE" in str(state.get("video_plot_feedback") or "").upper() or
-        bool(human_feedback and gate1_decision not in ["approved", "revise_plot"])
+        "BASE IMAGE" in str(state.get("video_plot_feedback") or "").upper()
     )
 
     image_path, should_generate = resolve_task_asset(output_path, topic, "image", needs_revision=needs_image_revision)
