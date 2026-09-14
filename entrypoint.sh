@@ -37,6 +37,8 @@ else
 fi
 
 # Ensure gogcli home, PKM, and workspaces exist and have proper ownership
+export GOG_KEYRING_BACKEND="${GOG_KEYRING_BACKEND:-file}"
+export GOG_KEYRING_PROVIDER="${GOG_KEYRING_PROVIDER:-file}"
 GOG_DIR="${GOG_HOME:-/app/.gogcli}"
 mkdir -p "$GOG_DIR/config" "$GOG_DIR/data" "$GOG_DIR/state" "$GOG_DIR/cache" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config
 chown -R appuser:appuser "$GOG_DIR" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config 2>/dev/null || true

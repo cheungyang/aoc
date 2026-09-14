@@ -64,6 +64,10 @@ RUN useradd -m appuser \
                 /home/appuser/workspaces \
     && chown -R appuser:appuser /home/appuser /app
 
+# Set environment variables for gogcli headless file keyring
+ENV GOG_KEYRING_BACKEND=file \
+    GOG_KEYRING_PROVIDER=file
+
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

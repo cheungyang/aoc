@@ -22,6 +22,7 @@ services:
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
       - GOG_KEYRING_BACKEND=file
+      - GOG_KEYRING_PROVIDER=file
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app
