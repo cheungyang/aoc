@@ -18,8 +18,19 @@ else
     echo "No SSH keys found at /mnt/.ssh or directory is empty."
 fi
 
-# Ensure appuser owns the app directory (if needed, but usually handled by mount permissions or build)
-# chown -R appuser:appuser /app
+# Ensure directories exist and have proper ownership
+mkdir -p /home/appuser/.config/gogcli /home/appuser/pkm /home/appuser/workspaces
+chown -R appuser:appuser /home/appuser/.config /home/appuser/pkm /home/appuser/workspaces 2>/dev/null || true
+
+# Symlink repo-relative paths to /home/appuser directories
+if [ -d "/app" ]; then
+    if [ ! -e "/app/pkm" ] || [ -L "/app/pkm" ]; then
+        ln -sfn /home/appuser/pkm /app/pkm 2>/dev/null || true
+    fi
+    if [ ! -e "/app/workspaces" ] || [ -L "/app/workspaces" ]; then
+        ln -sfn /home/appuser/workspaces /app/workspaces 2>/dev/null || true
+    fi
+fi
 
 # Start Chromium in the background as appuser for the browser tool
 runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &

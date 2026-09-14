@@ -37,9 +37,17 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 RUN pip install --no-cache-dir notebooklm-mcp-cli
 
 # Install gogcli (supports amd64 and arm64)
+# Upstream repository: https://github.com/openclaw/gogcli
+ARG GOGCLI_VERSION=0.40.0
 RUN ARCH=$(dpkg --print-architecture) \
     && mkdir -p /tmp/gogcli_extract \
-    && wget "https://github.com/steipete/gogcli/releases/download/v0.12.0/gogcli_0.12.0_linux_${ARCH}.tar.gz" -O /tmp/gogcli.tar.gz \
+    && if [ "${GOGCLI_VERSION}" = "latest" ]; then \
+         TAG=$(wget -qO- "https://api.github.com/repos/openclaw/gogcli/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/'); \
+         VERSION="${TAG:-0.40.0}"; \
+       else \
+         VERSION="${GOGCLI_VERSION#v}"; \
+       fi \
+    && wget "https://github.com/openclaw/gogcli/releases/download/v${VERSION}/gogcli_${VERSION}_linux_${ARCH}.tar.gz" -O /tmp/gogcli.tar.gz \
     && tar -xzf /tmp/gogcli.tar.gz -C /tmp/gogcli_extract \
     && find /tmp/gogcli_extract -type f \( -name "gog" -o -name "gog_*" \) | head -1 | xargs -I{} cp {} /usr/local/bin/gog \
     && chmod +x /usr/local/bin/gog \
@@ -48,11 +56,13 @@ RUN ARCH=$(dpkg --print-architecture) \
 # Copy application source code
 COPY . .
 
-# Create non-root user
-RUN useradd -m appuser
-
-# Create directory for SSH keys
-RUN mkdir -p /home/appuser/.ssh && chown appuser:appuser /home/appuser/.ssh
+# Create non-root user and prepare required directories
+RUN useradd -m appuser \
+    && mkdir -p /home/appuser/.ssh \
+                /home/appuser/.config/gogcli \
+                /home/appuser/pkm \
+                /home/appuser/workspaces \
+    && chown -R appuser:appuser /home/appuser /app
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

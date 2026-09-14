@@ -67,7 +67,8 @@ Ensure you have the following files/directories on your host machine if you want
 - `.env` file in the project root.
 - SSH keys in `~/.ssh` (to allow git operations inside the container).
 - `gogcli` config files in `~/.config/gogcli`.
-- PKM directory in `~/pkm` (if using PKM tasks/vaults).
+- PKM directory in `../pkm` (external directory mapped into container at `/home/appuser/pkm`).
+- Workspaces directory in `../workspaces` (external directory mapped into container at `/home/appuser/workspaces`).
 
 ### 3. Run the Container
 

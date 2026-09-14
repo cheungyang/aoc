@@ -33,6 +33,24 @@ if [ ! -d "$GOG_CONFIG_DIR" ]; then
 fi
 GOG_OPT="-v $GOG_CONFIG_DIR:/home/appuser/.config/gogcli"
 
+# Check for PKM directory (defaults to ../pkm on host machine)
+PKM_HOST_DIR="${PKM_HOST_DIR:-$(cd "$(pwd)/../pkm" 2>/dev/null && pwd || echo "$(pwd)/../pkm")}"
+if [ -d "$PKM_HOST_DIR" ]; then
+    PKM_OPT="-v $PKM_HOST_DIR:/home/appuser/pkm"
+else
+    echo "Warning: PKM directory not found at $PKM_HOST_DIR."
+    PKM_OPT=""
+fi
+
+# Check for workspaces directory (defaults to ../workspaces on host machine)
+WORKSPACES_HOST_DIR="${WORKSPACES_HOST_DIR:-$(cd "$(pwd)/../workspaces" 2>/dev/null && pwd || echo "$(pwd)/../workspaces")}"
+if [ -d "$WORKSPACES_HOST_DIR" ]; then
+    WORKSPACES_OPT="-v $WORKSPACES_HOST_DIR:/home/appuser/workspaces"
+else
+    echo "Warning: Workspaces directory not found at $WORKSPACES_HOST_DIR."
+    WORKSPACES_OPT=""
+fi
+
 # Run the container
 echo "Starting Docker container $IMAGE_NAME..."
 docker run -it \
@@ -40,4 +58,6 @@ docker run -it \
   $ENV_OPT \
   $SSH_OPT \
   $GOG_OPT \
+  $PKM_OPT \
+  $WORKSPACES_OPT \
   $IMAGE_NAME "$@"
