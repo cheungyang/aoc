@@ -33,8 +33,8 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install notebooklm-mcp-cli (nlm command)
-RUN pip install --no-cache-dir notebooklm-mcp-cli
+# Install notebooklm-mcp-cli (nlm command) ensuring mcp<2 compatibility
+RUN pip install --no-cache-dir "mcp<2" "fastmcp<4" notebooklm-mcp-cli
 
 # Install gogcli (supports amd64 and arm64)
 # Upstream repository: https://github.com/openclaw/gogcli

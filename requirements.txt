@@ -1,5 +1,7 @@
 browser-use<=0.13.9
 mcp<2
+fastmcp<4
+notebooklm-mcp-cli
 croniter
 discord.py
 langchain-core
@@ -11,6 +13,7 @@ langgraph
 langsmith>=0.1.0
 playwright
 pytest
+pytest-asyncio
 python-dotenv
 pyyaml
 lancedb
@@ -19,6 +22,8 @@ pyarrow
 discord-ext-voice-recv
 pynacl
 faster-whisper
+onnxruntime
+numpy
 edge-tts
 soundfile
 imageio-ffmpeg
