@@ -1,5 +1,23 @@
 #!/bin/bash
 
+# Align appuser UID and GID with the owner of the mounted /app volume
+TARGET_UID=$(stat -c '%u' /app 2>/dev/null || stat -f '%u' /app 2>/dev/null || echo "")
+TARGET_GID=$(stat -c '%g' /app 2>/dev/null || stat -f '%g' /app 2>/dev/null || echo "")
+
+if [ -n "$TARGET_UID" ] && [ "$TARGET_UID" -ne 0 ] && [ "$TARGET_UID" != "$(id -u appuser 2>/dev/null)" ]; then
+    groupmod -g "$TARGET_GID" appuser 2>/dev/null || true
+    usermod -u "$TARGET_UID" -g "$TARGET_GID" appuser 2>/dev/null || usermod -u "$TARGET_UID" appuser 2>/dev/null || true
+    chown -R appuser:appuser /home/appuser 2>/dev/null || true
+fi
+
+# Ensure /app and its files are readable and directories are executable
+chmod -R a+rX /app 2>/dev/null || true
+
+# If appuser still cannot read /app/main.py, ensure ownership
+if ! runuser -u appuser -- test -r /app/main.py 2>/dev/null; then
+    chown -R appuser:appuser /app 2>/dev/null || true
+fi
+
 # Create .ssh directory if it doesn't exist
 mkdir -p /home/appuser/.ssh
 
