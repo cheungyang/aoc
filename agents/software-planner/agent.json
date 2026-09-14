@@ -1,6 +1,7 @@
 {
   "agent_id": "software-planner",
   "channels": [
+    "general",
     "software-dev"
   ],
   "name": "Elephant",
