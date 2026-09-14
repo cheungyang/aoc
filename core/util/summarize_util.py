@@ -143,13 +143,16 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
 
         token = current_execution_context.set(ctx)
         try:
-            result = filesystem.invoke({
-                "instructions": [{
-                    "action": "append",
-                    "path": log_file,
-                    "content": payload
-                }]
-            })
+            result = filesystem.invoke(
+                {
+                    "instructions": [{
+                        "action": "append",
+                        "path": log_file,
+                        "content": payload
+                    }]
+                },
+                config={"callbacks": []}
+            )
         finally:
             current_execution_context.reset(token)
 

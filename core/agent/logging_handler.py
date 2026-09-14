@@ -111,8 +111,29 @@ class LoggingHandler(BaseCallbackHandler):
         self.llm_start_time = None
         self.last_execution_time = 0.0
         self.tool_start_times = {}
-        
+
+    def _is_for_this_agent(self, kwargs: dict) -> bool:
+        """
+        Determines whether this callback event belongs to this handler's agent/session.
+        Prevents parent agent handlers (e.g. main) from logging or recording
+        events dispatched by child agents (e.g. subagents invoked via agent_call).
+        """
+        metadata = kwargs.get("metadata") or {}
+        event_agent = metadata.get("agent_id")
+        if not event_agent:
+            try:
+                from core.agent.execution_context import try_context
+                sess = try_context()
+                event_agent = sess.agent_id if sess else None
+            except Exception:
+                pass
+        if self.agent_id and event_agent and event_agent != self.agent_id:
+            return False
+        return True
+
     def on_llm_start(self, serialized, prompts, **kwargs):
+        if not self._is_for_this_agent(kwargs):
+            return
         self.llm_start_time = time.time()
         if self.session_id and self.role and self.human_message is not None:
             msg = self.human_message
@@ -127,6 +148,8 @@ class LoggingHandler(BaseCallbackHandler):
             self.human_message = None
 
     def on_llm_end(self, response, **kwargs):
+        if not self._is_for_this_agent(kwargs):
+            return
         if hasattr(self, 'llm_start_time') and self.llm_start_time:
             self.last_execution_time = round(time.time() - self.llm_start_time, 3)
             self.llm_start_time = None
@@ -157,6 +180,8 @@ class LoggingHandler(BaseCallbackHandler):
                     self.last_token_usage['model'] = response.llm_output.get('model_name', 'unknown')
 
     def on_chain_end(self, outputs, **kwargs):
+        if not self._is_for_this_agent(kwargs):
+            return
         if hasattr(self, 'last_token_usage') and self.last_token_usage:
             usage = self.last_token_usage
             input_token = usage.get('input_tokens', 0)
@@ -183,6 +208,8 @@ class LoggingHandler(BaseCallbackHandler):
             self.last_execution_time = 0.0
 
     def on_tool_start(self, serialized, input_str, **kwargs):
+        if not self._is_for_this_agent(kwargs):
+            return
         tool_name = serialized.get("name", "Unknown") if isinstance(serialized, dict) else "Unknown"
         run_id = str(kwargs.get("run_id") or "default")
         if not hasattr(self, "tool_start_times"):
@@ -227,6 +254,8 @@ class LoggingHandler(BaseCallbackHandler):
             self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}{extra_str}:{input_str}")
 
     def on_tool_end(self, output, **kwargs):
+        if not self._is_for_this_agent(kwargs):
+            return
         if self.session_id:
             run_id = str(kwargs.get("run_id") or "default")
             start_t = getattr(self, "tool_start_times", {}).pop(run_id, None)

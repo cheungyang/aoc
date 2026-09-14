@@ -50,7 +50,9 @@ def gog(command: str) -> str:
             cmd,
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=30.0,
+            stdin=subprocess.DEVNULL
         )
 
         output = []
@@ -61,5 +63,11 @@ def gog(command: str) -> str:
 
         return format_tool_response("gog", payload="\n".join(output), errors="None")
 
+    except subprocess.TimeoutExpired:
+        return format_tool_response(
+            "gog",
+            payload="",
+            errors="Error: gog command timed out after 30 seconds. In headless Docker environments, ensure gog is authenticated (OAuth credentials in .gogcli) and the command does not wait for interactive input."
+        )
     except Exception as e:
         return format_tool_response("gog", payload="", errors=f"Error performing gog action: {e}")

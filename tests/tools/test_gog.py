@@ -99,5 +99,32 @@ class TestGogTool(unittest.TestCase):
         
         self.assertIn("Error performing gog action: cmd failed", result)
 
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
+    def test_gog_timeout(self, mock_run, mock_exists):
+        import subprocess
+        mock_exists.return_value = True
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["gog", "calendar"], timeout=30.0)
+        
+        result = gog.func(command="calendar calendars")
+        self.assertIn("Error: gog command timed out after 30 seconds", result)
+
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
+    def test_gog_passes_timeout_and_devnull(self, mock_run, mock_exists):
+        import subprocess
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        gog.func(command="calendar calendars")
+        self.assertTrue(mock_run.called)
+        kwargs = mock_run.call_args[1]
+        self.assertEqual(kwargs.get("timeout"), 30.0)
+        self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
+
 if __name__ == '__main__':
     unittest.main()

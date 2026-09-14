@@ -347,6 +347,73 @@ class TestLoggingHandler(unittest.TestCase):
         self.assertTrue(logged_msg.startswith("Tool Output ["), f"Message '{logged_msg}' should start with 'Tool Output ['")
         self.assertTrue(logged_msg.endswith("s]: Search result output"), f"Message '{logged_msg}' should end with 's]: Search result output'")
 
+    def test_on_tool_start_ignores_different_agent_metadata(self):
+        from unittest.mock import patch
+        handler_main = LoggingHandler(session=self.session) # agent_id="test-agent"
+        handler_main.manager = MagicMock()
+        
+        with patch("builtins.print") as mock_print:
+            handler_main.on_tool_start(
+                {"name": "gog"},
+                "calendar calendars",
+                metadata={"agent_id": "excursion-planner"}
+            )
+            mock_print.assert_not_called()
+            handler_main.manager.append_message.assert_not_called()
+
+    def test_on_tool_start_ignores_different_agent_context(self):
+        from unittest.mock import patch
+        from core.agent.execution_context import current_execution_context
+        handler_main = LoggingHandler(session=self.session) # agent_id="test-agent"
+        handler_main.manager = MagicMock()
+        
+        sess_sub = SessionManager.get_session(agent_id="excursion-planner", source="tool", channel="session1")
+        tok = current_execution_context.set(sess_sub)
+        try:
+            with patch("builtins.print") as mock_print:
+                handler_main.on_tool_start(
+                    {"name": "filesystem"},
+                    "{'instructions': [{'action': 'append', 'path': '/tmp/log.md'}]}"
+                )
+                mock_print.assert_not_called()
+                handler_main.manager.append_message.assert_not_called()
+        finally:
+            current_execution_context.reset(tok)
+
+    def test_on_tool_end_ignores_different_agent_metadata(self):
+        handler_main = LoggingHandler(session=self.session)
+        handler_main.manager = MagicMock()
+        
+        mock_output = MagicMock()
+        mock_output.content = "output from subagent"
+        handler_main.on_tool_end(mock_output, metadata={"agent_id": "excursion-planner"})
+        handler_main.manager.append_message.assert_not_called()
+
+    def test_on_llm_start_and_end_ignores_different_agent_metadata(self):
+        handler_main = LoggingHandler(session=self.session, role="user", human_message="prompt")
+        handler_main.manager = MagicMock()
+        
+        handler_main.on_llm_start(None, ["prompt"], metadata={"agent_id": "excursion-planner"})
+        handler_main.manager.append_message.assert_not_called()
+        
+        mock_response = MagicMock()
+        mock_generation = MagicMock()
+        mock_generation.text = "Subagent AI reply"
+        mock_response.generations = [[mock_generation]]
+        handler_main.on_llm_end(mock_response, metadata={"agent_id": "excursion-planner"})
+        handler_main.manager.append_message.assert_not_called()
+
+    def test_on_chain_end_ignores_different_agent_metadata(self):
+        handler_main = LoggingHandler(session=self.session)
+        handler_main.manager = MagicMock()
+        handler_main.last_token_usage = {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "model": "gemini-pro"
+        }
+        handler_main.on_chain_end({}, metadata={"agent_id": "excursion-planner"})
+        handler_main.manager.append_token_usage.assert_not_called()
+
 
 class TestFormatToolExtraStr(unittest.TestCase):
     def test_format_filesystem_multiple_instructions_dict(self):
