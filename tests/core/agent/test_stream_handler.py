@@ -202,5 +202,114 @@ class TestStreamHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(buffer.messages), 1)
 
 
+class TestOnlyTheOwningAgentsTokensAreStreamed(unittest.IsolatedAsyncioTestCase):
+    """`astream_events` reports descendants too, and they are not the answer.
+
+    A graph node that reaches a stateless worker through `agent_call` runs
+    inside this callback tree, so the worker's model tokens arrive here looking
+    exactly like the orchestrator's own. Streaming them is what posted raw
+    `<worker_handoff>` XML into `#software-dev` — once per implement attempt.
+    The existing `has_subagent_streamed` guard never fired for it, because a
+    stateless agent returns its result instead of dispatching custom events.
+    """
+
+    def _graph_with(self, events):
+        graph = MagicMock()
+
+        async def astream_events(*args, **kwargs):
+            for event in events:
+                yield event
+
+        graph.astream_events = astream_events
+        return graph
+
+    @staticmethod
+    def _chat(content, agent_id=None):
+        event = {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content=content)}}
+        if agent_id:
+            event["metadata"] = {"agent_id": agent_id}
+        return event
+
+    async def test_a_nested_workers_tokens_never_reach_the_channel(self):
+        graph = self._graph_with([
+            self._chat("Running the coding graph now.", agent_id="main"),
+            self._chat("<worker_handoff><status>READY_FOR_TEST</status>", agent_id="graph-worker"),
+            self._chat("</worker_handoff>", agent_id="graph-worker"),
+        ])
+
+        events = [ev async for ev in
+                  StreamHandler.stream_graph_events(graph, {}, {}, agent_id="main")]
+
+        self.assertEqual([ev["content"] for ev in events], ["Running the coding graph now."])
+
+    async def test_the_owning_agents_own_tokens_still_stream(self):
+        graph = self._graph_with([self._chat("Hello ", agent_id="main"),
+                                  self._chat("world", agent_id="main")])
+
+        events = [ev async for ev in
+                  StreamHandler.stream_graph_events(graph, {}, {}, agent_id="main")]
+
+        self.assertEqual([ev["content"] for ev in events], ["Hello ", "world"])
+
+    async def test_tokens_with_no_owner_recorded_are_not_dropped(self):
+        """Absent metadata means "unknown", not "someone else".
+
+        Dropping those would silence any run whose config does not carry an
+        agent id — the whole turn would arrive as nothing.
+        """
+        graph = self._graph_with([self._chat("anonymous token")])
+
+        events = [ev async for ev in
+                  StreamHandler.stream_graph_events(graph, {}, {}, agent_id="main")]
+
+        self.assertEqual([ev["content"] for ev in events], ["anonymous token"])
+
+    async def test_subagent_chat_token_skipped_before_custom_event(self):
+        """When a subagent emits on_chat_model_stream before agent_call dispatches
+        SUBAGENT_STREAM_TOKEN, the subagent's chat stream token must be skipped so that
+        the stream does not repeat the first words (e.g. 'Let\'🌼 Daisy: Let\'s pick up')."""
+        from core.agent.stream_handler import SUBAGENT_STREAM_TOKEN
+
+        events = [
+            # 1. Subagent LLM emits its first chunk
+            self._chat("Let'", agent_id="day-planner"),
+            # 2. agent_call dispatches header
+            {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_TOKEN,
+                "data": {"content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True}
+            },
+            # 3. agent_call dispatches the first token
+            {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_TOKEN,
+                "data": {"content": "Let'", "agent_id": "day-planner"}
+            },
+            # 4. agent_call dispatches subsequent tokens
+            {
+                "event": "on_custom_event",
+                "name": SUBAGENT_STREAM_TOKEN,
+                "data": {"content": "s pick up", "agent_id": "day-planner"}
+            }
+        ]
+        graph = self._graph_with(events)
+        streamed = [ev async for ev in StreamHandler.stream_graph_events(graph, {}, {}, agent_id="main")]
+        tokens = [ev["content"] for ev in streamed if ev["type"] == "token"]
+        # Must start with the header, NOT the duplicated "Let'"
+        self.assertEqual(tokens, ["🌼 Daisy: ", "Let'", "s pick up"])
+        self.assertEqual("".join(tokens), "🌼 Daisy: Let's pick up")
+
+    async def test_agent_id_inferred_from_config(self):
+        """If agent_id argument is None, it is inferred from config metadata."""
+        graph = self._graph_with([
+            self._chat("worker token", agent_id="subagent"),
+            self._chat("orchestrator token", agent_id="main")
+        ])
+        config = {"metadata": {"agent_id": "main"}}
+        streamed = [ev async for ev in StreamHandler.stream_graph_events(graph, {}, config, agent_id=None)]
+        tokens = [ev["content"] for ev in streamed if ev["type"] == "token"]
+        self.assertEqual(tokens, ["orchestrator token"])
+
+
 if __name__ == "__main__":
     unittest.main()

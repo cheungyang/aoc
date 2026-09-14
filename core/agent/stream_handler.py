@@ -27,8 +27,27 @@ class StreamHandler:
     """
 
     @staticmethod
-    async def stream_graph_events(graph: Any, inputs: Dict[str, Any], config: Dict[str, Any]):
-        """Low-level graph streaming generator yielding normalized token/tool events."""
+    async def stream_graph_events(
+        graph: Any,
+        inputs: Dict[str, Any],
+        config: Dict[str, Any],
+        agent_id: Optional[str] = None
+    ):
+        """Low-level graph streaming generator yielding normalized token/tool events.
+
+        `agent_id` is the agent that owns this stream. It matters because
+        `astream_events` reports every *descendant* run too: an agent reached
+        through `agent_call` — or a graph node that calls one — runs inside this
+        callback tree, so its model tokens arrive here indistinguishable from
+        the owner's own. Streaming them verbatim is what put a worker's raw
+        `<worker_handoff>` XML into the channel, once per attempt. A nested run
+        carries its own `agent_id` in the event metadata, so it is skipped:
+        whatever the caller does with the subagent's result is the caller's to
+        report.
+        """
+        if agent_id is None and config:
+            agent_id = (config.get("metadata") or {}).get("agent_id") or (config.get("configurable") or {}).get("agent_id")
+
         if hasattr(graph, "astream_events"):
             has_subagent_streamed = False
             async for event in graph.astream_events(inputs, config=config, version="v2"):
@@ -37,6 +56,9 @@ class StreamHandler:
                     if has_subagent_streamed:
                         # Suppress top-level orchestrator (e.g. Concierge) post-delegation
                         # tokens to avoid echoing or duplicating subagent response text
+                        continue
+                    event_agent = (event.get("metadata") or {}).get("agent_id")
+                    if agent_id and event_agent and event_agent != agent_id:
                         continue
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content"):
@@ -99,16 +121,17 @@ class StreamHandler:
         config: Dict[str, Any],
         session: ExecutionContext,
         recover_checkpoint_fn: Callable[[ExecutionContext], None],
-        is_corrupt_checkpoint_fn: Callable[[Exception], bool]
+        is_corrupt_checkpoint_fn: Callable[[Exception], bool],
+        agent_id: Optional[str] = None
     ):
         """Streams graph events with automatic corrupt checkpoint recovery and retry."""
         try:
-            async for event in cls.stream_graph_events(graph, inputs, config):
+            async for event in cls.stream_graph_events(graph, inputs, config, agent_id=agent_id):
                 yield event
         except Exception as e:
             if is_corrupt_checkpoint_fn(e):
                 recover_checkpoint_fn(session)
-                async for event in cls.stream_graph_events(graph, inputs, config):
+                async for event in cls.stream_graph_events(graph, inputs, config, agent_id=agent_id):
                     yield event
             else:
                 raise e
