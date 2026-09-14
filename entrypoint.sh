@@ -18,9 +18,13 @@ else
     echo "No SSH keys found at /mnt/.ssh or directory is empty."
 fi
 
-# Ensure directories exist and have proper ownership
-mkdir -p /home/appuser/.config/gogcli /home/appuser/pkm /home/appuser/workspaces
-chown -R appuser:appuser /home/appuser/.config /home/appuser/pkm /home/appuser/workspaces 2>/dev/null || true
+# Ensure gogcli home, PKM, and workspaces exist and have proper ownership
+GOG_DIR="${GOG_HOME:-/app/.gogcli}"
+mkdir -p "$GOG_DIR/config" "$GOG_DIR/data" "$GOG_DIR/state" "$GOG_DIR/cache" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config
+chown -R appuser:appuser "$GOG_DIR" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config 2>/dev/null || true
+
+# Symlink legacy ~/.config/gogcli to project gogcli config directory
+ln -sfn "$GOG_DIR/config" /home/appuser/.config/gogcli 2>/dev/null || true
 
 # Symlink repo-relative paths to /home/appuser directories
 if [ -d "/app" ]; then

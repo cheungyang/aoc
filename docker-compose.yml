@@ -5,8 +5,8 @@ services:
       dockerfile: Dockerfile
       args:
         GOGCLI_VERSION: "0.40.0"
-    image: langgraph-app:latest
-    container_name: langgraph-system
+    image: aoc-app:latest
+    container_name: aoc
     restart: unless-stopped
     stdin_open: true # Equivalent to -i
     tty: true        # Equivalent to -t
@@ -19,13 +19,14 @@ services:
       - PKM_DIR=${PKM_DIR:-/home/appuser/pkm}
       - TASKS_DB_PATH=${TASKS_DB_PATH:-/home/appuser/pkm/tasks.db}
       - WORKSPACES_DIR=${WORKSPACES_DIR:-/home/appuser/workspaces}
+      # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
+      - GOG_HOME=${GOG_HOME:-/app/.gogcli}
+      - GOG_KEYRING_BACKEND=file
     volumes:
-      # Project directory mount for hot-reloading and live code edits
+      # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app
       # Host SSH keys mounted read-only; copied to ~/.ssh by entrypoint with secure permissions
       - ${HOME}/.ssh:/mnt/.ssh:ro
-      # Gogcli config mount for Google Calendar integration
-      - ${GOG_CONFIG_DIR:-${HOME}/.config/gogcli}:/home/appuser/.config/gogcli
       # PKM storage directory mount (mapped to ../pkm on host machine)
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)

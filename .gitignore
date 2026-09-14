@@ -3,6 +3,7 @@
 .env.*
 .gemini
 .git
+.gogcli/
 .pytest_cache
 .venv
 .vscode

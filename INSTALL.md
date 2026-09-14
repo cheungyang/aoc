@@ -66,7 +66,7 @@ docker build -t aoc .
 Ensure you have the following files/directories on your host machine if you want to use them:
 - `.env` file in the project root.
 - SSH keys in `~/.ssh` (to allow git operations inside the container).
-- `gogcli` config files in `~/.config/gogcli`.
+- `gogcli` auth & configuration: stored automatically in `./.gogcli` inside the project root (no `~/.config/gogcli` required).
 - PKM directory in `../pkm` (external directory mapped into container at `/home/appuser/pkm`).
 - Workspaces directory in `../workspaces` (external directory mapped into container at `/home/appuser/workspaces`).
 
@@ -127,4 +127,4 @@ Once enabled, all agent executions, subgraph runs, LLM calls, and tool invocatio
 
 ## Customization
 
-If your SSH keys or `gogcli` config are in non-standard locations, you can edit the `install.sh` script to point to the correct paths before running it.
+If your SSH keys or PKM directory are in non-standard locations, you can set `PKM_HOST_DIR`, `WORKSPACES_HOST_DIR`, or `GOG_HOME` in your `.env` file before running.

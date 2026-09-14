@@ -25,13 +25,9 @@ else
     SSH_OPT="-v $SSH_DIR:/mnt/.ssh"
 fi
 
-# Check for gogcli config directory
-GOG_CONFIG_DIR="$HOME/.config/gogcli"
-if [ ! -d "$GOG_CONFIG_DIR" ]; then
-    echo "Warning: $GOG_CONFIG_DIR not found. Creating a placeholder directory to mount."
-    mkdir -p "$GOG_CONFIG_DIR"
-fi
-GOG_OPT="-v $GOG_CONFIG_DIR:/home/appuser/.config/gogcli"
+# Gogcli config directory lives in project root (./.gogcli)
+mkdir -p "$(pwd)/.gogcli"
+GOG_OPT="-e GOG_HOME=/app/.gogcli -e GOG_KEYRING_BACKEND=file"
 
 # Check for PKM directory (defaults to ../pkm on host machine)
 PKM_HOST_DIR="${PKM_HOST_DIR:-$(cd "$(pwd)/../pkm" 2>/dev/null && pwd || echo "$(pwd)/../pkm")}"

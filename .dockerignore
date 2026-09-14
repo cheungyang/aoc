@@ -4,6 +4,7 @@ __pycache__/
 .gemini/
 .git
 .gitignore
+.gogcli/
 .pytest_cache/
 .venv
 .vscode/
