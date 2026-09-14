@@ -1,6 +1,4 @@
 import os
-import inspect
-import io
 import re
 import asyncio
 import discord
@@ -48,7 +46,6 @@ class VoiceManager:
         self.bridge_manager = BridgeManager()
         self.audio_queue = AudioStreamQueue(self, loop=getattr(self.bot, "loop", None))
         
-        self._is_processing = False
         self._lock = asyncio.Lock()
         self._active_turn = 0
         self._current_task = None
@@ -69,7 +66,9 @@ class VoiceManager:
         1. Uses explicitly linked channel if set (e.g. from !join command).
         2. Matches voice channel name (e.g. 'day-planning-voice' -> 'day-planning')
            against the agent's channel_hosts and guild text channels.
-        3. Falls back to the voice channel's built-in text chat.
+        3. Matches any agent channel_host in text channels (e.g. 'general').
+        4. Falls back to first available text channel in guild to unify context with text.
+        5. Last resort fallback to voice channel itself.
         """
         if self.linked_text_channel:
             return self.linked_text_channel
@@ -93,7 +92,16 @@ class VoiceManager:
             if (ch.name in channel_hosts or str(ch.id) in channel_hosts) and (ch_norm in vc_normalized or vc_normalized in ch_norm):
                 return ch
 
-        # Fallback to the voice channel itself (Discord voice channels support text chat)
+        # 3. Match any agent channel_host in text channels (e.g. general)
+        for ch in voice_channel.guild.text_channels:
+            if ch.name in channel_hosts or str(ch.id) in channel_hosts:
+                return ch
+
+        # 4. Fallback to first available text channel in guild to unify context with text
+        if voice_channel.guild.text_channels:
+            return voice_channel.guild.text_channels[0]
+
+        # 5. Last resort fallback to the voice channel itself
         return voice_channel
 
     async def _cleanup_failed_connection(self, target_channel=None):
@@ -188,29 +196,13 @@ class VoiceManager:
             print(f"[VoiceManager:{self.agent_id}] Connected! Context linked to text channel '#{resolved_name}'. Listening for voice...")
             return True
             
-        except (asyncio.TimeoutError, TimeoutError):
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Connection timed out (UDP/voice handshake timeout).")
-            await self._cleanup_failed_connection(target_channel)
-            return False
-        except discord.errors.ClientException as e:
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Discord client error: {e}")
-            await self._cleanup_failed_connection(target_channel)
-            return False
-        except (discord.errors.ConnectionClosed, discord.errors.GatewayNotFound) as e:
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Voice gateway connection closed ({e}).")
-            await self._cleanup_failed_connection(target_channel)
-            return False
-        except (OSError, ConnectionError) as e:
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': Network error ({e}).")
-            await self._cleanup_failed_connection(target_channel)
-            return False
         except asyncio.CancelledError:
             print(f"[VoiceManager:{self.agent_id}] Voice connection to '{channel_name}' was cancelled.")
             await self._cleanup_failed_connection(target_channel)
             return False
         except Exception as e:
             err_msg = str(e).strip() or type(e).__name__
-            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': {err_msg}")
+            print(f"[VoiceManager:{self.agent_id}] Failed to connect to voice channel '{channel_name}': {type(e).__name__}: {err_msg}")
             await self._cleanup_failed_connection(target_channel)
             return False
 
@@ -329,6 +321,7 @@ class VoiceManager:
                 
                 chunker = SentenceChunker()
                 has_emitted_speech = False
+                final_text = ""
 
                 # Ensure audio queue is started
                 self.audio_queue.start()
@@ -340,7 +333,7 @@ class VoiceManager:
                     channel=target_channel
                 )
                 async for event in agent.execute_stream(
-                    content=transcript,
+                    transcript,
                     session=session_ident
                 ):
                     if turn_id != self._active_turn:
@@ -375,17 +368,32 @@ class VoiceManager:
                                 await self.audio_queue.put(tts_file, auto_delete=True)
 
                     elif event_type == "final_response":
-                        pass
+                        final_text = event.get("text", "") or ""
+
+                    elif event_type == "error":
+                        print(f"[VoiceManager:{self.agent_id}] Agent stream error: {event.get('content')}")
 
                 # Flush remaining sentences from chunker
                 remaining_sentences = chunker.flush()
                 for sentence in remaining_sentences:
                     if turn_id != self._active_turn:
                         return
+                    has_emitted_speech = True
                     print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing final sentence chunk: '{sentence[:60]}...'")
                     tts_file = await self.tts_engine.synthesize_to_file(sentence)
                     if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
                         await self.audio_queue.put(tts_file, auto_delete=True)
+
+                # Fallback for short direct answers (e.g. "Done.") that did not hit chunker threshold
+                if not has_emitted_speech and final_text:
+                    clean_sentences = SentenceChunker().split_into_sentences(final_text)
+                    for sentence in clean_sentences:
+                        if turn_id != self._active_turn:
+                            return
+                        print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing direct response: '{sentence[:60]}...'")
+                        tts_file = await self.tts_engine.synthesize_to_file(sentence)
+                        if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
+                            await self.audio_queue.put(tts_file, auto_delete=True)
                         
             except asyncio.CancelledError:
                 pass
@@ -393,8 +401,6 @@ class VoiceManager:
                 from core.util import format_error_message
                 err_msg = format_error_message(e)
                 print(f"[VoiceManager:{self.agent_id}] Error in voice pipeline: {err_msg}")
-            finally:
-                self._is_processing = False
 
     def _play_blurp(self):
         """Plays the agent's static blurp cue immediately."""
@@ -411,30 +417,3 @@ class VoiceManager:
         except Exception as e:
             print(f"[VoiceManager:{self.agent_id}] Error playing static blurp: {e}")
 
-    def _play_audio_file(self, file_path: str):
-        """Plays an audio file into the Discord voice channel and removes temp file afterwards."""
-        if not self.voice_client or not self.voice_client.is_connected():
-            if os.path.exists(file_path):
-                os.unlink(file_path)
-            return
-
-        def _after_play(error):
-            if error:
-                print(f"[VoiceManager:{self.agent_id}] Playback error: {error}")
-            if os.path.exists(file_path):
-                try:
-                    os.unlink(file_path)
-                except Exception:
-                    pass
-
-        try:
-            # Stop any playing blurp before speaking
-            if self.voice_client.is_playing():
-                self._stop_playback()
-                
-            source = discord.FFmpegPCMAudio(file_path, executable=FFMPEG_EXE)
-            self.voice_client.play(source, after=_after_play)
-        except Exception as e:
-            print(f"[VoiceManager:{self.agent_id}] Error streaming audio: {e}")
-            if os.path.exists(file_path):
-                os.unlink(file_path)

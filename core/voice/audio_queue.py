@@ -34,27 +34,16 @@ class AudioStreamQueue:
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
         """Returns the active running event loop, falling back to bound or default loop."""
-        from unittest.mock import MagicMock
-        if isinstance(self._loop, MagicMock):
-            return self._loop
         try:
             return asyncio.get_running_loop()
         except RuntimeError:
-            if self._loop and not getattr(self._loop, "_closed", False):
+            if self._loop and hasattr(self._loop, "create_task"):
                 return self._loop
-            try:
-                return asyncio.get_event_loop()
-            except RuntimeError:
-                return self._loop
+            return asyncio.get_event_loop()
 
     def _ensure_queue(self):
         """Ensures the internal asyncio.Queue is attached to the current active event loop."""
         cur_loop = self.loop
-        from unittest.mock import MagicMock
-        if isinstance(cur_loop, MagicMock):
-            if self._queue is None:
-                self._queue = asyncio.Queue()
-            return
 
         if self._queue is None:
             self._queue = asyncio.Queue()
@@ -77,9 +66,6 @@ class AudioStreamQueue:
         self._running = True
         self._ensure_queue()
         cur_loop = self.loop
-        from unittest.mock import MagicMock
-        if isinstance(cur_loop, MagicMock):
-            return
 
         if self._playback_task is None or self._playback_task.done():
             try:

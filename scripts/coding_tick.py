@@ -11,10 +11,12 @@ Exit codes:
     1  the tick could not run (bad manifest, broken config)
 
 Usage:
-    scripts/coding_tick.py [--manifest PATH] [--max-tasks N] [--dry-run]
+    scripts/coding_tick.py [--manifest PATH] [--max-tasks N] [--dry-run] [--verbose]
 """
 import argparse
 import asyncio
+import contextlib
+import io
 import os
 import sys
 
@@ -43,7 +45,34 @@ def parse_args():
         action="store_true",
         help="Report what the tick would pick up, without running or writing anything."
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=bool(os.environ.get("AOC_TICK_VERBOSE")),
+        help="Re-emit the runtime's own chatter on stderr instead of discarding it."
+    )
     return parser.parse_args()
+
+
+@contextlib.contextmanager
+def quiet_stdout(verbose: bool = False):
+    """Keeps stdout for the tick report alone.
+
+    The runtime narrates itself on stdout — graph reloads, tool rosters, every
+    tool call the worker makes. That is fine in a terminal and wrong here: the
+    script-executor posts this script's stdout to `#software-dev` verbatim, so
+    the narration became the message and the one line that mattered was buried
+    in it. Captured chatter is discarded, or sent to stderr under `--verbose`
+    (the runner only reads stderr when the script exits non-zero).
+    """
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            yield
+    finally:
+        noise = buffer.getvalue()
+        if verbose and noise.strip():
+            sys.stderr.write(noise)
 
 
 async def run_tick(manifest_path: str) -> str:
@@ -79,17 +108,18 @@ def main() -> int:
         return 0
 
     try:
-        if args.dry_run:
-            report = describe_pending(manifest_path)
-        else:
-            reports = []
-            for _ in range(max(1, args.max_tasks)):
-                output = asyncio.run(run_tick(manifest_path))
-                if not output.strip():
-                    # Nothing left to advance; further ticks would repeat this.
-                    break
-                reports.append(output.strip())
-            report = "\n".join(reports)
+        with quiet_stdout(args.verbose):
+            if args.dry_run:
+                report = describe_pending(manifest_path)
+            else:
+                reports = []
+                for _ in range(max(1, args.max_tasks)):
+                    output = asyncio.run(run_tick(manifest_path))
+                    if not output.strip():
+                        # Nothing left to advance; further ticks would repeat this.
+                        break
+                    reports.append(output.strip())
+                report = "\n".join(reports)
     except Exception as e:
         # A broken manifest or config must be loud: it will not fix itself, and
         # silence here would look exactly like an idle queue.

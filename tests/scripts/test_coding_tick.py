@@ -5,7 +5,9 @@ means no output and exit 0, a broken configuration means a message and exit 1.
 Getting that backwards either floods a channel every five minutes or hides a
 pipeline that has silently stopped.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -120,6 +122,58 @@ class TestMaxTasks(TickScriptTestCase):
             self.run_main("--max-tasks", "5")
 
         self.assertEqual(mock_tick.call_count, 2)
+
+
+class TestOnlyTheOutcomeReachesStdout(TickScriptTestCase):
+    """stdout is the message. Everything else the runtime says is not.
+
+    The runtime narrates itself on stdout — graph reloads, tool rosters, every
+    tool call the worker makes. The script-executor posts this script's stdout
+    to `#software-dev` verbatim, so all of it became the message and the one
+    line that mattered was buried at the bottom of it.
+    """
+
+    def _tick_that_narrates(self, report):
+        async def run_tick(_manifest_path):
+            print("GraphsLoader: Loaded/Reloaded graph 'coding'")
+            print("Loaded 2 tools for graph-worker: ['bash', 'filesystem']")
+            print('[Agent:graph-worker] Tool use: filesystem [action "ls" on .]')
+            return report
+        return run_tick
+
+    def test_runtime_chatter_never_reaches_stdout(self):
+        self.write([])
+        buffer = io.StringIO()
+
+        with patch.object(self.module, "run_tick", self._tick_that_narrates("🧠 `T1`: implemented.")), \
+             contextlib.redirect_stdout(buffer):
+            code = self.run_main()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(buffer.getvalue().strip(), "🧠 `T1`: implemented.")
+
+    def test_a_tick_with_nothing_to_report_stays_completely_silent(self):
+        """Chatter must not turn an idle tick into a message 288 times a day."""
+        self.write([])
+        buffer = io.StringIO()
+
+        with patch.object(self.module, "run_tick", self._tick_that_narrates("")), \
+             contextlib.redirect_stdout(buffer):
+            self.run_main()
+
+        self.assertEqual(buffer.getvalue(), "")
+
+    def test_verbose_keeps_the_chatter_on_stderr(self):
+        """Debuggability is not lost, it is just moved off the channel's path."""
+        self.write([])
+        out, err = io.StringIO(), io.StringIO()
+
+        with patch.object(self.module, "run_tick", self._tick_that_narrates("done")), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.run_main("--verbose")
+
+        self.assertEqual(out.getvalue().strip(), "done")
+        self.assertIn("Loaded/Reloaded graph", err.getvalue())
 
 
 class TestInvokedAsTheCronDoes(unittest.TestCase):

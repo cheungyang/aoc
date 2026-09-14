@@ -61,7 +61,9 @@ async def main():
     loader = AgentsLoader()
     agent = loader.get_agent("main")
     if agent:
-        response = await agent.execute(content=transcript, source="voice_dryrun")
+        from core.agent.session_manager import SessionManager
+        session = SessionManager.get_session("main", source="voice_dryrun", stateless=True)
+        response = await agent.execute(transcript, session=session)
         print(f"\n💬 Agent Response:\n{response}")
         
         # Synthesize spoken response

@@ -1,7 +1,7 @@
 import os
 import sys
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 from scripts.voice_dryrun import main
 
 @pytest.mark.asyncio
@@ -19,7 +19,7 @@ async def test_voice_dryrun_with_provided_file(tmp_path):
         mock_get_agent.return_value = mock_agent
         
         await main()
-        mock_agent.execute.assert_awaited_once_with(content="Testing 1 2 3", source="voice_dryrun")
+        mock_agent.execute.assert_awaited_once_with("Testing 1 2 3", session=ANY)
 
 @pytest.mark.asyncio
 async def test_voice_dryrun_synthetic_generation(tmp_path):
@@ -36,7 +36,7 @@ async def test_voice_dryrun_synthetic_generation(tmp_path):
         mock_get_agent.return_value = mock_agent
         
         await main()
-        mock_agent.execute.assert_awaited_once_with(content="Testing testing 1 2 3", source="voice_dryrun")
+        mock_agent.execute.assert_awaited_once_with("Testing testing 1 2 3", session=ANY)
 
 @pytest.mark.asyncio
 async def test_voice_dryrun_empty_transcription(tmp_path):

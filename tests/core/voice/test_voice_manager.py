@@ -255,7 +255,7 @@ async def test_voice_manager_on_speech_finished_pipeline(mock_bot_runner, tmp_pa
         
         # 3. Verify Agent executed with shared source='discord'
         mock_agent.execute_stream.assert_called_once_with(
-            content="Check my tasks for today",
+            "Check my tasks for today",
             session=ANY
         )
         called_session = mock_agent.execute_stream.call_args[1]["session"]
@@ -400,5 +400,5 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
         # Verify second sentence was transcribed and answered!
         assert vm.stt_engine.transcribe.call_count == 2
         assert mock_agent.execute_stream.call_count == 2
-        assert mock_agent.execute_stream.call_args_list[1][1]["content"] == "Tell me the list of agents."
+        assert mock_agent.execute_stream.call_args_list[1][0][0] == "Tell me the list of agents."
         assert vm.tts_engine.synthesize_to_file.call_count == 2
