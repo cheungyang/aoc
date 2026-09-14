@@ -360,7 +360,8 @@ class Agent(BaseAgent):
                     config=config,
                     session=session,
                     recover_checkpoint_fn=self._recover_corrupt_checkpoint,
-                    is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error
+                    is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error,
+                    agent_id=self.agent_id
                 ):
                     if event.get("type") == EVENT_TOKEN:
                         accumulated_tokens.append(event.get("content", ""))

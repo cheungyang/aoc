@@ -1,10 +1,17 @@
 import os
+import glob
 import json
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from graphs.coding.schemas import TaskEnvelope, TaskStatus
 from graphs.coding.utils import manifest as manifest_store
 
-DEFAULT_MANIFEST_PATH = "pkm/wiki/software/build_request.json"
+# One manifest per project, under its own spec folder. A single shared queue
+# made every project's tasks each other's problem: one halted task held the
+# concurrency slot, and `max_concurrency`, `repo` and `setup_command` — all
+# project-scoped settings — had to be identical for everything in the queue.
+SOFTWARE_ROOT = "pkm/wiki/software"
+MANIFEST_FILENAME = "build_request.json"
 
 # A task is finished under either vocabulary: v2 wrote "completed", v3 writes "done".
 COMPLETED_STATUSES = {"completed", "done"}
@@ -31,9 +38,50 @@ def resolve_path(path: Optional[str], default: Optional[str] = None, must_exist:
     return abs_path
 
 
+def project_slug(project_name: str) -> str:
+    """The folder a project's specs and manifest live in.
+
+    Accepts what people actually type — `French Learning Cards`,
+    `french_learning_cards` — and lands on one folder name either way.
+    """
+    slug = re.sub(r"[\s_]+", "-", str(project_name).strip().lower())
+    return re.sub(r"[^a-z0-9.-]", "", slug).strip("-")
+
+
+def manifest_path_for_project(project_name: str, root: str = SOFTWARE_ROOT) -> str:
+    """Where a named project's manifest lives, whether or not it exists yet."""
+    slug = project_slug(project_name)
+    if not slug:
+        return ""
+    return os.path.abspath(os.path.join(root, slug, MANIFEST_FILENAME))
+
+
+def discover_manifests(root: str = SOFTWARE_ROOT) -> List[str]:
+    """Every project manifest, sorted.
+
+    Only the operator entry points use this: a graph run is always told which
+    one project it is working on. Discovery here is so the scheduled tick can
+    visit each project in turn without a list to keep in sync.
+    """
+    pattern = os.path.join(os.path.abspath(root), "*", MANIFEST_FILENAME)
+    return sorted(glob.glob(pattern))
+
+
 def resolve_manifest_path(path: Optional[str] = None, *args, **kwargs) -> str:
-    """Resolves absolute path to global build_request.json from system root."""
-    return resolve_path(path, default=DEFAULT_MANIFEST_PATH)
+    """Resolves the manifest path a run was given.
+
+    There is deliberately no default. A global fallback is how a run that was
+    never told which project it was for still found *a* queue — the wrong one —
+    and started working through somebody else's tasks.
+    """
+    if not path:
+        raise ValueError(
+            "No build_request.json was given. The coding graph works on one "
+            "project at a time: pass `build_request_path` (or `project_name`, "
+            f"resolved to {SOFTWARE_ROOT}/<project>/{MANIFEST_FILENAME})."
+        )
+    return resolve_path(path)
+
 
 
 def load_manifest(manifest_path: str) -> Dict[str, Any]:

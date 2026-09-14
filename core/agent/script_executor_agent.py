@@ -109,12 +109,14 @@ class ScriptExecutorAgent(BaseAgent):
                             args[0] = os.path.join("scripts", args[0])
                         expanded_args = [os.path.expanduser(arg) for arg in args]
                         res = await asyncio.to_thread(subprocess.run, expanded_args, capture_output=True, text=True, check=True)
-                        # A script that succeeded and said nothing gets no message,
-                        # not even the wrapper: on a five-minute schedule the
-                        # "executed successfully" line is the noise.
+                        # The script's own stdout *is* the message. A script that
+                        # succeeded and said nothing gets no message at all, and one
+                        # that did say something gets no banner wrapped around it:
+                        # on a five-minute schedule both the wrapper and the silence
+                        # would be the noise.
                         stdout = (res.stdout or "").strip()
                         if stdout:
-                            results.append(f"Script '{rest}' executed successfully:\n{stdout}")
+                            results.append(stdout)
                     except subprocess.CalledProcessError as e:
                         results.append(f"Error executing script '{rest}': {e.stderr}")
                     except Exception as e:

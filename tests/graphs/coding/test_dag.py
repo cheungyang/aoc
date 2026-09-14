@@ -156,5 +156,77 @@ class TestDAGHelpers(unittest.TestCase):
         res = resolve_path(None, default="foo/bar.json")
         self.assertTrue(res.endswith("foo/bar.json"))
 
+class TestOneManifestPerProject(unittest.TestCase):
+    """A shared queue made every project's tasks each other's problem: one
+    halted task held the only concurrency slot, and `repo` and `setup_command`
+    had to be true of everything in it at once."""
+
+    def test_a_project_name_becomes_one_folder_name(self):
+        from graphs.coding.utils.dag import project_slug
+
+        for given in ("French Learning Cards", "french_learning_cards",
+                      "  French-Learning-Cards  "):
+            self.assertEqual(project_slug(given), "french-learning-cards", given)
+
+    def test_the_manifest_lives_beside_the_projects_specs(self):
+        from graphs.coding.utils.dag import manifest_path_for_project
+
+        path = manifest_path_for_project("French Learning Cards")
+
+        self.assertTrue(
+            path.endswith("pkm/wiki/software/french-learning-cards/build_request.json"),
+            path
+        )
+
+    def test_a_nameless_project_resolves_to_nothing(self):
+        """Better an empty string the caller must handle than a path that
+        happens to point at some other project's queue."""
+        from graphs.coding.utils.dag import manifest_path_for_project
+
+        self.assertEqual(manifest_path_for_project("  "), "")
+
+    def test_discovery_finds_one_manifest_per_project(self):
+        from graphs.coding.utils.dag import discover_manifests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("beta", "alpha"):
+                os.makedirs(os.path.join(tmp, name))
+                with open(os.path.join(tmp, name, "build_request.json"), "w") as f:
+                    json.dump({"queue": []}, f)
+            # A stray file at the root is not a project and must not be picked up.
+            with open(os.path.join(tmp, "build_request.json"), "w") as f:
+                json.dump({"queue": []}, f)
+
+            found = discover_manifests(tmp)
+
+        self.assertEqual(len(found), 2)
+        self.assertTrue(found[0].endswith("alpha/build_request.json"), found)
+        self.assertTrue(found[1].endswith("beta/build_request.json"), found)
+
+    def test_discovery_of_an_empty_tree_is_empty_not_an_error(self):
+        from graphs.coding.utils.dag import discover_manifests
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(discover_manifests(tmp), [])
+
+    def test_resolving_without_a_manifest_refuses_rather_than_guesses(self):
+        """The old global default is how a run that was never told which project
+        it was for still found a queue — and started on somebody else's tasks."""
+        from graphs.coding.utils.dag import resolve_manifest_path
+
+        with self.assertRaises(ValueError) as caught:
+            resolve_manifest_path(None)
+
+        self.assertIn("one project at a time", str(caught.exception))
+
+    def test_an_explicit_manifest_still_resolves(self):
+        from graphs.coding.utils.dag import resolve_manifest_path
+
+        res = resolve_manifest_path("pkm/wiki/software/demo/build_request.json")
+
+        self.assertTrue(res.endswith("pkm/wiki/software/demo/build_request.json"))
+        self.assertTrue(os.path.isabs(res))
+
+
 if __name__ == "__main__":
     unittest.main()

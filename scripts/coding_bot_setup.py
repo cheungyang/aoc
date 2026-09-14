@@ -28,23 +28,51 @@ if project_root not in sys.path:
 
 from core.util import git_ops
 from core.util.push_identity import PushIdentityError, describe, resolve_token_path
-from graphs.coding.utils.dag import load_manifest, resolve_manifest_path
+from graphs.coding.utils.dag import (
+    discover_manifests,
+    load_manifest,
+    manifest_path_for_project,
+    resolve_manifest_path,
+)
 from graphs.coding.utils.repo import get_repo_descriptor, resolve_push_identity
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Verify the coding graph's machine-user setup.")
-    parser.add_argument("--manifest", type=str, default=None, help="Path to build_request.json")
+    parser.add_argument("--manifest", type=str, default=None,
+                        help="Path to one project's build_request.json")
+    parser.add_argument("--project", type=str, default=None,
+                        help="Project name, resolved to pkm/wiki/software/<project>/build_request.json")
     parser.add_argument("--repo", type=str, default=None, help="Override the target repo slug (owner/name)")
     parser.add_argument("--login", type=str, default=None, help="Override the machine-user login")
     parser.add_argument("--no-label", action="store_true", help="Skip creating the `approved` label")
     return parser.parse_args()
 
 
+def _target_manifest(manifest, project) -> str:
+    """The one project's manifest to verify.
+
+    The push identity and repo slug are per-project settings, so there is no
+    single manifest to check any more.
+    """
+    if manifest:
+        return resolve_manifest_path(manifest)
+    if project:
+        return manifest_path_for_project(project)
+
+    found = discover_manifests()
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise SystemExit("No project manifests found under pkm/wiki/software/<project>/.")
+    names = ", ".join(os.path.basename(os.path.dirname(p)) for p in found)
+    raise SystemExit(f"Several projects are queued — pass --project. Found: {names}")
+
+
 async def main() -> int:
     args = parse_args()
 
-    manifest_path = resolve_manifest_path(args.manifest)
+    manifest_path = _target_manifest(args.manifest, args.project)
     manifest = load_manifest(manifest_path)
     descriptor = get_repo_descriptor(manifest)
     if args.login:

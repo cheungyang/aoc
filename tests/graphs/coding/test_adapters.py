@@ -20,12 +20,33 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(res["max_concurrency"], 1)
         self.assertEqual(res["error_message"], "")
 
-    def test_prepare_input_without_project_path_is_valid(self):
-        """A scheduled tick has no project in mind; the manifest carries spec paths."""
+    def test_a_run_with_no_manifest_and_no_project_is_refused(self):
+        """One project, one queue. With neither, there is nothing to work on —
+        and guessing a queue means working through another project's tasks."""
         res = prepare_input(query="Run build without dir")
-        self.assertEqual(res["error_message"], "")
+        self.assertIn("build_request.json", res["error_message"])
         self.assertEqual(res["project_path"], "")
-        self.assertTrue(res["build_request_path"].endswith("pkm/wiki/software/build_request.json"))
+        self.assertEqual(res["build_request_path"], "")
+
+    def test_the_project_name_resolves_to_that_projects_queue(self):
+        res = prepare_input(query="tick", project_name="French Learning Cards")
+
+        self.assertEqual(res["error_message"], "")
+        self.assertTrue(
+            res["build_request_path"].endswith(
+                "pkm/wiki/software/french-learning-cards/build_request.json"
+            ),
+            res["build_request_path"]
+        )
+
+    def test_an_explicit_manifest_wins_over_the_project_name(self):
+        res = prepare_input(
+            query="tick",
+            project_name="french-learning-cards",
+            build_request_path="pkm/wiki/software/other/build_request.json"
+        )
+
+        self.assertTrue(res["build_request_path"].endswith("other/build_request.json"))
 
     def test_prepare_input_seeds_v2_fields(self):
         res = prepare_input(query="tick")
@@ -59,12 +80,16 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertIn("filesystem", res["required_tools"])
 
     def test_prepare_input_project_path_resolution(self):
+        """A project directory implies that project's queue, not a shared one."""
         res = prepare_input(
             query="Run build",
             project_path="pkm/wiki/software/aoc"
         )
         self.assertTrue(res["project_path"].endswith("pkm/wiki/software/aoc"))
-        self.assertTrue(res["build_request_path"].endswith("pkm/wiki/software/build_request.json"))
+        self.assertTrue(
+            res["build_request_path"].endswith("pkm/wiki/software/aoc/build_request.json"),
+            res["build_request_path"]
+        )
 
     def test_prepare_input_human_feedback_extraction(self):
         res = prepare_input(

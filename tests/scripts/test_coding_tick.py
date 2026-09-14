@@ -195,5 +195,89 @@ class TestInvokedAsTheCronDoes(unittest.TestCase):
         self.assertEqual(result.stderr, "")
 
 
+class TestEveryProjectGetsATick(unittest.TestCase):
+    """Each project owns a queue, so the cron — which names no project — has to
+    visit all of them, and say which one each line came from."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.module = _load_module()
+        self.manifests = [
+            self.write_project("alpha", ["alpha task"]),
+            self.write_project("beta", ["beta task"]),
+        ]
+
+    def write_project(self, name, queue):
+        folder = os.path.join(self.tmp.name, name)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "build_request.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"version": "3.0", "project_name": name, "queue": []}, f)
+        return path
+
+    def run_main(self, *argv, reports=None):
+        """Runs the script with discovery pointed at the temp tree."""
+        reports = reports if reports is not None else {}
+
+        def _tick(manifest_path, args):
+            return reports.get(os.path.basename(os.path.dirname(manifest_path)), "")
+
+        with patch.object(sys, "argv", ["coding_tick.py", *argv]), \
+             patch.object(self.module, "tick_project", side_effect=_tick), \
+             patch("graphs.coding.utils.dag.discover_manifests", return_value=self.manifests), \
+             patch("builtins.print") as mock_print:
+            code = self.module.main()
+        return code, mock_print
+
+    def test_with_no_project_named_every_queue_is_visited(self):
+        code, printed = self.run_main(reports={"alpha": "did a thing", "beta": "did another"})
+
+        self.assertEqual(code, 0)
+        output = printed.call_args[0][0]
+        self.assertIn("did a thing", output)
+        self.assertIn("did another", output)
+
+    def test_each_line_says_which_project_it_came_from(self):
+        """Two projects reporting into one channel is unreadable otherwise."""
+        _, printed = self.run_main(reports={"alpha": "did a thing", "beta": "did another"})
+
+        output = printed.call_args[0][0]
+        self.assertIn("alpha", output)
+        self.assertIn("beta", output)
+
+    def test_a_quiet_project_contributes_nothing(self):
+        _, printed = self.run_main(reports={"beta": "did another"})
+
+        output = printed.call_args[0][0]
+        self.assertNotIn("alpha", output)
+        self.assertIn("did another", output)
+
+    def test_all_queues_idle_stays_completely_silent(self):
+        code, printed = self.run_main(reports={})
+
+        self.assertEqual(code, 0)
+        printed.assert_not_called()
+
+    def test_naming_one_project_leaves_the_others_alone(self):
+        seen = []
+
+        with patch.object(sys, "argv", ["coding_tick.py", "--manifest", self.manifests[0]]), \
+             patch.object(self.module, "tick_project",
+                          side_effect=lambda p, a: seen.append(p) or ""), \
+             patch("builtins.print"):
+            self.module.main()
+
+        self.assertEqual(seen, [self.manifests[0]])
+
+    def test_no_projects_at_all_is_not_an_error(self):
+        """An empty `pkm/wiki/software` means nothing has been queued yet."""
+        self.manifests = []
+        code, printed = self.run_main()
+
+        self.assertEqual(code, 0)
+        printed.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

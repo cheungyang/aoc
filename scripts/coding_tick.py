@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Runs one reconciliation tick of the coding graph.
+"""Runs one reconciliation tick of the coding graph, per project.
 
-Invoked by the `script-executor` cron every five minutes. It prints what the
-tick did and nothing at all when the tick did nothing — the runner treats empty
-stdout as "post nothing", which is what keeps a channel usable when the queue is
-idle 287 times out of 288 a day.
+Invoked by the `script-executor` cron every five minutes. Each project has its
+own `pkm/wiki/software/<project>/build_request.json`; with no arguments this
+visits every one of them. It prints what the ticks did and nothing at all when
+they did nothing — the runner treats empty stdout as "post nothing", which is
+what keeps a channel usable when the queues are idle 287 times out of 288 a day.
 
 Exit codes:
     0  the tick ran (whether or not it had work to do)
     1  the tick could not run (bad manifest, broken config)
 
 Usage:
-    scripts/coding_tick.py [--manifest PATH] [--max-tasks N] [--dry-run] [--verbose]
+    scripts/coding_tick.py [--manifest PATH | --project NAME]
+                           [--max-tasks N] [--dry-run] [--verbose]
 """
 import argparse
 import asyncio
@@ -31,14 +33,19 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run one coding graph tick.")
     parser.add_argument(
         "--manifest",
-        default=os.environ.get("AOC_BUILD_REQUEST", "pkm/wiki/software/build_request.json"),
-        help="Path to build_request.json (default: pkm/wiki/software/build_request.json)."
+        default=os.environ.get("AOC_BUILD_REQUEST", ""),
+        help="Path to one project's build_request.json. Omit to tick every project."
+    )
+    parser.add_argument(
+        "--project",
+        default="",
+        help="Project name, resolved to pkm/wiki/software/<project>/build_request.json."
     )
     parser.add_argument(
         "--max-tasks",
         type=int,
         default=1,
-        help="How many tasks one invocation may advance. Each is a separate tick."
+        help="How many tasks one invocation may advance, per project. Each is a separate tick."
     )
     parser.add_argument(
         "--dry-run",
@@ -75,6 +82,27 @@ def quiet_stdout(verbose: bool = False):
             sys.stderr.write(noise)
 
 
+def select_manifests(args) -> list:
+    """The manifests this invocation is responsible for.
+
+    An explicit `--manifest` or `--project` names one. With neither — which is
+    how cron runs it — every project is visited in turn, because there is no
+    longer one shared queue that all projects wait in.
+    """
+    from graphs.coding.utils.dag import discover_manifests, manifest_path_for_project
+
+    if args.manifest:
+        return [os.path.abspath(os.path.expanduser(args.manifest))]
+    if args.project:
+        return [manifest_path_for_project(args.project)]
+    return discover_manifests()
+
+
+def project_label(manifest_path: str) -> str:
+    """The project folder's name — how a report says which queue it came from."""
+    return os.path.basename(os.path.dirname(manifest_path))
+
+
 async def run_tick(manifest_path: str) -> str:
     from graphs.coding.adapters import format_output, prepare_input
     from graphs.coding.graph import create_graph
@@ -98,36 +126,51 @@ def describe_pending(manifest_path: str) -> str:
     return f"Next tick would run `{task['task_id']}` → {route}."
 
 
+def tick_project(manifest_path: str, args) -> str:
+    """Advances one project by up to `--max-tasks` tasks."""
+    if args.dry_run:
+        return describe_pending(manifest_path)
+
+    reports = []
+    for _ in range(max(1, args.max_tasks)):
+        output = asyncio.run(run_tick(manifest_path))
+        if not output.strip():
+            # Nothing left to advance; further ticks would repeat this.
+            break
+        reports.append(output.strip())
+    return "\n".join(reports)
+
+
 def main() -> int:
     args = parse_args()
-    manifest_path = os.path.abspath(os.path.expanduser(args.manifest))
 
-    if not os.path.exists(manifest_path):
+    manifests = [p for p in select_manifests(args) if p and os.path.exists(p)]
+    if not manifests:
         # Not an error worth alerting on every five minutes: no manifest simply
         # means nothing has been queued yet.
         return 0
 
+    sections = []
     try:
         with quiet_stdout(args.verbose):
-            if args.dry_run:
-                report = describe_pending(manifest_path)
-            else:
-                reports = []
-                for _ in range(max(1, args.max_tasks)):
-                    output = asyncio.run(run_tick(manifest_path))
-                    if not output.strip():
-                        # Nothing left to advance; further ticks would repeat this.
-                        break
-                    reports.append(output.strip())
-                report = "\n".join(reports)
+            for manifest_path in manifests:
+                report = tick_project(manifest_path, args)
+                if not report.strip():
+                    continue
+                # Several projects tick in one run, so a line has to say which
+                # queue it came from.
+                if len(manifests) > 1:
+                    sections.append(f"**{project_label(manifest_path)}**\n{report.strip()}")
+                else:
+                    sections.append(report.strip())
     except Exception as e:
         # A broken manifest or config must be loud: it will not fix itself, and
         # silence here would look exactly like an idle queue.
         print(f"🛑 Coding tick could not run: {e}", file=sys.stderr)
         return 1
 
-    if report.strip():
-        print(report.strip())
+    if sections:
+        print("\n\n".join(sections))
     return 0
 
 

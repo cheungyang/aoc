@@ -10,8 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from core.util import git_ops
 from core.util.push_identity import PushIdentity
 from graphs.coding.utils.repo import resolve_push_identity
-
-WORKER_AGENT_ID = "graph-worker"
+from graphs.coding.utils.worker import WORKER_AGENT_ID, worker_session
 
 
 def check_required_tools(graph_id: str, tool_names: List[str]) -> Tuple[bool, str]:
@@ -24,18 +23,20 @@ def check_required_tools(graph_id: str, tool_names: List[str]) -> Tuple[bool, st
     graph's grants. When that merge goes wrong the worker does not error — it
     writes files it cannot test, or reports "completed without modifying files".
     Checking it up front turns that into one line naming the missing tool.
+
+    It resolves the roster through `worker_session`, the same factory the real
+    call uses. Building a context here instead is how this check passed with
+    `['bash', 'filesystem']` while the worker ran with `['filesystem',
+    'load_skill']` and no access to its own worktree.
     """
     if not tool_names:
         return True, ""
 
-    from core.agent.session_manager import SessionManager
     from core.loaders.tools_loader import ToolsLoader
 
     loader = ToolsLoader()
 
-    ctx = SessionManager.get_session(
-        agent_id=WORKER_AGENT_ID, source="graph", stateless=True, graph_id=graph_id
-    )
+    ctx = worker_session(graph_id=graph_id, source="graph")
     try:
         available = {getattr(t, "name", "") for t in loader.get_tools(ctx)}
     except Exception as e:

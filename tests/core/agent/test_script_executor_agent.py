@@ -25,14 +25,15 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
 
     @patch('subprocess.run')
     async def test_execute_script_success(self, mock_run):
+        """The script's stdout is the message; the runner adds nothing to it."""
         mock_run.return_value = MagicMock(stdout="command output", stderr="", returncode=0)
-        
+
         agent = ScriptExecutorAgent("script-executor")
         session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
         output = await agent.execute("script echo hello", session=session)
-        
-        self.assertIn("Script 'echo hello' executed successfully", output)
-        self.assertIn("command output", output)
+
+        self.assertEqual(output, "command output")
+        self.assertNotIn("executed successfully", output)
         mock_run.assert_called_once_with(['scripts/echo', 'hello'], capture_output=True, text=True, check=True)
 
     @patch('importlib.import_module')
@@ -78,7 +79,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         session = SessionManager.get_session(agent_id="script-executor", source="discord", channel="general")
         output = await agent.execute("script ls -la ~", session=session)
         
-        self.assertIn("Script 'ls -la ~' executed successfully", output)
+        self.assertEqual(output, "ls output")
         mock_run.assert_called_once()
         called_args = mock_run.call_args[0][0]
         self.assertEqual(called_args[0], 'scripts/ls')
@@ -158,6 +159,26 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         output = await agent.execute("script coding_tick.py", session=session)
 
         self.assertIn("manifest is not readable JSON", output)
+
+    @patch('subprocess.run')
+    async def test_what_the_script_printed_is_what_the_channel_gets(self, mock_run):
+        """No framing around the outcome.
+
+        The tick already writes a finished sentence; wrapping it in "Script
+        'coding_tick.py' executed successfully:" made the report look like a
+        console dump in a channel people read.
+        """
+        mock_run.return_value = MagicMock(
+            stdout="🧠 `feat_01`: implemented (3 file(s) changed).\n", stderr="", returncode=0
+        )
+        channel = AsyncMock()
+        channel.name = "software-dev"
+
+        agent = ScriptExecutorAgent("script-executor")
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel=channel)
+        await agent.execute("script coding_tick.py", session=session)
+
+        channel.send.assert_awaited_once_with("🧠 `feat_01`: implemented (3 file(s) changed).")
 
     async def test_the_coding_tick_is_scheduled_every_five_minutes(self):
         loader = AgentsLoader()

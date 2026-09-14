@@ -51,6 +51,12 @@ class TaskEnvelope(TypedDict, total=False):
     spec_path: str
     dependencies: List[str]          # Prerequisite task_ids
     allowed_files: List[str]         # Strict filesystem whitelist
+    # Run once per worktree, before any code is written: scaffolding and
+    # dependency install. Keeping it out of `verification_command` means an
+    # install failure is an environment fault, not a failed test, and is not
+    # re-run on every verify. Falls back to the manifest-level `setup_command`.
+    setup_command: Optional[str]
+    setup_done: bool                 # Reset whenever the worktree is re-created
     verification_command: str        # CLI test command
     acceptance_criteria: str         # Given-When-Then criteria
     status: TaskStatus

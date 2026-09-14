@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Operator control plane for the coding graph.
 
-    scripts/coding_admin.py status [TASK_ID]
-    scripts/coding_admin.py retry TASK_ID [--from-stage STAGE]
-    scripts/coding_admin.py reset TASK_ID [--yes] [--dry-run]
-    scripts/coding_admin.py skip TASK_ID
-    scripts/coding_admin.py unblock TASK_ID
-    scripts/coding_admin.py abort TASK_ID [--reason TEXT]
+    scripts/coding_admin.py [--project NAME] status [TASK_ID]
+    scripts/coding_admin.py [--project NAME] retry TASK_ID [--from-stage STAGE]
+    scripts/coding_admin.py [--project NAME] reset TASK_ID [--yes] [--dry-run]
+    scripts/coding_admin.py [--project NAME] skip TASK_ID
+    scripts/coding_admin.py [--project NAME] unblock TASK_ID
+    scripts/coding_admin.py [--project NAME] abort TASK_ID [--reason TEXT]
+
+Each project has its own queue at
+`pkm/wiki/software/<project>/build_request.json`. `--project` (or `--manifest`)
+says which one; with exactly one project queued it can be omitted.
 
 None of these run the pipeline. They write the manifest, and the next tick acts
 on what they wrote — so there is exactly one execution path, and inspecting the
@@ -23,15 +27,42 @@ from _bootstrap import ensure_project_interpreter, enter_project_root  # noqa: E
 ensure_project_interpreter()
 enter_project_root()
 
-DEFAULT_MANIFEST = "pkm/wiki/software/build_request.json"
+def resolve_target_manifest(manifest: str = "", project: str = "") -> str:
+    """The one project this command acts on.
+
+    Explicit beats implicit, and a lone project is unambiguous — but with
+    several projects queued, guessing which one you meant is how an operator
+    retries a task in the wrong repository.
+    """
+    from graphs.coding.utils.dag import discover_manifests, manifest_path_for_project
+
+    if manifest:
+        return os.path.abspath(os.path.expanduser(manifest))
+    if project:
+        return manifest_path_for_project(project)
+
+    found = discover_manifests()
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise SystemExit(
+            "No project manifests found under pkm/wiki/software/<project>/build_request.json."
+        )
+    names = ", ".join(os.path.basename(os.path.dirname(p)) for p in found)
+    raise SystemExit(f"Several projects are queued — pass --project. Found: {names}")
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Inspect and steer the coding graph queue.")
     parser.add_argument(
         "--manifest",
-        default=os.environ.get("AOC_BUILD_REQUEST", DEFAULT_MANIFEST),
-        help=f"Path to build_request.json (default: {DEFAULT_MANIFEST})."
+        default=os.environ.get("AOC_BUILD_REQUEST", ""),
+        help="Path to one project's build_request.json."
+    )
+    parser.add_argument(
+        "--project",
+        default="",
+        help="Project name, resolved to pkm/wiki/software/<project>/build_request.json."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -79,7 +110,7 @@ def _confirm(prompt: str) -> bool:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    manifest_path = os.path.abspath(os.path.expanduser(args.manifest))
+    manifest_path = resolve_target_manifest(args.manifest, args.project)
 
     from graphs.coding.utils import control
 

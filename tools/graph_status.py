@@ -7,25 +7,29 @@ from core.agent.execution_context import try_context
 from core.util import format_tool_response
 
 def _coding_queue_status() -> str:
-    """The coding graph's status, read from the manifest rather than a checkpoint.
+    """The coding graph's status, read from the manifests rather than a checkpoint.
 
     The tick reconciler runs without a checkpointer on purpose: its durable
     state is the manifest, git and GitHub. So the checkpoint probe above finds
     nothing for it, and without this the tool would report "no active
     subgraphs" while a queue full of work was in flight.
+
+    Each project owns a queue, so this reports all of them, named — one
+    combined list would hide which repository a task belongs to.
     """
     try:
         from graphs.coding.utils.control import status_report
-        from graphs.coding.utils.dag import resolve_manifest_path
+        from graphs.coding.utils.dag import discover_manifests
 
-        manifest_path = resolve_manifest_path(None)
-        if not os.path.exists(manifest_path):
-            return ""
+        sections = []
+        for manifest_path in discover_manifests():
+            report = status_report(manifest_path)
+            if not report or report == "The queue is empty.":
+                continue
+            project = os.path.basename(os.path.dirname(manifest_path))
+            sections.append(f"[{project}]\n{report}")
 
-        report = status_report(manifest_path)
-        if report == "The queue is empty.":
-            return ""
-        return report
+        return "\n\n".join(sections)
     except Exception:
         # A missing or malformed manifest must not take down the status of
         # every other graph.

@@ -22,6 +22,7 @@ from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import get_runnable_tasks, resolve_manifest_path
 from graphs.coding.utils.preflight import preflight_tick
 from graphs.coding.utils.repo import ensure_repo_available, get_repo_descriptor
+from graphs.coding.utils.shell import run_in_worktree
 from core.util import git_ops
 
 # Routes the scheduler can emit. `done` ends the tick.
@@ -80,6 +81,21 @@ def select_task(
 
 async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     now = time.time()
+    # Which project this tick is for is an input, not a default. Reported rather
+    # than raised: a caller that forgot it should see the sentence that tells
+    # them what to pass, not a traceback in the channel.
+    if not state.get("build_request_path"):
+        return {
+            "route": ROUTE_DONE,
+            "current_task": None,
+            "tick_report": list(state.get("tick_report") or []),
+            "tick_handled": list(state.get("tick_handled") or []),
+            "error_message": state.get("error_message") or (
+                "Missing required build_request.json: the coding graph works on "
+                "one project at a time."
+            ),
+        }
+
     manifest_path = resolve_manifest_path(state.get("build_request_path"))
     owner = state.get("lease_owner") or f"tick_{uuid.uuid4().hex[:6]}"
     handled = list(state.get("tick_handled") or [])
@@ -191,15 +207,37 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
             return _idle(error_message=message)
         # Provisioning wipes the worktree, so any digest recorded against the old
         # one is stale; keeping it would skip an implement that must happen.
+        # The same applies to setup: a fresh worktree has no `node_modules`.
         stage = "provisioned" if stage == "queued" else stage
-        manifest_store.persist_task(
+        task = manifest_store.persist_task(
             manifest_path, task_id,
-            status="active", stage=stage, run_id=run_id, branch_name=branch_name
-        )
+            status="active", stage=stage, run_id=run_id, branch_name=branch_name,
+            setup_done=False
+        ) or task
     elif route != ROUTE_SYNC:
-        manifest_store.persist_task(
+        task = manifest_store.persist_task(
             manifest_path, task_id, status="active", run_id=run_id, branch_name=branch_name
-        )
+        ) or task
+
+    # 7. Set the worktree up once: scaffold, install dependencies. This is an
+    #    environment concern, so a failure here halts as `environment` and never
+    #    touches the implement budget — the code is not what went wrong.
+    setup_command = task.get("setup_command") or manifest.get("setup_command")
+    if route != ROUTE_SYNC and setup_command and not task.get("setup_done"):
+        code, out, err = await run_in_worktree(str(setup_command), cwd=workspace_path)
+        if code != 0:
+            detail = (err or out or "").strip()[-800:]
+            message = f"Setup command failed (exit {code}): {setup_command}\n{detail}"
+            manifest_store.persist_task(
+                manifest_path, task_id,
+                status="halted",
+                last_error={"stage": "setup", "kind": "environment",
+                            "message": message, "at": now},
+                lease_owner=None, lease_expires_at=None
+            )
+            report.append(f"⚠️ `{task_id}` halted in setup: {detail.splitlines()[-1] if detail else code}")
+            return _idle(error_message=message)
+        task = manifest_store.persist_task(manifest_path, task_id, setup_done=True) or task
 
     updated_task = dict(task)
     updated_task.update({"run_id": run_id, "branch_name": branch_name, "stage": stage})

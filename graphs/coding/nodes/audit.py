@@ -18,6 +18,7 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.token_opt import sanitize_diff
+from graphs.coding.utils.worker import call_worker
 from graphs.coding.utils.xml_parsers import parse_critic_verdict_xml
 from core.util import git_ops
 
@@ -42,7 +43,8 @@ async def audit_node(state: CodingState) -> Dict[str, Any]:
     verdict = await _run_audit(
         spec_content=spec_content,
         diff=diff,
-        channel=state.get("channel") or "coding-pipeline"
+        channel=state.get("channel") or "coding-pipeline",
+        graph_id=state.get("graph_id") or "coding"
     )
     passed = verdict["passed"]
     feedback = verdict["feedback"]
@@ -80,7 +82,7 @@ def _spec_text(state: CodingState, current_task: Dict[str, Any]) -> str:
     return ""
 
 
-async def _run_audit(spec_content: str, diff: str, channel: str) -> Dict[str, Any]:
+async def _run_audit(spec_content: str, diff: str, channel: str, graph_id: str = "coding") -> Dict[str, Any]:
     """Asks the model for a verdict. An audit that cannot run is not a rejection.
 
     The old critic failed closed and blocked the pipeline whenever the LLM call
@@ -95,13 +97,8 @@ async def _run_audit(spec_content: str, diff: str, channel: str) -> Dict[str, An
         git_diff_text=diff or "(No git diff changes)"
     )
     try:
-        from tools.agent_call import agent_call
-        result = await agent_call.ainvoke({
-            "agent_id": "graph-worker",
-            "prompt": prompt,
-            "channel": channel
-        })
-        parsed = parse_critic_verdict_xml(str(result))
+        result = await call_worker(prompt=prompt, graph_id=graph_id, channel=channel)
+        parsed = parse_critic_verdict_xml(result)
     except Exception as e:
         print(f"audit: agent_call error: {e}")
         return {"passed": True, "feedback": ""}

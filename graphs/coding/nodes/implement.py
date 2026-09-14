@@ -16,10 +16,25 @@ from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.digest import compute_worktree_digest, digest_matches
 from graphs.coding.utils.token_opt import sanitize_traceback
+from graphs.coding.utils.worker import call_worker
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 from core.util import git_ops
 
 MAX_IMPLEMENT_ATTEMPTS = 3
+
+# A worker saying "I was not allowed to" is not a worker that failed to think.
+# Three more attempts cannot grant it a tool, so these halt instead of retrying.
+_BLOCKED_MARKERS = (
+    "does not have permission",
+    "permission restriction",
+    "not have filesystem permission",
+    "no permission",
+)
+
+
+def _is_blocked(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _BLOCKED_MARKERS)
 
 
 async def implement_node(state: CodingState) -> Dict[str, Any]:
@@ -71,18 +86,30 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         human_feedback=_review_feedback(state)
     )
 
-    manifest_store.bump_attempt(manifest_path, task_id, "implement")
+    # The count has to travel in state, not just to disk. `current_task` is the
+    # snapshot the scheduler took at the start of the tick, and verify reads the
+    # budget off it: leaving it stale meant verify saw 0 attempts however many
+    # times it ran, so implement→verify→implement never terminated and one tick
+    # burned the whole recursion limit on LLM calls. Every write below therefore
+    # feeds its result back into `current_task`, so state and manifest agree.
+    attempt_count = manifest_store.bump_attempt(manifest_path, task_id, "implement")
+    current_task = {
+        **current_task,
+        "attempts": {**(current_task.get("attempts") or {}), "implement": attempt_count},
+    }
 
     summary = ""
+    status = ""
     agent_error = ""
     try:
-        from tools.agent_call import agent_call
-        result = await agent_call.ainvoke({
-            "agent_id": "graph-worker",
-            "prompt": prompt,
-            "channel": state.get("channel") or "coding-pipeline"
-        })
-        summary = parse_worker_handoff_xml(str(result)).get("implementation_summary", "")
+        reply = await call_worker(
+            prompt=prompt,
+            graph_id=state.get("graph_id") or "coding",
+            channel=state.get("channel") or "coding-pipeline"
+        )
+        handoff = parse_worker_handoff_xml(reply)
+        summary = handoff.get("implementation_summary", "")
+        status = (handoff.get("status") or "").strip().upper()
     except Exception as e:
         agent_error = str(e)
         print(f"implement: agent_call error: {e}")
@@ -93,17 +120,47 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
     digest = await compute_worktree_digest(workspace_path)
 
     if not modified_files:
+        # The worker's own account of why. Throwing it away is how "Agent
+        # graph-worker does not have permission to perform 'ls' on
+        # .../run_21B6" reached the channel as "Worker completed without
+        # modifying any file" — a sentence that reads like a lazy model and
+        # sent three tasks through their whole budget before anyone looked.
+        reason = summary.strip() if status == "FAILED" and summary.strip() else ""
         message = (
             f"Worker completed without modifying any file in {workspace_path}"
+            + (f": {reason}" if reason else "")
             + (f" ({agent_error})" if agent_error else "")
         )
-        manifest_store.yield_task(
+
+        blocked = _is_blocked(reason) or _is_blocked(agent_error)
+        if blocked:
+            # No model can grant itself a tool. Retrying costs three LLM calls
+            # and ends in the same place, so stop and say what is actually wrong.
+            stored = manifest_store.persist_task(
+                manifest_path, task_id,
+                status="halted",
+                last_error={"stage": "implement", "kind": "config",
+                            "message": message, "at": time.time()},
+                lease_owner=None, lease_expires_at=None
+            )
+            report.append(f"⚠️ `{task_id}`: {message}")
+            return {
+                "current_task": stored or current_task,
+                "implementation_summary": summary or message,
+                "modified_files": [],
+                "route": "done",
+                "tick_report": report,
+                "error_message": message
+            }
+
+        stored = manifest_store.yield_task(
             manifest_path, task_id,
             last_error={"stage": "implement", "kind": "llm", "message": message, "at": time.time()}
         )
         report.append(f"⚠️ `{task_id}`: {message}")
         # No stage advance: the next tick retries implement until the budget runs out.
         return {
+            "current_task": stored or current_task,
             "implementation_summary": summary or message,
             "modified_files": [],
             "route": "done",
@@ -111,7 +168,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
             "error_message": message
         }
 
-    manifest_store.persist_task(
+    stored = manifest_store.persist_task(
         manifest_path, task_id,
         stage="implemented",
         impl_digest=digest,
@@ -120,6 +177,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
     report.append(f"🧠 `{task_id}`: implemented ({len(modified_files)} file(s) changed).")
 
     return {
+        "current_task": stored or current_task,
         "stage": "implemented",
         "route": "verify",
         "impl_digest": digest,

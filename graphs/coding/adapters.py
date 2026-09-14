@@ -3,6 +3,7 @@ import re
 from typing import Dict, Any, Optional
 from langchain_core.messages import HumanMessage, AIMessage
 from graphs.coding.schemas import CodingState
+from graphs.coding.utils.dag import MANIFEST_FILENAME, manifest_path_for_project
 
 def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """Translates incoming text query / kwargs into initial CodingState."""
@@ -31,17 +32,20 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     if project_path:
         project_path = os.path.abspath(project_path)
 
-    # Extract build_request_path
+    # Extract build_request_path. One project, one manifest: a run is told which
+    # queue it is working on, and there is no global one to fall back to.
     build_request_path = kwargs.get("build_request_path") or kwargs.get("manifest_path") or ""
     if not build_request_path:
         m_req = re.search(r'(?:build_request_path|manifest_path|manifest)[:=]\s*["\']?([^"\'\s,]+)["\']?', query, re.IGNORECASE)
         if m_req:
             build_request_path = m_req.group(1).strip()
 
-    if not build_request_path:
-        build_request_path = os.path.abspath("pkm/wiki/software/build_request.json")
-    else:
+    if build_request_path:
         build_request_path = os.path.abspath(build_request_path)
+    elif project_name:
+        build_request_path = manifest_path_for_project(project_name)
+    elif project_path:
+        build_request_path = os.path.join(project_path, MANIFEST_FILENAME)
 
     # Extract target_repo (e.g. owner/repo)
     target_repo = kwargs.get("target_repo") or kwargs.get("repo") or ""
@@ -56,9 +60,18 @@ def prepare_input(query: str, caller: Optional[str] = None, **kwargs) -> Dict[st
     channel = kwargs.get("channel") or "coding-pipeline"
 
     # The manifest carries each task's spec_path, so a tick does not need a
-    # project directory. Requiring one used to make the scheduled tick — which has
-    # no project in mind — fail before it started.
+    # project directory — but it does need to know *which project*. Which
+    # manifest is the one required input, the way `topic` is for content
+    # creation: without it a run has no queue, and guessing one means working
+    # through some other project's tasks.
     error_msg = ""
+    if not build_request_path:
+        error_msg = (
+            "Missing required build_request.json. The coding graph works on one "
+            "project at a time — pass `build_request_path: "
+            "'pkm/wiki/software/<project>/build_request.json'`, or "
+            "`project_name: '<project>'` to resolve it."
+        )
 
     # A nudge in chat is not an approval — approval is read off GitHub — but it
     # does reopen the polling window and is passed to the worker as feedback.

@@ -237,5 +237,60 @@ class TestTickEndToEnd(ManifestFixture):
         self.assertEqual(state["tick_report"], [])
 
 
+class TestTheImplementVerifyLoopTerminates(TestTickEndToEnd):
+    """The budget has to hold *within* one tick, not only across ticks.
+
+    implement and verify hand a task back and forth, and both read the budget
+    off `current_task`. That is the scheduler's opening snapshot, so while the
+    nodes only wrote the new count to disk, verify saw zero attempts every time
+    round and routed straight back to implement. The tick ran the worker 25
+    times on one task and died on LangGraph's recursion limit — which is what
+    put the same `<worker_handoff>` block in the channel 25 times.
+
+    Only a run through the compiled graph catches this: called directly, each
+    node is given a fresh, correct `current_task` by the test itself.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # A worker that always produces a new tree, and tests that never pass:
+        # the loop's worst case, and the shape of the incident.
+        self.digests = iter(f"digest_{n}" for n in range(1, 100))
+        patch("graphs.coding.nodes.implement.compute_worktree_digest",
+              AsyncMock(side_effect=lambda *_a, **_k: next(self.digests))).start()
+        patch("graphs.coding.nodes.implement.digest_matches",
+              AsyncMock(return_value=False)).start()
+
+    async def test_a_task_whose_tests_never_pass_stops_at_the_budget(self):
+        from graphs.coding.nodes.implement import MAX_IMPLEMENT_ATTEMPTS
+
+        self.write_manifest([_task(stage="queued")])
+
+        with patch("graphs.coding.nodes.verify._run",
+                   AsyncMock(return_value=(1, "", "AssertionError: expected 3 to equal 4"))):
+            await self.run_tick()
+
+        self.assertEqual(self.agent.ainvoke.await_count, MAX_IMPLEMENT_ATTEMPTS)
+        self.assertEqual(self.stored()["status"], "halted")
+        self.assertEqual(self.stored()["attempts"]["implement"], MAX_IMPLEMENT_ATTEMPTS)
+
+    async def test_a_worktree_with_no_dependencies_costs_exactly_one_llm_call(self):
+        """The incident itself: `npx vitest` with no `node_modules`.
+
+        The command cannot run, so its output says nothing about the code. One
+        attempt is enough to learn that; the other 24 were spent rewriting a
+        correct implementation.
+        """
+        self.write_manifest([_task(stage="queued")])
+
+        with patch("graphs.coding.nodes.verify._run",
+                   AsyncMock(return_value=(1, "", "Error: Cannot find module 'react'"))):
+            await self.run_tick()
+
+        self.assertEqual(self.agent.ainvoke.await_count, 1)
+        self.assertEqual(self.stored()["status"], "halted")
+        self.assertEqual(self.stored()["last_error"]["kind"], "environment")
+
+
 if __name__ == "__main__":
     unittest.main()

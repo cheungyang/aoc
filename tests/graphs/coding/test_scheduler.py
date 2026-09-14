@@ -94,6 +94,17 @@ class TestSchedulerNode(ManifestFixture):
         state.update(overrides)
         return state
 
+    async def test_a_tick_with_no_project_named_says_so_and_stops(self):
+        """Which project is an input, not a default. Reported, not raised: the
+        caller needs the sentence that tells them what to pass."""
+        result = await scheduler_node(
+            {"build_request_path": "", "tick_report": [], "tick_handled": []}
+        )
+
+        self.assertEqual(result["route"], ROUTE_DONE)
+        self.assertIn("build_request.json", result["error_message"])
+        self.mock_preflight.assert_not_called()
+
     async def test_an_empty_queue_reports_nothing(self):
         """A quiet tick must produce no output at all, or the channel fills up."""
         self.write_manifest([])
@@ -271,6 +282,111 @@ class TestSchedulerNode(ManifestFixture):
             await scheduler_node(self.tick_state())
 
         self.assertIsNone(self.stored().get("lease_owner"))
+
+
+class TestSetupCommand(TestSchedulerNode):
+    """Scaffolding and dependency install belong to the worktree, not to the
+    test command: run once, and a failure is the environment's fault."""
+
+    def setUp(self):
+        super().setUp()
+        self.run = patch(
+            "graphs.coding.nodes.scheduler.run_in_worktree",
+            AsyncMock(return_value=(0, "added 312 packages", ""))
+        )
+        self.mock_run = self.run.start()
+        self.addCleanup(self.run.stop)
+
+    async def test_a_fresh_worktree_is_set_up_before_any_code_is_written(self):
+        self.write_manifest([_task()], setup_command="npm install")
+
+        result = await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_awaited_once()
+        self.assertEqual(self.mock_run.await_args.args[0], "npm install")
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+        self.assertTrue(self.stored()["setup_done"])
+
+    async def test_setup_runs_in_the_worktree_not_the_repo_root(self):
+        self.write_manifest([_task()], setup_command="npm install")
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(
+            self.mock_run.await_args.kwargs["cwd"], result["workspace_path"]
+        )
+
+    async def test_a_task_level_command_overrides_the_manifest_one(self):
+        self.write_manifest(
+            [_task(setup_command="pip install -e .")], setup_command="npm install"
+        )
+
+        await scheduler_node(self.tick_state())
+
+        self.assertEqual(self.mock_run.await_args.args[0], "pip install -e .")
+
+    async def test_setup_is_not_repeated_once_it_has_succeeded(self):
+        """Re-installing on every tick is the cost this field exists to remove."""
+        os.makedirs(os.path.join(self.workspace, "runs"), exist_ok=True)
+        self.write_manifest(
+            [_task(stage="provisioned", setup_done=True)], setup_command="npm install"
+        )
+
+        with patch("os.path.exists", return_value=True):
+            await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_not_awaited()
+
+    async def test_re_provisioning_makes_setup_run_again(self):
+        """A recreated worktree has no `node_modules`, so a stale flag would
+        send the worker into a directory that cannot build."""
+        self.write_manifest(
+            [_task(stage="provisioned", setup_done=True)], setup_command="npm install"
+        )
+
+        # The worktree path does not exist, so the scheduler re-provisions.
+        await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_awaited_once()
+        self.assertTrue(self.stored()["setup_done"])
+
+    async def test_a_failed_setup_halts_the_task_as_an_environment_fault(self):
+        self.write_manifest([_task()], setup_command="npm install")
+        self.mock_run.return_value = (1, "", "npm ERR! code ENOTFOUND")
+
+        result = await scheduler_node(self.tick_state())
+
+        stored = self.stored()
+        self.assertEqual(result["route"], ROUTE_DONE)
+        self.assertEqual(stored["status"], "halted")
+        self.assertEqual(stored["last_error"]["kind"], "environment")
+        self.assertIn("ENOTFOUND", stored["last_error"]["message"])
+
+    async def test_a_failed_setup_does_not_spend_the_implement_budget(self):
+        """The whole point of the split: the worker never saw this task, so it
+        must not be charged for it."""
+        self.write_manifest([_task()], setup_command="npm install")
+        self.mock_run.return_value = (127, "", "sh: npm: command not found")
+
+        await scheduler_node(self.tick_state())
+
+        self.assertEqual(self.stored().get("attempts", {}).get("implement", 0), 0)
+
+    async def test_a_failed_setup_releases_the_lease(self):
+        self.write_manifest([_task()], setup_command="npm install")
+        self.mock_run.return_value = (1, "", "boom")
+
+        await scheduler_node(self.tick_state())
+
+        self.assertIsNone(self.stored().get("lease_owner"))
+
+    async def test_no_setup_command_means_no_shell_at_all(self):
+        self.write_manifest([_task()])
+
+        result = await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_not_awaited()
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
 
 
 if __name__ == "__main__":
