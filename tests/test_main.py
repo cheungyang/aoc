@@ -69,6 +69,14 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
     @patch('main.AgentsLoader')
     @patch('main.BotsLoader')
     async def test_run_bots_no_agents(self, mock_bots_loader, mock_agents_loader, mock_schedule_runner_class):
+        """With no agents configured the process must still run the scheduler.
+
+        Scheduled work (cron jobs, ticks) is independent of Discord: an early
+        return on "no bots" would silently stop every scheduled task on a
+        deployment that has none. The `else: print("No Discord bots to start.")`
+        branch in `main.run_bots` is now unreachable precisely because the
+        schedule runner is always appended to `tasks`.
+        """
         # Mock ScheduleRunner
         mock_schedule_runner = MagicMock()
         mock_schedule_runner.start = AsyncMock()
@@ -78,8 +86,13 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         mock_agents_loader.return_value = mock_loader_instance
         mock_loader_instance.list_agent_ids.return_value = []
 
+        mock_bots_loader_instance = MagicMock()
+        mock_bots_loader.return_value = mock_bots_loader_instance
+
         await main.run_bots()
-        # Should just print "No Discord bots to start."
+
+        mock_schedule_runner.start.assert_awaited_once()
+        mock_bots_loader_instance.get_bot.assert_not_called()
 
     def test_parse_args_default(self):
         args = main.parse_args([])

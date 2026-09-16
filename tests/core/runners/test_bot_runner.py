@@ -137,59 +137,6 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner.voice_manager.join_voice_channel.assert_called_with("day-planning-voice")
 
-    @patch('core.runners.bot_runner.commands.Bot')
-    @patch('core.runners.bot_runner.AgentsLoader')
-    async def test_on_message_ignores_self(self, mock_agents_loader_class, mock_bot_class):
-        mock_bot = MagicMock()
-        mock_bot.user = "TestBot#1234"
-        mock_bot_class.return_value = mock_bot
-        
-        runner = BotRunner("test_token", "main")
-        
-        mock_message = MagicMock()
-        mock_message.author = MagicMock()
-        mock_message.author.bot = True
-        
-        await runner.on_message(mock_message)
-        
-        # Should return immediately without doing anything
-        mock_agents_loader_class.assert_not_called()
-
-    @patch('core.runners.bot_runner.AgentsLoader')
-    @patch('core.runners.bot_runner.commands.Bot')
-    async def test_on_message_delegates(self, mock_bot_class, mock_agents_loader_class):
-        mock_bot = MagicMock()
-        mock_bot.user = MagicMock()
-        mock_bot.user.bot = True
-        mock_bot.mcp_tools = ["tool1", "tool2"]
-        mock_bot_class.return_value = mock_bot
-        
-        runner = BotRunner("test_token", "main")
-        
-        mock_message = MagicMock()
-        mock_message.author = MagicMock()
-        mock_message.author.bot = False
-        mock_message.content = "Hello bot"
-        mock_message.mentions = [runner.bot.user]
-        mock_message.channel.send = AsyncMock()
-        
-        # Mock AgentsLoader and dynamic Agent
-        async def fake_empty_stream(*args, **kwargs):
-            if False:
-                yield None
-
-        mock_loader = MagicMock()
-        mock_agents_loader_class.return_value = mock_loader
-        mock_agent = MagicMock()
-        mock_agent.config = {"channel_hosts": []}
-        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
-        mock_loader.get_agent = MagicMock(return_value=mock_agent)
-        
-        await runner.on_message(mock_message)
-
-        mock_loader.get_agent.assert_called_with("main")
-        mock_agent.execute_stream.assert_called_once()
-
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_message_from_thread(self, mock_bot_class, mock_agents_loader_class):
@@ -310,6 +257,15 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_message_long_reply(self, mock_bot_class, mock_agents_loader_class):
+        """A reply over Discord's 2,000-char message limit must reach the channel intact,
+        split across several sends.
+
+        This test used to stub `agent.execute`, but on_message streams through
+        `agent.execute_stream` (bot_runner.py:258). The 4,500-char response was therefore
+        never produced, and the only assertion (`send.call_count == 0`) would have held
+        even if on_message had been deleted outright. It now drives the real stream and
+        the real DiscordStreamBuffer chunking.
+        """
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()
         mock_bot.user.bot = True
@@ -318,11 +274,23 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         runner = BotRunner("test_token", "main")
         
         mock_message = MagicMock()
-        mock_message.author = MagicMock()
-        mock_message.author.bot = False
+        mock_message.author = MagicMock(bot=False)
         mock_message.content = "Hello bot"
         mock_message.mentions = [runner.bot.user]
-        mock_message.channel.send = AsyncMock()
+        mock_message.attachments = []
+        
+        # Record every chunk posted to the channel; hand back an editable message stub so
+        # the buffer's later edit/delete passes behave like real discord.Message objects.
+        sent_chunks = []
+
+        async def fake_send(content=None, **kwargs):
+            sent_chunks.append(content)
+            sent_msg = MagicMock()
+            sent_msg.edit = AsyncMock()
+            sent_msg.delete = AsyncMock()
+            return sent_msg
+
+        mock_message.channel.send = AsyncMock(side_effect=fake_send)
         
         # Mock channel.typing context manager
         mock_typing = MagicMock()
@@ -330,18 +298,34 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_typing.__aexit__ = AsyncMock()
         mock_message.channel.typing.return_value = mock_typing
         
+        # ~4,600 chars of distinguishable text. No trailing whitespace: the buffer
+        # rstrips the filtered text, which would break exact reassembly below.
+        long_response = "\n".join(f"Line {i:03d}: " + ("detail " * 8).strip() for i in range(70))
+        self.assertGreater(len(long_response), 4000)
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "token", "content": long_response}
+            yield {"type": "final_response", "text": long_response, "response": None}
+
         # Mock AgentsLoader and dynamic Agent
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
         mock_agent.config = {"channel_hosts": []}
-        long_response = "a" * 4500
-        mock_agent.execute = AsyncMock(return_value=long_response)
+        mock_agent.execute_stream = fake_stream
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
  
-        self.assertEqual(mock_message.channel.send.call_count, 0)
+        # The reply must actually be split: more than one send...
+        self.assertGreater(len(sent_chunks), 1)
+        # ...every chunk within Discord's hard 2,000-char limit...
+        for chunk in sent_chunks:
+            self.assertLessEqual(len(chunk), 2000)
+        # ...and the chunks must reassemble to exactly the response (no loss, no
+        # reordering, and no error message tacked on by the exception handler).
+        self.assertEqual("".join(sent_chunks), long_response)
+
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
     async def test_on_message_handles_self_vote(self, mock_bot_class, mock_agents_loader_class):
@@ -462,9 +446,21 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content_arg[1]["type"], "image_url")
         self.assertTrue(content_arg[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
 
+    @patch('core.knowledge.memory.sqlite_session_store.SqliteSessionStore.load_history')
     @patch('core.runners.bot_runner.AgentsLoader')
     @patch('core.runners.bot_runner.commands.Bot')
-    async def test_on_message_without_attachments_does_not_pull_history(self, mock_bot_class, mock_agents_loader_class):
+    async def test_on_message_does_not_reseed_thread_starter_when_history_exists(self, mock_bot_class, mock_agents_loader_class, mock_load_history):
+        """History must not be replayed into the prompt on every turn.
+
+        The original version of this test was named
+        `test_on_message_without_attachments_does_not_pull_history`, from a time when
+        on_message scraped Discord history looking for a previous image. That code is
+        gone; the only history access left is the SqliteSessionStore.load_history guard
+        at bot_runner.py:242, which exists so a thread's starter message is injected
+        *once* (on the first turn) and never again. This test pins that guard: with a
+        non-empty stored history, the starter text must be absent and the payload must
+        stay the user's plain message string.
+        """
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()
         mock_bot.user.bot = True
@@ -472,40 +468,51 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner = BotRunner("test_token", "main")
         
+        mock_starter = MagicMock()
+        mock_starter.id = 1111111111111111111
+        mock_starter.author = MagicMock(display_name="Alva")
+        mock_starter.content = "Initial topic outline"
+
+        mock_thread = MagicMock(spec=discord.Thread)
+        mock_thread.id = 1541110915540324533
+        mock_thread.name = "AI thread"
+        mock_thread.parent = MagicMock()
+        mock_thread.parent.name = "topic-research"
+        mock_thread.starter_message = mock_starter
+
         mock_message = MagicMock()
-        mock_message.author = MagicMock()
-        mock_message.author.bot = False
+        mock_message.id = 3333333333333333333
+        mock_message.author = MagicMock(bot=False)
         mock_message.content = "What is that image?"
-        mock_message.mentions = [runner.bot.user]
-        mock_message.channel.send = AsyncMock()
+        mock_message.mentions = []
+        mock_message.channel = mock_thread
         mock_message.attachments = []
         
-        # Mock channel.typing context manager
-        mock_typing = MagicMock()
-        mock_typing.__aenter__ = AsyncMock()
-        mock_typing.__aexit__ = AsyncMock()
-        mock_message.channel.typing.return_value = mock_typing
+        # The session already has stored turns -> starter seeding must be skipped
+        mock_load_history.return_value = [{"role": "user", "content": "earlier turn"}]
         
-        # Mock AgentsLoader and dynamic Agent
-        async def fake_empty_stream(*args, **kwargs):
+        captured_payload = None
+        async def fake_stream(payload, *args, **kwargs):
+            nonlocal captured_payload
+            captured_payload = payload
             if False:
                 yield None
 
         mock_loader = MagicMock()
         mock_agents_loader_class.return_value = mock_loader
         mock_agent = MagicMock()
-        mock_agent.config = {"channel_hosts": []}
-        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
+        mock_agent.config = {"channel_hosts": ["topic-research"]}
+        mock_agent.execute_stream = MagicMock(side_effect=fake_stream)
         mock_loader.get_agent = MagicMock(return_value=mock_agent)
         
         await runner.on_message(mock_message)
         
-        # Verify that execute_stream was called with string payload (no history image pulled)
         mock_agent.execute_stream.assert_called_once()
-        args, kwargs = mock_agent.execute_stream.call_args
-        content_arg = args[0]
-        
-        self.assertEqual(content_arg, "What is that image?")
+        # The history guard must actually have been consulted...
+        mock_load_history.assert_called_once()
+        # ...and its non-empty result must suppress the starter-message prefix.
+        self.assertEqual(captured_payload, "What is that image?")
+        self.assertNotIn("[Thread starter message", captured_payload)
 
     @patch('core.agent.stream_handler.DiscordStreamBuffer.finalize')
     @patch('core.agent.stream_handler.DiscordStreamBuffer.append_token')

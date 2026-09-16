@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
+import itertools
 import os
 import sys
 import time
@@ -62,8 +63,14 @@ class TestJobKillTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_kill", payload="", errors="Job unknown_job not found."))
 
     @patch('tools.job_kill.JobManager')
+    @patch('tools.job_kill.time.time')
     @patch('tools.job_kill.time.sleep')
-    def test_job_kill_timeout(self, mock_sleep, mock_job_manager_class):
+    def test_job_kill_timeout(self, mock_sleep, mock_time, mock_job_manager_class):
+        """Patching only `time.sleep` left the `while time.time() - start < 10` poll
+        in job_kill.py spinning for a real 10 seconds -- a third of the entire suite's
+        runtime. The clock has to move too, or the test just burns wall-clock."""
+        mock_time.side_effect = itertools.count(0.0, 4.0)
+
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
         
@@ -75,6 +82,8 @@ class TestJobKillTool(unittest.TestCase):
         result = job_kill.func(job_id="test_job_123")
         
         self.assertEqual(result, format_tool_response("job_kill", payload="Job test_job_123 did not stop in time. Current status: killing", errors="None"))
+        # The loop must actually have polled and given up, not exited on the first pass.
+        self.assertGreater(mock_sleep.call_count, 0)
 
 if __name__ == '__main__':
     unittest.main()

@@ -22,6 +22,8 @@ class TestGraphTopology(unittest.TestCase):
 
         graph = create_graph()
         self.assertIsNone(graph.checkpointer)
+        # Exact set, not a superset: this is also what keeps the interrupt-driven
+        # topology (`hitl_gate`, `worker_node`, `git_handoff`) from coming back.
         self.assertEqual(
             {"scheduler", "implement", "verify", "audit", "publish", "sync_review"},
             set(graph.nodes) - {"__start__"},
@@ -40,15 +42,6 @@ class TestGraphTopology(unittest.TestCase):
         graph = create_graph(checkpointer=MemorySaver())
 
         self.assertIsNone(graph.checkpointer)
-
-    def test_the_interrupt_driven_graph_is_gone(self):
-        from graphs.coding.graph import create_graph
-
-        nodes = set(create_graph().nodes)
-
-        self.assertNotIn("hitl_gate", nodes)
-        self.assertNotIn("worker_node", nodes)
-        self.assertNotIn("git_handoff", nodes)
 
 
 class TestNodeSeparation(unittest.TestCase):

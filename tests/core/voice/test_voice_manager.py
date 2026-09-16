@@ -267,18 +267,40 @@ async def test_voice_manager_on_speech_finished_pipeline(mock_bot_runner, tmp_pa
 
 @pytest.mark.asyncio
 async def test_voice_manager_ignores_bot_speech(mock_bot_runner):
+    """
+    The bot must never react to its own (or another bot's) voice: no barge-in,
+    no new turn, no processing task. Note _stop_playback delegates to
+    audio_queue.clear(), which halts playback via vc.stop_playing().
+    """
     vm = VoiceManager(mock_bot_runner)
     mock_vc = MagicMock()
     mock_vc.is_playing.return_value = True
+    mock_vc.is_connected.return_value = True
     vm.voice_client = mock_vc
-    
-    bot_user = MagicMock(bot=True)
+
+    # Stub the turn pipeline so we can observe whether a turn is started at all.
+    vm._process_speech_turn = AsyncMock()
+
+    bot_user = MagicMock(bot=True, display_name="OtherBot")
     await vm.on_speech_started(bot_user)
-    # Should NOT stop playback because user is a bot
-    mock_vc.stop.assert_not_called()
-    
+    mock_vc.stop_playing.assert_not_called()
+    assert vm._active_turn == 0
+
     await vm.on_speech_finished(bot_user, b"fake_bytes")
-    assert mock_vc.play.call_count == 0
+    assert vm._current_task is None
+    vm._process_speech_turn.assert_not_awaited()
+
+    # Control: an otherwise identical human speaker DOES barge in and DOES
+    # start a turn, so the assertions above pin the bot guard, not dead code.
+    human_user = MagicMock(bot=False, display_name="Alice")
+    await vm.on_speech_started(human_user)
+    mock_vc.stop_playing.assert_called_once()
+    assert vm._active_turn == 1
+
+    await vm.on_speech_finished(human_user, b"fake_bytes")
+    assert vm._current_task is not None
+    await vm._current_task
+    vm._process_speech_turn.assert_awaited_once_with(human_user, b"fake_bytes", 1)
 
 @pytest.mark.asyncio
 async def test_voice_manager_interruption_turn_invalidation(mock_bot_runner, tmp_path):

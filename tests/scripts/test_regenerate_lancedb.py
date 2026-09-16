@@ -61,6 +61,13 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
 
     @patch.object(rl_module, "regenerate_lancedb")
     def test_main_success(self, mock_regen):
+        """`main` is the CLI seam: every flag has to reach `regenerate_lancedb`,
+        and a verified run must not exit non-zero.
+
+        A dropped or misrouted flag here is invisible end-to-end -- the
+        regeneration still runs, just with the defaults the caller asked it not
+        to use (e.g. a real embedding run when `--skip-embedding` was given).
+        """
         mock_regen.return_value = {
             "pkm_dir": "/mock/pkm",
             "db_path": "/mock/.lancedb",
@@ -71,10 +78,54 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
             "dry_run": False
         }
 
-        with patch.object(sys, "argv", ["regenerate_lancedb.py"]), \
-             patch("builtins.print") as mock_print:
+        with patch.object(sys, "argv", [
+            "regenerate_lancedb.py",
+            "--pkm-dir", "/custom/pkm",
+            "--db-path", "/custom/.lancedb",
+            "--no-clean",
+            "--skip-embedding",
+            "--model", "gemini-embedding-001",
+            "--batch-size", "128",
+            "--write-batch-size", "250",
+            "--test-query", "test search",
+            "--verbose",
+        ]), patch("builtins.print"):
             rl_module.main()
-            mock_regen.assert_called_once()
+
+        mock_regen.assert_called_once_with(
+            pkm_dir="/custom/pkm",
+            db_path="/custom/.lancedb",
+            clean=False,
+            dry_run=False,
+            skip_embedding=True,
+            model="gemini-embedding-001",
+            batch_size=128,
+            write_batch_size=250,
+            test_query="test search",
+            verbose=True
+        )
+
+    @patch.object(rl_module, "regenerate_lancedb")
+    def test_main_exits_non_zero_when_the_rebuild_is_not_verified(self, mock_regen):
+        """An unverified rebuild means the database was written but could not be
+        queried back. Exiting 0 there tells cron everything is fine and leaves a
+        silently broken index in place."""
+        mock_regen.return_value = {
+            "pkm_dir": "/mock/pkm",
+            "db_path": "/mock/.lancedb",
+            "scanned_files": 10,
+            "total_chunks": 30,
+            "rows_in_db": 0,
+            "verified": False,
+            "dry_run": False
+        }
+
+        with patch.object(sys, "argv", ["regenerate_lancedb.py"]), \
+             patch("builtins.print"):
+            with self.assertRaises(SystemExit) as ctx:
+                rl_module.main()
+
+        self.assertEqual(ctx.exception.code, 1)
 
     @patch.object(rl_module, "regenerate_lancedb")
     def test_main_error_exit(self, mock_regen):

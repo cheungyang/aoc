@@ -13,6 +13,7 @@ import unittest
 
 from graphs.coding.prompts.critic_prompt import build_critic_prompt
 from graphs.coding.utils.xml_parsers import parse_critic_verdict_xml
+from tests.graphs.coding.test_spec_validator_prompt import fill_tag
 
 
 class CriticPromptInputsTestCase(unittest.TestCase):
@@ -118,16 +119,35 @@ class CriticPromptOutputContractTestCase(unittest.TestCase):
         copy of the template must produce a REJECT the pipeline can act on."""
         prompt = build_critic_prompt(spec_text="spec", git_diff_text="diff")
         template = re.search(r"<critic_verdict>.*?</critic_verdict>", prompt, re.DOTALL).group(0)
-        filled = (
-            template.replace("APPROVE | REJECT", "REJECT")
-            .replace("Fake It Trap | Happy Path Bias | Silent Failure | Bloated Files", "Silent Failure")
-            .replace("path/to/file", "core/a.py")
-        )
+        filled = fill_tag(self, template, "verdict", "REJECT")
+        filled = fill_tag(self, filled, "rule", "Silent Failure")
+        filled = fill_tag(self, filled, "file", "core/a.py")
+        self.assertNotEqual(filled, template, "the template was never filled in")
+
         parsed = parse_critic_verdict_xml(filled)
         self.assertEqual(parsed["verdict"], "REJECT")
         self.assertFalse(parsed["passed"])
         self.assertEqual(parsed["anti_patterns_detected"][0]["rule"], "Silent Failure")
         self.assertEqual(parsed["anti_patterns_detected"][0]["file"], "core/a.py")
+
+    def test_a_verdict_shaped_like_the_prompt_template_parses_as_an_approval(self):
+        """The APPROVE half of the contract, driven through the shipped template.
+
+        Only a literal APPROVE approves, so if the template ever drifted into a
+        shape that cannot produce one, every clean diff would be rejected and
+        the task would loop back into implement forever. The rejection twin
+        above cannot catch that: REJECT is also the parser's default.
+        """
+        prompt = build_critic_prompt(spec_text="spec", git_diff_text="diff")
+        template = re.search(r"<critic_verdict>.*?</critic_verdict>", prompt, re.DOTALL).group(0)
+        filled = fill_tag(self, template, "verdict", "APPROVE")
+        filled = fill_tag(self, filled, "feedback_for_worker", "No anti-patterns found")
+        self.assertNotEqual(filled, template, "the template was never filled in")
+
+        parsed = parse_critic_verdict_xml(filled)
+        self.assertEqual(parsed["verdict"], "APPROVE")
+        self.assertTrue(parsed["passed"])
+        self.assertEqual(parsed["feedback_for_worker"], "No anti-patterns found")
 
 
     def test_an_unfilled_template_verdict_does_not_approve(self):

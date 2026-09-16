@@ -41,6 +41,13 @@ class TestRenderPlate(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(res["raw_video_path"], target_video)
 
     async def test_render_plate_reuses_existing_when_qc_passed(self):
+        """An approved plate is never re-rendered — Veo 3 is the priciest call in the graph.
+
+        Archive-on-reject keeps the canonical path identical in both the reuse
+        and the regenerate branch, so the returned path proves nothing on its
+        own. The observable difference is that `generate_animation_veo3.ainvoke`
+        is never awaited and no `_v1` archive appears on disk.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "cat")
             os.makedirs(output_path, exist_ok=True)
@@ -57,8 +64,12 @@ class TestRenderPlate(unittest.IsolatedAsyncioTestCase):
                     "video_qc_passed": True
                 }
                 res = await render_plate_task(state)
-                mock_veo.assert_not_called() if hasattr(mock_veo, 'assert_not_called') else None
+
+                mock_veo.ainvoke.assert_not_called()
                 self.assertEqual(res["raw_video_path"], existing_plate)
+                with open(existing_plate, "rb") as f:
+                    self.assertEqual(f.read(), b"EXISTING_VIDEO_BYTES")
+                self.assertFalse(os.path.exists(os.path.join(output_path, "cat_raw_video_v1.mp4")))
 
 
 if __name__ == "__main__":

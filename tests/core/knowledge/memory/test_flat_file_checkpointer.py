@@ -3,122 +3,62 @@ import os
 import shutil
 import tempfile
 import sys
-import asyncio
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.flat_file_checkpointer import FlatFileCheckpointer
+from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 
 class TestFlatFileCheckpointer(unittest.TestCase):
+    """
+    FlatFileCheckpointer is a backwards-compatibility shim (core/knowledge/memory/flat_file_checkpointer.py):
+    a constructor-only subclass of SqliteCheckpointer whose *only* own behaviour is mapping the legacy
+    `directory=` argument onto <directory>/memory.db.
+
+    Every read/write/list/archive behaviour is inherited verbatim and is already covered by
+    TestSqliteCheckpointer in test_sqlite_checkpointer.py, so this file deliberately tests only the
+    shim's own contract instead of re-running the parent class's test suite through the subclass.
+    """
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.checkpointer = FlatFileCheckpointer(directory=self.test_dir)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    def test_init_creates_dir(self):
-        self.assertTrue(os.path.exists(self.test_dir))
+    def test_directory_argument_maps_to_memory_db_inside_directory(self):
+        # The whole reason this shim exists: legacy callers passed a directory, not a db file.
+        checkpointer = FlatFileCheckpointer(directory=self.test_dir)
+        expected_db = os.path.join(self.test_dir, "memory.db")
+        self.assertEqual(checkpointer.db_path, expected_db)
+        # SqliteCheckpointer.__init__ opens the db, so the mapped file must exist on disk.
+        self.assertTrue(
+            os.path.exists(expected_db),
+            f"expected the shim to create {expected_db}, dir contains {os.listdir(self.test_dir)}"
+        )
 
-    def test_put_and_get_tuple_latest(self):
-        config = {"configurable": {"thread_id": "thread1"}}
-        checkpoint = {"id": "cp1"}
-        metadata = {"step": 1}
-        new_versions = {}
+    def test_db_path_argument_takes_precedence_over_directory(self):
+        explicit_db = os.path.join(self.test_dir, "explicit.db")
+        checkpointer = FlatFileCheckpointer(directory=self.test_dir, db_path=explicit_db)
+        self.assertEqual(checkpointer.db_path, explicit_db)
+        self.assertTrue(os.path.exists(explicit_db))
+        # The directory mapping must not also fire when an explicit db_path was given.
+        self.assertFalse(os.path.exists(os.path.join(self.test_dir, "memory.db")))
 
-        # Put
-        return_config = self.checkpointer.put(config, checkpoint, metadata, new_versions)
-        self.assertEqual(return_config["configurable"]["thread_id"], "thread1")
-        self.assertEqual(return_config["configurable"]["checkpoint_id"], "cp1")
+    def test_is_a_working_sqlite_checkpointer_subclass(self):
+        # Inherited behaviour is tested next door; here we only prove the subclass wiring is real
+        # and that inherited I/O actually lands in the directory-mapped file.
+        checkpointer = FlatFileCheckpointer(directory=self.test_dir)
+        self.assertIsInstance(checkpointer, SqliteCheckpointer)
 
-        # Get Tuple Latest
-        cp_tuple = self.checkpointer.get_tuple(config)
-        self.assertIsNotNone(cp_tuple)
-        self.assertEqual(cp_tuple.config["configurable"]["checkpoint_id"], "cp1")
+        config = {"configurable": {"thread_id": "shim_thread"}}
+        checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+
+        plain = SqliteCheckpointer(db_path=os.path.join(self.test_dir, "memory.db"))
+        cp_tuple = plain.get_tuple(config)
+        self.assertIsNotNone(cp_tuple, "checkpoint written via the shim was not found in <directory>/memory.db")
         self.assertEqual(cp_tuple.checkpoint["id"], "cp1")
-        self.assertEqual(cp_tuple.metadata["step"], 1)
-
-    def test_put_and_get_tuple_specific(self):
-        config = {"configurable": {"thread_id": "thread1"}}
-        
-        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
-        self.checkpointer.put(config, {"id": "cp2"}, {"step": 2}, {})
-
-        # Get latest
-        cp_tuple = self.checkpointer.get_tuple(config)
-        self.assertEqual(cp_tuple.checkpoint["id"], "cp2")
-
-        # Get specific
-        specific_config = {"configurable": {"thread_id": "thread1", "checkpoint_id": "cp1"}}
-        cp_tuple_spec = self.checkpointer.get_tuple(specific_config)
-        self.assertEqual(cp_tuple_spec.checkpoint["id"], "cp1")
-
-    def test_list(self):
-        config = {"configurable": {"thread_id": "thread1"}}
-        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
-        self.checkpointer.put(config, {"id": "cp2"}, {"step": 2, "tag": "important"}, {})
-        
-        # Test list all
-        all_cps = list(self.checkpointer.list(config))
-        self.assertEqual(len(all_cps), 2)
-        self.assertEqual(all_cps[0].checkpoint["id"], "cp2") # Descending order by step
-
-        # Test filter
-        filtered = list(self.checkpointer.list(config, filter={"tag": "important"}))
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].checkpoint["id"], "cp2")
-
-    def test_delete_thread(self):
-         config = {"configurable": {"thread_id": "thread1"}}
-         self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
-         
-         cp_tuple = self.checkpointer.get_tuple(config)
-         self.assertIsNotNone(cp_tuple)
-         
-         self.checkpointer.delete_thread("thread1")
-         cp_tuple_after = self.checkpointer.get_tuple(config)
-         self.assertIsNone(cp_tuple_after)
-
-    def test_aput_and_aget_tuple(self):
-        config = {"configurable": {"thread_id": "thread2"}}
-        checkpoint = {"id": "cp2"}
-        metadata = {"step": 2}
-        new_versions = {}
-
-        async def run_test():
-            return_config = await self.checkpointer.aput(config, checkpoint, metadata, new_versions)
-            self.assertEqual(return_config["configurable"]["checkpoint_id"], "cp2")
-            cp_tuple = await self.checkpointer.aget_tuple(config)
-            self.assertIsNotNone(cp_tuple)
-            self.assertEqual(cp_tuple.checkpoint["id"], "cp2")
-        
-        asyncio.run(run_test())
-
-    def test_aput_writes(self):
-        config = {"configurable": {"thread_id": "thread3", "checkpoint_id": "cp3"}}
-        writes = [("channel1", "value1")]
-        
-        async def run_test():
-            await self.checkpointer.aput_writes(config, writes, "task1")
-        
-        asyncio.run(run_test())
-
-    def test_alist(self):
-        config = {"configurable": {"thread_id": "thread4"}}
-        
-        async def run_test():
-            await self.checkpointer.aput(config, {"id": "cp1"}, {"step": 1}, {})
-            await self.checkpointer.aput(config, {"id": "cp2"}, {"step": 2}, {})
-            
-            cps = []
-            async for cp in self.checkpointer.alist(config):
-                cps.append(cp)
-            
-            self.assertEqual(len(cps), 2)
-            self.assertEqual(cps[0].checkpoint["id"], "cp2")
-            
-        asyncio.run(run_test())
 
 if __name__ == "__main__":
     unittest.main()

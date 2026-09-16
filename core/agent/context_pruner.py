@@ -441,15 +441,6 @@ class ContextPruner:
         """Asynchronously inspects and prunes the session checkpoint in SQLite storage if exceeding thresholds."""
         session_id = session.session_id
         channel = session.channel_name
-        if hasattr(self.auto_prune_session, "mock_calls") or hasattr(self.auto_prune_session, "_mock_name"):
-            if force:
-                res = self.auto_prune_session(session, force=force)
-            else:
-                res = self.auto_prune_session(session)
-            if asyncio.iscoroutine(res):
-                return await res
-            return res
-
         try:
             checkpointer, tuple_res, messages = self._get_session_messages_for_auto_prune(session_id, force=force)
             if not tuple_res:

@@ -308,13 +308,22 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
         finally:
             current_execution_context.reset(token)
 
-    async def test_missing_args(self):
-        with self.assertRaises(Exception):
-            await agent_call.ainvoke({"agent_id": "agent1"})
-
-    async def test_missing_channel_arg(self):
-        with self.assertRaises(Exception):
-            await agent_call.ainvoke({"agent_id": "agent1", "prompt": "hello"})
+    async def test_empty_required_args_hit_the_tools_own_guard(self):
+        """Passing a *missing* key only exercises pydantic's schema validation --
+        agent_call.py:46 (`if not agent_id or not prompt or not channel`) is never
+        reached that way, so the guard looked covered while nothing tested it.
+        Empty values get past pydantic and into the tool."""
+        for missing, args in (
+            ("agent_id", {"agent_id": "", "prompt": "hello", "channel": "general"}),
+            ("prompt", {"agent_id": "agent1", "prompt": "", "channel": "general"}),
+            ("channel", {"agent_id": "agent1", "prompt": "hello", "channel": ""}),
+        ):
+            with self.subTest(missing=missing):
+                result = await agent_call.ainvoke(args)
+                self.assertIn(
+                    "Error: agent_call requires 'agent_id', 'prompt', and 'channel'.",
+                    result
+                )
 
     @patch('core.loaders.bots_loader.BotsLoader')
     @patch('tools.agent_call.AgentsLoader')

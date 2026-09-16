@@ -3,7 +3,7 @@ import glob
 import json
 import re
 from typing import List, Dict, Any, Optional, Tuple
-from graphs.coding.schemas import TaskEnvelope, TaskStatus
+from graphs.coding.schemas import TaskEnvelope
 from graphs.coding.utils import manifest as manifest_store
 
 # One manifest per project, under its own spec folder. A single shared queue
@@ -146,36 +146,3 @@ def get_runnable_tasks(queue: List[TaskEnvelope], max_count: int = 1) -> List[Ta
                 break
 
     return runnable
-
-
-def update_task_in_queue(
-    queue: List[TaskEnvelope],
-    task_id: str,
-    status: Optional[TaskStatus] = None,
-    run_id: Optional[str] = None,
-    branch_name: Optional[str] = None,
-    pr_url: Optional[str] = None,
-    commit_url: Optional[str] = None,
-    error_message: Optional[str] = None
-) -> List[TaskEnvelope]:
-    """Updates a task in the queue list in place and returns updated queue."""
-    updated = []
-    for t in queue:
-        if t.get("task_id") == task_id:
-            new_task = dict(t)
-            if status is not None:
-                new_task["status"] = status
-            if run_id is not None:
-                new_task["run_id"] = run_id
-            if branch_name is not None:
-                new_task["branch_name"] = branch_name
-            if pr_url is not None:
-                new_task["pr_url"] = pr_url
-            if commit_url is not None:
-                new_task["commit_url"] = commit_url
-            if error_message is not None:
-                new_task["error_message"] = error_message
-            updated.append(new_task)
-        else:
-            updated.append(t)
-    return updated

@@ -61,14 +61,17 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
                 "latest_human_feedback": ""
             }
 
-            # Simulate first pass pausing at Gate 1
-            with patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.ingest_audio_node", new=AsyncMock(return_value={"source_audio_path": "tests/fake_audio.m4a"})):
-                with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock(return_value={"image_path": v1_img})) as mock_gen_img_1:
-                    with patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock(return_value={"video_plot_path": v1_plot})):
-                        with patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock(return_value={"video_plot_qc_passed": True})):
-                            state1 = await graph.ainvoke(initial_state, config=config)
-                            self.assertEqual(state1["image_path"], v1_img)
-                            mock_gen_img_1.assert_called_once()
+            # Simulate first pass pausing at Gate 1.
+            # `ingest_audio` deliberately runs for real: graph.py binds the node
+            # function into the StateGraph at import time, so patching the module
+            # attribute here would be a silent no-op. It is harmless — the node
+            # only passes `source_audio_path` through from state.
+            with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock(return_value={"image_path": v1_img})) as mock_gen_img_1:
+                with patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock(return_value={"video_plot_path": v1_plot})):
+                    with patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock(return_value={"video_plot_qc_passed": True})):
+                        state1 = await graph.ainvoke(initial_state, config=config)
+                        self.assertEqual(state1["image_path"], v1_img)
+                        mock_gen_img_1.assert_called_once()
 
             # Check that graph paused after ideate_package (Gate 1), next scheduled node is process_gate1_decision
             snapshot = graph.get_state(config)
@@ -141,11 +144,11 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
                 "latest_human_feedback": ""
             }
 
-            with patch("graphs.content_creation.nodes.ingestion.ingest_audio_node.ingest_audio_node", new=AsyncMock(return_value={"source_audio_path": "tests/fake_audio.m4a"})):
-                with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock(return_value={"image_path": v1_img})):
-                    with patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock(return_value={"video_plot_path": v1_plot})):
-                        with patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock(return_value={"video_plot_qc_passed": True})):
-                            await graph.ainvoke(initial_state, config=config)
+            # `ingest_audio` runs for real here too — see the note in the test above.
+            with patch("graphs.content_creation.nodes.ideation.ideate_package_node.generate_image_task", new=AsyncMock(return_value={"image_path": v1_img})):
+                with patch("graphs.content_creation.nodes.ideation.ideate_package_node.draft_plot_task", new=AsyncMock(return_value={"video_plot_path": v1_plot})):
+                    with patch("graphs.content_creation.nodes.ideation.ideate_package_node.audit_plot_task", new=AsyncMock(return_value={"video_plot_qc_passed": True})):
+                        await graph.ainvoke(initial_state, config=config)
 
             ambiguous = "the hat should be red and the camera slower, also try ghibli"
             graph.update_state(config, {

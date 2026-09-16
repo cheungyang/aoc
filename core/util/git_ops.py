@@ -16,14 +16,9 @@ from core.util.push_identity import (
 # Several operations used to report success when the remote was unreachable or `gh` was
 # unauthenticated: a push that never left the machine, a fabricated PR URL, a "simulated"
 # merge and a "simulated" comment. Downstream nodes trusted those results and carried on,
-# so a run could report a merged PR that did not exist. Honest failure is now the default;
-# the old behaviour is opt-in for offline experiments only.
-_SIMULATION_ENV_VAR = "ALLOW_SIMULATED_GIT"
-
-
-def simulated_git_allowed() -> bool:
-    """True only when ALLOW_SIMULATED_GIT is explicitly enabled."""
-    return os.environ.get(_SIMULATION_ENV_VAR, "").strip().lower() in ("1", "true", "yes", "on")
+# so a run could report a merged PR that did not exist. These operations now fail honestly
+# in every environment. If you need offline behaviour, fake it at the boundary in a test --
+# never in here, where a real run could reach it.
 
 
 def _with_identity_env(
@@ -291,8 +286,6 @@ async def commit_and_push(
     code, out, err = await run_cmd_async(push_cmd, cwd=workspace_path, timeout=30.0, env=commit_env)
     if code != 0:
         detail = (err.strip() or out.strip())
-        if simulated_git_allowed():
-            return True, f"Committed locally (remote origin push skipped: {detail})"
         # The commit is safe on the local branch; the caller must not treat this as published.
         return False, (
             f"git push failed for branch {branch_name}: {detail}. "
@@ -367,11 +360,9 @@ async def create_pull_request(
             pr_number = int(m.group(1))
             return True, pr_url, pr_number
 
-    # 3. Offline / unauthenticated environments: only ever fabricate a URL on explicit opt-in.
+    # 3. Offline / unauthenticated environments must fail honestly: a fabricated URL
+    # would be trusted by every downstream node.
     if "not logged in" in combined.lower() or "no default repository" in combined.lower() or "fatal" in combined.lower():
-        if simulated_git_allowed():
-            repo_slug = resolved_repo or "local-repo"
-            return True, f"https://github.com/{repo_slug}/pull/{branch_name}", None
         return False, f"gh pr create failed: {(err or out).strip()}", None
 
     return False, f"gh pr create failed: {err or out}", None
@@ -553,10 +544,6 @@ async def merge_pull_request(
 
         return True, commit_url, out or "PR squashed and merged successfully."
     else:
-        if simulated_git_allowed() and (
-            "not logged in" in (err + out).lower() or "no default repository" in (err + out).lower()
-        ):
-            return True, f"{pr_url_or_number}/commit/simulated_squash_merge", "Simulated merge in local test environment."
         return False, "", f"gh pr merge failed: {err or out}"
 
 
@@ -679,12 +666,6 @@ async def comment_pull_request(
     )
     if code == 0:
         return True, out.strip() or "Comment posted successfully."
-
-    combined = (out + " " + err).lower()
-    if simulated_git_allowed() and (
-        "not logged in" in combined or "no default repository" in combined or "fatal" in combined
-    ):
-        return True, "Simulated PR comment in local/offline test environment."
 
     return False, f"gh pr comment failed: {err.strip() or out.strip()}"
 

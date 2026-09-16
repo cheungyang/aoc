@@ -23,10 +23,13 @@ class TestSentenceChunker(unittest.TestCase):
         self.assertEqual(emitted[1], "And this is the second one!")
 
     def test_abbreviation_not_split(self):
-        text = "Dr. Smith went to Washington D.C. for a conference."
+        # "Dr." sits past min_chars, so only the ABBREVIATIONS lookup
+        # (sentence_chunker.py:77) can stop it becoming a sentence boundary.
+        text = "We had a meeting with Dr. Smith yesterday. It went well."
         chunks = self.chunker.add_token(text)
-        # Should not split on "Dr."
-        self.assertTrue(any("Dr." in c for c in chunks) or any("Dr." in c for c in self.chunker.flush()))
+        # Should not split on "Dr." - the first boundary is the real full stop.
+        self.assertEqual(chunks, ["We had a meeting with Dr. Smith yesterday."])
+        self.assertEqual(self.chunker.flush(), ["It went well."])
 
     def test_flush_remaining_tokens(self):
         self.chunker.add_token("Unfinished trailing thought")

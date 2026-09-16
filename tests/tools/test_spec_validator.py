@@ -38,6 +38,17 @@ class TestSpecValidatorTool(unittest.IsolatedAsyncioTestCase):
             self.assertIn("<verdict>PASS</verdict>", res)
             self.assertIn("<unambiguous>true</unambiguous>", res)
 
+            # The two assertions above only prove the stub's own return value survived
+            # `str(tool_res)`. Everything this tool actually does -- reading the spec off
+            # disk and dispatching it to the right worker -- happens before that, so it
+            # has to be asserted separately or deleting it all would still pass.
+            mock_agent.ainvoke.assert_awaited_once()
+            request = mock_agent.ainvoke.await_args[0][0]
+            self.assertEqual(request["agent_id"], "graph-worker")
+            self.assertEqual(request["channel"], "software-planning")
+            self.assertIn("Allowed files: auth.py", request["prompt"])
+            self.assertIn("Given auth When valid Then pass", request["prompt"])
+
     async def test_spec_validator_fails_closed_on_agent_exception(self):
         with patch("tools.agent_call.agent_call") as mock_agent:
             mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("Worker timeout"))

@@ -40,12 +40,30 @@ def test_vad_sink_pcm_to_wav():
             assert wav_file.getnframes() == 1600
 
 def test_vad_sink_write_empty_or_none():
+    """
+    write() must early-return on empty PCM (vad_sink.py:115) before touching any
+    state: no user keyed, no buffer, and the ONNX VAD session never invoked.
+    """
     mock_vm = MagicMock()
-    with patch("onnxruntime.InferenceSession"):
+    mock_session = MagicMock()
+    with patch("onnxruntime.InferenceSession", return_value=mock_session):
         sink = VADSink(mock_vm)
-        # Should not raise exception
-        sink.write(None, MagicMock(pcm=b"1234"))
-        sink.write(MagicMock(id=1), MagicMock(pcm=b""))
+
+        user = MagicMock(id=1, bot=False)
+        sink.write(None, MagicMock(pcm=b""))
+        sink.write(user, MagicMock(pcm=b""))
+        sink.write(user, MagicMock(pcm=None))
+
+        assert sink.user_states == {}
+        mock_session.run.assert_not_called()
+
+        # Control: a non-empty frame does key the speaker, so the assertions
+        # above are about the early return and not about a dead code path.
+        # (4 bytes = 1 stereo 48kHz sample: keys state, too short to reach VAD.)
+        sink.write(user, MagicMock(pcm=b"\x00\x00\x00\x00"))
+        assert list(sink.user_states.keys()) == [1]
+        assert len(sink.user_states[1].audio_buffer) == 0
+        mock_session.run.assert_not_called()
 
 @pytest.mark.asyncio
 async def test_vad_sink_speech_detection_and_finish():

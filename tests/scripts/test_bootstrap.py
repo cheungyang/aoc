@@ -127,9 +127,19 @@ class TestSkipsReexec(EnsureInterpreterTestCase):
 
 class TestPerformsReexec(EnsureInterpreterTestCase):
     def _run(self, argv):
+        """Stands the caller up as a *different* interpreter from the venv.
+
+        `realpath` is the identity here so the comparison in
+        `ensure_project_interpreter` is over the literal paths, and
+        `sys.executable` is pinned to a system python: without that pin the
+        suite's own interpreter *is* `<root>/.venv/bin/python`, the
+        "already the right interpreter" guard fires, and every assertion below
+        would be about a re-exec that never happened.
+        """
         with patch("importlib.util.find_spec", return_value=None), \
              patch("os.path.exists", return_value=True), \
              patch("os.path.realpath", side_effect=lambda p: p), \
+             patch.object(sys, "executable", "/usr/bin/python3"), \
              patch.object(sys, "argv", argv):
             _bootstrap.ensure_project_interpreter(probe_module="definitely_not_installed")
 

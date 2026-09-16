@@ -4,12 +4,39 @@ import shutil
 import tempfile
 import sys
 import asyncio
+import sqlite3
 from unittest.mock import patch
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
+
+
+def _open_fd_count():
+    """Number of file descriptors open in this process, or None if the OS doesn't expose them.
+
+    macOS exposes them at /dev/fd, Linux at /proc/self/fd. Stdlib only - psutil is not a
+    declared dependency of this project.
+    """
+    for fd_dir in ("/dev/fd", "/proc/self/fd"):
+        if os.path.isdir(fd_dir):
+            try:
+                return len(os.listdir(fd_dir))
+            except OSError:
+                return None
+    return None
+
+
+def _is_connection_open(conn):
+    """True if the sqlite connection is still usable (i.e. was never closed)."""
+    try:
+        conn.execute("SELECT 1")
+        return True
+    except sqlite3.ProgrammingError:
+        return False
+
+
 
 class TestSqliteCheckpointer(unittest.TestCase):
     def setUp(self):
@@ -105,12 +132,23 @@ class TestSqliteCheckpointer(unittest.TestCase):
     def test_aput_writes(self):
         config = {"configurable": {"thread_id": "thread3", "checkpoint_id": "cp3"}}
         writes = [("channel1", "value1")]
-        
+
         async def run_test():
+            # A checkpoint must exist first: put() prunes 'write' rows with no matching checkpoint.
+            await self.checkpointer.aput(config, {"id": "cp3"}, {"step": 1}, {})
             await self.checkpointer.aput_writes(config, writes, "task1")
+
             cp_tuple = await self.checkpointer.aget_tuple(config)
-            # Tuple doesn't error when pending writes exist
-        
+            self.assertIsNotNone(cp_tuple)
+            # put_writes persists a 'write' row; get_tuple must rebuild it into pending_writes
+            # as (task_id, channel, value).
+            self.assertIsNotNone(cp_tuple.pending_writes, "pending write was dropped between put_writes and get_tuple")
+            self.assertEqual(len(cp_tuple.pending_writes), 1)
+            task_id, channel, value = cp_tuple.pending_writes[0]
+            self.assertEqual(task_id, "task1")
+            self.assertEqual(channel, "channel1")
+            self.assertEqual(value, "value1")
+
         asyncio.run(run_test())
 
     def test_alist(self):
@@ -164,8 +202,31 @@ class TestSqliteCheckpointer(unittest.TestCase):
         self.assertEqual(latest.checkpoint["id"], "cp_14")
 
     def test_vacuum(self):
-        # Ensure vacuum method executes without errors
+        # VACUUM's observable effect is reclaiming pages that deleted/dropped tables left on the
+        # SQLite freelist. Build a large thread, drop it, and assert the space is actually reclaimed.
+        keep_config = {"configurable": {"thread_id": "vacuum_keep"}}
+        drop_config = {"configurable": {"thread_id": "vacuum_drop"}}
+
+        self.checkpointer.put(keep_config, {"id": "cp_keep", "payload": os.urandom(20000)}, {"step": 1}, {})
+        for i in range(10):
+            self.checkpointer.put(drop_config, {"id": f"cp_{i}", "payload": os.urandom(50000)}, {"step": i}, {})
+        self.checkpointer.delete_thread("vacuum_drop")
+
+        def freelist_count():
+            with self.checkpointer._get_connection() as conn:
+                return conn.execute("PRAGMA freelist_count").fetchone()[0]
+
+        before = freelist_count()
+        self.assertGreater(before, 0, "dropping a large table should have left free pages to reclaim")
+
         self.checkpointer.vacuum()
+
+        self.assertEqual(freelist_count(), 0, "vacuum() did not reclaim the free pages")
+
+        # Vacuum must not destroy surviving data
+        kept = self.checkpointer.get_tuple(keep_config)
+        self.assertIsNotNone(kept)
+        self.assertEqual(kept.checkpoint["id"], "cp_keep")
 
     def test_archive_thread(self):
         config = {"configurable": {"thread_id": "thread_to_archive"}}
@@ -357,12 +418,42 @@ class TestSqliteCheckpointer(unittest.TestCase):
         self.assertIn(large_b64, tool_msg.content)
 
     def test_no_file_descriptor_leak(self):
-        # Repeated checkpointer operations should close connections and not accumulate open FDs
+        # Repeated checkpointer operations should close connections and not accumulate open FDs.
+        # SqliteCheckpointer._get_connection is a contextmanager whose `finally` closes the
+        # connection; if that ever regresses, every put/get/list burns db + -wal + -shm handles.
         config = {"configurable": {"thread_id": "fd_leak_thread"}}
-        for i in range(100):
-            self.checkpointer.put(config, {"id": f"cp_{i}"}, {"step": i}, {})
-            self.checkpointer.get_tuple(config)
-            list(self.checkpointer.list(config))
+
+        opened = []
+        real_connect = sqlite3.connect
+
+        def tracking_connect(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        fds_before = _open_fd_count()
+        with patch("sqlite3.connect", tracking_connect):
+            for i in range(20):
+                self.checkpointer.put(config, {"id": f"cp_{i}"}, {"step": i}, {})
+                self.checkpointer.get_tuple(config)
+                list(self.checkpointer.list(config))
+        fds_after = _open_fd_count()
+
+        # Sanity: the loop really did open connections (3 per iteration: put, get_tuple, list)
+        self.assertGreaterEqual(len(opened), 60)
+
+        # Every connection handed out by _get_connection must be closed once its block exits
+        still_open = [c for c in opened if _is_connection_open(c)]
+        self.assertEqual(
+            len(still_open), 0,
+            f"{len(still_open)} of {len(opened)} sqlite connections were left open by the checkpointer"
+        )
+
+        if fds_before is not None and fds_after is not None:
+            self.assertLessEqual(
+                fds_after - fds_before, 5,
+                f"open file descriptors grew from {fds_before} to {fds_after} across {len(opened)} connections"
+            )
 
 
 if __name__ == "__main__":

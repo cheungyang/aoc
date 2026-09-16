@@ -68,7 +68,10 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
 
     @patch.dict(os.environ, {"ALLOW_SIMULATED_GIT": "1"})
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_commit_and_push_local_fallback_is_opt_in(self, mock_run):
+    async def test_commit_and_push_never_fabricates_success_from_an_env_var(self, mock_run):
+        """`ALLOW_SIMULATED_GIT` used to turn a failed push into a success. Simulation
+        now lives only in tests, so the legacy flag must be inert: setting it cannot
+        make a push that never reached the remote look like it did."""
         mock_run.side_effect = [
             (0, "", ""),
             (0, "[main 12345] feat: done", ""),
@@ -80,8 +83,9 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
                 branch_name="feat/test/auth_run_1",
                 commit_msg="feat(test): implement auth"
             )
-            self.assertTrue(ok)
-            self.assertIn("Committed locally (remote origin push skipped", msg)
+            self.assertFalse(ok)
+            self.assertIn("git push failed", msg)
+            self.assertNotIn("skipped", msg)
 
     @patch('core.util.git_ops.run_cmd_async')
     async def test_resolve_base_ref_master(self, mock_run):
@@ -166,7 +170,10 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
 
     @patch.dict(os.environ, {"ALLOW_SIMULATED_GIT": "1"})
     @patch('core.util.git_ops.run_cmd_async')
-    async def test_create_pull_request_fabricated_url_is_opt_in(self, mock_run):
+    async def test_create_pull_request_never_fabricates_a_url_from_an_env_var(self, mock_run):
+        """A fabricated PR URL is the worst of the old simulated results: every
+        downstream node treats it as a real pull request. No environment variable
+        may bring it back."""
         mock_run.return_value = (1, "", "fatal: not logged in to gh")
         ok, pr_url, pr_num = await create_pull_request(
             workspace_path="/tmp/ws",
@@ -175,8 +182,9 @@ class TestGitOps(unittest.IsolatedAsyncioTestCase):
             body="Automated PR",
             target_repo="cheungyang/aoc"
         )
-        self.assertTrue(ok)
-        self.assertEqual(pr_url, "https://github.com/cheungyang/aoc/pull/feat/auth_1")
+        self.assertFalse(ok)
+        self.assertIn("gh pr create failed", pr_url)
+        self.assertNotIn("github.com", pr_url)
         self.assertIsNone(pr_num)
 
     @patch('core.util.git_ops.run_cmd_async')

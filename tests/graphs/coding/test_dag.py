@@ -6,7 +6,6 @@ from graphs.coding.schemas import TaskEnvelope
 from graphs.coding.utils.dag import (
     get_completed_task_ids,
     get_runnable_tasks,
-    update_task_in_queue,
     load_manifest,
     save_manifest
 )
@@ -55,51 +54,21 @@ class TestDAGHelpers(unittest.TestCase):
         self.assertEqual(runnable[0]["task_id"], "TASK-A")
 
         # Complete TASK-A
-        queue = update_task_in_queue(queue, "TASK-A", status="completed")
+        task_a["status"] = "completed"
         runnable = get_runnable_tasks(queue)
         self.assertEqual(len(runnable), 1)
         self.assertEqual(runnable[0]["task_id"], "TASK-B")
 
         # Complete TASK-B
-        queue = update_task_in_queue(queue, "TASK-B", status="completed")
+        task_b["status"] = "completed"
         runnable = get_runnable_tasks(queue)
         self.assertEqual(len(runnable), 1)
         self.assertEqual(runnable[0]["task_id"], "TASK-C")
 
         # Complete TASK-C
-        queue = update_task_in_queue(queue, "TASK-C", status="completed")
+        task_c["status"] = "completed"
         runnable = get_runnable_tasks(queue)
         self.assertEqual(len(runnable), 0)
-
-    def test_update_task_in_queue_v2_fields(self):
-        task: TaskEnvelope = {
-            "task_id": "TASK-01",
-            "status": "pending",
-            "dependencies": []
-        }
-        queue = [task]
-        
-        # 1. Update to in_review
-        queue = update_task_in_queue(
-            queue,
-            "TASK-01",
-            status="in_review",
-            run_id="run_123",
-            branch_name="feat/test/auth",
-            pr_url="https://github.com/org/repo/pull/1"
-        )
-        self.assertEqual(queue[0]["status"], "in_review")
-        self.assertEqual(queue[0]["pr_url"], "https://github.com/org/repo/pull/1")
-
-        # 2. Update to completed with commit_url
-        queue = update_task_in_queue(
-            queue,
-            "TASK-01",
-            status="completed",
-            commit_url="https://github.com/org/repo/commit/sha123"
-        )
-        self.assertEqual(queue[0]["status"], "completed")
-        self.assertEqual(queue[0]["commit_url"], "https://github.com/org/repo/commit/sha123")
 
     def test_manifest_load_and_save(self):
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:

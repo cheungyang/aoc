@@ -66,25 +66,59 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_on_tool_start_cross_loop(self, mock_agents_loader_class):
+        """
+        The callback can be fired from a worker thread running its own event loop
+        (LangChain executor) while the discord.Message belongs to the bot's loop.
+        Awaiting the reaction directly would run it on the wrong loop, so
+        _add_reaction_safe must marshal it with asyncio.run_coroutine_threadsafe
+        (reaction_handler.py:40-43). This drives that exact path for real.
+        """
         import asyncio
+        import threading
+
         mock_agents_loader = MagicMock()
         mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
         mock_agents_loader_class.return_value = mock_agents_loader
 
-        # Create a mock message with a separate dummy running event loop
-        other_loop = MagicMock(spec=asyncio.AbstractEventLoop)
-        other_loop.is_running.return_value = True
+        # The message belongs to *this* loop (stand-in for the discord bot loop).
+        message_loop = asyncio.get_running_loop()
+        reacted = asyncio.Event()
+        reaction_loops = []
+
+        async def fake_add_reaction(emoji):
+            reaction_loops.append(asyncio.get_running_loop())
+            reacted.set()
 
         mock_message = MagicMock()
         mock_state = MagicMock()
-        mock_state.loop = other_loop
+        mock_state.loop = message_loop
         mock_message._state = mock_state
-        mock_message.add_reaction = MagicMock()
+        mock_message.add_reaction = AsyncMock(side_effect=fake_add_reaction)
 
-        with patch('asyncio.run_coroutine_threadsafe') as mock_threadsafe:
-            handler = ReactionCallbackHandler(mock_message)
-            serialized = {"name": "agent_call"}
-            input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
+        handler = ReactionCallbackHandler(mock_message)
+        serialized = {"name": "agent_call"}
+        input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
+
+        # Fire the callback from a different thread, on a different event loop.
+        worker_errors = []
+
+        def worker():
+            try:
+                asyncio.run(handler.on_tool_start(serialized, input_str))
+            except BaseException as e:  # noqa: BLE001 - surfaced as a test failure below
+                worker_errors.append(e)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        # The reaction must actually be executed, and on the message's loop.
+        await asyncio.wait_for(reacted.wait(), timeout=5)
+        thread.join(timeout=5)
+
+        self.assertEqual(worker_errors, [])
+        self.assertFalse(thread.is_alive())
+        mock_message.add_reaction.assert_awaited_once_with("🤖")
+        self.assertEqual(reaction_loops, [message_loop])
 
     @patch('core.loaders.graphs_loader.GraphsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')

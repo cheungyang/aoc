@@ -3,70 +3,64 @@ import os
 import shutil
 import tempfile
 import sys
-import json
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.flat_file_session_store import FlatFileSessionStore
+from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 
 class TestFlatFileSessionStore(unittest.TestCase):
+    """
+    FlatFileSessionStore is a backwards-compatibility shim (core/knowledge/memory/flat_file_session_store.py):
+    a constructor-only subclass of SqliteSessionStore whose *only* own behaviour is mapping the legacy
+    `sessions_dir=` argument onto <sessions_dir>/memory.db.
+
+    Message/token/archive behaviour is inherited verbatim and is already covered by TestSqliteSessionStore
+    in test_sqlite_session_store.py, so this file tests only the shim's own contract.
+    """
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.store = FlatFileSessionStore(sessions_dir=self.test_dir)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    def test_append_and_load_history(self):
-        session_id = "session1"
-        self.store.append_message(session_id, "user", "hello")
-        self.store.append_message(session_id, "bot", "hi")
+    def test_sessions_dir_argument_maps_to_memory_db_inside_directory(self):
+        store = FlatFileSessionStore(sessions_dir=self.test_dir)
+        expected_db = os.path.join(self.test_dir, "memory.db")
+        self.assertEqual(store.db_path, expected_db)
 
-        history = self.store.load_history(session_id)
-        self.assertEqual(len(history), 2)
+        # SqliteSessionStore only creates the file lazily on first write; writing must hit the mapped path.
+        store.append_message("session1", "user", "hello")
+        self.assertTrue(
+            os.path.exists(expected_db),
+            f"expected the shim to write {expected_db}, dir contains {os.listdir(self.test_dir)}"
+        )
+
+    def test_db_path_argument_takes_precedence_over_sessions_dir(self):
+        explicit_db = os.path.join(self.test_dir, "explicit.db")
+        store = FlatFileSessionStore(sessions_dir=self.test_dir, db_path=explicit_db)
+        self.assertEqual(store.db_path, explicit_db)
+
+        store.append_message("session1", "user", "hello")
+        self.assertTrue(os.path.exists(explicit_db))
+        # The sessions_dir mapping must not also fire when an explicit db_path was given.
+        self.assertFalse(os.path.exists(os.path.join(self.test_dir, "memory.db")))
+
+    def test_is_a_working_sqlite_session_store_subclass(self):
+        # Inherited behaviour is tested next door; here we only prove the subclass wiring is real
+        # and that inherited I/O actually lands in the directory-mapped file.
+        store = FlatFileSessionStore(sessions_dir=self.test_dir)
+        self.assertIsInstance(store, SqliteSessionStore)
+
+        store.append_message("session1", "user", "hello")
+
+        plain = SqliteSessionStore(db_path=os.path.join(self.test_dir, "memory.db"))
+        history = plain.load_history("session1")
+        self.assertEqual(len(history), 1, "message written via the shim was not found in <sessions_dir>/memory.db")
         self.assertEqual(history[0]["from"], "user")
         self.assertEqual(history[0]["message"], "hello")
-        self.assertEqual(history[1]["from"], "bot")
-        self.assertEqual(history[1]["message"], "hi")
-
-    def test_archive_session(self):
-        session_id = "session1"
-        self.store.append_message(session_id, "user", "hello")
-        
-        # Archive
-        result = self.store.archive_session(session_id)
-        self.assertIn("archived to table ctx_session1_archived_", result)
-
-        # Active history should now be empty
-        history = self.store.load_history(session_id)
-        self.assertEqual(len(history), 0)
-
-    def test_append_token_usage(self):
-        session_id = "session1"
-        self.store.append_token_usage(session_id, "gemini-pro", 100, 50, 20.0)
-        
-        tokens = self.store.load_token_history(session_id)
-        self.assertEqual(len(tokens), 1)
-        self.assertEqual(tokens[0]["model"], "gemini-pro")
-        self.assertEqual(tokens[0]["input_token"], 100)
-        self.assertEqual(tokens[0]["output_token"], 50)
-        self.assertEqual(tokens[0]["cached_token"], 20.0)
-
-    def test_archive_session_with_token_data(self):
-        session_id = "session1"
-        self.store.append_message(session_id, "user", "hello")
-        self.store.append_token_usage(session_id, "gemini-pro", 100, 50, 20.0)
-        
-        # Archive
-        result = self.store.archive_session(session_id)
-        self.assertIn("archived to table ctx_session1_archived_", result)
-        
-        # Active history should be empty
-        history = self.store.load_history(session_id)
-        self.assertEqual(len(history), 0)
-        tokens = self.store.load_token_history(session_id)
-        self.assertEqual(len(tokens), 0)
 
 if __name__ == "__main__":
     unittest.main()

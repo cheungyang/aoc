@@ -290,6 +290,12 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("rapid zoom and pan", f.read())
 
     async def test_reuses_existing_plot_when_image_specific_feedback_provided(self):
+        """Image feedback must not buy a new plot.
+
+        Both branches return the same canonical path under archive-on-reject,
+        so reuse is only observable as: `agent_call.ainvoke` never awaited, the
+        plot bytes untouched, and no `_v1` archive on disk.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "cat")
             os.makedirs(output_path, exist_ok=True)
@@ -307,8 +313,16 @@ class TestDraftVideoPlotNode(unittest.IsolatedAsyncioTestCase):
                 "creator_instructions_path": os.path.join(temp_dir, "02_Creator_Instructions.md")
             }
 
-            result = await draft_plot_task(state)
-            self.assertEqual(result["video_plot_path"], existing_plot_path)
+            with patch("tools.agent_call.agent_call") as mock_agent_call:
+                mock_agent_call.ainvoke = AsyncMock()
+
+                result = await draft_plot_task(state)
+
+                mock_agent_call.ainvoke.assert_not_called()
+                self.assertEqual(result["video_plot_path"], existing_plot_path)
+                with open(existing_plot_path, "r") as f:
+                    self.assertEqual(f.read(), "Initial plot")
+                self.assertFalse(os.path.exists(os.path.join(output_path, "cat_video_plot_v1.md")))
 
 
 if __name__ == "__main__":

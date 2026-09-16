@@ -22,7 +22,6 @@ from graphs.coding.utils.manifest import (
     load_manifest,
     locked_manifest,
     migrate_manifest,
-    next_stage,
     persist_task,
     reclaim_expired_leases,
     release_lease,
@@ -256,11 +255,6 @@ class TestStageHelpers(unittest.TestCase):
         self.assertFalse(stage_at_or_past({"stage": "implemented"}, "verified"))
         self.assertFalse(stage_at_or_past({}, "implemented"))
         self.assertFalse(stage_at_or_past({"stage": "nonsense"}, "implemented"))
-
-    def test_next_stage(self):
-        self.assertEqual(next_stage("queued"), "provisioned")
-        self.assertIsNone(next_stage("done"))
-        self.assertIsNone(next_stage("nonsense"))
 
 
 if __name__ == "__main__":

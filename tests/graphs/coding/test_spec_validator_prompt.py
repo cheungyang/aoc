@@ -16,6 +16,21 @@ from graphs.coding.prompts.spec_validator_prompt import build_spec_validator_pro
 from graphs.coding.utils.xml_parsers import parse_spec_validation_xml
 
 
+def fill_tag(test, template, tag, value):
+    """Puts `value` inside `<tag>` in a copy of the prompt's own example block.
+
+    The placeholder text is read out of the template rather than written down
+    here. Hardcoding it is how this file rotted once already: the fills said
+    `.replace("PASS | FAIL", "FAIL")` long after the prompt had moved to
+    `PASS_OR_FAIL`, so every fill was a no-op and the "round trip" tests were
+    only ever parsing the untouched placeholder — i.e. the parser's defaults.
+    A no-op is impossible now: a missing tag fails the assertion below.
+    """
+    match = re.search(rf"<{tag}>(.*?)</{tag}>", template, re.DOTALL)
+    test.assertIsNotNone(match, f"prompt template no longer offers a <{tag}> field")
+    return template[: match.start(1)] + value + template[match.end(1) :]
+
+
 class SpecValidatorPromptInputTestCase(unittest.TestCase):
     def test_spec_text_reaches_the_prompt(self):
         """tools.spec_validator reads the file and passes its whole contents as
@@ -90,16 +105,13 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         )
         self.assertIsNotNone(template, "prompt no longer contains a result example")
 
-        filled = (
-            template.group(0)
-            .replace("PASS | FAIL", "FAIL")
-            .replace("true | false", "false")
-            .replace(
-                "Description of missing interface, missing schema, or unstated constraint (if any)",
-                "No verification command given",
-            )
-            .replace("Zero-context evaluation rationale", "Spec relies on unstated context")
-        )
+        filled = template.group(0)
+        filled = fill_tag(self, filled, "verdict", "FAIL")
+        filled = fill_tag(self, filled, "unambiguous", "false")
+        filled = fill_tag(self, filled, "item", "No verification command given")
+        filled = fill_tag(self, filled, "summary", "Spec relies on unstated context")
+        self.assertNotEqual(filled, template.group(0), "the template was never filled in")
+
         parsed = parse_spec_validation_xml(filled)
         self.assertEqual(parsed["verdict"], "FAIL")
         self.assertFalse(parsed["passed"])
@@ -108,15 +120,26 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         self.assertEqual(parsed["summary"], "Spec relies on unstated context")
 
     def test_a_passing_result_round_trips_with_unambiguous_true(self):
+        """The PASS half of the contract, driven through the shipped template.
+
+        A spec that clears the gate has to be expressible in the shape the model
+        is actually shown; if only the FAIL path round-tripped, a template that
+        could never yield a PASS would look healthy.
+        """
         prompt = build_spec_validator_prompt("spec")
         template = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         ).group(0)
-        filled = template.replace("PASS_OR_FAIL", "PASS").replace("TRUE_OR_FALSE", "true")
+        filled = fill_tag(self, template, "verdict", "PASS")
+        filled = fill_tag(self, filled, "unambiguous", "true")
+        filled = fill_tag(self, filled, "summary", "Spec is self-contained")
+        self.assertNotEqual(filled, template, "the template was never filled in")
+
         parsed = parse_spec_validation_xml(filled)
         self.assertEqual(parsed["verdict"], "PASS")
         self.assertTrue(parsed["passed"])
         self.assertTrue(parsed["unambiguous"])
+        self.assertEqual(parsed["summary"], "Spec is self-contained")
 
     def test_an_unfilled_template_verdict_does_not_pass(self):
         """The laziest possible output must not be the most permissive one.

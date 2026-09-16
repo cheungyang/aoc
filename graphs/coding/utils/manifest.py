@@ -311,14 +311,3 @@ def stage_at_or_past(task: Dict[str, Any], stage: str) -> bool:
         return STAGE_ORDER.index(current) >= STAGE_ORDER.index(stage)
     except ValueError:
         return False
-
-
-def next_stage(stage: str) -> Optional[str]:
-    """The stage that follows `stage`, or None at the end of the machine."""
-    try:
-        index = STAGE_ORDER.index(stage)
-    except ValueError:
-        return None
-    if index + 1 >= len(STAGE_ORDER):
-        return None
-    return STAGE_ORDER[index + 1]

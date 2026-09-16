@@ -4,11 +4,39 @@ import shutil
 import tempfile
 import sys
 import json
+import sqlite3
+from unittest.mock import patch
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
+
+
+def _open_fd_count():
+    """Number of file descriptors open in this process, or None if the OS doesn't expose them.
+
+    macOS exposes them at /dev/fd, Linux at /proc/self/fd. Stdlib only - psutil is not a
+    declared dependency of this project.
+    """
+    for fd_dir in ("/dev/fd", "/proc/self/fd"):
+        if os.path.isdir(fd_dir):
+            try:
+                return len(os.listdir(fd_dir))
+            except OSError:
+                return None
+    return None
+
+
+def _is_connection_open(conn):
+    """True if the sqlite connection is still usable (i.e. was never closed)."""
+    try:
+        conn.execute("SELECT 1")
+        return True
+    except sqlite3.ProgrammingError:
+        return False
+
+
 
 class TestSqliteSessionStore(unittest.TestCase):
     def setUp(self):
@@ -155,8 +183,44 @@ class TestSqliteSessionStore(unittest.TestCase):
         self.assertEqual(history[1]["message"], json.dumps(dict_msg))
 
     def test_no_file_descriptor_leak(self):
-        # Repeated store operations should close connections and not accumulate open FDs
+        # Repeated store operations should close connections and not accumulate open FDs.
+        # SqliteSessionStore._get_connection is a contextmanager whose `finally` closes the
+        # connection; if that regresses, every append/load burns db + -wal + -shm handles.
         session_id = "fd_leak_session"
+
+        opened = []
+        real_connect = sqlite3.connect
+
+        def tracking_connect(*args, **kwargs):
+            conn = real_connect(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        fds_before = _open_fd_count()
+        with patch("sqlite3.connect", tracking_connect):
+            for i in range(20):
+                self.store.append_message(session_id, "user", f"msg {i}")
+                self.store.load_history(session_id)
+                self.store.append_token_usage(session_id, "gemini-pro", 10, 5, 0.0)
+                self.store.load_token_history(session_id)
+        fds_after = _open_fd_count()
+
+        # Sanity: the loop really did open connections (4 per iteration)
+        self.assertGreaterEqual(len(opened), 80)
+
+        # Every connection handed out by _get_connection must be closed once its block exits
+        still_open = [c for c in opened if _is_connection_open(c)]
+        self.assertEqual(
+            len(still_open), 0,
+            f"{len(still_open)} of {len(opened)} sqlite connections were left open by the session store"
+        )
+
+        if fds_before is not None and fds_after is not None:
+            self.assertLessEqual(
+                fds_after - fds_before, 5,
+                f"open file descriptors grew from {fds_before} to {fds_after} across {len(opened)} connections"
+            )
+
     def test_archive_thread_session_does_not_archive_parent_channel(self):
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
         cp = SqliteCheckpointer(db_path=self.db_path)

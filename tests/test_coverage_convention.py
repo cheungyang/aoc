@@ -16,6 +16,7 @@ tested in isolation, add it to EXEMPT with a reason -- an explicit, reviewed
 exemption is fine; an invisible gap is not.
 """
 import os
+import re
 import unittest
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -63,6 +64,15 @@ def _iter_modules():
             yield module
 
 
+def _has_a_test(path):
+    """A file can satisfy the rule by name alone, which is how a module ends up
+    'covered' by a tombstone. `tests/scripts/test_query_vault.py` was exactly that:
+    a single comment, left behind when the tool was removed, still counting as the
+    test file for a module."""
+    with open(path, encoding="utf-8") as handle:
+        return re.search(r"^\s*(async\s+)?def test_", handle.read(), re.MULTILINE)
+
+
 def _existing_test_files():
     found = set()
     for test_dir in TEST_DIRS:
@@ -72,6 +82,7 @@ def _existing_test_files():
         found.update(
             name for name in os.listdir(abs_dir)
             if name.startswith("test_") and name.endswith(".py")
+            and _has_a_test(os.path.join(abs_dir, name))
         )
     return found
 
