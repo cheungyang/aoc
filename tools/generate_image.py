@@ -2,7 +2,7 @@ import os
 import asyncio
 from typing import Optional
 from langchain_core.tools import tool
-from core.util import format_tool_response
+from core.util import format_tool_response, IMAGE
 from core.util.config import Config
 from PIL import Image
 import base64
@@ -63,7 +63,7 @@ async def generate_image(
         # Generate image with Gemini (run in thread to avoid blocking event loop)
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-3.1-flash-image-preview",
+            model=IMAGE,
             contents=contents,
         )
         

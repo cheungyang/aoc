@@ -7,7 +7,6 @@
     "content-creation",
     "day-planning",
     "general",
-    "goal-planning",
     "lifestyle-perk",
     "meal-planning",
     "pkm-wiki",
@@ -20,36 +19,19 @@
     "real-estate",
     "aoc-debug"
   ],
+  "concierge_prefixes": [
+    "[main]",
+    "[concierge]",
+    "list all jobs",
+    "jobs",
+    "kill"
+  ],
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
   "emoji": "🛎️",
-  "model": "gemini-3.1-pro-preview",
+  "model": "PRO",
   "name": "Concierge",
-  "schedules": [
-    {
-      "channel": "general",
-      "thread": "dreams",
-      "cron": "0 23 * * *",
-      "prompt": [
-        "CRITICAL MULTI-STEP STANDUP:",
-        "Step 1: Execute your OWN 'dream' skill natively to process your own memory logs.",
-        "Generate your own `<dream_response>` internally (do not output it to the user yet).",
-        "Step 2: Execute the 'agent_list' tool to retrieve the active agents.",
-        "Step 3: Issue an 'agent_call' tool execution (trigger: 'Run your dream skill') for",
-        "EVERY agent (excluding yourself and non-LLM scripts). You MUST pause and WAIT",
-        "for these tool calls to return. DO NOT hallucinate their responses.",
-        "Step 4: ONLY AFTER receiving the real `<dream_response>` XML payloads from the",
-        "tools, combine them with your own internal dream response from Step 1.",
-        "Step 5: Output EXACTLY ONE final markdown summary (NO XML). Format:",
-        "",
-        "**Nightly Dream Standup - [YYYY-MM-DD]**",
-        "",
-        "🛎️ Concierge | [Status based on Step 1]",
-        "[EMOJI] [Agent Name] | 🌙 Dreamed -> Key Update: [Extraction from <learnings>]",
-        "[EMOJI] [Agent Name] | 💤 No new memories to process today."
-      ]
-    }
-  ],
+  "schedules": [],
   "skills": [],
   "tools": {
     "agent_call": {},

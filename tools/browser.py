@@ -3,7 +3,7 @@ import sys
 import asyncio
 from langchain_core.tools import tool
 from browser_use import Agent, ChatGoogle
-from core.util import format_tool_response
+from core.util import format_tool_response, DEFAULT_BROWSER_MODEL
 from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 
@@ -40,7 +40,7 @@ async def _run_browser(goal: str, port: int) -> str:
     browser_inst = BrowserSession(browser_profile=config)
     
     # browser-use requires a multimodal visual LLM - using Gemini as native fallback
-    llm = ChatGoogle(model="gemini-3.1-pro-preview") 
+    llm = ChatGoogle(model=DEFAULT_BROWSER_MODEL)
     
     agent = Agent(
         task=goal,

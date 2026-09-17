@@ -1,25 +1,8 @@
-import asyncio
 from typing import Optional
 from langchain_core.tools import tool
-from langchain_core.callbacks import adispatch_custom_event
-from core.loaders.agents_loader import AgentsLoader
-from core.agent.execution_context import ExecutionContext
-from core.agent.session_manager import SessionManager
+from core.agent.delegation import stream_delegate
 from core.util import format_tool_response
-from core.agent.stream_handler import (
-    SUBAGENT_STREAM_TOKEN,
-    SUBAGENT_STREAM_FINAL,
-    EVENT_TOKEN,
-    EVENT_FINAL_RESPONSE,
-    EVENT_ERROR,
-)
 
-async def _safe_dispatch_custom_event(name: str, data: dict):
-    """Safely dispatches a custom event to the active stream if running within LangGraph astream_events."""
-    try:
-        await adispatch_custom_event(name, data)
-    except Exception:
-        pass
 
 @tool
 async def agent_call(
@@ -44,110 +27,27 @@ async def agent_call(
         caller: The ID of the triggering agent (optional, automatically inferred from context if omitted).
     """
     if not agent_id or not prompt or not channel:
-        return format_tool_response("agent_call", payload="", errors="Error: agent_call requires 'agent_id', 'prompt', and 'channel'.")
-    try:
-        loader = AgentsLoader()
-        agent = loader.get_agent(agent_id)
-        
-        # Check channel permissions
-        allowed_channels = agent.config.get("channels", [])
-        allowed_channels_lower = [c.lower() for c in allowed_channels]
-        if "*" not in allowed_channels_lower and channel.lower() not in allowed_channels_lower:
-            return format_tool_response(
-                "agent_call",
-                payload="",
-                errors=f"Error: Agent '{agent_id}' cannot be called in channel '{channel}'. Allowed channels: {allowed_channels}"
-            )
-            
-        from core.agent.execution_context import try_context
-        from core.agent.session_manager import SessionManager
-        from core.loaders.bots_loader import BotsLoader
-
-        active_sess = try_context()
-        if active_sess and active_sess.matches_channel(channel):
-            discord_channel = active_sess.channel_obj
-        else:
-            discord_channel = BotsLoader().find_channel(channel)
-        
-        triggering_agent = caller or (active_sess.agent_id if active_sess else None)
-        if triggering_agent and "<caller>" not in prompt:
-            formatted_prompt = f"<caller>{triggering_agent}</caller>\n{prompt}"
-        else:
-            formatted_prompt = prompt
-
-        is_stateless = agent.config.get("stateless", False)
-        # Inherit the caller's graph binding: an agent invoked from inside a graph must be
-        # evaluated against that graph's grants, and that must travel explicitly.
-        target_session = SessionManager().get_session(
-            agent_id=agent_id,
-            source="tool",
-            channel=discord_channel or channel,
-            stateless=is_stateless,
-            graph_id=active_sess.graph_id if active_sess else None
+        return format_tool_response(
+            "agent_call",
+            payload="",
+            errors="Error: agent_call requires 'agent_id', 'prompt', and 'channel'.",
         )
 
-        if run_async:
-            asyncio.create_task(agent.execute(formatted_prompt, session=target_session))
-            return format_tool_response("agent_call", payload=f"Successfully triggered agent '{agent_id}'. Background task started with job_id: {target_session.job_id}.", errors="None")
-        elif is_stateless:
-            res = await agent.execute(formatted_prompt, session=target_session)
-            payload_text = res if isinstance(res, str) else (res.text if hasattr(res, "text") else str(res or ""))
-            return format_tool_response("agent_call", payload=payload_text, errors="None")
-        else:
-            emoji = agent.config.get("emoji", "🤖")
-            agent_name = agent.config.get("name", agent_id)
-            header = f"{emoji} {agent_name}: "
-
-            header_emitted = False
-            accumulated_tokens = []
-            subagent_response = None
-
-            async for event in agent.execute_stream(formatted_prompt, session=target_session):
-                etype = event.get("type")
-                if etype == EVENT_TOKEN:
-                    content_delta = event.get("content", "")
-                    if content_delta:
-                        if not header_emitted:
-                            await _safe_dispatch_custom_event(
-                                SUBAGENT_STREAM_TOKEN,
-                                {"content": header, "agent_id": agent_id, "is_header": True}
-                            )
-                            header_emitted = True
-                        accumulated_tokens.append(content_delta)
-                        await _safe_dispatch_custom_event(
-                            SUBAGENT_STREAM_TOKEN,
-                            {"content": content_delta, "agent_id": agent_id}
-                        )
-                elif etype == EVENT_FINAL_RESPONSE:
-                    subagent_response = event.get("response")
-                    await _safe_dispatch_custom_event(
-                        SUBAGENT_STREAM_FINAL,
-                        {
-                            "agent_id": agent_id,
-                            "response": subagent_response,
-                            "text": event.get("text", "")
-                        }
-                    )
-                elif etype == EVENT_ERROR:
-                    err_msg = event.get("content", "Error in subagent execution")
-                    if not header_emitted:
-                        await _safe_dispatch_custom_event(
-                            SUBAGENT_STREAM_TOKEN,
-                            {"content": header, "agent_id": agent_id, "is_header": True}
-                        )
-                        header_emitted = True
-                    await _safe_dispatch_custom_event(
-                        SUBAGENT_STREAM_TOKEN,
-                        {"content": f"\n[Error: {err_msg}]", "agent_id": agent_id}
-                    )
-
-            if subagent_response and subagent_response.text:
-                full_text = subagent_response.text
-            elif accumulated_tokens:
-                full_text = "".join(accumulated_tokens)
-            else:
-                full_text = ""
-
-            return format_tool_response("agent_call", payload=full_text, errors="None")
+    # Everything below the argument check is shared with the router's `direct_call`
+    # node. This tool's only remaining job is to be the LLM-facing surface: the
+    # schema above, and the tool-response envelope below.
+    try:
+        result = await stream_delegate(
+            agent_id=agent_id,
+            prompt=prompt,
+            channel=channel,
+            caller=caller,
+            run_async=run_async,
+        )
     except Exception as e:
         return format_tool_response("agent_call", payload="", errors=f"Error calling agent: {e}")
+
+    if not result.ok:
+        return format_tool_response("agent_call", payload="", errors=f"Error: {result.error}")
+
+    return format_tool_response("agent_call", payload=result.text, errors="None")

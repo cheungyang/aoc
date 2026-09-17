@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.generate_image import generate_image
-from core.util import format_tool_response
+from core.util import format_tool_response, IMAGE
 
 class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
 
@@ -41,7 +41,7 @@ class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
                 result = await generate_image.ainvoke({"prompt": "test", "output_path": "test.png"})
                 
         mock_client.models.generate_content.assert_called_once_with(
-            model="gemini-3.1-flash-image-preview",
+            model=IMAGE,
             contents=["test"],
         )
         mock_image.save.assert_called_once_with("/fake/path/test.png")
@@ -74,7 +74,7 @@ class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
                 })
                 
         mock_client.models.generate_content.assert_called_once_with(
-            model="gemini-3.1-flash-image-preview",
+            model=IMAGE,
             contents=["test", ANY],
         )
         mock_image.save.assert_called_once_with("/fake/path/test.png")
@@ -110,7 +110,7 @@ class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
                 })
                 
         mock_client.models.generate_content.assert_called_once_with(
-            model="gemini-3.1-flash-image-preview",
+            model=IMAGE,
             contents=["test", mock_input_image],
         )
         mock_image.save.assert_called_once_with("/fake/path/test.png")

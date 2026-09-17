@@ -39,6 +39,14 @@
       "prompt": [
         "script coding_tick.py"
       ]
+    },
+    {
+      "channel": "general",
+      "thread": "dreams",
+      "cron": "0 23 * * *",
+      "prompt": [
+        "script dream_standup.py"
+      ]
     }
   ]
 }

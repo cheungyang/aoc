@@ -48,27 +48,12 @@ class ReactionCallbackHandler(AsyncCallbackHandler):
 
     async def on_tool_start(self, serialized: Dict[str, Any], input_str: Any, **kwargs: Any) -> Any:
         tool_name = serialized.get("name")
-        if tool_name == "agent_call":
-            try:
-                args = self._parse_input(input_str)
-                if not isinstance(args, dict):
-                    return
-                
-                agent_id = args.get("agent_id")
-                if agent_id:
-                    try:
-                        config = self.loader.get_agent(agent_id).config
-                        emoji = config.get("emoji", "🤖")
-                        await self._add_reaction_safe(emoji)
-                    except Exception as e:
-                        print(f"Error adding reaction in callback: {e}")
-                        try:
-                            await self._add_reaction_safe("🤖")
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"Error in on_tool_start callback: {e}")
-        elif tool_name == "graph_call":
+        # `agent_call` is deliberately absent. Delegation now announces itself
+        # from `core.agent.delegation` via a ROUTE_REACTION stream event, because
+        # the deterministic router delegates without invoking a tool and this
+        # callback would never fire for it. Reacting here as well would
+        # double-react on the LLM's path.
+        if tool_name == "graph_call":
             try:
                 args = self._parse_input(input_str)
                 if not isinstance(args, dict):

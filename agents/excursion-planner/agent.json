@@ -6,7 +6,7 @@
     ],
     "name": "Eric",
     "emoji": "🏕️",
-    "model": "gemini-3.6-flash",
+    "model": "FLASH",
     "description": "An enthusiastic, adventurous weekend excursion planner.",
     "schedules": [
         {

@@ -14,10 +14,20 @@ EVENT_TOOL_END = "tool_end"
 EVENT_FINAL_RESPONSE = "final_response"
 EVENT_ERROR = "error"
 EVENT_SUBAGENT_FINAL = "subagent_final"
+EVENT_REACTION = "reaction"
 
 # Subagent Custom Stream Events (dispatched via adispatch_custom_event)
 SUBAGENT_STREAM_TOKEN = "subagent_stream_token"
 SUBAGENT_STREAM_FINAL = "subagent_stream_final"
+
+# Emitted by `core.agent.delegation` when a turn is handed to another agent.
+#
+# The acknowledgement emoji used to be driven by `ReactionCallbackHandler`
+# watching `on_tool_start` for the name `agent_call`. That only works when a tool
+# is what performed the delegation; the deterministic router delegates without
+# calling a tool, and the emoji silently disappeared. Announcing it from the
+# delegation path itself makes the signal independent of who decided to delegate.
+ROUTE_REACTION = "route_reaction"
 
 
 class StreamHandler:
@@ -107,6 +117,17 @@ class StreamHandler:
                             "agent_id": data.get("agent_id"),
                             "response": data.get("response"),
                             "text": data.get("text", "")
+                        }
+                    elif event_name == ROUTE_REACTION:
+                        # Deliberately does not set `has_subagent_streamed`: this
+                        # announces *that* a delegation happened, before any of the
+                        # callee's text exists, and must not suppress the owner's
+                        # own tokens on its own.
+                        data = event.get("data", {})
+                        yield {
+                            "type": EVENT_REACTION,
+                            "agent_id": data.get("agent_id"),
+                            "emoji": data.get("emoji")
                         }
         else:
             result = await graph.ainvoke(inputs, config=config)

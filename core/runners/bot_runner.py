@@ -263,6 +263,17 @@ class BotRunner:
                     event_type = event.get("type")
                     if event_type == "token":
                         await stream_buffer.append_token(event.get("content", ""))
+                    elif event_type == "reaction":
+                        # Delegation acknowledgement. This arrives from the
+                        # delegation path itself rather than from a tool
+                        # callback, so it fires for both the LLM's choice and
+                        # the router's -- and lands before any text exists.
+                        emoji = event.get("emoji")
+                        if emoji:
+                            try:
+                                await message.add_reaction(emoji)
+                            except Exception as re:
+                                print(f"[BotRunner:{self.agent_id}] Could not add routing reaction: {re}")
                     elif event_type == "final_response":
                         await stream_buffer.finalize(
                             final_text=event.get("text", ""),

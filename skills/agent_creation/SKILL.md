@@ -28,7 +28,7 @@ Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure tem
   "name": "<Agent Name>",
   "emoji": "<Emoji>",
   "description": "<Short Description>",
-  "model": "<Optional Model Name>",
+  "model": "<Optional Tier: FLASH_LITE | FLASH | PRO>",
   "discord_token_key": "<Optional Discord Token Key>",
   "channel_hosts": ["<Optional Channel>"],
   "tools": {
@@ -40,6 +40,10 @@ Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure tem
 *Critical Constraints for agent.json:*
 - The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
 - Do not explicitly add tools to the `tools` object if they are already inherited via the skills listed in the `skills` array (e.g., `filesystem` permissions are inherited via the `dream` skill).
+- The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite`. Valid
+  tiers are defined in `core/util/models.py`; omit the field to accept the default. Choose
+  `FLASH_LITE` for narrow, high-volume work, `FLASH` for everyday reasoning, and `PRO` only when
+  the agent genuinely needs the strongest model.
 
 ### 3. Create Core Markdown Files
 Create the following files under `agents/<agent_id>/`:

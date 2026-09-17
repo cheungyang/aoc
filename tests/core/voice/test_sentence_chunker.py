@@ -42,5 +42,37 @@ class TestSentenceChunker(unittest.TestCase):
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0], "Here is the plan for today.")
 
+    def test_split_into_sentences_returns_all_sentences(self):
+        sentences = self.chunker.split_into_sentences(
+            "This is the first sentence. And this is the second one!"
+        )
+        self.assertEqual(
+            sentences,
+            ["This is the first sentence.", "And this is the second one!"],
+        )
+
+    def test_split_into_sentences_keeps_a_trailing_fragment(self):
+        # The streaming path withholds an incomplete tail waiting for more
+        # tokens; this one must not, because the text has finished arriving.
+        sentences = self.chunker.split_into_sentences(
+            "A complete sentence here. Then a dangling tail"
+        )
+        self.assertEqual(sentences[-1], "Then a dangling tail")
+
+    def test_split_into_sentences_handles_a_short_answer(self):
+        # "Done." is below min_chars, so no split position is ever found. It
+        # still has to be spoken -- this returned nothing before the method
+        # existed, and the AttributeError was swallowed upstream.
+        self.assertEqual(self.chunker.split_into_sentences("Done."), ["Done."])
+
+    def test_split_into_sentences_is_empty_for_empty_text(self):
+        self.assertEqual(self.chunker.split_into_sentences(""), [])
+        self.assertEqual(self.chunker.split_into_sentences("   "), [])
+
+    def test_split_into_sentences_does_not_disturb_the_stream_buffer(self):
+        self.chunker.add_token("A partial thought still arriving")
+        self.chunker.split_into_sentences("Something else entirely. Twice over.")
+        self.assertEqual(self.chunker.flush(), ["A partial thought still arriving"])
+
 if __name__ == "__main__":
     unittest.main()

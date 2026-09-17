@@ -26,6 +26,17 @@ from core.util.error_util import (
     is_service_error,
 )
 from core.util.config import Config
+from core.util.models import (
+    FLASH_LITE,
+    FLASH,
+    PRO,
+    IMAGE,
+    TIERS,
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_VERBALIZER_MODEL,
+    DEFAULT_BROWSER_MODEL,
+    resolve_model,
+)
 from core.util.git_sync import (
     sync_pkm_vault,
     sync_main_codebase,
@@ -67,6 +78,15 @@ __all__ = [
     "format_error_message",
     "is_service_error",
     "Config",
+    "FLASH_LITE",
+    "FLASH",
+    "PRO",
+    "IMAGE",
+    "TIERS",
+    "DEFAULT_AGENT_MODEL",
+    "DEFAULT_VERBALIZER_MODEL",
+    "DEFAULT_BROWSER_MODEL",
+    "resolve_model",
     "sync_pkm_vault",
     "sync_main_codebase",
     "sync_all",

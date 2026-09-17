@@ -2,13 +2,12 @@
     "agent_id": "day-planner",
     "channels": [
         "day-planning",
-        "weekend-planning",
         "weekly-planning",
         "general"
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
     "emoji": "🌼",
-    "model": "gemini-3.5-flash-lite",
+    "model": "FLASH_LITE",
     "name": "Daisy",
     "schedules": [
         {

@@ -43,6 +43,26 @@ class SentenceChunker:
         cleaned = self._clean_for_speech(remaining)
         return [cleaned] if cleaned else []
 
+    def split_into_sentences(self, text: str) -> List[str]:
+        """Splits a complete piece of text into speech-ready sentences.
+
+        Unlike `add_token`/`flush`, this is for text that has already finished
+        arriving, so it does not buffer and never withholds a trailing fragment.
+
+        `VoiceManager` has called this since the streaming path was written, but
+        it was never implemented -- the resulting AttributeError was swallowed by
+        the pipeline's catch-all handler, so the fallback for short answers
+        ("Done.") produced no audio and only a logged error.
+        """
+        if not text:
+            return []
+
+        working = SentenceChunker(min_chars=self.min_chars, max_chars=self.max_chars)
+        working.buffer = text
+        sentences = working._extract_ready_chunks()
+        sentences.extend(working.flush())
+        return [s for s in sentences if s]
+
     def _extract_ready_chunks(self) -> List[str]:
         chunks = []
         while True:

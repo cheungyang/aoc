@@ -10,8 +10,16 @@ from core.agent.reaction_handler import ReactionCallbackHandler
 
 class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
+    @patch('core.loaders.graphs_loader.GraphsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_delegation(self, mock_agents_loader_class):
+    async def test_agent_call_no_longer_reacts_here(self, mock_agents_loader_class, mock_graphs_loader_class):
+        """Delegation reactions moved to `core.agent.delegation`.
+
+        They had to: this callback only fires when a *tool* runs, and the
+        deterministic router delegates without calling one, so the emoji silently
+        vanished on routed turns. Reacting here as well would double-react on the
+        LLM's path, so the branch is gone -- and stays gone.
+        """
         mock_agents_loader = MagicMock()
         mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
         mock_agents_loader_class.return_value = mock_agents_loader
@@ -21,51 +29,45 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
         handler = ReactionCallbackHandler(mock_message)
 
-        serialized = {"name": "agent_call"}
-        input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
+        await handler.on_tool_start({"name": "agent_call"}, '{"agent_id": "test-agent", "prompt": "hello"}')
 
-        await handler.on_tool_start(serialized, input_str)
+        mock_message.add_reaction.assert_not_called()
 
-        mock_message.add_reaction.assert_called_once_with("🤖")
-
+    @patch('core.loaders.graphs_loader.GraphsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_single_quotes(self, mock_agents_loader_class):
-        mock_agents_loader = MagicMock()
-        mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
-        mock_agents_loader_class.return_value = mock_agents_loader
+    async def test_on_tool_start_graph_call_dict_input(self, mock_agents_loader_class, mock_graphs_loader_class):
+        mock_graphs_loader = MagicMock()
+        mock_graphs_loader.get_graph_config.return_value = {"graph_id": "coding", "emoji": "🚀"}
+        mock_graphs_loader_class.return_value = mock_graphs_loader
 
         mock_message = MagicMock()
         mock_message.add_reaction = AsyncMock()
 
         handler = ReactionCallbackHandler(mock_message)
 
-        serialized = {"name": "agent_call"}
-        input_str = "{'agent_id': 'test-agent', 'prompt': 'hello'}"
-
-        await handler.on_tool_start(serialized, input_str)
-
-        mock_message.add_reaction.assert_called_once_with("🤖")
-
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_dict_input(self, mock_agents_loader_class):
-        mock_agents_loader = MagicMock()
-        mock_agents_loader.get_agent.return_value.config = {"emoji": "🚀"}
-        mock_agents_loader_class.return_value = mock_agents_loader
-
-        mock_message = MagicMock()
-        mock_message.add_reaction = AsyncMock()
-
-        handler = ReactionCallbackHandler(mock_message)
-
-        serialized = {"name": "agent_call"}
-        input_dict = {"agent_id": "test-agent", "prompt": "hello"}
-
-        await handler.on_tool_start(serialized, input_dict)
+        await handler.on_tool_start({"name": "graph_call"}, {"graph_name": "coding", "query": "write tests"})
 
         mock_message.add_reaction.assert_called_once_with("🚀")
 
+    @patch('core.loaders.graphs_loader.GraphsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_on_tool_start_cross_loop(self, mock_agents_loader_class):
+    async def test_on_tool_start_graph_call_single_quotes(self, mock_agents_loader_class, mock_graphs_loader_class):
+        mock_graphs_loader = MagicMock()
+        mock_graphs_loader.get_graph_config.return_value = {"graph_id": "coding", "emoji": "💻"}
+        mock_graphs_loader_class.return_value = mock_graphs_loader
+
+        mock_message = MagicMock()
+        mock_message.add_reaction = AsyncMock()
+
+        handler = ReactionCallbackHandler(mock_message)
+
+        await handler.on_tool_start({"name": "graph_call"}, "{'graph_name': 'coding', 'query': 'write tests'}")
+
+        mock_message.add_reaction.assert_called_once_with("💻")
+
+    @patch('core.loaders.graphs_loader.GraphsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_on_tool_start_cross_loop(self, mock_agents_loader_class, mock_graphs_loader_class):
         """
         The callback can be fired from a worker thread running its own event loop
         (LangChain executor) while the discord.Message belongs to the bot's loop.
@@ -76,9 +78,9 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
         import asyncio
         import threading
 
-        mock_agents_loader = MagicMock()
-        mock_agents_loader.get_agent.return_value.config = {"emoji": "🤖"}
-        mock_agents_loader_class.return_value = mock_agents_loader
+        mock_graphs_loader = MagicMock()
+        mock_graphs_loader.get_graph_config.return_value = {"graph_id": "coding", "emoji": "💻"}
+        mock_graphs_loader_class.return_value = mock_graphs_loader
 
         # The message belongs to *this* loop (stand-in for the discord bot loop).
         message_loop = asyncio.get_running_loop()
@@ -96,8 +98,8 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
         mock_message.add_reaction = AsyncMock(side_effect=fake_add_reaction)
 
         handler = ReactionCallbackHandler(mock_message)
-        serialized = {"name": "agent_call"}
-        input_str = '{"agent_id": "test-agent", "prompt": "hello"}'
+        serialized = {"name": "graph_call"}
+        input_str = '{"graph_name": "coding", "query": "write tests"}'
 
         # Fire the callback from a different thread, on a different event loop.
         worker_errors = []
@@ -117,7 +119,7 @@ class TestReactionCallbackHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(worker_errors, [])
         self.assertFalse(thread.is_alive())
-        mock_message.add_reaction.assert_awaited_once_with("🤖")
+        mock_message.add_reaction.assert_awaited_once_with("💻")
         self.assertEqual(reaction_loops, [message_loop])
 
     @patch('core.loaders.graphs_loader.GraphsLoader')

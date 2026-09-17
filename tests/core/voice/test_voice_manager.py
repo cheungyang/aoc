@@ -424,3 +424,155 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
         assert mock_agent.execute_stream.call_count == 2
         assert mock_agent.execute_stream.call_args_list[1][0][0] == "Tell me the list of agents."
         assert vm.tts_engine.synthesize_to_file.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Text and speech diverge on a voice turn
+# ---------------------------------------------------------------------------
+
+STRUCTURED_REPLY = (
+    "Here is what I found for you.\n"
+    "\n"
+    "- **Point Reyes** - 2 hours, $0 entry\n"
+    "- **Mount Tam** - 45 minutes, $8 parking\n"
+)
+
+
+def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
+    """Wires a VoiceManager up to a mocked guild, agent, and audio queue."""
+    vm = VoiceManager(mock_bot_runner)
+
+    mock_vc = MagicMock()
+    mock_vc.is_connected.return_value = True
+    mock_vc.is_playing.return_value = False
+
+    sent_message = MagicMock()
+    sent_message.edit = AsyncMock()
+    sent_message.delete = AsyncMock()
+
+    text_channel = MagicMock()
+    text_channel.name = "general"
+    text_channel.send = AsyncMock(return_value=sent_message)
+
+    guild = MagicMock()
+    guild.text_channels = [text_channel]
+    mock_vc.channel.name = "general-voice"
+    mock_vc.channel.guild = guild
+    vm.voice_client = mock_vc
+
+    vm.stt_engine.transcribe = AsyncMock(return_value="Where should we go this weekend?")
+
+    async def fake_stream(*_args, **_kwargs):
+        yield {"type": "token", "content": reply}
+        yield {"type": "final_response", "text": reply, "response": None}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+
+    tts_file = tmp_path / "reply.mp3"
+    tts_file.write_bytes(b"audio")
+    vm.tts_engine.synthesize_to_file = AsyncMock(return_value=str(tts_file))
+
+    vm.audio_queue = MagicMock()
+    vm.audio_queue.start = MagicMock()
+    vm.audio_queue.put = AsyncMock()
+
+    return vm, agent, text_channel
+
+
+@pytest.mark.asyncio
+async def test_voice_turn_keeps_markdown_intact_in_the_text_channel(mock_bot_runner, tmp_path):
+    """
+    A voice turn previously produced audio and nothing else: the reply existed
+    only as sound, so anything with a link, a price, or a name in it was
+    unrecoverable once spoken. The channel now gets what the agent wrote,
+    markdown and all, while only the synthesiser gets the rewritten version.
+    """
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, STRUCTURED_REPLY)
+    vm.verbalizer.verbalize = AsyncMock(
+        return_value="Point Reyes is two hours away and free. Mount Tam is forty five minutes with eight dollar parking."
+    )
+
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
+         patch("discord.FFmpegPCMAudio"):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        if vm._current_task:
+            await vm._current_task
+
+    posted = "\n".join(
+        call.args[0] for call in text_channel.send.call_args_list if call.args
+    )
+    assert "- **Point Reyes**" in posted, "markdown was flattened in the text channel"
+    assert "$8 parking" in posted
+
+
+@pytest.mark.asyncio
+async def test_voice_turn_speaks_verbalized_text_not_markdown(mock_bot_runner, tmp_path):
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, STRUCTURED_REPLY)
+    vm.verbalizer.verbalize = AsyncMock(
+        return_value="Point Reyes is two hours away and free. Mount Tam is forty five minutes with eight dollar parking."
+    )
+
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
+         patch("discord.FFmpegPCMAudio"):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        if vm._current_task:
+            await vm._current_task
+
+    # The list block reached the verbalizer...
+    verbalized_inputs = "\n".join(c.args[0] for c in vm.verbalizer.verbalize.call_args_list)
+    assert "- **Point Reyes**" in verbalized_inputs
+
+    # ...and nothing with a bullet or asterisk reached the synthesiser.
+    spoken = [c.args[0] for c in vm.tts_engine.synthesize_to_file.call_args_list]
+    assert spoken, "nothing was synthesized"
+    for line in spoken:
+        assert "*" not in line, f"markdown leaked into speech: {line!r}"
+        assert not line.lstrip().startswith("-"), f"bullet leaked into speech: {line!r}"
+    assert "Point Reyes" in " ".join(spoken)
+
+
+@pytest.mark.asyncio
+async def test_voice_turn_prose_reply_skips_the_verbalizer(mock_bot_runner, tmp_path):
+    # The common case must not pay a model round-trip before the first word.
+    vm, agent, _channel = _voice_turn_fixture(
+        mock_bot_runner, tmp_path, "I booked the table for seven under your name."
+    )
+    vm.verbalizer.verbalize = AsyncMock()
+
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
+         patch("discord.FFmpegPCMAudio"):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        if vm._current_task:
+            await vm._current_task
+
+    vm.verbalizer.verbalize.assert_not_awaited()
+    spoken = [c.args[0] for c in vm.tts_engine.synthesize_to_file.call_args_list]
+    assert "I booked the table for seven under your name." in " ".join(spoken)
+
+
+def test_voice_manager_verbalizer_can_be_disabled_per_agent(mock_bot_runner):
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
+        agent = MagicMock()
+        agent.config = {"voice_config": {"verbalize": False, "verbalizer_model": "custom-model"}}
+        mock_loader.return_value.get_agent.return_value = agent
+
+        vm = VoiceManager(mock_bot_runner)
+        assert vm.verbalizer.enabled is False
+        assert vm.verbalizer.model_name == "custom-model"
+
+
+def test_voice_manager_verbalizer_is_on_by_default(mock_bot_runner):
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
+        agent = MagicMock()
+        agent.config = {"voice_config": {}}
+        mock_loader.return_value.get_agent.return_value = agent
+
+        vm = VoiceManager(mock_bot_runner)
+        assert vm.verbalizer.enabled is True

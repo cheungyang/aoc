@@ -8,10 +8,12 @@ from .stt_engine import STTEngine
 from .tts_engine import TTSEngine
 from .blurp_generator import BlurpGenerator
 from .sentence_chunker import SentenceChunker
+from .verbalizer import Verbalizer, VoiceStream
 from .audio_queue import AudioStreamQueue
 from .bridge_manager import BridgeManager
 from core.loaders.agents_loader import AgentsLoader
 from core.agent.session_manager import SessionManager
+from core.util.models import DEFAULT_VERBALIZER_MODEL
 
 # Ensure FFmpeg executable is located
 try:
@@ -43,6 +45,14 @@ class VoiceManager:
         
         self.stt_engine = STTEngine(model_size=stt_model)
         self.tts_engine = TTSEngine(default_voice=tts_voice, default_speed=tts_speed)
+        # Rewrites structured agent output for the ear. Disabling it falls the
+        # pipeline back to TextSanitizer, which is still speakable -- just
+        # flatter -- so this is a safe switch to flip if latency matters more
+        # than phrasing on a given agent.
+        self.verbalizer = Verbalizer(
+            model_name=self.config.get("verbalizer_model", DEFAULT_VERBALIZER_MODEL),
+            enabled=self.config.get("verbalize", True),
+        )
         self.bridge_manager = BridgeManager()
         self.audio_queue = AudioStreamQueue(self, loop=getattr(self.bot, "loop", None))
         
@@ -318,8 +328,17 @@ class VoiceManager:
                     return
                     
                 print(f"[VoiceManager:{self.agent_id}] 🤖 Streaming LangGraph agent under #{target_name} context...")
-                
-                chunker = SentenceChunker()
+
+                # Speech and text diverge here, deliberately. The synthesiser gets
+                # text restructured for the ear; the channel gets what the agent
+                # actually wrote, markdown and all. Previously the channel got
+                # nothing on a voice turn -- the reply existed only as audio, so
+                # anything with a link or a number in it was unrecoverable once
+                # spoken.
+                from core.agent.stream_handler import DiscordStreamBuffer
+
+                voice_stream = VoiceStream(verbalizer=self.verbalizer)
+                text_buffer = DiscordStreamBuffer(target_channel, edit_interval=1.5)
                 has_emitted_speech = False
                 final_text = ""
 
@@ -357,37 +376,42 @@ class VoiceManager:
 
                     elif event_type == "token":
                         token_delta = event.get("content", "")
-                        sentences = chunker.add_token(token_delta)
+                        await text_buffer.append_token(token_delta)
+                        sentences = await voice_stream.add_token(token_delta)
                         for sentence in sentences:
                             if turn_id != self._active_turn:
                                 return
                             has_emitted_speech = True
-                            print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing sentence chunk: '{sentence[:60]}...'")
+                            print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing chunk: '{sentence[:60]}...'")
                             tts_file = await self.tts_engine.synthesize_to_file(sentence)
                             if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
                                 await self.audio_queue.put(tts_file, auto_delete=True)
 
                     elif event_type == "final_response":
                         final_text = event.get("text", "") or ""
+                        await text_buffer.finalize(
+                            final_text=final_text,
+                            response=event.get("response")
+                        )
 
                     elif event_type == "error":
                         print(f"[VoiceManager:{self.agent_id}] Agent stream error: {event.get('content')}")
 
-                # Flush remaining sentences from chunker
-                remaining_sentences = chunker.flush()
+                # Flush remaining text from the voice stream
+                remaining_sentences = await voice_stream.flush()
                 for sentence in remaining_sentences:
                     if turn_id != self._active_turn:
                         return
                     has_emitted_speech = True
-                    print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing final sentence chunk: '{sentence[:60]}...'")
+                    print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing final chunk: '{sentence[:60]}...'")
                     tts_file = await self.tts_engine.synthesize_to_file(sentence)
                     if tts_file and turn_id == self._active_turn and self.voice_client and self.voice_client.is_connected():
                         await self.audio_queue.put(tts_file, auto_delete=True)
 
-                # Fallback for short direct answers (e.g. "Done.") that did not hit chunker threshold
+                # Fallback for short direct answers (e.g. "Done.") that never streamed a token
                 if not has_emitted_speech and final_text:
-                    clean_sentences = SentenceChunker().split_into_sentences(final_text)
-                    for sentence in clean_sentences:
+                    spoken = await self.verbalizer.verbalize(final_text)
+                    for sentence in SentenceChunker().split_into_sentences(spoken):
                         if turn_id != self._active_turn:
                             return
                         print(f"[VoiceManager:{self.agent_id}] 🔊 Synthesizing direct response: '{sentence[:60]}...'")
