@@ -72,8 +72,18 @@ def parse_args():
 def main():
     args = parse_args()
 
-    pkm_dir = os.path.abspath(os.path.expanduser(args.pkm_dir)) if args.pkm_dir else Config().pkm_dir
-    codebase_dir = os.path.abspath(os.path.expanduser(args.codebase_dir)) if args.codebase_dir else project_root
+    if args.pkm_dir:
+        pkm_dir = os.path.abspath(os.path.expanduser(args.pkm_dir))
+    else:
+        pkm_dir = Config().pkm_dir
+        if not os.path.exists(pkm_dir) or not os.path.exists(os.path.join(pkm_dir, ".git")):
+            for candidate in ["/app/pkm", os.path.join(project_root, "pkm"), "/home/appuser/pkm"]:
+                if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, ".git")):
+                    pkm_dir = os.path.abspath(candidate)
+                    break
+        pkm_dir = os.path.abspath(os.path.expanduser(pkm_dir))
+
+    codebase_dir = os.path.abspath(os.path.expanduser(args.codebase_dir)) if args.codebase_dir else Config().codebase_dir
 
     print("=== Starting Git Synchronization ===")
     if not args.skip_pkm:

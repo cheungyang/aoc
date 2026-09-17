@@ -125,6 +125,25 @@ Once enabled, all agent executions, subgraph runs, LLM calls, and tool invocatio
 - **Threads / Sessions**: Multi-turn conversation history grouped by Discord session/thread ID.
 - **Metadata & Tags**: Filter traces by agent ID (e.g. `main`, `agent-designer`), source (`discord`, `tool`, `scheduled`), or role.
 
+## Periodic Git Resolution (Dual Repositories)
+
+The system automatically schedules periodic Git resolution for two separate Git repositories:
+1. **PKM Obsidian Vault** (`PKM_DIR`, default `/home/appuser/pkm` or `pkm/`): Automatically stages new files, commits local updates, pulls remote changes (resolving conflicts with `-X theirs`), and pushes back to remote.
+2. **Main Codebase** (`CODEBASE_DIR`, default `/app`): Pulls latest upstream updates and resolves conflicts with remote content without pushing local uncommitted development changes.
+
+### Configuration & Credentials
+
+- **SSH Authentication**: Mounted from host (`~/.ssh` -> `/mnt/.ssh:ro`). Keys are copied into the container's `/home/appuser/.ssh` with permissions automatically fixed (700 for directory, 600 for keys).
+- **Non-Interactive SSH**: Non-interactive `BatchMode` and `StrictHostKeyChecking=accept-new` are enabled via `GIT_SSH_COMMAND` to prevent hanging during automated scheduled jobs.
+- **Git Safe Directories**: `safe.directory '*'` is configured system-wide to permit Git operations across mounted Docker volumes.
+- **Git Identity**: `GIT_USER_NAME` and `GIT_USER_EMAIL` are configured in `docker-compose.yml` (and copied from host `~/.gitconfig` if mounted).
+- **One-off Git Sync Run**:
+  ```bash
+  docker compose exec app python scripts/sync_git.py
+  # Or dry-run
+  docker compose exec app python scripts/sync_git.py --dry-run
+  ```
+
 ## Customization
 
-If your SSH keys or PKM directory are in non-standard locations, you can set `PKM_HOST_DIR`, `WORKSPACES_HOST_DIR`, or `GOG_HOME` in your `.env` file before running.
+If your SSH keys or PKM directory are in non-standard locations, you can set `PKM_HOST_DIR`, `WORKSPACES_HOST_DIR`, `CODEBASE_DIR`, or `GOG_HOME` in your `.env` file before running.

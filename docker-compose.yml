@@ -15,10 +15,17 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-      # Default PKM and workspaces paths inside the container (can be overridden via .env)
+      # Default PKM, codebase, and workspaces paths inside the container (can be overridden via .env)
       - PKM_DIR=${PKM_DIR:-/home/appuser/pkm}
+      - CODEBASE_DIR=${CODEBASE_DIR:-/app}
       - TASKS_DB_PATH=${TASKS_DB_PATH:-/home/appuser/pkm/tasks.db}
       - WORKSPACES_DIR=${WORKSPACES_DIR:-/home/appuser/workspaces}
+      # Git configuration for automated non-interactive sync and commits
+      - GIT_TERMINAL_PROMPT=0
+      - GIT_ASKPASS=
+      - GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15
+      - GIT_USER_NAME=${GIT_USER_NAME:-AOC Bot}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-aoc@localhost}
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
       - GOG_KEYRING_BACKEND=file

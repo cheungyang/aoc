@@ -3,6 +3,7 @@ FROM python:3.11-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
+    openssh-client \
     curl \
     wget \
     vim \
@@ -11,6 +12,13 @@ RUN apt-get update && apt-get install -y \
     procps \
     chromium \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure Git safe.directory and system defaults for mounted repositories
+RUN git config --system --add safe.directory '*' \
+    && git config --system user.name "AOC Bot" \
+    && git config --system user.email "aoc@localhost" \
+    && mkdir -p /etc/ssh \
+    && ssh-keyscan -t rsa,ecdsa,ed25519 github.com gitlab.com >> /etc/ssh/ssh_known_hosts 2>/dev/null || true
 
 # Set working directory
 WORKDIR /app
@@ -64,9 +72,12 @@ RUN useradd -m appuser \
                 /home/appuser/workspaces \
     && chown -R appuser:appuser /home/appuser /app
 
-# Set environment variables for gogcli headless file keyring
+# Set environment variables for gogcli headless file keyring and non-interactive git operations
 ENV GOG_KEYRING_BACKEND=file \
-    GOG_KEYRING_PROVIDER=file
+    GOG_KEYRING_PROVIDER=file \
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_ASKPASS="" \
+    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

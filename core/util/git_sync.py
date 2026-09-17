@@ -65,21 +65,37 @@ def run_git_cmd(
     args: List[str],
     cwd: str,
     check: bool = False,
-    env: Optional[Dict[str, str]] = None
+    env: Optional[Dict[str, str]] = None,
+    timeout: float = 120.0,
 ) -> subprocess.CompletedProcess:
-    """Runs a git command in the specified directory."""
+    """Runs a git command in the specified directory with non-interactive defaults."""
     cmd = ["git"] + args
     full_env = os.environ.copy()
+    full_env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    full_env.setdefault("GIT_ASKPASS", "")
+    full_env.setdefault(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+    )
     if env:
         full_env.update(env)
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=check,
-        env=full_env
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=check,
+            env=full_env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(
+            cmd,
+            returncode=124,
+            stdout=(e.stdout or ""),
+            stderr=f"Command timed out after {timeout} seconds: {' '.join(cmd)}"
+        )
 
 
 def is_git_repo(path: str) -> bool:
@@ -351,7 +367,7 @@ def sync_main_codebase(
     3. Does NOT commit local changes or git push.
     """
     target = "Main Codebase"
-    default_codebase = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    default_codebase = Config().codebase_dir
     codebase_path = os.path.abspath(os.path.expanduser(codebase_dir)) if codebase_dir else default_codebase
 
     result = GitSyncResult(target=target, path=codebase_path)

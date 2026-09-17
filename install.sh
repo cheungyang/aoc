@@ -47,12 +47,24 @@ else
     WORKSPACES_OPT=""
 fi
 
+# Git environment options for automated non-interactive sync
+GIT_OPT="-e GIT_TERMINAL_PROMPT=0 -e GIT_ASKPASS= -e GIT_SSH_COMMAND=ssh\ -o\ BatchMode=yes\ -o\ StrictHostKeyChecking=accept-new\ -o\ ConnectTimeout=15 -e CODEBASE_DIR=/app"
+
+# Check for host .gitconfig
+if [ -f "$HOME/.gitconfig" ]; then
+    GITCONFIG_OPT="-v $HOME/.gitconfig:/mnt/.gitconfig:ro"
+else
+    GITCONFIG_OPT=""
+fi
+
 # Run the container
 echo "Starting Docker container $IMAGE_NAME..."
 docker run -it \
   -v "$(pwd)":$CONTAINER_WORKDIR \
   $ENV_OPT \
   $SSH_OPT \
+  $GITCONFIG_OPT \
+  $GIT_OPT \
   $GOG_OPT \
   $PKM_OPT \
   $WORKSPACES_OPT \
