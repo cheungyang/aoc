@@ -10,7 +10,7 @@ This guide explains how to set up and run the LangGraph system in a Docker conta
 ## Files Created
 
 - `docker-compose.yml`: Docker Compose configuration for launching the system as a managed service.
-- `Dockerfile`: Defines the container environment (Python 3.11, Chromium, Playwright, gogcli, gh CLI, nlm).
+- `Dockerfile`: Defines the container environment (Python 3.11, Node.js 22 + npm/corepack, Chromium, Playwright, gogcli, gh CLI, nlm).
 - `.dockerignore`: Excludes local caches, `.venv`, and artifacts from the build context.
 - `entrypoint.sh`: Handles copying SSH keys and setting permissions inside the container.
 - `install.sh`: A helper script to run the container directly with `docker run`.

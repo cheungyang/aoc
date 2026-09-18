@@ -42,6 +42,19 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Node.js + npm (NodeSource, multi-arch). The coding graph runs a
+# per-task `setup_command` inside the worktree (see graphs/coding/utils/shell.py)
+# and JS projects scaffold with `npm create ...`; without a Node runtime that
+# command dies with exit 127 "npm: not found" and halts the task in setup.
+# corepack is enabled so `yarn`/`pnpm` setup commands resolve too.
+ARG NODE_MAJOR=22
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && node --version \
+    && npm --version
+
 # Install notebooklm-mcp-cli (nlm command) ensuring mcp<2 compatibility
 RUN pip install --no-cache-dir "mcp<2" "fastmcp<4" notebooklm-mcp-cli
 
@@ -102,6 +115,8 @@ RUN useradd -m appuser \
                 /home/appuser/.config/gogcli \
                 /home/appuser/pkm \
                 /home/appuser/workspaces \
+                /home/appuser/.npm \
+                /home/appuser/.npm-global \
     && chown -R appuser:appuser /home/appuser /app /opt/aoc /opt/aoc-seed
 
 # Set environment variables for gogcli headless file keyring and non-interactive git operations
@@ -109,6 +124,16 @@ ENV GOG_KEYRING_BACKEND=file \
     GIT_TERMINAL_PROMPT=0 \
     GIT_ASKPASS="" \
     GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+
+# npm runs as appuser, which cannot write the root-owned default prefix
+# (/usr/local/lib/node_modules) or cache (/root/.npm). Point both at the home
+# directory the entrypoint already chowns after the UID remap, and put the
+# global bin on PATH so anything a setup command installs is callable.
+ENV NPM_CONFIG_PREFIX=/home/appuser/.npm-global \
+    NPM_CONFIG_CACHE=/home/appuser/.npm \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    PATH="/home/appuser/.npm-global/bin:${PATH}"
 
 # Copy entrypoint script
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

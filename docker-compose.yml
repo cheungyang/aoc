@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         GOGCLI_VERSION: "0.40.0"
+        NODE_MAJOR: "${NODE_MAJOR:-22}"
     image: aoc-app:latest
     container_name: aoc
     restart: unless-stopped

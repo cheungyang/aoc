@@ -147,6 +147,14 @@ GOG_DIR="$GOG_HOME"
 mkdir -p "$GOG_DIR/config" "$GOG_DIR/data" "$GOG_DIR/state" "$GOG_DIR/cache" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config
 chown -R appuser:appuser "$GOG_DIR" /home/appuser/pkm /home/appuser/workspaces /home/appuser/.config 2>/dev/null || true
 
+# npm writes its cache and global prefix as appuser. Recreate them here as well
+# as in the image: the UID remap above can leave them owned by the old UID, and
+# an unwritable cache makes every `npm`/`npx` setup command fail with EACCES.
+NPM_CACHE_DIR="${NPM_CONFIG_CACHE:-/home/appuser/.npm}"
+NPM_PREFIX_DIR="${NPM_CONFIG_PREFIX:-/home/appuser/.npm-global}"
+mkdir -p "$NPM_CACHE_DIR" "$NPM_PREFIX_DIR" 2>/dev/null || true
+chown -R appuser:appuser "$NPM_CACHE_DIR" "$NPM_PREFIX_DIR" 2>/dev/null || true
+
 # Symlink legacy ~/.config/gogcli to project gogcli config directory
 ln -sfn "$GOG_DIR/config" /home/appuser/.config/gogcli 2>/dev/null || true
 
