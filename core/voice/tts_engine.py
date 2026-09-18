@@ -14,9 +14,15 @@ class TextSanitizer:
             
         cleaned = text
         
-        # 1. Remove XML/HTML tags (e.g. <poll>...</poll>, <job>...</job>, etc.)
-        cleaned = re.sub(r"<[^>]+>.*?</[^>]+>", "", cleaned, flags=re.DOTALL)
-        cleaned = re.sub(r"<[^>]+>", "", cleaned)
+        # 1. Remove XML/HTML tags and contents (e.g. <memory>...</memory>, <vote>...</vote>, <poll>...</poll>, <job>...</job>, etc.)
+        xml_pattern = r"<([a-zA-Z][a-zA-Z0-9_:-]*)(?:\s+[^>]*)?>.*?</\1>"
+        prev = None
+        while prev != cleaned:
+            prev = cleaned
+            cleaned = re.sub(xml_pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r"<[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?/>", "", cleaned)
+        cleaned = re.sub(r"<[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?>.*$", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r"</?[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?>", "", cleaned)
         
         # 2. Replace multi-line code blocks with a brief spoken note
         cleaned = re.sub(r"```[a-zA-Z0-9_-]*\n(.*?)```", " (I have provided the code in the chat.) ", cleaned, flags=re.DOTALL)

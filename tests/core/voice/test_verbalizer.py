@@ -14,6 +14,7 @@ from core.voice.verbalizer import (
     Verbalizer,
     VoiceStream,
     has_structure,
+    strip_xml,
 )
 
 
@@ -354,3 +355,121 @@ async def test_golden_fallback_preserves_every_item():
     for place in ("Point Reyes", "Mount Tam", "Muir Woods",
                   "Stinson Beach", "Tennessee Valley"):
         assert place in spoken, f"{place} was dropped by the fallback"
+
+
+# --------------------------------------------------------------------------
+# XML stripping
+# --------------------------------------------------------------------------
+
+def test_strip_xml_removes_memory_and_vote_blocks():
+    text = "<memory>User prefers concise answers.</memory>Here is the plan."
+    assert strip_xml(text) == "Here is the plan."
+
+    text = "<vote>yes</vote>The vote was recorded."
+    assert strip_xml(text) == "The vote was recorded."
+
+    text = "<memory>Note 1</memory><vote>Note 2</vote>All clear."
+    assert strip_xml(text) == "All clear."
+
+
+def test_strip_xml_removes_nested_and_multiline_blocks():
+    text = "<vote><choice>yes</choice><reason>fast</reason></vote>Done."
+    assert strip_xml(text) == "Done."
+
+    text = "<memory>\n- User likes tea\n- User likes coffee\n</memory>\nHere is your tea."
+    assert strip_xml(text).strip() == "Here is your tea."
+
+
+def test_strip_xml_removes_unclosed_or_dangling_tags():
+    assert strip_xml("<memory>unclosed tag without closing") == ""
+    assert strip_xml("Here is content.<memory>unclosed") == "Here is content."
+
+
+def test_strip_xml_preserves_plain_text_and_comparisons():
+    assert strip_xml("The price is < 50 dollars.") == "The price is < 50 dollars."
+    assert strip_xml("Sure, I booked the table.") == "Sure, I booked the table."
+
+
+def test_has_structure_ignores_structure_only_in_xml():
+    # If the only bullets/headers are inside <memory> or <vote>, it should not trigger structuring
+    text = "<memory>\n- note 1\n- note 2\n</memory>\nI will remember that."
+    assert has_structure(text) is False
+
+
+def test_has_structure_detects_structure_outside_xml():
+    text = "<memory>User likes tea</memory>\n- First\n- Second"
+    assert has_structure(text) is True
+
+
+@pytest.mark.asyncio
+async def test_verbalize_strips_xml_before_model_call():
+    v = Verbalizer()
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(
+        content="First, eggs. After that, milk."
+    ))
+    with patch.object(Verbalizer, "_get_llm", return_value=llm):
+        result = await v.verbalize("<memory>User likes grocery lists</memory>\n<vote>yes</vote>\n- eggs\n- milk")
+
+    assert result == "First, eggs. After that, milk."
+    messages = llm.ainvoke.call_args[0][0]
+    # Verify the XML block was stripped before being passed to the model
+    assert "<memory>" not in messages[1].content
+    assert "User likes grocery lists" not in messages[1].content
+    assert "<vote>" not in messages[1].content
+    assert "- eggs\n- milk" in messages[1].content
+
+
+@pytest.mark.asyncio
+async def test_verbalize_only_xml_returns_empty_without_model_call():
+    v = Verbalizer()
+    with patch.object(Verbalizer, "_get_llm") as get_llm:
+        assert await v.verbalize("<memory>User likes dark mode</memory>") == ""
+        assert await v.verbalize("<vote>yes</vote>") == ""
+        assert await v.verbalize("<memory>\n- Item 1\n- Item 2\n</memory>") == ""
+    get_llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_verbalize_prose_with_xml_skips_the_model():
+    v = Verbalizer()
+    with patch.object(Verbalizer, "_get_llm") as get_llm:
+        result = await v.verbalize("<memory>User lives in Seattle</memory>I booked the table for seven.")
+    get_llm.assert_not_called()
+    assert result == "I booked the table for seven."
+    assert "Seattle" not in result
+
+
+@pytest.mark.asyncio
+async def test_stream_strips_memory_and_vote_blocks():
+    stream = VoiceStream(verbalizer=RecordingVerbalizer())
+    chunks = await _feed(
+        stream,
+        "<memory>Remember user preferences.</memory> I booked the table for seven. It is under your name.",
+    )
+    spoken = " ".join(chunks)
+    assert "Remember user preferences" not in spoken
+    assert "booked the table for seven" in spoken
+
+
+@pytest.mark.asyncio
+async def test_stream_holds_in_flight_xml_tokens():
+    stream = VoiceStream(verbalizer=RecordingVerbalizer())
+    # Add tokens where XML block is split across chunks
+    tokens = ["<mem", "ory>User likes pizza.</mem", "ory> I booked ", "the table for seven. "]
+    chunks = []
+    for t in tokens:
+        chunks.extend(await stream.add_token(t))
+    chunks.extend(await stream.flush())
+
+    spoken = " ".join(chunks)
+    assert "pizza" not in spoken.lower()
+    assert "booked the table for seven" in spoken
+
+
+@pytest.mark.asyncio
+async def test_stream_only_xml_emits_nothing():
+    stream = VoiceStream(verbalizer=RecordingVerbalizer())
+    chunks = await _feed(stream, "<memory>Internal agent notes</memory><vote>approve</vote>")
+    assert chunks == []
+

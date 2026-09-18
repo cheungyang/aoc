@@ -37,8 +37,70 @@ _STRUCTURE_PATTERNS = (
 _STRUCTURE_RE = re.compile("|".join(_STRUCTURE_PATTERNS), re.MULTILINE)
 
 
+def strip_completed_xml(text: str) -> str:
+    """Strips completed matching XML tag pairs and self-closing tags."""
+    if not text:
+        return ""
+    pattern = r"<([a-zA-Z][a-zA-Z0-9_:-]*)(?:\s+[^>]*)?>.*?</\1>"
+    prev = None
+    cleaned = text
+    while prev != cleaned:
+        prev = cleaned
+        cleaned = re.sub(pattern, "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r"<[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?/>", "", cleaned)
+    return cleaned
+
+
+def find_unclosed_xml_start(text: str) -> Optional[int]:
+    """Finds the starting index of the earliest in-flight or unclosed XML tag."""
+    earliest = None
+    tag_matches = list(re.finditer(r"<([a-zA-Z][a-zA-Z0-9_:-]*)(?:\s+[^>]*)?>", text))
+    for tm in tag_matches:
+        tag_name = tm.group(1)
+        close_tag = f"</{tag_name}>"
+        if not re.search(re.escape(close_tag), text[tm.end():], flags=re.IGNORECASE):
+            if earliest is None or tm.start() < earliest:
+                earliest = tm.start()
+                break
+
+    m_partial = re.search(r"<(?=[a-zA-Z/?!]|(?:\s*$))[^>]*$", text)
+    if m_partial:
+        if earliest is None or m_partial.start() < earliest:
+            earliest = m_partial.start()
+
+    return earliest
+
+
+def strip_xml(text: str) -> str:
+    """Strips all XML elements and their contents from text before synthesis.
+
+    Agent responses can include internal XML blocks (such as `<memory>...</memory>`,
+    `<vote>...</vote>`, `<poll>...</poll>`, etc.) meant for state persistence or
+    interactive UI components. These should never be spoken or sent to the
+    speech restructuring model.
+    """
+    if not text:
+        return ""
+    cleaned = strip_completed_xml(text)
+    # Strip any remaining unclosed or dangling opening tags and subsequent content
+    cleaned = re.sub(
+        r"<[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?>.*$",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Strip stray closing or standalone tags
+    cleaned = re.sub(r"</?[a-zA-Z][a-zA-Z0-9_:-]*(?:\s+[^>]*)?>", "", cleaned)
+    # Strip partial opening tags at the end
+    cleaned = re.sub(r"<(?=[a-zA-Z/?!]|(?:\s*$))[^>]*$", "", cleaned)
+    return cleaned
+
+
 def has_structure(text: str) -> bool:
     """Whether the text was laid out visually and needs restructuring for speech."""
+    if not text:
+        return False
+    text = strip_xml(text)
     if not text:
         return False
     return bool(_STRUCTURE_RE.search(text))
@@ -74,6 +136,10 @@ class Verbalizer:
         if not text or not text.strip():
             return ""
 
+        text = strip_xml(text)
+        if not text or not text.strip():
+            return ""
+
         if not self.enabled or not has_structure(text):
             return TextSanitizer.sanitize(text)
 
@@ -97,7 +163,7 @@ class Verbalizer:
             if spoken:
                 # Sanitised anyway: the model is asked for plain speech, but a
                 # stray asterisk reaching the synthesiser is read out loud.
-                return TextSanitizer.sanitize(spoken)
+                return TextSanitizer.sanitize(strip_xml(spoken))
         except asyncio.TimeoutError:
             print(f"[Verbalizer] Timed out after {self.timeout}s; speaking sanitized text.")
         except Exception as e:
@@ -152,53 +218,74 @@ class VoiceStream:
     async def _drain(self, final: bool) -> List[str]:
         chunks: List[str] = []
 
+        if final:
+            self._buffer = strip_xml(self._buffer)
+        else:
+            self._buffer = strip_completed_xml(self._buffer)
+
         while self._buffer:
-            if has_structure(self._buffer):
-                block, rest = self._take_block(final)
+            unclosed_idx = None if final else find_unclosed_xml_start(self._buffer)
+            if unclosed_idx == 0:
+                break
+
+            if unclosed_idx is not None:
+                work_buf = self._buffer[:unclosed_idx]
+                held = self._buffer[unclosed_idx:]
+            else:
+                work_buf = self._buffer
+                held = ""
+
+            if has_structure(work_buf):
+                block, rest = self._take_block(final, work_buf)
                 if block is None:
                     break
-                self._buffer = rest
+                self._buffer = rest + held
                 spoken = await self.verbalizer.verbalize(block)
                 chunks.extend(self._splitter.split_into_sentences(spoken))
             else:
-                sentence, rest = self._take_sentence(final)
+                sentence, rest = self._take_sentence(final, work_buf)
                 if sentence is None:
                     break
-                self._buffer = rest
+                self._buffer = rest + held
                 cleaned = TextSanitizer.sanitize(sentence)
                 if cleaned:
                     chunks.append(cleaned)
 
+            if not final:
+                self._buffer = strip_completed_xml(self._buffer)
+
         return [c for c in chunks if c]
 
-    def _take_block(self, final: bool):
+    def _take_block(self, final: bool, text: Optional[str] = None):
         """Splits off a complete structural block, or (None, buffer) if pending."""
-        boundary = self._buffer.find("\n\n")
+        buf = self._buffer if text is None else text
+        boundary = buf.find("\n\n")
         if boundary != -1:
-            return self._buffer[:boundary], self._buffer[boundary + 2:].lstrip("\n")
+            return buf[:boundary], buf[boundary + 2:].lstrip("\n")
 
-        if len(self._buffer) >= self.max_block_chars:
+        if len(buf) >= self.max_block_chars:
             # A list that never ends still has to be spoken. Break on the last
             # line boundary so a bullet is not split down the middle.
-            cut = self._buffer.rfind("\n", 0, self.max_block_chars)
+            cut = buf.rfind("\n", 0, self.max_block_chars)
             if cut > 0:
-                return self._buffer[:cut], self._buffer[cut + 1:]
-            return self._buffer[:self.max_block_chars], self._buffer[self.max_block_chars:]
+                return buf[:cut], buf[cut + 1:]
+            return buf[:self.max_block_chars], buf[self.max_block_chars:]
 
         if final:
-            return self._buffer, ""
+            return buf, ""
 
-        return None, self._buffer
+        return None, buf
 
-    def _take_sentence(self, final: bool):
+    def _take_sentence(self, final: bool, text: Optional[str] = None):
         """Splits off one prose sentence, or (None, buffer) if none is complete."""
-        position = self._splitter._find_split_position(self._buffer)
-        if position is None and len(self._buffer) >= self.max_chars:
-            position = self._splitter._find_fallback_split(self._buffer)
+        buf = self._buffer if text is None else text
+        position = self._splitter._find_split_position(buf)
+        if position is None and len(buf) >= self.max_chars:
+            position = self._splitter._find_fallback_split(buf)
 
         if position is None:
             if final:
-                return self._buffer, ""
-            return None, self._buffer
+                return buf, ""
+            return None, buf
 
-        return self._buffer[:position], self._buffer[position:].lstrip()
+        return buf[:position], buf[position:].lstrip()
