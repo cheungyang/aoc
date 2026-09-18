@@ -23,7 +23,7 @@ class WorkerTestCase(unittest.IsolatedAsyncioTestCase):
     where they are defined."""
 
     def setUp(self):
-        self.session = patch("core.agent.session_manager.SessionManager.get_session")
+        self.session = patch("core.runtime.session_manager.SessionManager.get_session")
         self.mock_get_session = self.session.start()
         self.mock_get_session.side_effect = lambda **kw: MagicMock(**{
             "graph_id": kw.get("graph_id"), "agent_id": kw.get("agent_id")
@@ -32,7 +32,7 @@ class WorkerTestCase(unittest.IsolatedAsyncioTestCase):
 
     def ambient(self, graph_id):
         """Installs an ambient context bound to `graph_id`, as `graph_call` does."""
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
 
         ctx = MagicMock()
         ctx.graph_id = graph_id
@@ -101,7 +101,7 @@ class TestCallWorker(WorkerTestCase):
         self.addCleanup(self.tool.stop)
 
     async def test_the_worker_runs_under_the_graphs_grants(self):
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
 
         seen = {}
 
@@ -117,7 +117,7 @@ class TestCallWorker(WorkerTestCase):
 
     async def test_the_binding_is_undone_afterwards(self):
         """A leaked binding would follow whatever ran next on this task."""
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
 
         await call_worker("build it", graph_id="coding", channel="c")
 
@@ -125,7 +125,7 @@ class TestCallWorker(WorkerTestCase):
 
     async def test_the_binding_is_undone_even_when_the_worker_raises(self):
         self.mock_invoke.side_effect = RuntimeError("boom")
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
 
         with self.assertRaises(RuntimeError):
             await call_worker("build it", graph_id="coding", channel="c")

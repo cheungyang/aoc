@@ -3,7 +3,7 @@ import shutil
 import fnmatch
 from langchain_core.tools import tool
 from core.util import format_tool_response
-from core.agent.execution_context import try_context
+from core.runtime.execution_context import try_context
 
 @tool
 def filesystem(instructions: list[dict]) -> str:

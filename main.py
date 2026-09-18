@@ -2,9 +2,9 @@ import sys
 import argparse
 import asyncio
 from core.util.config import Config
-from core.loaders.bots_loader import BotsLoader
+from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.runners.schedule_runner import ScheduleRunner
+from core.runtime.schedule_runner import ScheduleRunner
 
 config = Config()
 GEMINI_API_KEY = config.gemini_api_key

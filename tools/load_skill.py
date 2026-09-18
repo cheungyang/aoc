@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 from core.loaders.skills_loader import SkillsLoader
 from core.util import format_tool_response
-from core.agent.execution_context import try_context
+from core.runtime.execution_context import try_context
 
 @tool
 def load_skill(skill_id: str) -> str:

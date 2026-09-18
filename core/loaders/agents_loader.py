@@ -1,9 +1,7 @@
 import os
 import json
 import time
-from core.runners.hot_reloader import HotReloader
-from core.agent.agent import Agent
-from core.agent.script_executor_agent import ScriptExecutorAgent
+from core.loaders.hot_reloader import HotReloader
 
 class AgentsLoader:
     _instance = None
@@ -40,7 +38,7 @@ class AgentsLoader:
         from core.loaders.tools_loader import ToolsLoader
         ToolsLoader().clear_permissions_cache()
         
-        from core.loaders.bots_loader import BotsLoader
+        from core.channel.discord.loader import BotsLoader
         asyncio.create_task(BotsLoader().reload_bot(agent_id))
 
     def _load_agents(self):
@@ -132,8 +130,10 @@ class AgentsLoader:
             raise ValueError(f"Agent configuration not found for: {agent_id}")
                         
         if agent_id == "script-executor":
+            from core.runtime.script_executor_agent import ScriptExecutorAgent
             agent = ScriptExecutorAgent(agent_id, config)
         else:
+            from core.runtime.agent import Agent
             agent = Agent(agent_id, config)
 
         self._agents_cache[agent_id] = agent

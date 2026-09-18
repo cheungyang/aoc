@@ -89,8 +89,8 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_with_contextvar_caller(self, mock_graphs_loader_class):
-        from core.agent.execution_context import current_execution_context
-        from core.agent.execution_context import ExecutionContext
+        from core.runtime.execution_context import current_execution_context
+        from core.runtime.execution_context import ExecutionContext
 
         mock_loader = MagicMock()
         mock_graphs_loader_class.return_value = mock_loader
@@ -103,7 +103,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
             "metadata": {"name": "coding"}
         }
 
-        from core.agent.session_manager import SessionManager
+        from core.runtime.session_manager import SessionManager
         sess = SessionManager.get_session(agent_id="topic-researcher", source="discord", channel="general")
         token = current_execution_context.set(sess)
         try:
@@ -203,8 +203,8 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_resumes_interrupted_channel_thread(self, mock_graphs_loader_class):
-        from core.agent.execution_context import current_execution_context
-        from core.agent.session_manager import SessionManager
+        from core.runtime.execution_context import current_execution_context
+        from core.runtime.session_manager import SessionManager
         sess = SessionManager.get_session(agent_id="main", source="discord", channel="content-creation")
         token = current_execution_context.set(sess)
 
@@ -238,7 +238,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_sets_execution_context_graph_id(self, mock_graphs_loader_class):
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
 
         captured_ctx = None
 
@@ -268,8 +268,8 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
     @patch('tools.graph_call.GraphsLoader')
     async def test_graph_call_with_thread_context(self, mock_graphs_loader_class):
         import discord
-        from core.agent.execution_context import current_execution_context
-        from core.agent.session_manager import SessionManager
+        from core.runtime.execution_context import current_execution_context
+        from core.runtime.session_manager import SessionManager
 
         mock_loader = MagicMock()
         mock_graphs_loader_class.return_value = mock_loader

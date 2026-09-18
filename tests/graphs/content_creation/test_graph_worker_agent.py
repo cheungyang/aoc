@@ -29,7 +29,7 @@ class TestGraphWorkerAgent(unittest.IsolatedAsyncioTestCase):
         thing worth asserting is the *effective* roster under the content_creation
         binding — the media tools the nodes delegate for.
         """
-        from core.agent.session_manager import SessionManager
+        from core.runtime.session_manager import SessionManager
         from core.loaders.tools_loader import ToolsLoader
 
         loader = AgentsLoader()

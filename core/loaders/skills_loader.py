@@ -1,5 +1,5 @@
 import os
-from core.runners.hot_reloader import HotReloader
+from core.loaders.hot_reloader import HotReloader
 
 class SkillsLoader:
     _instance = None
@@ -44,7 +44,7 @@ class SkillsLoader:
 
     @staticmethod
     def _require_ctx(ctx, caller: str):
-        from core.agent.execution_context import ExecutionContext
+        from core.runtime.execution_context import ExecutionContext
         if not isinstance(ctx, ExecutionContext):
             raise TypeError(
                 f"SkillsLoader.{caller}() expects an ExecutionContext, got {type(ctx).__name__}."

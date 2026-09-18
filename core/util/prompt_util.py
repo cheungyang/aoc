@@ -51,7 +51,7 @@ Format:
 
 
 def get_channel_prompt(channel_name: Optional[str] = None) -> str:
-    from core.agent.execution_context import try_context
+    from core.runtime.execution_context import try_context
     sess = try_context()
 
     if channel_name is None and sess:

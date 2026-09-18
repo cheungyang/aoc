@@ -4,7 +4,7 @@ import shlex
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
-from core.agent.execution_context import try_context
+from core.runtime.execution_context import try_context
 
 @tool
 def bash(command_string: str, cwd: str) -> str:

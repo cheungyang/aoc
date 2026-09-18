@@ -6,16 +6,16 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.agent.agent import Agent
-from core.agent.session_manager import SessionManager
-from core.agent.script_executor_agent import ScriptExecutorAgent
+from core.runtime.agent import Agent
+from core.runtime.session_manager import SessionManager
+from core.runtime.script_executor_agent import ScriptExecutorAgent
 from tools.graph_call import graph_call
 from scripts.verify_langsmith import verify_langsmith
 
 
 class TestLangSmithIntegration(unittest.IsolatedAsyncioTestCase):
 
-    @patch('core.agent.agent.LoggingHandler')
+    @patch('core.runtime.agent.LoggingHandler')
     async def test_agent_passes_tracing_metadata_and_tags(self, mock_logging_handler_class):
         mock_logging_handler = MagicMock()
         mock_logging_handler_class.return_value = mock_logging_handler

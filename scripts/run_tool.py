@@ -12,8 +12,8 @@ load_dotenv(os.path.join(workspace_root, ".env"))
 sys.path.append(workspace_root)
 
 from core.loaders.tools_loader import ToolsLoader
-from core.agent.session_manager import SessionManager
-from core.agent.execution_context import current_execution_context
+from core.runtime.session_manager import SessionManager
+from core.runtime.execution_context import current_execution_context
 
 def main():
     print("Loading tools...")

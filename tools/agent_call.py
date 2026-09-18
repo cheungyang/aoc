@@ -1,6 +1,6 @@
 from typing import Optional
 from langchain_core.tools import tool
-from core.agent.delegation import stream_delegate
+from core.runtime.delegation import stream_delegate
 from core.util import format_tool_response
 
 

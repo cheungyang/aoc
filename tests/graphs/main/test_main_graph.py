@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 # Add root directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.agent.delegation import DelegationResult
+from core.runtime.delegation import DelegationResult
 from graphs.main.graph import create_graph, format_output, prepare_input
 
 ORCHESTRATOR = {

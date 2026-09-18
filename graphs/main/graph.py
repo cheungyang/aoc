@@ -23,7 +23,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
-from core.agent.delegation import agent_header, prompt_to_text, stream_delegate
+from core.runtime.delegation import agent_header, prompt_to_text, stream_delegate
 from graphs.main.router import CONCIERGE, DIRECT_CALL, decide
 
 
@@ -57,7 +57,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
     def _decide(state: MessagesState) -> Dict[str, Any]:
         """Resolves the route and stashes it for the conditional edge."""
-        from core.agent.execution_context import try_context
+        from core.runtime.execution_context import try_context
         from core.loaders.agents_loader import AgentsLoader
 
         ctx = try_context()
@@ -92,7 +92,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
         """Hands the turn to the one agent allowed to answer here."""
-        from core.agent.execution_context import try_context
+        from core.runtime.execution_context import try_context
 
         ctx = try_context()
         messages = state.get("messages") or []

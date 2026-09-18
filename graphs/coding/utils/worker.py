@@ -39,7 +39,7 @@ def worker_session(graph_id: str, channel: Optional[Any] = None, source: str = "
     `graph_id` is the authority field: it decides which tools and skills get
     merged into the worker's roster.
     """
-    from core.agent.session_manager import SessionManager
+    from core.runtime.session_manager import SessionManager
 
     return SessionManager.get_session(
         agent_id=WORKER_AGENT_ID,
@@ -57,8 +57,8 @@ def _bind_graph(graph_id: str):
     already bound to this graph (the interactive path, where `graph_call` has
     already done it).
     """
-    from core.agent.execution_context import current_execution_context, try_context
-    from core.agent.session_manager import SessionManager
+    from core.runtime.execution_context import current_execution_context, try_context
+    from core.runtime.session_manager import SessionManager
 
     ambient = try_context()
     if ambient is not None and ambient.graph_id == graph_id:
@@ -77,7 +77,7 @@ def _bind_graph(graph_id: str):
 
 async def call_worker(prompt: str, graph_id: str, channel: str) -> str:
     """Runs `graph-worker` under `graph_id`'s grants and returns its raw reply."""
-    from core.agent.execution_context import current_execution_context
+    from core.runtime.execution_context import current_execution_context
     from tools.agent_call import agent_call
 
     token = _bind_graph(graph_id or "coding")

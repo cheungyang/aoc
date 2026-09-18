@@ -2,7 +2,7 @@ import os
 import json
 import importlib.util
 from typing import Dict, Any, List, Optional
-from core.runners.hot_reloader import HotReloader
+from core.loaders.hot_reloader import HotReloader
 
 class GraphsLoader:
     _instance = None

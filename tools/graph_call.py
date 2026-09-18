@@ -4,7 +4,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from core.loaders.graphs_loader import GraphsLoader
-from core.agent.execution_context import current_execution_context
+from core.runtime.execution_context import current_execution_context
 from core.util import format_tool_response
 
 @tool
@@ -90,7 +90,7 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         else:
             # No ambient caller (e.g. a scheduled or programmatic invocation): synthesize a
             # stateless context so the graph still has an unambiguous identity.
-            from core.agent.session_manager import SessionManager
+            from core.runtime.session_manager import SessionManager
             child_ctx = SessionManager().get_session(
                 agent_id=triggering_agent or "system",
                 source="job",

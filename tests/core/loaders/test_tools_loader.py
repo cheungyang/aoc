@@ -228,7 +228,7 @@ class TestCheckPermission(unittest.TestCase):
 
         # 3. An ambient context must NOT leak into a differently-bound call: the roster is
         # decided by the ctx argument alone. This is the frozen-tool-roster regression guard.
-        from core.agent.execution_context import current_execution_context
+        from core.runtime.execution_context import current_execution_context
         token = current_execution_context.set(make_context(agent_id="agent1", graph_id="test_graph"))
         try:
             self.loader.clear_permissions_cache()

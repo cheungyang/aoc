@@ -2,8 +2,8 @@ import os
 import asyncio
 import re
 from langchain_core.tools import tool
-from core.agent.job_manager import JobManager
-from core.agent.execution_context import try_context
+from core.runtime.job_manager import JobManager
+from core.runtime.execution_context import try_context
 from core.util import format_tool_response
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 from tools.agent_call import agent_call

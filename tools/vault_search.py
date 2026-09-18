@@ -3,7 +3,7 @@ from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
-from core.agent.execution_context import try_context
+from core.runtime.execution_context import try_context
 from core.knowledge.vector.db import (
     init_knowledge_db,
     hybrid_search_vault,

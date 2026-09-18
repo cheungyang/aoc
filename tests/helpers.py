@@ -5,8 +5,8 @@ ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 """
 from contextlib import contextmanager
 
-from core.agent.execution_context import current_execution_context
-from core.agent.session_manager import SessionManager
+from core.runtime.execution_context import current_execution_context
+from core.runtime.session_manager import SessionManager
 
 
 def make_context(agent_id="test-agent", graph_id=None, source="job", channel=None, stateless=True):

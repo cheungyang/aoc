@@ -49,7 +49,7 @@ class ToolCheckTestCase(unittest.TestCase):
             loader.get_tools.return_value = [_tool(n) for n in tool_names]
 
         loader_patch = patch("core.loaders.tools_loader.ToolsLoader", return_value=loader)
-        session_patch = patch("core.agent.session_manager.SessionManager.get_session",
+        session_patch = patch("core.runtime.session_manager.SessionManager.get_session",
                               return_value=MagicMock())
         self.mock_loader_cls = loader_patch.start()
         self.mock_get_session = session_patch.start()

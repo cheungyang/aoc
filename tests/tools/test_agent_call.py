@@ -3,7 +3,7 @@
 `agent_call` is now a wrapper: it validates the arguments an LLM supplied and
 wraps the outcome in a tool-response envelope. The delegation mechanics it used
 to own -- permissions, caller tagging, streaming, thread context -- live in
-`core.agent.delegation` and are tested in `tests/core/agent/test_delegation.py`.
+`core.runtime.delegation` and are tested in `tests/core/agent/test_delegation.py`.
 Re-testing them through the tool would only assert that the wrapper forwards.
 """
 import os
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.agent.delegation import DelegationResult
+from core.runtime.delegation import DelegationResult
 from core.util import format_tool_response
 from tools.agent_call import agent_call
 

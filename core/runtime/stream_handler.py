@@ -1,0 +1,176 @@
+import re
+import time
+import asyncio
+from typing import Optional, List, Any, Dict, Callable
+from core.channel.response_parser import AgentResponse
+from core.runtime.execution_context import ExecutionContext
+
+# Event Type Constants
+EVENT_TOKEN = "token"
+EVENT_TOOL_START = "tool_start"
+EVENT_TOOL_END = "tool_end"
+EVENT_FINAL_RESPONSE = "final_response"
+EVENT_ERROR = "error"
+EVENT_SUBAGENT_FINAL = "subagent_final"
+EVENT_REACTION = "reaction"
+
+# Subagent Custom Stream Events (dispatched via adispatch_custom_event)
+SUBAGENT_STREAM_TOKEN = "subagent_stream_token"
+SUBAGENT_STREAM_FINAL = "subagent_stream_final"
+
+# Emitted by `core.runtime.delegation` when a turn is handed to another agent.
+#
+# The acknowledgement emoji used to be driven by `ReactionCallbackHandler`
+# watching `on_tool_start` for the name `agent_call`. That only works when a tool
+# is what performed the delegation; the deterministic router delegates without
+# calling a tool, and the emoji silently disappeared. Announcing it from the
+# delegation path itself makes the signal independent of who decided to delegate.
+ROUTE_REACTION = "route_reaction"
+
+
+class StreamHandler:
+    """
+    Encapsulates LangGraph event streaming, normalization,
+    subagent event propagation, and corrupt checkpoint recovery.
+    """
+
+    @staticmethod
+    async def stream_graph_events(
+        graph: Any,
+        inputs: Dict[str, Any],
+        config: Dict[str, Any],
+        agent_id: Optional[str] = None
+    ):
+        """Low-level graph streaming generator yielding normalized token/tool events.
+
+        `agent_id` is the agent that owns this stream. It matters because
+        `astream_events` reports every *descendant* run too: an agent reached
+        through `agent_call` — or a graph node that calls one — runs inside this
+        callback tree, so its model tokens arrive here indistinguishable from
+        the owner's own. Streaming them verbatim is what put a worker's raw
+        `<worker_handoff>` XML into the channel, once per attempt. A nested run
+        carries its own `agent_id` in the event metadata, so it is skipped:
+        whatever the caller does with the subagent's result is the caller's to
+        report.
+        """
+        if agent_id is None and config:
+            agent_id = (config.get("metadata") or {}).get("agent_id") or (config.get("configurable") or {}).get("agent_id")
+
+        if hasattr(graph, "astream_events"):
+            has_subagent_streamed = False
+            async for event in graph.astream_events(inputs, config=config, version="v2"):
+                kind = event.get("event")
+                if kind == "on_chat_model_stream":
+                    if has_subagent_streamed:
+                        # Suppress top-level orchestrator (e.g. Concierge) post-delegation
+                        # tokens to avoid echoing or duplicating subagent response text
+                        continue
+                    event_agent = (event.get("metadata") or {}).get("agent_id")
+                    if agent_id and event_agent and event_agent != agent_id:
+                        continue
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content"):
+                        content_delta = chunk.content
+                        if isinstance(content_delta, str) and content_delta:
+                            yield {"type": EVENT_TOKEN, "content": content_delta}
+                        elif isinstance(content_delta, list):
+                            for p in content_delta:
+                                if isinstance(p, dict) and p.get("type") == "text":
+                                    t = p.get("text", "")
+                                    if t:
+                                        yield {"type": EVENT_TOKEN, "content": t}
+                                elif isinstance(p, str) and p:
+                                    yield {"type": EVENT_TOKEN, "content": p}
+                elif kind == "on_tool_start":
+                    yield {
+                        "type": EVENT_TOOL_START,
+                        "tool_name": event.get("name"),
+                        "tool_args": event.get("data", {}).get("input", {}),
+                        "run_id": event.get("run_id")
+                    }
+                elif kind == "on_tool_end":
+                    yield {
+                        "type": EVENT_TOOL_END,
+                        "tool_name": event.get("name"),
+                        "output": event.get("data", {}).get("output"),
+                        "run_id": event.get("run_id")
+                    }
+                elif kind == "on_custom_event":
+                    event_name = event.get("name")
+                    if event_name == SUBAGENT_STREAM_TOKEN:
+                        data = event.get("data", {})
+                        content_delta = data.get("content", "")
+                        if content_delta:
+                            has_subagent_streamed = True
+                            yield {
+                                "type": EVENT_TOKEN,
+                                "content": content_delta,
+                                "agent_id": data.get("agent_id")
+                            }
+                    elif event_name == SUBAGENT_STREAM_FINAL:
+                        data = event.get("data", {})
+                        has_subagent_streamed = True
+                        yield {
+                            "type": EVENT_SUBAGENT_FINAL,
+                            "agent_id": data.get("agent_id"),
+                            "response": data.get("response"),
+                            "text": data.get("text", "")
+                        }
+                    elif event_name == ROUTE_REACTION:
+                        # Deliberately does not set `has_subagent_streamed`: this
+                        # announces *that* a delegation happened, before any of the
+                        # callee's text exists, and must not suppress the owner's
+                        # own tokens on its own.
+                        data = event.get("data", {})
+                        yield {
+                            "type": EVENT_REACTION,
+                            "agent_id": data.get("agent_id"),
+                            "emoji": data.get("emoji")
+                        }
+        else:
+            result = await graph.ainvoke(inputs, config=config)
+            reply_message = result["messages"][-1]
+            yield {"type": EVENT_TOKEN, "content": str(reply_message.content)}
+
+    @classmethod
+    async def stream_with_recovery(
+        cls,
+        graph: Any,
+        inputs: Dict[str, Any],
+        config: Dict[str, Any],
+        session: ExecutionContext,
+        recover_checkpoint_fn: Callable[[ExecutionContext], None],
+        is_corrupt_checkpoint_fn: Callable[[Exception], bool],
+        agent_id: Optional[str] = None
+    ):
+        """Streams graph events with automatic corrupt checkpoint recovery and retry."""
+        try:
+            async for event in cls.stream_graph_events(graph, inputs, config, agent_id=agent_id):
+                yield event
+        except Exception as e:
+            if is_corrupt_checkpoint_fn(e):
+                recover_checkpoint_fn(session)
+                async for event in cls.stream_graph_events(graph, inputs, config, agent_id=agent_id):
+                    yield event
+            else:
+                raise e
+
+    @staticmethod
+    def resolve_final_response(
+        graph: Any,
+        config: Dict[str, Any],
+        accumulated_tokens: Optional[List[str]],
+        parse_fn: Callable[[Any], AgentResponse]
+    ) -> AgentResponse:
+        """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
+        state = graph.get_state(config) if hasattr(graph, "get_state") else None
+        raw_reply = ""
+        if state and hasattr(state, "values") and state.values and "messages" in state.values and state.values["messages"]:
+            raw_reply = state.values["messages"][-1].content
+        elif accumulated_tokens:
+            raw_reply = "".join(accumulated_tokens)
+        return parse_fn(raw_reply)
+
+
+# Re-exported for backwards compatibility during migration
+from core.channel.discord.stream_buffer import DiscordStreamBuffer

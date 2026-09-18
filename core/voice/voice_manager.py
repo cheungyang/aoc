@@ -12,7 +12,7 @@ from .verbalizer import Verbalizer, VoiceStream
 from .audio_queue import AudioStreamQueue
 from .bridge_manager import BridgeManager
 from core.loaders.agents_loader import AgentsLoader
-from core.agent.session_manager import SessionManager
+from core.runtime.session_manager import SessionManager
 from core.util.models import DEFAULT_VERBALIZER_MODEL
 
 # Ensure FFmpeg executable is located
@@ -335,7 +335,7 @@ class VoiceManager:
                 # nothing on a voice turn -- the reply existed only as audio, so
                 # anything with a link or a number in it was unrecoverable once
                 # spoken.
-                from core.agent.stream_handler import DiscordStreamBuffer
+                from core.channel.discord.stream_buffer import DiscordStreamBuffer
 
                 voice_stream = VoiceStream(verbalizer=self.verbalizer)
                 text_buffer = DiscordStreamBuffer(target_channel, edit_interval=1.5)

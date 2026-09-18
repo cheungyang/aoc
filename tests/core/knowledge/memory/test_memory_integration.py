@@ -10,8 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
-from core.agent.session_manager import SessionManager
-from core.agent.logging_handler import LoggingHandler
+from core.runtime.session_manager import SessionManager
+from core.runtime.logging_handler import LoggingHandler
 
 class TestMemoryIntegration(unittest.TestCase):
     def setUp(self):

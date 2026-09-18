@@ -8,9 +8,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools.graph_status import graph_status
 from core.util import format_tool_response
-from core.agent.execution_context import current_execution_context
-from core.agent.job_manager import Job
-from core.agent.execution_context import ExecutionContext
+from core.runtime.execution_context import current_execution_context
+from core.runtime.job_manager import Job
+from core.runtime.execution_context import ExecutionContext
 
 class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
@@ -135,7 +135,7 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
 
         mock_jm = MagicMock()
         mock_job_manager_class.return_value = mock_jm
-        from core.agent.session_manager import SessionManager
+        from core.runtime.session_manager import SessionManager
         sess = SessionManager.get_session(agent_id="test", source="discord", channel="content-creation")
         token = current_execution_context.set(sess)
         try:

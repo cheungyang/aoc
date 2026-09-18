@@ -44,7 +44,7 @@ class ToolsLoader:
     @staticmethod
     def _require_ctx(ctx, caller: str):
         """Rejects the legacy `(agent_id, graph_id)` string form loudly instead of guessing."""
-        from core.agent.execution_context import ExecutionContext
+        from core.runtime.execution_context import ExecutionContext
         if not isinstance(ctx, ExecutionContext):
             raise TypeError(
                 f"ToolsLoader.{caller}() expects an ExecutionContext, got {type(ctx).__name__}. "

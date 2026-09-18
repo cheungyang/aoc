@@ -1,6 +1,6 @@
 from datetime import datetime
 from langchain_core.tools import tool
-from core.agent.job_manager import JobManager
+from core.runtime.job_manager import JobManager
 from core.util import format_tool_response
 
 @tool

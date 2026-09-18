@@ -61,7 +61,7 @@ async def main():
     loader = AgentsLoader()
     agent = loader.get_agent("main")
     if agent:
-        from core.agent.session_manager import SessionManager
+        from core.runtime.session_manager import SessionManager
         session = SessionManager.get_session("main", source="voice_dryrun", stateless=True)
         response = await agent.execute(transcript, session=session)
         print(f"\n💬 Agent Response:\n{response}")
