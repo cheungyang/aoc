@@ -55,16 +55,6 @@ _REWRITING: List[str] = [
     ),
     'Say "~" as "about", and "e.g." as "for example".',
     "Replace markdown emphasis and emoji with plain spoken phrasing.",
-    (
-        'Drop hashtags entirely: "#a/read" and "#project/home" are '
-        "filing labels, not speech, so say neither the tag nor the hash."
-    ),
-    (
-        'Say the priority symbols as words: "\U0001F53A" is "highest '
-        'priority", "\u23EB" is "high priority", "\U0001F53C" is '
-        '"medium priority", "\U0001F53D" is "low priority", and '
-        '"\u23EC" is "lowest priority".'
-    ),
     "For a link, say its label, never its URL.",
     (
         'Add short connecting phrases ("first", "after that", "the catch '

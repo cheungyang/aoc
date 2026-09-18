@@ -48,25 +48,14 @@ class TestVerbalizerPrompt(unittest.TestCase):
         up front is what tells them when it ends."""
         self.assertIn("say how many items it has", self.prompt)
 
-    def test_drops_hashtags(self):
-        """Filing labels like "#a/read" are notation for the eye; read
-        aloud they are noise in the middle of a sentence."""
-        self.assertIn("Drop hashtags", self.prompt)
-        self.assertIn("#a/read", self.prompt)
-
-    def test_spells_out_every_priority_symbol(self):
-        """Each symbol carries a distinct level, and an unspoken one
-        loses the ranking the task was written to express."""
-        for symbol, spoken in (
-            ("\U0001F53A", "highest priority"),
-            ("\u23EB", "high priority"),
-            ("\U0001F53C", "medium priority"),
-            ("\U0001F53D", "low priority"),
-            ("\u23EC", "lowest priority"),
-        ):
-            with self.subTest(symbol=symbol):
-                self.assertIn(symbol, self.prompt)
-                self.assertIn(spoken, self.prompt)
+    def test_leaves_deterministic_notation_to_the_code(self):
+        """Hashtags and priority symbols are resolved in `verbalizer`
+        before the model is called, on every path including the prose one
+        that never reaches a model. A rule here would be dead weight at
+        best and a second, drifting definition at worst."""
+        self.assertNotIn("hashtag", self.prompt.lower())
+        self.assertNotIn("\U0001F53A", self.prompt)
+        self.assertNotIn("\u23EB", self.prompt)
 
     def test_demands_plain_output(self):
         """The result goes straight to a synthesiser, which reads a stray

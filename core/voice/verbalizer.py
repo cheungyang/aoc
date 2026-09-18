@@ -12,6 +12,11 @@ The model is only consulted for text that has structure to restructure. Plain
 conversational prose -- the majority of turns -- takes the fast path and never
 leaves the process, because a round-trip before the first word of a two-sentence
 reply is the one latency cost a voice conversation cannot hide.
+
+Notation that always resolves the same way -- XML blocks, filing hashtags,
+priority symbols -- is handled here in code rather than asked of the model. A
+prompt rule only applies on the turns that reach the model, and these markers
+turn up just as often in the prose that does not.
 """
 import asyncio
 import re
@@ -96,6 +101,89 @@ def strip_xml(text: str) -> str:
     return cleaned
 
 
+# A tag is a hash followed immediately by a letter, so "# Heading" and the
+# "#" of a markdown header are left alone. The lookbehind requires the hash
+# to open a word, which keeps "C#", "issue #4", and a URL fragment intact.
+_HASHTAG_RE = re.compile(r"(?<![^\s(\[])#[A-Za-z][\w-]*(?:/[\w-]+)*")
+
+# Obsidian task priorities. The sanitizer classes these as emoji and deletes
+# them, so unless they are turned into words here the level is lost without
+# a trace -- the listener hears the task and never learns it was urgent.
+_PRIORITY_WORDS = {
+    "\U0001F53A": "highest priority",
+    "\u23EB": "high priority",
+    "\U0001F53C": "medium priority",
+    "\U0001F53D": "low priority",
+    "\u23EC": "lowest priority",
+}
+
+_PRIORITY_RE = re.compile("|".join(re.escape(s) for s in _PRIORITY_WORDS))
+
+# Bullets and numbering that can sit between the line start and a symbol.
+_LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*+>]\s*|\d+[.)]\s*)*")
+
+
+def strip_hashtags(text: str) -> str:
+    """Removes filing tags such as `#a/read` from text bound for speech.
+
+    Tags are notation for the eye. Read aloud, "#a/read" becomes "hash a
+    slash read" in the middle of a sentence, and asking the model to drop
+    them only works on the turns that reach the model -- plain prose takes
+    the fast path. Doing it here covers every path, the way `strip_xml`
+    does.
+
+    Line structure is preserved: `has_structure` reads line beginnings, so
+    collapsing newlines here would hide a list from the detector. A line
+    left with no words after its tags are removed is dropped entirely,
+    since a blank line is a block boundary downstream.
+    """
+    if not text:
+        return ""
+
+    kept: List[str] = []
+    for line in text.split("\n"):
+        stripped = _HASHTAG_RE.sub("", line)
+        if stripped == line:
+            kept.append(line)
+            continue
+        stripped = re.sub(r"[ \t]{2,}", " ", stripped)
+        # A tag sitting just before punctuation ("and #home.") leaves the
+        # space behind it, which the synthesiser pauses on.
+        stripped = re.sub(r"[ \t]+([.,;:!?])", r"\1", stripped).rstrip()
+        if not re.search(r"[A-Za-z0-9]", stripped):
+            # The line was nothing but tags; a bare "-" is not worth saying.
+            continue
+        kept.append(stripped)
+
+    return "\n".join(kept)
+
+
+def speak_priority_symbols(text: str) -> str:
+    """Replaces the priority symbols with the words for their level.
+
+    Placement follows where the symbol sits. Leading its line it reads as a
+    label ("high priority: call the dentist"); trailing a phrase it reads as
+    an aside ("call the dentist, high priority"). The comma is what stops
+    the synthesiser running the level into the task as one breath.
+    """
+    if not text:
+        return ""
+
+    def replace(match: re.Match) -> str:
+        words = _PRIORITY_WORDS[match.group(0)]
+        before = text[:match.start()].rsplit("\n", 1)[-1]
+        if not _LIST_PREFIX_RE.sub("", before).strip():
+            return f"{words}:"
+        if before.rstrip()[-1] in ".,;:!?-\u2014":
+            return words
+        return f", {words}"
+
+    spoken = _PRIORITY_RE.sub(replace, text)
+    # The symbol was usually preceded by a space; an inserted comma must not
+    # be left floating after it.
+    return re.sub(r"[ \t]+,", ",", spoken)
+
+
 def has_structure(text: str) -> bool:
     """Whether the text was laid out visually and needs restructuring for speech."""
     if not text:
@@ -138,6 +226,12 @@ class Verbalizer:
 
         text = strip_xml(text)
         if not text or not text.strip():
+            return ""
+
+        # Before the structure check, so the model and the sanitizer fallback
+        # both receive words rather than symbols the sanitizer would delete.
+        text = speak_priority_symbols(strip_hashtags(text))
+        if not text.strip():
             return ""
 
         if not self.enabled or not has_structure(text):
@@ -247,7 +341,11 @@ class VoiceStream:
                 if sentence is None:
                     break
                 self._buffer = rest + held
-                cleaned = TextSanitizer.sanitize(sentence)
+                # This branch never reaches `verbalize`, so the same notation
+                # pass has to happen here. Sentences arrive at a boundary, so
+                # a tag or symbol is whole by the time it is emitted.
+                spoken = speak_priority_symbols(strip_hashtags(sentence))
+                cleaned = TextSanitizer.sanitize(spoken)
                 if cleaned:
                     chunks.append(cleaned)
 
