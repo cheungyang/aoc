@@ -32,6 +32,12 @@ class TickScriptTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.manifest_path = os.path.join(self.tmp.name, "build_request.json")
+        self.cache_path = os.path.join(self.tmp.name, "tick_errors.json")
+        patcher = patch.dict(
+            os.environ, {"AOC_TICK_ERROR_CACHE": self.cache_path}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.module = _load_module()
 
     def write(self, queue):
@@ -277,6 +283,142 @@ class TestEveryProjectGetsATick(unittest.TestCase):
 
         self.assertEqual(code, 0)
         printed.assert_not_called()
+
+
+class TestErrorCaching(TickScriptTestCase):
+    def test_first_occurrence_of_error_is_reported(self):
+        self.write([])
+        error_msg = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error_msg), \
+             patch("builtins.print") as mock_print:
+            code = self.run_main()
+
+        self.assertEqual(code, 0)
+        mock_print.assert_called_once_with(error_msg)
+
+    def test_repeating_same_error_is_suppressed(self):
+        self.write([])
+        error_msg = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error_msg), \
+             patch("builtins.print") as mock_print:
+            code1 = self.run_main()
+            self.assertEqual(code1, 0)
+            mock_print.assert_called_once_with(error_msg)
+
+        # Second tick returns the exact same error; it must be suppressed.
+        with patch.object(self.module, "run_tick", return_value=error_msg), \
+             patch("builtins.print") as mock_print2:
+            code2 = self.run_main()
+            self.assertEqual(code2, 0)
+            mock_print2.assert_not_called()
+
+    def test_different_error_is_reported_when_error_changes(self):
+        self.write([])
+        error1 = "🛑 Coding tick error: Preflight failed: Token not found"
+        error2 = "🛑 Coding tick error: Setup command failed (exit 127)"
+        with patch.object(self.module, "run_tick", return_value=error1), \
+             patch("builtins.print") as mock_print:
+            self.run_main()
+            mock_print.assert_called_once_with(error1)
+
+        # Different error is not suppressed.
+        with patch.object(self.module, "run_tick", return_value=error2), \
+             patch("builtins.print") as mock_print2:
+            self.run_main()
+            mock_print2.assert_called_once_with(error2)
+
+    def test_successful_tick_clears_error_cache(self):
+        self.write([])
+        error = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print:
+            self.run_main()
+            mock_print.assert_called_once_with(error)
+
+        # Successful tick clears error cache.
+        with patch.object(self.module, "run_tick",
+                          return_value="🧠 T1: implemented."), \
+             patch("builtins.print") as mock_print2:
+            self.run_main()
+            mock_print2.assert_called_once_with("🧠 T1: implemented.")
+
+        # Error occurs again later; now reported again because cache cleared.
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print3:
+            self.run_main()
+            mock_print3.assert_called_once_with(error)
+
+    def test_no_cache_flag_bypasses_suppression(self):
+        self.write([])
+        error = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print:
+            self.run_main()
+            mock_print.assert_called_once_with(error)
+
+        # Running with --no-cache reports the error even if it persists.
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print2:
+            self.run_main("--no-cache")
+            mock_print2.assert_called_once_with(error)
+
+    def test_clear_cache_flag_clears_stored_error(self):
+        self.write([])
+        error = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print"):
+            self.run_main()
+
+        # Running with --clear-cache clears stored error and reports.
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print2:
+            self.run_main("--clear-cache")
+            mock_print2.assert_called_once_with(error)
+
+    def test_dry_run_does_not_mutate_error_cache(self):
+        self.write([{
+            "task_id": "T1", "status": "pending", "stage": "queued",
+            "dependencies": [], "verification_command": "pytest -q"
+        }])
+        error = "🛑 Coding tick error: Preflight failed: Token not found"
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print"):
+            self.run_main()
+
+        # Dry run does not clear or affect cache.
+        with patch("builtins.print"):
+            self.run_main("--dry-run")
+
+        # Second normal tick still suppresses the persisting error.
+        with patch.object(self.module, "run_tick", return_value=error), \
+             patch("builtins.print") as mock_print:
+            self.run_main()
+            mock_print.assert_not_called()
+
+    def test_multi_project_error_caching_isolates_projects(self):
+        project1 = os.path.join(self.tmp.name, "p1", "build_request.json")
+        project2 = os.path.join(self.tmp.name, "p2", "build_request.json")
+        os.makedirs(os.path.dirname(project1), exist_ok=True)
+        os.makedirs(os.path.dirname(project2), exist_ok=True)
+        with open(project1, "w") as f:
+            json.dump({"project_name": "p1", "queue": []}, f)
+        with open(project2, "w") as f:
+            json.dump({"project_name": "p2", "queue": []}, f)
+
+        err = "🛑 Coding tick error: Preflight failed: Token not found"
+        args1 = self.module.parse_args(["--manifest", project1])
+        args2 = self.module.parse_args(["--manifest", project2])
+
+        with patch.object(self.module, "run_tick", return_value=err):
+            # First tick for project 1 reports the error
+            r1 = self.module.tick_project(project1, args1)
+            self.assertEqual(r1, err)
+            # Second tick for project 1 suppresses the error
+            r2 = self.module.tick_project(project1, args1)
+            self.assertEqual(r2, "")
+            # Project 2 is independent: its first tick still reports
+            r3 = self.module.tick_project(project2, args2)
+            self.assertEqual(r3, err)
 
 
 if __name__ == "__main__":

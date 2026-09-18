@@ -19,46 +19,64 @@ import argparse
 import asyncio
 import contextlib
 import io
+import json
 import os
 import sys
+import time
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _bootstrap import ensure_project_interpreter, enter_project_root  # noqa: E402
+from _bootstrap import (  # noqa: E402
+    ensure_project_interpreter,
+    enter_project_root,
+)
 
 ensure_project_interpreter()
 project_root = enter_project_root()
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Run one coding graph tick.")
     parser.add_argument(
         "--manifest",
         default=os.environ.get("AOC_BUILD_REQUEST", ""),
-        help="Path to one project's build_request.json. Omit to tick every project."
+        help="Path to build_request.json. Omit to tick every project."
     )
     parser.add_argument(
         "--project",
         default="",
-        help="Project name, resolved to pkm/wiki/software/<project>/build_request.json."
+        help="Project name, resolved to "
+             "pkm/wiki/software/<project>/build_request.json."
     )
     parser.add_argument(
         "--max-tasks",
         type=int,
         default=1,
-        help="How many tasks one invocation may advance, per project. Each is a separate tick."
+        help="How many tasks one invocation may advance, per project. "
+             "Each is a separate tick."
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Report what the tick would pick up, without running or writing anything."
+        help="Report what the tick would pick up, without running anything."
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
         default=bool(os.environ.get("AOC_TICK_VERBOSE")),
-        help="Re-emit the runtime's own chatter on stderr instead of discarding it."
+        help="Re-emit the runtime's own chatter on stderr."
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass error cache and report errors even if they persist."
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear the error cache before running."
+    )
+    return parser.parse_args(argv)
 
 
 @contextlib.contextmanager
@@ -89,7 +107,10 @@ def select_manifests(args) -> list:
     how cron runs it — every project is visited in turn, because there is no
     longer one shared queue that all projects wait in.
     """
-    from graphs.coding.utils.dag import discover_manifests, manifest_path_for_project
+    from graphs.coding.utils.dag import (
+        discover_manifests,
+        manifest_path_for_project,
+    )
 
     if args.manifest:
         return [os.path.abspath(os.path.expanduser(args.manifest))]
@@ -99,7 +120,7 @@ def select_manifests(args) -> list:
 
 
 def project_label(manifest_path: str) -> str:
-    """The project folder's name — how a report says which queue it came from."""
+    """The project folder name — says which queue a report came from."""
     return os.path.basename(os.path.dirname(manifest_path))
 
 
@@ -108,7 +129,8 @@ async def run_tick(manifest_path: str) -> str:
     from graphs.coding.graph import create_graph
 
     graph = create_graph()
-    state = await graph.ainvoke(prepare_input(query="coding tick", build_request_path=manifest_path))
+    inp = prepare_input(query="coding tick", build_request_path=manifest_path)
+    state = await graph.ainvoke(inp)
     return format_output(state)
 
 
@@ -126,23 +148,128 @@ def describe_pending(manifest_path: str) -> str:
     return f"Next tick would run `{task['task_id']}` → {route}."
 
 
+def get_cache_file_path() -> str:
+    """Returns the path to the error cache JSON file."""
+    env_path = os.environ.get("AOC_TICK_ERROR_CACHE")
+    if env_path:
+        return os.path.abspath(os.path.expanduser(env_path))
+    return os.path.join(project_root, "sessions", "coding_tick_errors.json")
+
+
+def load_error_cache(cache_path: Optional[str] = None) -> Dict[str, Any]:
+    """Loads the error cache dictionary from disk."""
+    path = cache_path or get_cache_file_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {}
+
+
+def save_error_cache(
+    cache: Dict[str, Any], cache_path: Optional[str] = None
+) -> None:
+    """Saves the error cache dictionary to disk atomically."""
+    path = cache_path or get_cache_file_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temp_path = f"{path}.tmp.{os.getpid()}"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+        os.replace(temp_path, path)
+    except Exception:
+        pass
+
+
+def cache_key_for_manifest(manifest_path: str) -> str:
+    """Returns the canonical cache key for a manifest path."""
+    return os.path.realpath(os.path.abspath(os.path.expanduser(manifest_path)))
+
+
+def get_cached_error(
+    key: str, cache_path: Optional[str] = None
+) -> Optional[str]:
+    """Retrieves the previous cached error message for a manifest, if any."""
+    cache = load_error_cache(cache_path)
+    entry = cache.get(key)
+    if isinstance(entry, dict):
+        return entry.get("error")
+    if isinstance(entry, str):
+        return entry
+    return None
+
+
+def set_cached_error(
+    key: str, error_message: str, cache_path: Optional[str] = None
+) -> None:
+    """Records the error message for a manifest in the cache."""
+    cache = load_error_cache(cache_path)
+    cache[key] = {
+        "error": error_message.strip(),
+        "timestamp": time.time(),
+    }
+    save_error_cache(cache, cache_path)
+
+
+def clear_cached_error(key: str, cache_path: Optional[str] = None) -> None:
+    """Clears any cached error message for a manifest."""
+    cache = load_error_cache(cache_path)
+    if key in cache:
+        del cache[key]
+        save_error_cache(cache, cache_path)
+
+
+def is_tick_error(report: str) -> bool:
+    """Checks whether a tick report represents a fatal error."""
+    stripped = report.strip()
+    return stripped.startswith("🛑") or stripped.startswith("Error:")
+
+
 def tick_project(manifest_path: str, args) -> str:
     """Advances one project by up to `--max-tasks` tasks."""
     if args.dry_run:
         return describe_pending(manifest_path)
+
+    key = cache_key_for_manifest(manifest_path)
+    use_cache = not getattr(args, "no_cache", False)
 
     reports = []
     for _ in range(max(1, args.max_tasks)):
         output = asyncio.run(run_tick(manifest_path))
         if not output.strip():
             # Nothing left to advance; further ticks would repeat this.
+            if use_cache:
+                clear_cached_error(key)
             break
-        reports.append(output.strip())
+
+        cleaned = output.strip()
+        if is_tick_error(cleaned):
+            if use_cache:
+                cached = get_cached_error(key)
+                if cached == cleaned:
+                    # Same error persists from previous run; suppress it.
+                    break
+                set_cached_error(key, cleaned)
+            reports.append(cleaned)
+            # A fatal error halts further advances for this project.
+            break
+        else:
+            if use_cache:
+                clear_cached_error(key)
+            reports.append(cleaned)
+
     return "\n".join(reports)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv=None) -> int:
+    args = parse_args(argv)
+
+    if getattr(args, "clear_cache", False):
+        save_error_cache({})
 
     manifests = [p for p in select_manifests(args) if p and os.path.exists(p)]
     if not manifests:
@@ -160,7 +287,9 @@ def main() -> int:
                 # Several projects tick in one run, so a line has to say which
                 # queue it came from.
                 if len(manifests) > 1:
-                    sections.append(f"**{project_label(manifest_path)}**\n{report.strip()}")
+                    sections.append(
+                        f"**{project_label(manifest_path)}**\n{report.strip()}"
+                    )
                 else:
                     sections.append(report.strip())
     except Exception as e:
