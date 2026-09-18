@@ -1,32 +1,90 @@
-import os
-import json
-import hashlib
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple, Set
+"""Public interface to the vault knowledge store.
 
-import pyarrow as pa
-import lancedb
-from lancedb.index import FTS
+This module is a facade. It holds no storage logic of its own -- every call is
+forwarded to whichever backend `backends.get_backend()` selected -- and it
+imports nothing native at module scope.
 
-from core.util.config import Config
+That last point is the whole reason the facade exists. `import lancedb` on a CPU
+without AVX2 executes an illegal instruction, and SIGILL is not an exception:
+the kernel kills the interpreter before any `except` clause runs. A module-scope
+`import lancedb` here therefore took the entire bot down the moment anything
+touched the knowledge stack, including the tool loader merely discovering
+`vault_search`. Keeping this module pure-Python means importing it is always
+safe, and the decision about which native library to load happens later, behind
+a subprocess probe.
 
-TABLE_NAME = "vault_chunks"
+The handle returned by `init_knowledge_db` is a `StoreHandle`, not a LanceDB
+table. It remembers which backend created it, so these functions dispatch on the
+handle rather than on global state -- which is what lets a single process hold
+handles from both backends at once.
+"""
+
+from typing import Any, Dict, List, Optional
+
+from core.knowledge.vector import backends
+from core.knowledge.vector.backends.base import TABLE_NAME, StoreHandle
+
+__all__ = [
+    "TABLE_NAME",
+    "StoreHandle",
+    "get_knowledge_db_path",
+    "get_active_backend_name",
+    "get_db_connection",
+    "get_vault_schema",
+    "init_knowledge_db",
+    "build_fts_index",
+    "get_existing_hashes",
+    "upsert_chunks",
+    "prune_deleted_files",
+    "add_chunks",
+    "count_chunks",
+    "scan_by_category",
+    "flush",
+    "hybrid_search_vault",
+]
+
+
+def _backend(handle: Any = None):
+    """Resolves the backend to use for a call.
+
+    Prefers the one that produced the handle, so a handle stays bound to its
+    own implementation even if the process-wide selection differs.
+    """
+    if isinstance(handle, StoreHandle):
+        return handle.backend
+    return backends.get_backend()
 
 
 def get_knowledge_db_path() -> str:
-    """Returns the configured LanceDB directory path or defaults to ~/pkm/.lancedb."""
+    """Returns the configured store directory, defaulting to ~/pkm/.lancedb."""
+    from core.util.config import Config
     return Config().knowledge_db_path
 
 
-def get_db_connection(db_path: Optional[str] = None) -> lancedb.DBConnection:
-    """Creates a LanceDB connection."""
-    path = os.path.abspath(os.path.expanduser(db_path or get_knowledge_db_path()))
-    os.makedirs(path, exist_ok=True)
-    return lancedb.connect(path)
+def get_active_backend_name() -> str:
+    """Name of the backend currently in use ('lancedb' or 'numpy')."""
+    return backends.get_backend().name
 
 
-def get_vault_schema(dim: int = 1536) -> pa.Schema:
-    """Returns the PyArrow schema for vault chunks."""
+def get_db_connection(db_path: Optional[str] = None) -> Any:
+    """Opens a connection to the store directory.
+
+    The return type is backend-defined and only meaningful when handed straight
+    back to `init_knowledge_db`.
+    """
+    return _backend().connect(db_path or get_knowledge_db_path())
+
+
+def get_vault_schema(dim: int = 1536):
+    """PyArrow schema for vault chunks.
+
+    Kept at module level because the parquet the numpy backend writes uses the
+    same field order, so the schema is the shared on-disk contract rather than a
+    LanceDB detail. pyarrow is imported lazily only to keep this module's import
+    free of native code.
+    """
+    import pyarrow as pa
+
     return pa.schema([
         pa.field("id", pa.string()),
         pa.field("file_path", pa.string()),
@@ -38,217 +96,110 @@ def get_vault_schema(dim: int = 1536) -> pa.Schema:
         pa.field("raw_content", pa.string()),
         pa.field("vector", pa.list_(pa.float32(), dim)),
         pa.field("content_hash", pa.string()),
-        pa.field("updated_at", pa.string())
+        pa.field("updated_at", pa.string()),
     ])
 
 
 def init_knowledge_db(
-    conn: Optional[lancedb.DBConnection] = None,
+    conn: Optional[Any] = None,
     db_path: Optional[str] = None,
     table_name: str = TABLE_NAME,
     dim: Optional[int] = None,
-    force_recreate: bool = False
-) -> Any:
+    force_recreate: bool = False,
+) -> StoreHandle:
+    """Opens (or creates) the vault chunk store and returns a handle to it."""
+    if dim is None:
+        from core.util.config import Config
+        dim = Config().embedding_dimensions
+
+    backend = _backend()
+    return backend.open(
+        conn=conn,
+        db_path=db_path or get_knowledge_db_path(),
+        table_name=table_name,
+        dim=dim,
+        force_recreate=force_recreate,
+    )
+
+
+def build_fts_index(table: StoreHandle) -> None:
+    """Creates or refreshes the BM25 index over the enriched `text` column."""
+    return _backend(table).build_fts_index(table)
+
+
+def get_existing_hashes(table: StoreHandle) -> Dict[str, str]:
+    """Maps chunk id -> content_hash for everything currently stored."""
+    return _backend(table).get_existing_hashes(table)
+
+
+def upsert_chunks(table: StoreHandle, chunks: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Inserts new chunks and updates changed ones, keyed on content_hash.
+
+    Returns {'inserted', 'updated', 'unchanged', 'total_scanned'}.
     """
-    Initializes or opens the LanceDB table for vault knowledge and creates the FTS index.
+    return _backend(table).upsert_chunks(table, chunks)
+
+
+def prune_deleted_files(table: StoreHandle, current_file_paths: List[str]) -> int:
+    """Removes chunks whose file is gone. Returns the number of *files* pruned."""
+    return _backend(table).prune_deleted_files(table, current_file_paths)
+
+
+def add_chunks(table: StoreHandle, rows: List[Dict[str, Any]]) -> None:
+    """Appends rows without dedupe checks -- the bulk rebuild path."""
+    return _backend(table).add_chunks(table, rows)
+
+
+def count_chunks(table: StoreHandle) -> int:
+    """Number of chunks stored."""
+    return _backend(table).count_chunks(table)
+
+
+def scan_by_category(table: StoreHandle, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Returns full rows, vectors included, optionally filtered by category.
+
+    Separate from `hybrid_search_vault` because search results deliberately omit
+    vectors; wiki_scanner needs them to compare documents against each other.
     """
-    if conn is None:
-        conn = get_db_connection(db_path)
-
-    dimension = dim or Config().embedding_dimensions
-    schema = get_vault_schema(dimension)
-
-    if force_recreate:
-        return conn.create_table(table_name, schema=schema, mode="overwrite")
-
-    try:
-        table = conn.open_table(table_name)
-        existing_field_names = set(table.schema.names)
-        expected_field_names = set(schema.names)
-        if not expected_field_names.issubset(existing_field_names):
-            # Schema evolution: Recreate table with new schema
-            table = conn.create_table(table_name, schema=schema, mode="overwrite")
-    except Exception:
-        table = conn.create_table(table_name, schema=schema)
-
-    return table
+    return _backend(table).scan_by_category(table, category)
 
 
-def build_fts_index(table: Any):
-    """Creates or updates the Full-Text Search (Tantivy BM25) index on the text column."""
-    try:
-        table.create_index("text", config=FTS(), replace=True)
-    except Exception:
-        try:
-            table.create_fts_index("text", replace=True)
-        except Exception as e:
-            print(f"Warning: Failed to create FTS index: {e}")
+def flush(table: StoreHandle) -> None:
+    """Forces pending writes to disk.
 
-
-def get_existing_hashes(table: Any) -> Dict[str, str]:
+    A no-op for LanceDB, which persists on write. The numpy backend batches its
+    writes, so anything that must survive the process needs this.
     """
-    Retrieves a mapping of id -> content_hash for all existing chunks in the table.
-    """
-    if table.count_rows() == 0:
-        return {}
-    
-    try:
-        arrow_tbl = table.to_arrow()
-        ids = arrow_tbl.column("id").to_pylist()
-        hashes = arrow_tbl.column("content_hash").to_pylist()
-        return dict(zip(ids, hashes))
-    except Exception:
-        # Fallback via search/scan if to_arrow fails
-        results = table.search().select(["id", "content_hash"]).limit(100000).to_list()
-        return {r["id"]: r.get("content_hash", "") for r in results}
-
-
-def upsert_chunks(table: Any, chunks: List[Dict[str, Any]]) -> Dict[str, int]:
-    """
-    Inserts new chunks and updates modified chunks based on content_hash.
-    Returns stats dict: {'inserted': int, 'updated': int, 'unchanged': int, 'total_scanned': int}.
-    """
-    if not chunks:
-        return {"inserted": 0, "updated": 0, "unchanged": 0, "total_scanned": 0}
-
-    existing_hashes = get_existing_hashes(table)
-    to_upsert = []
-    inserted_count = 0
-    updated_count = 0
-    unchanged_count = 0
-
-    seen_ids = set()
-    for chunk in chunks:
-        cid = chunk["id"]
-        if cid in seen_ids:
-            continue
-        seen_ids.add(cid)
-
-        chash = chunk.get("content_hash", "")
-        if cid not in existing_hashes:
-            to_upsert.append(chunk)
-            inserted_count += 1
-        elif existing_hashes[cid] != chash:
-            to_upsert.append(chunk)
-            updated_count += 1
-        else:
-            unchanged_count += 1
-
-    if to_upsert:
-        table.merge_insert("id") \
-            .when_matched_update_all() \
-            .when_not_matched_insert_all() \
-            .execute(to_upsert)
-        build_fts_index(table)
-
-    return {
-        "inserted": inserted_count,
-        "updated": updated_count,
-        "unchanged": unchanged_count,
-        "total_scanned": len(chunks)
-    }
-
-
-def prune_deleted_files(table: Any, current_file_paths: List[str]) -> int:
-    """
-    Removes chunks from LanceDB whose file_path is no longer in current_file_paths.
-    """
-    if table.count_rows() == 0:
-        return 0
-
-    current_set = set(current_file_paths)
-    try:
-        arrow_tbl = table.to_arrow()
-        file_paths = set(arrow_tbl.column("file_path").to_pylist())
-        deleted_files = file_paths - current_set
-        if not deleted_files:
-            return 0
-        
-        pruned_count = 0
-        for f in deleted_files:
-            # Escape single quotes in file paths
-            safe_f = f.replace("'", "''")
-            table.delete(f"file_path = '{safe_f}'")
-            pruned_count += 1
-            
-        if pruned_count > 0:
-            build_fts_index(table)
-        return pruned_count
-    except Exception as e:
-        print(f"Warning: Failed to prune deleted files: {e}")
-        return 0
+    return _backend(table).flush(table)
 
 
 def hybrid_search_vault(
-    table: Any,
+    table: StoreHandle,
     query: str,
     query_vector: Optional[List[float]] = None,
     limit: int = 5,
     category: Optional[str] = None,
     path_filter: Optional[str] = None,
-    search_type: str = "hybrid"
+    search_type: str = "hybrid",
 ) -> List[Dict[str, Any]]:
-    """
-    Performs hybrid, vector-only, or full-text (BM25) search on vault chunks.
-    
+    """Searches vault chunks by vector, BM25, or a fusion of both.
+
     Args:
-        table: LanceDB table instance.
+        table: Handle from `init_knowledge_db`.
         query: Keyword or natural language query.
-        query_vector: Dense vector representation of query (required for hybrid & semantic).
-        limit: Max results to return.
-        category: Filter by category ('vault' for personal notes, 'wiki' for synthesized wiki, or 'all'/None).
-        path_filter: Substring or prefix to filter file_path.
-        search_type: 'hybrid', 'semantic' (vector only), or 'keyword' (BM25 only).
+        query_vector: Dense query embedding; required for hybrid and semantic.
+        limit: Max results.
+        category: 'vault', 'wiki', or None/'all' for no filter.
+        path_filter: Substring match against file_path.
+        search_type: 'hybrid', 'semantic'/'vector', or 'keyword'/'fts'.
+            Falls back to keyword when no query_vector is supplied.
     """
-    if table.count_rows() == 0:
-        return []
-
-    search_type = search_type.lower()
-
-    if search_type == "hybrid" and query_vector is not None:
-        builder = table.search(query_type="hybrid").vector(query_vector).text(query)
-    elif search_type in ("semantic", "vector") and query_vector is not None:
-        builder = table.search(query_vector)
-    elif search_type in ("keyword", "fts") or query_vector is None:
-        builder = table.search(query, query_type="fts")
-    else:
-        builder = table.search(query_type="hybrid").vector(query_vector).text(query)
-
-    where_clauses = []
-    if category and category.lower() != "all":
-        safe_cat = category.lower().replace("'", "''")
-        where_clauses.append(f"category = '{safe_cat}'")
-
-    if path_filter:
-        safe_path = path_filter.replace("'", "''")
-        where_clauses.append(f"file_path LIKE '%{safe_path}%'")
-
-    if where_clauses:
-        builder = builder.where(" AND ".join(where_clauses))
-
-    raw_results = builder.limit(limit).to_list()
-
-    results = []
-    for r in raw_results:
-        tags = []
-        if r.get("tags"):
-            try:
-                tags = json.loads(r["tags"])
-            except Exception:
-                tags = [r["tags"]]
-
-        score = r.get("_relevance_score", r.get("_distance", 0.0))
-        results.append({
-            "id": r.get("id"),
-            "file_path": r.get("file_path"),
-            "category": r.get("category", "vault"),
-            "title": r.get("title", ""),
-            "header_path": r.get("header_path", ""),
-            "tags": tags,
-            "text": r.get("text", ""),
-            "raw_content": r.get("raw_content", ""),
-            "score": score,
-            "updated_at": r.get("updated_at", "")
-        })
-
-    return results
+    return _backend(table).hybrid_search(
+        table,
+        query=query,
+        query_vector=query_vector,
+        limit=limit,
+        category=category,
+        path_filter=path_filter,
+        search_type=search_type,
+    )

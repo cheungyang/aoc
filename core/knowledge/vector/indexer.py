@@ -1,6 +1,7 @@
 import re
 import os
 import json
+import time
 import hashlib
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -241,48 +242,118 @@ def get_embedding_client(model_name: Optional[str] = None):
         return None
 
 
-def generate_embeddings(texts: List[str], client: Optional[Any] = None) -> List[List[float]]:
+# Distinguishes "caller didn't say" from "caller said: no client".
+# `client or get_embedding_client()` conflated the two, which made every
+# offline path a lie: --skip-embedding, whose help text promises 0 quota cost,
+# passed client=None and got a live API client built for it anyway.
+_AUTO_CLIENT = object()
+
+
+def _resolve_client(client):
+    return get_embedding_client() if client is _AUTO_CLIENT else client
+
+
+class EmbeddingError(RuntimeError):
+    """An embedding client was available but could not produce vectors.
+
+    Deliberately fatal rather than falling back to deterministic vectors. A hash
+    of the text is a perfectly well-formed vector that is indistinguishable from
+    a real one once written, so substituting it silently poisons the index: the
+    affected chunks never match anything meaningful, and nothing records which
+    ones they were. A failed index build you have to re-run is a much smaller
+    problem than an index that is quietly wrong for months.
+    """
+
+
+EMBEDDING_MAX_ATTEMPTS = 3
+EMBEDDING_RETRY_BASE_SECONDS = 1.0
+
+# Substrings that mark a failure as worth retrying. Anything else -- a retired
+# model name, a bad key -- will fail identically on the next attempt, so retrying
+# only delays the report.
+_TRANSIENT_MARKERS = (
+    "429", "resource_exhausted", "rate limit", "ratelimit", "quota",
+    "500", "503", "internal error", "unavailable", "overloaded",
+    "timeout", "timed out", "deadline",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
+
+
+def _deterministic_vector(text: str, dim: int) -> List[float]:
+    h = hashlib.sha256(text.encode("utf-8")).digest()
+    # Repeat/slice hash bytes to make a float list of length `dim`
+    return [(h[(i * 4) % len(h)] / 255.0) - 0.5 for i in range(dim)]
+
+
+def _embed_with_retry(call, description: str):
+    """Runs an embedding call, retrying transient failures with backoff."""
+    last_error = None
+    attempts = 0
+
+    for attempt in range(1, EMBEDDING_MAX_ATTEMPTS + 1):
+        attempts = attempt
+        try:
+            return call()
+        except Exception as e:
+            last_error = e
+            if not _is_transient(e) or attempt == EMBEDDING_MAX_ATTEMPTS:
+                break
+            delay = EMBEDDING_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            print(
+                f"Warning: {description} failed (attempt {attempt}/{EMBEDDING_MAX_ATTEMPTS}): "
+                f"{e}. Retrying in {delay:.1f}s."
+            )
+            time.sleep(delay)
+
+    raise EmbeddingError(
+        f"{description} failed after {attempts} attempt(s): {last_error}"
+    ) from last_error
+
+
+def generate_embeddings(texts: List[str], client: Any = _AUTO_CLIENT) -> List[List[float]]:
     """
     Generates dense embeddings for a list of texts.
-    If no client is available, generates deterministic pseudo-random vectors for testability.
+
+    Pass `client=None` to force deterministic offline vectors; omit the argument
+    to build a client from config if one is available.
+
+    Raises:
+        EmbeddingError: a client was available but the call failed. Never
+            silently substitutes deterministic vectors for a failed API call.
     """
     if not texts:
         return []
 
-    client = client or get_embedding_client()
-    if client:
-        try:
-            return client.embed_documents(texts)
-        except Exception as e:
-            print(f"Warning: Embedding call failed: {e}. Falling back to deterministic embeddings.")
+    client = _resolve_client(client)
+    if client is None:
+        dim = Config().embedding_dimensions
+        return [_deterministic_vector(text, dim) for text in texts]
 
-    # Deterministic fallback vector generation based on MD5
-    dim = Config().embedding_dimensions
-    vectors = []
-    for text in texts:
-        h = hashlib.sha256(text.encode("utf-8")).digest()
-        # Repeat/slice hash bytes to make a float list of length `dim`
-        floats = []
-        for i in range(dim):
-            byte_val = h[(i * 4) % len(h)]
-            floats.append((byte_val / 255.0) - 0.5)
-        vectors.append(floats)
-    return vectors
+    return _embed_with_retry(
+        lambda: client.embed_documents(texts),
+        f"Embedding request for {len(texts)} chunk(s)",
+    )
 
 
-def generate_query_embedding(query: str, client: Optional[Any] = None) -> List[float]:
-    """Generates embedding for a single query text."""
-    client = client or get_embedding_client()
-    if client:
-        try:
-            return client.embed_query(query)
-        except Exception as e:
-            print(f"Warning: Query embedding call failed: {e}. Falling back to deterministic embedding.")
+def generate_query_embedding(query: str, client: Any = _AUTO_CLIENT) -> List[float]:
+    """Generates embedding for a single query text.
 
-    dim = Config().embedding_dimensions
-    h = hashlib.sha256(query.encode("utf-8")).digest()
-    floats = []
-    for i in range(dim):
-        byte_val = h[(i * 4) % len(h)]
-        floats.append((byte_val / 255.0) - 0.5)
-    return floats
+    Pass `client=None` to force a deterministic offline vector. Note that such a
+    vector cannot match API-generated document vectors, so callers without a
+    client should prefer keyword search over a meaningless vector search.
+
+    Raises:
+        EmbeddingError: a client was available but the call failed.
+    """
+    client = _resolve_client(client)
+    if client is None:
+        return _deterministic_vector(query, Config().embedding_dimensions)
+
+    return _embed_with_retry(
+        lambda: client.embed_query(query),
+        "Query embedding request",
+    )

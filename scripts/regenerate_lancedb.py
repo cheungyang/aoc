@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI script to regenerate or rebuild the LanceDB vector database from Obsidian PKM notes.
+CLI script to regenerate or rebuild the vault vector index from Obsidian PKM notes.
 
 Usage:
     python3 scripts/regenerate_lancedb.py [OPTIONS]
@@ -25,10 +25,13 @@ import argparse
 import time
 from typing import Optional, Dict, Any, List
 
-# Check dependencies before heavy imports
+# Check dependencies before heavy imports.
+# Deliberately does not import lancedb: it is now one of two possible backends,
+# and on a CPU whose instruction set its wheels assume but lack, the import
+# raises SIGILL rather than ImportError -- it would kill this script before the
+# except clause could report anything useful.
 try:
     import pyarrow as pa
-    import lancedb
 except ImportError as e:
     print(f"Error: Missing required dependency ({e}).", file=sys.stderr)
     print("Please run this script using the Python environment where dependencies are installed.", file=sys.stderr)
@@ -48,6 +51,10 @@ from core.knowledge.vector.db import (
     build_fts_index,
     hybrid_search_vault,
     get_knowledge_db_path,
+    get_active_backend_name,
+    add_chunks,
+    count_chunks,
+    flush as flush_store,
     TABLE_NAME,
 )
 from core.knowledge.vector.indexer import (
@@ -55,6 +62,7 @@ from core.knowledge.vector.indexer import (
     generate_embeddings,
     generate_query_embedding,
     get_embedding_client,
+    EmbeddingError,
 )
 from core.knowledge.vector.sync import (
     scan_knowledge_markdown_files,
@@ -64,7 +72,7 @@ from core.knowledge.vector.sync import (
 
 def resolve_paths(pkm_dir_arg: Optional[str] = None, db_path_arg: Optional[str] = None) -> tuple[str, str]:
     """
-    Resolves and validates PKM directory and LanceDB storage path.
+    Resolves and validates PKM directory and knowledge store path.
     Checks CLI args, environment variables, config, and sensible project-relative fallbacks.
     """
     config = Config()
@@ -79,7 +87,7 @@ def resolve_paths(pkm_dir_arg: Optional[str] = None, db_path_arg: Optional[str] 
     else:
         pkm_dir = os.path.abspath(os.path.expanduser(config.pkm_dir))
 
-    # 2. Resolve LanceDB directory
+    # 2. Resolve knowledge store directory
     if db_path_arg:
         db_path = os.path.abspath(os.path.expanduser(db_path_arg))
     elif os.getenv("KNOWLEDGE_DB_PATH"):
@@ -119,7 +127,7 @@ def check_and_repair_workspace_symlink(resolved_pkm: str) -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Regenerate or rebuild LanceDB vector database from Obsidian PKM notes."
+        description="Regenerate or rebuild the vault vector index from Obsidian PKM notes."
     )
     parser.add_argument(
         "--pkm-dir",
@@ -131,7 +139,7 @@ def parse_args():
         "--db-path",
         type=str,
         default=None,
-        help="Path to LanceDB database directory (defaults to <pkm-dir>/.lancedb)"
+        help="Path to the knowledge store directory (defaults to <pkm-dir>/.lancedb)"
     )
     parser.add_argument(
         "--clean",
@@ -166,7 +174,7 @@ def parse_args():
         "--write-batch-size",
         type=int,
         default=500,
-        help="Batch size for writing records to LanceDB (default: 500)"
+        help="Batch size for writing records to the knowledge store (default: 500)"
     )
     parser.add_argument(
         "--test-query",
@@ -202,7 +210,7 @@ def regenerate_lancedb(
 ) -> Dict[str, Any]:
     """
     Scans PKM markdown notes (vault/ and wiki/), parses header chunks,
-    computes vector embeddings, writes to LanceDB, builds BM25 FTS index,
+    computes vector embeddings, writes to the knowledge store, builds BM25 FTS index,
     and runs a verification sanity query.
     """
     start_time = time.time()
@@ -223,9 +231,9 @@ def regenerate_lancedb(
             f"Neither 'vault' nor 'wiki' subdirectories were found inside: {resolved_pkm}"
         )
 
-    print(f"=== LanceDB Regeneration Started ===")
+    print(f"=== Vault Index Regeneration Started ===")
     print(f"PKM Directory:    {resolved_pkm}")
-    print(f"LanceDB Path:     {resolved_db}")
+    print(f"Store Path:       {resolved_db}")
     print(f"Mode:             {'DRY-RUN' if dry_run else ('CLEAN REBUILD' if clean else 'INCREMENTAL')}")
     print(f"Embedding Mode:   {'Deterministic (Offline)' if skip_embedding else 'API Client (with deterministic fallback)'}")
 
@@ -307,7 +315,6 @@ def regenerate_lancedb(
 
     total_chunks = len(all_chunks)
     total_batches = (total_chunks + batch_size - 1) // batch_size
-    api_failure_logged = False
 
     for b_idx in range(total_batches):
         start_i = b_idx * batch_size
@@ -318,26 +325,19 @@ def regenerate_lancedb(
         pct = int((b_idx + 1) / total_batches * 100)
         print(f"\r  Embedding batch {b_idx + 1}/{total_batches} ({pct}%) [{start_i + 1}-{end_i}/{total_chunks}]", end="", flush=True)
 
-        if embedding_client and not api_failure_logged:
-            try:
-                vectors = embedding_client.embed_documents(texts)
-                for c, vec in zip(batch, vectors):
-                    c["vector"] = vec
-                continue
-            except Exception as e:
-                print(f"\n  Warning: API embedding failed on batch {b_idx + 1} ({e}). Switching to deterministic embeddings for remaining chunks.")
-                api_failure_logged = True
-                embedding_client = None
-
-        # Deterministic fallback
-        vectors = generate_embeddings(texts, client=None)
+        # One path for both modes: embedding_client is None under
+        # --skip-embedding, which is the only case that yields deterministic
+        # vectors. An API failure raises EmbeddingError rather than quietly
+        # degrading the rest of the run -- see main() for the handling.
+        vectors = generate_embeddings(texts, client=embedding_client)
         for c, vec in zip(batch, vectors):
             c["vector"] = vec
 
     print("\n  Embeddings generated successfully.")
 
-    # 4. Write to LanceDB
-    print("\n[4/5] Initializing LanceDB table and writing chunks...")
+    # 4. Write to the knowledge store
+    backend_name = get_active_backend_name()
+    print(f"\n[4/5] Initializing knowledge store (backend: {backend_name}) and writing chunks...")
     os.makedirs(resolved_db, exist_ok=True)
     table = init_knowledge_db(db_path=resolved_db, force_recreate=clean)
 
@@ -346,17 +346,21 @@ def regenerate_lancedb(
         w_start = wb_idx * write_batch_size
         w_end = min(w_start + write_batch_size, total_chunks)
         batch_to_add = all_chunks[w_start:w_end]
-        table.add(batch_to_add)
+        add_chunks(table, batch_to_add)
         w_pct = int((wb_idx + 1) / write_batches * 100)
-        print(f"\r  Wrote batch {wb_idx + 1}/{write_batches} ({w_pct}%) to LanceDB table '{TABLE_NAME}'", end="", flush=True)
+        print(f"\r  Wrote batch {wb_idx + 1}/{write_batches} ({w_pct}%) to table '{TABLE_NAME}'", end="", flush=True)
 
-    print("\n  Building Tantivy Full-Text Search (BM25) index on 'text'...")
+    print("\n  Building Full-Text Search (BM25) index on 'text'...")
     build_fts_index(table)
     print("  Full-Text Search index built.")
 
+    # Backends that batch their writes need this before anything reads the
+    # directory back; it is a no-op for the ones that persist on write.
+    flush_store(table)
+
     # 5. Verification & Health Check
     print("\n[5/5] Verifying database integrity...")
-    total_rows = table.count_rows()
+    total_rows = count_chunks(table)
     print(f"Total rows in '{TABLE_NAME}': {total_rows}")
 
     verified = False
@@ -400,7 +404,7 @@ def regenerate_lancedb(
         verified = total_rows > 0
 
     duration = round(time.time() - start_time, 2)
-    print(f"\n=== LanceDB Regeneration Completed in {duration}s ===")
+    print(f"\n=== Vault Index Regeneration Completed in {duration}s ===")
     print(f"Database Location: {resolved_db}")
     print(f"Total Chunks:      {total_rows}")
     print(f"Status:            {'HEALTHY & READY' if verified else 'CHECK WARNINGS'}")
@@ -437,8 +441,17 @@ def main():
         )
         if not results.get("verified", False) and not args.dry_run:
             sys.exit(1)
+    except EmbeddingError as e:
+        # Nothing has been written at this point -- embedding happens before the
+        # store is opened -- so the index is untouched rather than half-poisoned.
+        print(f"\nEmbedding failed, so no index was written: {e}", file=sys.stderr)
+        print("\nThe existing index is unchanged. Options:", file=sys.stderr)
+        print("  - Wait for the quota/outage to clear and re-run.", file=sys.stderr)
+        print("  - Re-run with --skip-embedding to build a keyword-only index now,", file=sys.stderr)
+        print("    then re-run without it later to add real vectors.", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"\nError during LanceDB regeneration: {e}", file=sys.stderr)
+        print(f"\nError during vault index regeneration: {e}", file=sys.stderr)
         sys.exit(1)
 
 

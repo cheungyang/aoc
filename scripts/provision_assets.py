@@ -325,8 +325,33 @@ def task_env_file(rep):
                    "no .env and no API keys in environment — copy .env.example and fill it in")
 
 
+def _index_present(db_path):
+    """True if the *active* backend already has a store at db_path.
+
+    A non-empty directory is not enough. The two backends use different layouts,
+    so a machine carrying an index written by the other one would look populated
+    while the running backend sees nothing -- and `auto` mode would skip the
+    build that would have fixed it.
+    """
+    if not os.path.isdir(db_path):
+        return False
+
+    try:
+        # Only resolves a name. The probe runs in a child process and no native
+        # library is imported here, so this is safe on any CPU.
+        from core.knowledge.vector.backends import resolve_backend_name, LANCEDB
+        backend = resolve_backend_name()
+    except Exception:
+        # Can't tell which backend will run; fall back to the old heuristic.
+        return bool(os.listdir(db_path))
+
+    if backend == LANCEDB:
+        return os.path.isdir(os.path.join(db_path, "vault_chunks.lance"))
+    return os.path.isfile(os.path.join(db_path, "vault_chunks", "chunks.parquet"))
+
+
 def task_vector_index(rep):
-    """Builds the LanceDB index when the mounted PKM has notes but no database.
+    """Builds the vault index when the mounted PKM has notes but no database.
 
     Controlled by AOC_BOOTSTRAP_INDEX: `auto` (default) only builds when the
     database is missing, `always` rebuilds every boot, `never` disables it.
@@ -343,8 +368,7 @@ def task_vector_index(rep):
         rep.record("vector_index", SKIP, f"PKM not mounted at {pkm_dir}")
         return
 
-    exists = os.path.isdir(db_path) and os.listdir(db_path)
-    if exists and mode == "auto":
+    if mode == "auto" and _index_present(db_path):
         rep.record("vector_index", SKIP, f"index already present at {db_path}")
         return
 

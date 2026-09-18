@@ -9,6 +9,7 @@ from core.knowledge.vector.db import (
     get_existing_hashes,
     get_knowledge_db_path,
     build_fts_index,
+    flush,
 )
 from core.knowledge.vector.indexer import (
     split_markdown_into_chunks,
@@ -77,7 +78,7 @@ def sync_knowledge(
 ) -> Dict[str, Any]:
     """
     Scans the PKM vault, splits notes into header-aware chunks,
-    generates embeddings incrementally, and upserts them into LanceDB.
+    generates embeddings incrementally, and upserts them into the knowledge store.
     """
     resolved_pkm = os.path.abspath(os.path.expanduser(pkm_dir or get_pkm_dir()))
     resolved_db = os.path.abspath(os.path.expanduser(db_path or get_knowledge_db_path()))
@@ -149,6 +150,11 @@ def sync_knowledge(
 
     # Prune deleted files
     pruned_count = prune_deleted_files(table, valid_file_paths)
+
+    # Both writes above rebuild the FTS index, which happens to persist on the
+    # batching backend -- but relying on that is relying on a side effect. Make
+    # durability explicit instead; it is a no-op when there is nothing pending.
+    flush(table)
 
     return {
         "scanned_files": len(files),

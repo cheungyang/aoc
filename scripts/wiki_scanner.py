@@ -7,11 +7,20 @@ It identifies a list of topics for wiki-gardener agent to propose updates to the
 Outputs to: pkm/wiki/pending_lint.json
 """
 import os
+import sys
 import json
 import numpy as np
-import lancedb
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+
+# Ensure project root is importable when run directly from cron.
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from core.knowledge.vector.db import init_knowledge_db, scan_by_category
+
 
 def compute_cosine_similarity(vectors):
     """Computes pairwise cosine similarity for a batch of vectors."""
@@ -30,24 +39,24 @@ def run_scanner():
         # Fallback to current working directory execution
         db_path = "pkm/.lancedb"
 
-    print(f"Connecting to LanceDB at: {db_path}")
-    db = lancedb.connect(db_path)
-    
+    print(f"Connecting to knowledge store at: {db_path}")
     try:
-        table = db.open_table("vault_chunks")
+        handle = init_knowledge_db(db_path=db_path)
     except Exception as e:
-        print(f"Failed to open vault_chunks table: {e}")
+        print(f"Failed to open the knowledge store: {e}")
         return
 
     print("Fetching wiki chunks...")
-    arrow_tbl = table.search().where("category = 'wiki'").to_arrow()
-    data = arrow_tbl.to_pydict()
-    
-    ids = data.get("id", [])
-    file_paths = data.get("file_path", [])
-    tags = data.get("tags", [])
-    vectors = data.get("vector", [])
-    updated_at = data.get("updated_at", [])
+    # Goes through the facade rather than a raw table scan because this script
+    # needs the stored vectors, which search results omit.
+    rows = scan_by_category(handle, "wiki")
+
+    ids = [r.get("id") for r in rows]
+    file_paths = [r.get("file_path") for r in rows]
+    tags = [r.get("tags") for r in rows]
+    vectors = [r.get("vector") for r in rows]
+    updated_at = [r.get("updated_at") for r in rows]
+    texts = [r.get("text") or "" for r in rows]
     
     n_chunks = len(ids)
     print(f"Loaded {n_chunks} wiki chunks.")
@@ -102,7 +111,7 @@ def run_scanner():
                 file_vectors[fp] = []
                 file_texts[fp] = ""
             file_vectors[fp].append(vectors[i])
-            file_texts[fp] += " " + str(tags[i]) + " " + str(data.get("text", [])[i]).lower()
+            file_texts[fp] += " " + str(tags[i]) + " " + texts[i].lower()
 
         doc_paths = []
         doc_vectors = []

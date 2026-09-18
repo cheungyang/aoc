@@ -35,6 +35,7 @@ class Config:
             cls._instance._projects_db_path = None
             cls._instance._projects_dir = None
             cls._instance._knowledge_db_path = None
+            cls._instance._knowledge_backend = None
             cls._instance._embedding_model = None
             cls._instance._embedding_dimensions = None
             cls._instance._pkm_dir = None
@@ -70,6 +71,7 @@ class Config:
         self._projects_db_path = None
         self._projects_dir = None
         self._knowledge_db_path = None
+        self._knowledge_backend = None
         self._embedding_model = None
         self._embedding_dimensions = None
         self._pkm_dir = None
@@ -336,6 +338,24 @@ class Config:
         self._knowledge_db_path = str(value) if value is not None else None
 
     @property
+    def knowledge_backend(self) -> str:
+        """Which vector store implementation to use: 'auto', 'lancedb', or 'numpy'.
+
+        'auto' probes the machine at startup and prefers lancedb, falling back
+        to the numpy store on CPUs whose instruction set lancedb's wheels assume
+        but do not have. The explicit values exist to skip that probe -- useful
+        in CI, and necessary if you want to force one backend on hardware where
+        either would work.
+        """
+        if self._knowledge_backend is not None:
+            return self._knowledge_backend
+        return os.getenv("KNOWLEDGE_BACKEND", "auto")
+
+    @knowledge_backend.setter
+    def knowledge_backend(self, value):
+        self._knowledge_backend = str(value) if value is not None else None
+
+    @property
     def embedding_model(self) -> str:
         if self._embedding_model is not None:
             return self._embedding_model
@@ -535,6 +555,7 @@ class Config:
         self._projects_db_path = None
         self._projects_dir = None
         self._knowledge_db_path = None
+        self._knowledge_backend = None
         self._embedding_model = None
         self._embedding_dimensions = None
         self._pkm_dir = None

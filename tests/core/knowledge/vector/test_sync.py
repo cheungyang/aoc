@@ -10,7 +10,7 @@ from core.knowledge.vector.sync import (
     sync_knowledge,
     get_pkm_dir,
 )
-from core.knowledge.vector.db import init_knowledge_db, get_db_connection
+from core.knowledge.vector.db import init_knowledge_db, get_db_connection, count_chunks
 
 
 class TestKnowledgeSync(unittest.TestCase):
@@ -99,10 +99,10 @@ class TestKnowledgeSync(unittest.TestCase):
         self.assertEqual(results["chunks_to_embed"], 1)
         self.assertTrue(results["dry_run"])
 
-        # LanceDB table should still be empty
+        # The knowledge store should still be empty
         conn = get_db_connection(self.db_path)
         table = init_knowledge_db(conn=conn, db_path=self.db_path, dim=4)
-        self.assertEqual(table.count_rows(), 0)
+        self.assertEqual(count_chunks(table), 0)
 
     def test_sync_knowledge_incremental_and_pruning(self):
         # 1. Initial sync with 1 vault note and 1 wiki note

@@ -7,8 +7,8 @@ discord.py
 langchain-core
 langchain-google-genai
 langchain-mcp-adapters
+# Used by graph_builder for ChatOllama when a model sets provider: ollama.
 langchain-ollama
-langchain-openai
 langgraph
 langsmith>=0.1.0
 playwright
@@ -16,14 +16,24 @@ pytest
 pytest-asyncio
 python-dotenv
 pyyaml
-lancedb
-tantivy
-pyarrow
+# --- Compiled extensions -------------------------------------------------
+# Pinned deliberately. These ship prebuilt wheels containing native code, and an
+# unpinned upgrade can change the baseline CPU instruction set a wheel is built
+# for. That is not a build error or an ImportError -- the process takes a SIGILL
+# and dies -- so it surfaces as an unexplained crash on a rebuild that changed
+# nothing in this repo. Bump these one at a time and confirm on the oldest
+# machine you deploy to.
+#
+# lancedb is optional at runtime: KNOWLEDGE_BACKEND=auto probes for it and falls
+# back to the numpy store when the CPU cannot run it.
+lancedb==0.38.0
+tantivy==0.26.0
+pyarrow==25.0.1
 discord-ext-voice-recv
 pynacl
-faster-whisper
-onnxruntime
-numpy
+faster-whisper==1.2.1
+onnxruntime==1.30.0
+numpy==2.4.6
 edge-tts
 soundfile
 imageio-ffmpeg

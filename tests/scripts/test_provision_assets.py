@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from scripts import provision_assets
+from core.util.config import Config
 
 
 class TestProvisionAssetsStages(unittest.TestCase):
@@ -165,12 +166,29 @@ class TestVectorIndexBootstrap(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.pkm = os.path.join(self.tmp, "pkm")
         os.makedirs(self.pkm)
+        self.db = os.path.join(self.pkm, ".lancedb")
+        Config().reset()
 
     def tearDown(self):
+        Config().reset()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def _seed_lancedb_index(self):
+        os.makedirs(os.path.join(self.db, "vault_chunks.lance"), exist_ok=True)
+
+    def _seed_numpy_index(self):
+        table = os.path.join(self.db, "vault_chunks")
+        os.makedirs(table, exist_ok=True)
+        open(os.path.join(table, "chunks.parquet"), "w").close()
+
     def _run(self, env):
-        base = {"PKM_DIR": self.pkm, "KNOWLEDGE_DB_PATH": os.path.join(self.pkm, ".lancedb")}
+        base = {
+            "PKM_DIR": self.pkm,
+            "KNOWLEDGE_DB_PATH": self.db,
+            # Pinned so the presence check is deterministic. Left on 'auto' it
+            # would probe, and the probe uses the subprocess.run this patches.
+            "KNOWLEDGE_BACKEND": "numpy",
+        }
         base.update(env)
         with patch.dict(os.environ, base, clear=False), \
              patch.object(provision_assets, "PROJECT_ROOT", self.tmp), \
@@ -190,11 +208,34 @@ class TestVectorIndexBootstrap(unittest.TestCase):
         self.assertFalse(rep.failed)
 
     def test_auto_mode_skips_when_database_present(self):
-        db = os.path.join(self.pkm, ".lancedb")
-        os.makedirs(db)
-        open(os.path.join(db, "table.lance"), "w").close()
+        self._seed_numpy_index()
         _, mock_run = self._run({"AOC_BOOTSTRAP_INDEX": "auto"})
         mock_run.assert_not_called()
+
+    def test_auto_mode_rebuilds_when_only_the_other_backend_has_an_index(self):
+        # A NAS that fell back to numpy still has the old LanceDB directory. It
+        # is non-empty, but the running backend cannot read a row of it, so
+        # treating it as "already indexed" would boot with an empty vault.
+        self._seed_lancedb_index()
+        _, mock_run = self._run({"AOC_BOOTSTRAP_INDEX": "auto", "KNOWLEDGE_BACKEND": "numpy"})
+        mock_run.assert_called_once()
+
+    def test_auto_mode_skips_lancedb_index_when_lancedb_is_the_backend(self):
+        self._seed_lancedb_index()
+        _, mock_run = self._run({"AOC_BOOTSTRAP_INDEX": "auto", "KNOWLEDGE_BACKEND": "lancedb"})
+        mock_run.assert_not_called()
+
+    def test_empty_database_directory_is_not_treated_as_an_index(self):
+        # init_knowledge_db creates the table directory eagerly, so its mere
+        # existence says nothing about whether anything was ever written.
+        os.makedirs(os.path.join(self.db, "vault_chunks"), exist_ok=True)
+        _, mock_run = self._run({"AOC_BOOTSTRAP_INDEX": "auto"})
+        mock_run.assert_called_once()
+
+    def test_always_mode_rebuilds_over_an_existing_index(self):
+        self._seed_numpy_index()
+        _, mock_run = self._run({"AOC_BOOTSTRAP_INDEX": "always"})
+        mock_run.assert_called_once()
 
     def test_missing_key_falls_back_to_offline_embeddings(self):
         # Live embeddings without a key would degrade to deterministic vectors

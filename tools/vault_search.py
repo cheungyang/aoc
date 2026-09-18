@@ -8,10 +8,12 @@ from core.knowledge.vector.db import (
     init_knowledge_db,
     hybrid_search_vault,
     get_knowledge_db_path,
+    count_chunks,
 )
 from core.knowledge.vector.indexer import (
     generate_query_embedding,
     get_embedding_client,
+    EmbeddingError,
 )
 from core.knowledge.vector.sync import sync_knowledge
 
@@ -26,7 +28,7 @@ def vault_search(
     action: str = "search"
 ) -> str:
     """
-    Search and retrieve knowledge chunks from the Obsidian PKM vault using LanceDB Hybrid Search (Vector + BM25).
+    Search and retrieve knowledge chunks from the Obsidian PKM vault using Hybrid Search (Vector + BM25).
 
     Supported Categories:
     - 'all': Searches both personal notes (~/pkm/vault) and agent-synthesized wiki (~/pkm/wiki). Defaults to 'all'.
@@ -36,7 +38,7 @@ def vault_search(
     Supported Actions:
     - 'search': Executes a hybrid, semantic (vector only), or keyword (BM25 only) search across the PKM vault.
         Args: 'query', 'search_type' ('hybrid'|'semantic'|'keyword'), 'category' ('all'|'vault'|'wiki'), 'path_filter', 'limit'.
-    - 'sync': Triggers an immediate incremental synchronization of ~/pkm into LanceDB.
+    - 'sync': Triggers an immediate incremental synchronization of ~/pkm into the knowledge index.
 
     Args:
         query: The natural language question, topic, or keyword to search for.
@@ -76,7 +78,7 @@ def vault_search(
             return format_tool_response("vault_search", payload="", errors="Error: 'query' parameter is required for action='search'.")
 
         table = init_knowledge_db()
-        if table.count_rows() == 0:
+        if count_chunks(table) == 0:
             return format_tool_response(
                 "vault_search",
                 payload="Vault index is empty. Run 'sync' action first to index the vault."
@@ -84,9 +86,22 @@ def vault_search(
 
         # Generate query vector if semantic or hybrid search
         query_vector = None
+        effective_search_type = search_type
+        notes = []
         if search_type.lower() in ("hybrid", "semantic", "vector"):
             client = get_embedding_client()
-            query_vector = generate_query_embedding(query, client=client)
+            if client is None:
+                # A deterministic vector is a hash, not a meaning -- it cannot
+                # match API-generated document vectors. Keyword search actually
+                # works, so prefer it and say so rather than returning noise.
+                effective_search_type = "keyword"
+                notes.append("No embedding client is configured, so this ran as a keyword (BM25) search.")
+            else:
+                try:
+                    query_vector = generate_query_embedding(query, client=client)
+                except EmbeddingError as e:
+                    effective_search_type = "keyword"
+                    notes.append(f"Embeddings are unavailable ({e}); this ran as a keyword (BM25) search.")
 
         results = hybrid_search_vault(
             table=table,
@@ -95,18 +110,25 @@ def vault_search(
             limit=limit,
             category=category if category and category.lower() != "all" else None,
             path_filter=path_filter if path_filter.strip() else None,
-            search_type=search_type
+            search_type=effective_search_type
         )
+
+        # A silent downgrade would be indistinguishable from a genuine miss, so
+        # the agent is told which mode actually ran.
+        note_str = ("\n" + " ".join(notes)) if notes else ""
 
         if not results:
             cat_note = f" in category '{category}'" if category and category.lower() != "all" else ""
             return format_tool_response(
                 "vault_search",
-                payload=f"No matching notes found for query: '{query}'{cat_note}"
+                payload=f"No matching notes found for query: '{query}'{cat_note}{note_str}"
             )
 
         # Format output as readable markdown with context
-        output_blocks = [f"Found {len(results)} result(s) for '{query}' (Mode: {search_type}, Category: {category}):\n"]
+        output_blocks = [
+            f"Found {len(results)} result(s) for '{query}' "
+            f"(Mode: {effective_search_type}, Category: {category}):{note_str}\n"
+        ]
         for idx, res in enumerate(results, 1):
             tags_str = f" `#{', #'.join(res['tags'])}`" if res.get("tags") else ""
             score_val = res.get("score")

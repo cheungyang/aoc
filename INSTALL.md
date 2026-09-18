@@ -97,6 +97,53 @@ See sections 9 and 10 of `.env.example` for the available knobs.
 
 ---
 
+## Knowledge Backend (CPU Compatibility)
+
+The vault index runs on one of two interchangeable backends, chosen by
+`KNOWLEDGE_BACKEND`:
+
+| Value | Storage | Requires |
+|---|---|---|
+| `auto` (default) | whichever of the two is usable | — |
+| `lancedb` | Lance columnar store with an ANN index | a CPU with AVX2 |
+| `numpy` | `chunks.parquet` + `vectors.npy` + a tantivy BM25 index | any CPU |
+
+Both expose the same search modes — hybrid, semantic, and keyword — and return
+identical result shapes, so `vault_search` and every script behave the same
+either way. The numpy backend scans exhaustively instead of using an ANN index,
+which is a non-issue at vault scale (a few tens of thousands of chunks is one
+matrix multiply per query).
+
+> [!IMPORTANT]
+> LanceDB's published wheels are compiled for AVX2. On an older CPU — the Intel
+> Celeron J4025 in a Synology DS220+, for instance — `import lancedb` does not
+> raise `ImportError`. It executes an illegal instruction and the kernel kills
+> the process with SIGILL, which no `try`/`except` can catch. That is why the
+> default is `auto`: it attempts the import in a **child** process and reads the
+> exit status, so a crash costs a subprocess rather than the bot.
+
+Check which one is active:
+
+```bash
+docker compose exec app python3 -c \
+    "from core.knowledge.vector.db import get_active_backend_name; print(get_active_backend_name())"
+```
+
+The two use different on-disk layouts, so switching requires a rebuild. There is
+no migration — re-indexing from the vault is both simpler and faster than
+converting:
+
+```bash
+docker compose exec app python3 scripts/regenerate_lancedb.py --clean
+```
+
+First boot handles this automatically: the provisioner looks for the *active*
+backend's own files, so a host still carrying an index from the other backend is
+treated as un-indexed and rebuilt rather than silently starting up empty.
+
+
+---
+
 ## Running with Docker Compose (Recommended)
 
 ### 1. Build and Start the Service
