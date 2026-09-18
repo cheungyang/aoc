@@ -21,11 +21,14 @@ fi
 # /home/appuser/.ssh and /root/.ssh with correct per-user ownership. Mounting
 # them directly onto ~/.ssh makes OpenSSH reject root's config ("Bad owner or
 # permissions"), since bind mounts preserve the host UID.
-SSH_DIR="$HOME/.ssh"
+# Override SSH_HOST_DIR when running under sudo: $HOME becomes /root there, so
+# the wrong account's keys would be staged silently.
+SSH_DIR="${SSH_HOST_DIR:-$HOME/.ssh}"
 if [ ! -d "$SSH_DIR" ]; then
     echo "Warning: $SSH_DIR not found. SSH keys will not be mounted."
     SSH_OPT=""
 else
+    echo "Staging SSH keys from $SSH_DIR (read-only at /mnt/.ssh)."
     SSH_OPT="-v $SSH_DIR:/mnt/.ssh:ro"
 fi
 

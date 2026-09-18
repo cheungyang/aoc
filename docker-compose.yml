@@ -36,7 +36,10 @@ services:
       # /home/appuser/.ssh and /root/.ssh with correct per-user ownership.
       # Mounting directly onto ~/.ssh breaks root's git ("Bad owner or
       # permissions") because bind mounts keep the host UID.
-      - ~/.ssh:/mnt/.ssh:ro
+      # NOTE: set SSH_HOST_DIR explicitly in .env when running under sudo --
+      # "~" / $HOME resolve to /root for the sudo'ing user, which silently
+      # mounts the wrong account's keys.
+      - ${SSH_HOST_DIR:-${HOME}/.ssh}:/mnt/.ssh:ro
       # PKM storage directory mount (mapped to ../pkm on host machine)
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)

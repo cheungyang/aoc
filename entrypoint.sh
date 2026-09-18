@@ -47,19 +47,36 @@ provision_ssh_dir() {
     if [ -f "$dest/config" ]; then
         # UseKeychain is macOS-only and makes OpenSSH on Linux fail to parse
         sed -i -E 's/^([[:space:]]*)([Uu]se[Kk]eychain.*)$/\1# \2/' "$dest/config" 2>/dev/null || true
-        # Rewrite host-style key paths (e.g. /Users/alice/.ssh) to this container path
+        # Repoint IdentityFile at the in-container copy. Host layouts vary
+        # (/Users/x/.ssh on macOS, /volume1/homes/x/.ssh on Synology, ...), so
+        # match any absolute path ending in /.ssh/ rather than specific homes.
+        sed -i -E "s#^([[:space:]]*[Ii]dentity[Ff]ile[[:space:]]+)[~]?/[^[:space:]]*/\.ssh/#\1$dest/#" "$dest/config" 2>/dev/null || true
+        # Any remaining host-style ~/.ssh references resolve per-user already
         sed -i -E "s#(/Users/[^/[:space:]]+|/home/[^/[:space:]]+)/\.ssh#$dest#g" "$dest/config" 2>/dev/null || true
     fi
 
-    # Non-interactive defaults so automated git sync never blocks on a prompt
-    if ! grep -qi "StrictHostKeyChecking" "$dest/config" 2>/dev/null; then
-        cat >> "$dest/config" << 'EOF' 2>/dev/null || true
-
-Host *
-    StrictHostKeyChecking accept-new
-    BatchMode yes
-    ConnectTimeout 15
-EOF
+    # Non-interactive defaults so automated git sync never blocks on a prompt.
+    # Also advertise every private key we find: keys with non-default names
+    # (e.g. "gitlab") are never tried automatically, so a host without an
+    # explicit config entry would fail with "Permission denied (publickey)".
+    if ! grep -q "aoc-managed defaults" "$dest/config" 2>/dev/null; then
+        {
+            echo ""
+            echo "# --- aoc-managed defaults (added by entrypoint.sh) ---"
+            echo "Host *"
+            echo "    StrictHostKeyChecking accept-new"
+            echo "    BatchMode yes"
+            echo "    ConnectTimeout 15"
+            for key in "$dest"/*; do
+                [ -f "$key" ] || continue
+                case "$key" in
+                    *.pub|*/config|*/known_hosts*|*/authorized_keys|*/agent.env) continue ;;
+                esac
+                if grep -qI "PRIVATE KEY" "$key" 2>/dev/null; then
+                    echo "    IdentityFile $key"
+                fi
+            done
+        } >> "$dest/config" 2>/dev/null || true
     fi
 
     chown -R "$owner" "$dest" 2>/dev/null || true
@@ -70,9 +87,18 @@ EOF
 
 if [ -n "$SSH_SRC" ]; then
     echo "Provisioning SSH credentials from $SSH_SRC for appuser and root..."
+else
+    echo "Warning: no SSH keys staged at /mnt/.ssh; git over SSH will fail."
 fi
 provision_ssh_dir /home/appuser/.ssh appuser:appuser
 provision_ssh_dir /root/.ssh root:root
+
+# Report which keys were staged. A wrong host mount (e.g. "~" resolving to
+# /root under sudo) otherwise only shows up as "Permission denied (publickey)".
+for pub in /root/.ssh/*.pub; do
+    [ -f "$pub" ] || continue
+    echo "  SSH key: $(ssh-keygen -lf "$pub" 2>/dev/null || basename "$pub")"
+done
 
 # Ensure system-wide SSH client config allows non-interactive host key acceptance for automated git sync
 if [ -d "/etc/ssh" ] && ! grep -qi "StrictHostKeyChecking accept-new" /etc/ssh/ssh_config 2>/dev/null; then
