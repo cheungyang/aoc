@@ -40,6 +40,15 @@ services:
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
       - GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND:-file}
+      # Home Assistant. As with AOC_BOT_TOKEN_FILE above, this is deliberately a
+      # path and not the token: an env-borne credential would be inherited by
+      # every subprocess an agent spawns. The file arrives through the `.:/app`
+      # bind mount. HA_WRITE_ENABLED is the master switch for mutating actions
+      # and stays off unless explicitly set in .env.
+      - HA_BASE_URL=${HA_BASE_URL:-}
+      - HA_TOKEN_FILE=${HA_TOKEN_FILE:-/app/home_assistant_token}
+      - HA_WRITE_ENABLED=${HA_WRITE_ENABLED:-false}
+      - HA_REQUEST_TIMEOUT=${HA_REQUEST_TIMEOUT:-20}
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app

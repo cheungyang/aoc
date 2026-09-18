@@ -13,6 +13,7 @@ __pycache__/
 *bot_token*
 client_secret_*
 debug_log.log
+home_assistant_token
 pkm
 scratch/
 sessions/

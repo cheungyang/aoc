@@ -15,6 +15,7 @@ assets/sounds/
 client_secret_*
 debug_log.log
 github_bot_token
+home_assistant_token
 pkm
 pkm-oc
 scratch
