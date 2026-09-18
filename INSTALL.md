@@ -66,7 +66,7 @@ docker build -t aoc .
 Ensure you have the following files/directories on your host machine if you want to use them:
 - `.env` file in the project root.
 - SSH keys in `~/.ssh` (to allow git operations inside the container).
-- `gogcli` auth & configuration: stored automatically in `./.gogcli` inside the project root (no `~/.config/gogcli` required).
+- `gogcli` auth & configuration: stored automatically in `./.gogcli` inside the project root (no `~/.config/gogcli` required). Configure `GOG_KEYRING_BACKEND=file` and `GOG_KEYRING_PASSWORD` in `.env` for headless automated authentication.
 - PKM directory in `../pkm` (external directory mapped into container at `/home/appuser/pkm`).
 - Workspaces directory in `../workspaces` (external directory mapped into container at `/home/appuser/workspaces`).
 
@@ -146,4 +146,5 @@ The system automatically schedules periodic Git resolution for two separate Git 
 
 ## Customization
 
-If your SSH keys or PKM directory are in non-standard locations, you can set `PKM_HOST_DIR`, `WORKSPACES_HOST_DIR`, `CODEBASE_DIR`, or `GOG_HOME` in your `.env` file before running.
+If your SSH keys or PKM directory are in non-standard locations, or you want to configure gogcli keyring settings, you can set `PKM_HOST_DIR`, `WORKSPACES_HOST_DIR`, `CODEBASE_DIR`, `GOG_HOME`, `GOG_KEYRING_BACKEND`, or `GOG_KEYRING_PASSWORD` in your `.env` file before running.
+

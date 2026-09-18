@@ -27,7 +27,12 @@ fi
 
 # Gogcli config directory lives in project root (./.gogcli)
 mkdir -p "$(pwd)/.gogcli"
-GOG_OPT="-e GOG_HOME=/app/.gogcli -e GOG_KEYRING_BACKEND=file -e GOG_KEYRING_PROVIDER=file"
+GOG_KEYRING_BACKEND_VAL="${GOG_KEYRING_BACKEND:-file}"
+GOG_KEYRING_PROVIDER_VAL="${GOG_KEYRING_PROVIDER:-file}"
+GOG_OPT="-e GOG_HOME=${GOG_HOME:-/app/.gogcli} -e GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND_VAL} -e GOG_KEYRING_PROVIDER=${GOG_KEYRING_PROVIDER_VAL}"
+if [ -n "$GOG_KEYRING_PASSWORD" ]; then
+    GOG_OPT="$GOG_OPT -e GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}"
+fi
 
 # Check for PKM directory (defaults to ../pkm on host machine)
 PKM_HOST_DIR="${PKM_HOST_DIR:-$(cd "$(pwd)/../pkm" 2>/dev/null && pwd || echo "$(pwd)/../pkm")}"

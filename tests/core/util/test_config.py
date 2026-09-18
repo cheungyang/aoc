@@ -233,6 +233,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.brave_api_key, "")
             self.assertEqual(self.config.openai_api_key, "")
             self.assertEqual(self.config.anthropic_api_key, "")
+            self.assertEqual(self.config.gog_keyring_backend, "file")
+            self.assertEqual(self.config.gog_keyring_password, "")
             self.assertEqual(self.config.tasks_db_path, os.path.expanduser("~/pkm/tasks.db"))
             self.assertEqual(self.config.projects_db_path, os.path.expanduser("~/pkm/projects.db"))
             self.assertEqual(self.config.projects_dir, os.path.join(os.path.expanduser("~/pkm"), "vault", "projects"))
@@ -275,12 +277,20 @@ class TestConfig(unittest.TestCase):
         self.config.pkm_dir = "/custom/pkm"
         self.assertEqual(self.config.pkm_dir, "/custom/pkm")
 
+        self.config.gog_keyring_backend = "kwallet"
+        self.assertEqual(self.config.gog_keyring_backend, "kwallet")
+
+        self.config.gog_keyring_password = "mysecretpassword"
+        self.assertEqual(self.config.gog_keyring_password, "mysecretpassword")
+
         # Environment variable loading
         with patch.dict(os.environ, {
             "GEMINI_API_KEY": "env_gem_key",
             "BRAVE_API_KEY": "env_brave_key",
             "OPENAI_API_KEY": "env_openai_key",
             "ANTHROPIC_API_KEY": "env_anthropic_key",
+            "GOG_KEYRING_BACKEND": "pass",
+            "GOG_KEYRING_PASSWORD": "env_secret_keyring_pass",
             "TASKS_DB_PATH": "/env/tasks.db",
             "PROJECTS_DB_PATH": "/env/projects.db",
             "PROJECTS_DIR": "/env/projects",
@@ -294,6 +304,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.brave_api_key, "env_brave_key")
             self.assertEqual(self.config.openai_api_key, "env_openai_key")
             self.assertEqual(self.config.anthropic_api_key, "env_anthropic_key")
+            self.assertEqual(self.config.gog_keyring_backend, "pass")
+            self.assertEqual(self.config.gog_keyring_password, "env_secret_keyring_pass")
             self.assertEqual(self.config.tasks_db_path, "/env/tasks.db")
             self.assertEqual(self.config.projects_db_path, "/env/projects.db")
             self.assertEqual(self.config.projects_dir, "/env/projects")

@@ -28,8 +28,9 @@ services:
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-aoc@localhost}
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
-      - GOG_KEYRING_BACKEND=file
-      - GOG_KEYRING_PROVIDER=file
+      - GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND:-file}
+      - GOG_KEYRING_PROVIDER=${GOG_KEYRING_PROVIDER:-file}
+      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD:-}
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app

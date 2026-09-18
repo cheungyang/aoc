@@ -46,13 +46,21 @@ def gog(command: str) -> str:
         args = shlex.split(command)
         cmd = [gog_bin] + args
 
+        # Prepare environment ensuring keyring and gogcli settings are passed
+        env = os.environ.copy()
+        if "GOG_KEYRING_BACKEND" not in env:
+            env["GOG_KEYRING_BACKEND"] = "file"
+        if "GOG_KEYRING_PROVIDER" not in env:
+            env["GOG_KEYRING_PROVIDER"] = "file"
+
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=False,
             timeout=30.0,
-            stdin=subprocess.DEVNULL
+            stdin=subprocess.DEVNULL,
+            env=env
         )
 
         output = []

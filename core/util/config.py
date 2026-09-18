@@ -39,6 +39,8 @@ class Config:
             cls._instance._context_window_messages = None
             cls._instance._context_summary_max_tokens = None
             cls._instance._context_pruning_timeout = None
+            cls._instance._gog_keyring_backend = None
+            cls._instance._gog_keyring_password = None
             cls._instance.load_from_env()
         return cls._instance
 
@@ -71,6 +73,8 @@ class Config:
         self._context_window_messages = None
         self._context_summary_max_tokens = None
         self._context_pruning_timeout = None
+        self._gog_keyring_backend = None
+        self._gog_keyring_password = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Generic access to environment variables via the central Config."""
@@ -236,6 +240,29 @@ class Config:
     @rapidapi_key.setter
     def rapidapi_key(self, value):
         self._rapidapi_key = str(value) if value is not None else None
+
+    # -------------------------------------------------------------------------
+    # Gogcli Keyring Settings
+    # -------------------------------------------------------------------------
+    @property
+    def gog_keyring_backend(self) -> str:
+        if self._gog_keyring_backend is not None:
+            return self._gog_keyring_backend
+        return os.getenv("GOG_KEYRING_BACKEND", "file")
+
+    @gog_keyring_backend.setter
+    def gog_keyring_backend(self, value):
+        self._gog_keyring_backend = str(value) if value is not None else None
+
+    @property
+    def gog_keyring_password(self) -> str:
+        if self._gog_keyring_password is not None:
+            return self._gog_keyring_password
+        return os.getenv("GOG_KEYRING_PASSWORD", "")
+
+    @gog_keyring_password.setter
+    def gog_keyring_password(self, value):
+        self._gog_keyring_password = str(value) if value is not None else None
 
     # -------------------------------------------------------------------------
     # PKM & Tasks Storage Paths
@@ -483,6 +510,8 @@ class Config:
         self._context_window_messages = None
         self._context_summary_max_tokens = None
         self._context_pruning_timeout = None
+        self._gog_keyring_backend = None
+        self._gog_keyring_password = None
         self.load_from_env()
 
 

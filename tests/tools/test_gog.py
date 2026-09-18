@@ -126,5 +126,24 @@ class TestGogTool(unittest.TestCase):
         self.assertEqual(kwargs.get("timeout"), 30.0)
         self.assertEqual(kwargs.get("stdin"), subprocess.DEVNULL)
 
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
+    def test_gog_passes_keyring_env(self, mock_run, mock_exists):
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        with patch.dict(os.environ, {"GOG_KEYRING_BACKEND": "file", "GOG_KEYRING_PASSWORD": "test_password"}, clear=False):
+            gog.func(command="calendar calendars")
+            self.assertTrue(mock_run.called)
+            kwargs = mock_run.call_args[1]
+            env = kwargs.get("env")
+            self.assertIsNotNone(env)
+            self.assertEqual(env.get("GOG_KEYRING_BACKEND"), "file")
+            self.assertEqual(env.get("GOG_KEYRING_PASSWORD"), "test_password")
+
 if __name__ == '__main__':
     unittest.main()
