@@ -4,6 +4,7 @@ import shlex
 from langchain_core.tools import tool
 from core.loaders.agents_loader import AgentsLoader
 from core.util import format_tool_response
+from core.util.config import Config
 
 @tool
 def gog(command: str) -> str:
@@ -46,12 +47,14 @@ def gog(command: str) -> str:
         args = shlex.split(command)
         cmd = [gog_bin] + args
 
-        # Prepare environment ensuring keyring and gogcli settings are passed
+        # Prepare environment ensuring keyring settings are passed
         env = os.environ.copy()
-        if "GOG_KEYRING_BACKEND" not in env:
-            env["GOG_KEYRING_BACKEND"] = "file"
-        if "GOG_KEYRING_PROVIDER" not in env:
-            env["GOG_KEYRING_PROVIDER"] = "file"
+        config = Config()
+
+        env["GOG_KEYRING_BACKEND"] = config.gog_keyring_backend or env.get("GOG_KEYRING_BACKEND", "file")
+        keyring_password = config.gog_keyring_password or env.get("GOG_KEYRING_PASSWORD", "")
+        if keyring_password:
+            env["GOG_KEYRING_PASSWORD"] = keyring_password
 
         result = subprocess.run(
             cmd,
@@ -69,7 +72,15 @@ def gog(command: str) -> str:
         if result.stderr:
             output.append(result.stderr)
 
-        return format_tool_response("gog", payload="\n".join(output), errors="None")
+        output_str = "\n".join(output)
+        if "aes.KeyUnwrap(): integrity check failed" in output_str:
+            output_str += (
+                "\n[Gog Tool Hint]: Keyring decryption failed. Please verify that "
+                "GOG_KEYRING_PASSWORD in .env matches the keyring passphrase used "
+                "when gogcli was initialized."
+            )
+
+        return format_tool_response("gog", payload=output_str, errors="None")
 
     except subprocess.TimeoutExpired:
         return format_tool_response(

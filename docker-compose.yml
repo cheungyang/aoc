@@ -29,13 +29,12 @@ services:
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
       - GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND:-file}
-      - GOG_KEYRING_PROVIDER=${GOG_KEYRING_PROVIDER:-file}
-      - GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD:-}
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app
-      # Host SSH keys mounted read-only; copied to ~/.ssh by entrypoint with secure permissions
-      - ${HOME}/.ssh:/mnt/.ssh:ro
+      # Host SSH keys mapped directly to container ~/.ssh for git operations
+      - ~/.ssh:/home/appuser/.ssh
+      - ~/.ssh:/root/.ssh
       # PKM storage directory mount (mapped to ../pkm on host machine)
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)

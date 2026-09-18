@@ -22,14 +22,13 @@ if [ ! -d "$SSH_DIR" ]; then
     echo "Warning: $SSH_DIR not found. SSH keys will not be mounted."
     SSH_OPT=""
 else
-    SSH_OPT="-v $SSH_DIR:/mnt/.ssh"
+    SSH_OPT="-v $SSH_DIR:/home/appuser/.ssh -v $SSH_DIR:/root/.ssh"
 fi
 
 # Gogcli config directory lives in project root (./.gogcli)
 mkdir -p "$(pwd)/.gogcli"
 GOG_KEYRING_BACKEND_VAL="${GOG_KEYRING_BACKEND:-file}"
-GOG_KEYRING_PROVIDER_VAL="${GOG_KEYRING_PROVIDER:-file}"
-GOG_OPT="-e GOG_HOME=${GOG_HOME:-/app/.gogcli} -e GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND_VAL} -e GOG_KEYRING_PROVIDER=${GOG_KEYRING_PROVIDER_VAL}"
+GOG_OPT="-e GOG_HOME=${GOG_HOME:-/app/.gogcli} -e GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND_VAL}"
 if [ -n "$GOG_KEYRING_PASSWORD" ]; then
     GOG_OPT="$GOG_OPT -e GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}"
 fi

@@ -3,7 +3,12 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 # Ensure .env is loaded on import of config
-load_dotenv()
+workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+env_path = os.path.join(workspace_root, ".env")
+if os.path.exists(env_path):
+    load_dotenv(dotenv_path=env_path, override=True)
+else:
+    load_dotenv(override=True)
 
 
 class Config:

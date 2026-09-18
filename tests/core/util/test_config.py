@@ -351,7 +351,6 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.context_window_messages, 8)
             self.assertEqual(self.config.context_summary_max_tokens, 400)
 
-
 if __name__ == '__main__':
     unittest.main()
 

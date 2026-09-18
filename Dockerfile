@@ -74,7 +74,6 @@ RUN useradd -m appuser \
 
 # Set environment variables for gogcli headless file keyring and non-interactive git operations
 ENV GOG_KEYRING_BACKEND=file \
-    GOG_KEYRING_PROVIDER=file \
     GIT_TERMINAL_PROMPT=0 \
     GIT_ASKPASS="" \
     GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"

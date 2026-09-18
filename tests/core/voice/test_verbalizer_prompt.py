@@ -43,6 +43,31 @@ class TestVerbalizerPrompt(unittest.TestCase):
             with self.subTest(topic=topic):
                 self.assertIn(topic, self.prompt)
 
+    def test_asks_for_a_count_before_a_list(self):
+        """A listener cannot see how far down a list they are; the count
+        up front is what tells them when it ends."""
+        self.assertIn("say how many items it has", self.prompt)
+
+    def test_drops_hashtags(self):
+        """Filing labels like "#a/read" are notation for the eye; read
+        aloud they are noise in the middle of a sentence."""
+        self.assertIn("Drop hashtags", self.prompt)
+        self.assertIn("#a/read", self.prompt)
+
+    def test_spells_out_every_priority_symbol(self):
+        """Each symbol carries a distinct level, and an unspoken one
+        loses the ranking the task was written to express."""
+        for symbol, spoken in (
+            ("\U0001F53A", "highest priority"),
+            ("\u23EB", "high priority"),
+            ("\U0001F53C", "medium priority"),
+            ("\U0001F53D", "low priority"),
+            ("\u23EC", "lowest priority"),
+        ):
+            with self.subTest(symbol=symbol):
+                self.assertIn(symbol, self.prompt)
+                self.assertIn(spoken, self.prompt)
+
     def test_demands_plain_output(self):
         """The result goes straight to a synthesiser, which reads a stray
         asterisk or a preamble out loud."""

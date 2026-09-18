@@ -145,5 +145,43 @@ class TestGogTool(unittest.TestCase):
             self.assertEqual(env.get("GOG_KEYRING_BACKEND"), "file")
             self.assertEqual(env.get("GOG_KEYRING_PASSWORD"), "test_password")
 
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
+    def test_gog_passes_keyring_password_from_config(self, mock_run, mock_exists):
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = "ok"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        mock_run.return_value = mock_result
+
+        from core.util.config import Config
+        cfg = Config()
+        cfg.gog_keyring_password = "configured_password"
+
+        with patch.dict(os.environ, {"GOG_KEYRING_BACKEND": "file"}, clear=False):
+            os.environ.pop("GOG_KEYRING_PASSWORD", None)
+            gog.func(command="calendar calendars")
+            self.assertTrue(mock_run.called)
+            kwargs = mock_run.call_args[1]
+            env = kwargs.get("env")
+            self.assertEqual(env.get("GOG_KEYRING_PASSWORD"), "configured_password")
+
+
+    @patch('tools.gog.os.path.exists')
+    @patch('tools.gog.subprocess.run')
+    def test_gog_includes_hint_on_key_unwrap_failure(self, mock_run, mock_exists):
+        mock_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_result.stderr = "open keyring: aes.KeyUnwrap(): integrity check failed"
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+
+        result = gog.func(command="calendar calendars")
+        self.assertIn("aes.KeyUnwrap(): integrity check failed", result)
+        self.assertIn("Gog Tool Hint", result)
+        self.assertIn("GOG_KEYRING_PASSWORD in .env", result)
+
 if __name__ == '__main__':
     unittest.main()

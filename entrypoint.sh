@@ -18,37 +18,55 @@ if ! runuser -u appuser -- test -r /app/main.py 2>/dev/null; then
     chown -R appuser:appuser /app 2>/dev/null || true
 fi
 
-# Create .ssh directory if it doesn't exist
-mkdir -p /home/appuser/.ssh
+# Create .ssh directories if they don't exist
+mkdir -p /home/appuser/.ssh /root/.ssh
 
-# Copy keys from mounted directory if present
+# Copy keys from legacy /mnt/.ssh if mounted
 if [ -d "/mnt/.ssh" ] && [ "$(ls -A /mnt/.ssh 2>/dev/null)" ]; then
     echo "Copying SSH keys from /mnt/.ssh..."
-    cp -R /mnt/.ssh/* /home/appuser/.ssh/
-    
-    # Fix permissions
-    chown -R appuser:appuser /home/appuser/.ssh
-    chmod 700 /home/appuser/.ssh
-    find /home/appuser/.ssh -type f -exec chmod 600 {} \;
-    chmod 644 /home/appuser/.ssh/*.pub /home/appuser/.ssh/known_hosts 2>/dev/null || true
-    chmod 600 /home/appuser/.ssh/config 2>/dev/null || true
-    
-    echo "SSH keys copied and permissions set."
-else
-    echo "No SSH keys found at /mnt/.ssh or directory is empty."
+    cp -R /mnt/.ssh/* /home/appuser/.ssh/ 2>/dev/null || true
 fi
 
-# Ensure SSH client config allows non-interactive host key acceptance for automated git sync
-if [ ! -f /home/appuser/.ssh/config ] || ! grep -qi "StrictHostKeyChecking" /home/appuser/.ssh/config 2>/dev/null; then
-    cat >> /home/appuser/.ssh/config << 'EOF'
+# Sync SSH keys between /home/appuser/.ssh and /root/.ssh so both users have credentials
+if [ -d "/home/appuser/.ssh" ] && [ "$(ls -A /home/appuser/.ssh 2>/dev/null)" ]; then
+    if [ ! "$(ls -A /root/.ssh 2>/dev/null)" ]; then
+        cp -R /home/appuser/.ssh/* /root/.ssh/ 2>/dev/null || true
+    fi
+elif [ -d "/root/.ssh" ] && [ "$(ls -A /root/.ssh 2>/dev/null)" ]; then
+    cp -R /root/.ssh/* /home/appuser/.ssh/ 2>/dev/null || true
+fi
+
+# Set safe permissions on SSH files where writable
+chown -R appuser:appuser /home/appuser/.ssh 2>/dev/null || true
+chmod 700 /home/appuser/.ssh /root/.ssh 2>/dev/null || true
+find /home/appuser/.ssh /root/.ssh -type f -exec chmod 600 {} \; 2>/dev/null || true
+chmod 644 /home/appuser/.ssh/*.pub /home/appuser/.ssh/known_hosts /root/.ssh/*.pub /root/.ssh/known_hosts 2>/dev/null || true
+chmod 600 /home/appuser/.ssh/config /root/.ssh/config 2>/dev/null || true
+
+# Ensure system-wide SSH client config allows non-interactive host key acceptance for automated git sync
+if [ -d "/etc/ssh" ] && ! grep -qi "StrictHostKeyChecking accept-new" /etc/ssh/ssh_config 2>/dev/null; then
+    cat >> /etc/ssh/ssh_config << 'EOF'
 
 Host *
     StrictHostKeyChecking accept-new
     BatchMode yes
     ConnectTimeout 15
 EOF
-    chown appuser:appuser /home/appuser/.ssh/config
-    chmod 600 /home/appuser/.ssh/config
+fi
+
+# Ensure appuser SSH config allows non-interactive host key acceptance if writable
+if [ -w /home/appuser/.ssh/config ] || { [ ! -f /home/appuser/.ssh/config ] && [ -w /home/appuser/.ssh ]; }; then
+    if ! grep -qi "StrictHostKeyChecking" /home/appuser/.ssh/config 2>/dev/null; then
+        cat >> /home/appuser/.ssh/config << 'EOF' 2>/dev/null || true
+
+Host *
+    StrictHostKeyChecking accept-new
+    BatchMode yes
+    ConnectTimeout 15
+EOF
+        chown appuser:appuser /home/appuser/.ssh/config 2>/dev/null || true
+        chmod 600 /home/appuser/.ssh/config 2>/dev/null || true
+    fi
 fi
 
 # Configure Git safe.directory for both root and appuser to support mounted volumes
@@ -80,7 +98,6 @@ fi
 # Ensure gogcli home, PKM, and workspaces exist and have proper ownership
 export GOG_HOME="${GOG_HOME:-/app/.gogcli}"
 export GOG_KEYRING_BACKEND="${GOG_KEYRING_BACKEND:-file}"
-export GOG_KEYRING_PROVIDER="${GOG_KEYRING_PROVIDER:-file}"
 if [ -n "$GOG_KEYRING_PASSWORD" ]; then
     export GOG_KEYRING_PASSWORD
 fi
