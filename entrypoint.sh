@@ -18,30 +18,61 @@ if ! runuser -u appuser -- test -r /app/main.py 2>/dev/null; then
     chown -R appuser:appuser /app 2>/dev/null || true
 fi
 
-# Create .ssh directories if they don't exist
-mkdir -p /home/appuser/.ssh /root/.ssh
-
-# Copy keys from legacy /mnt/.ssh if mounted
-if [ -d "/mnt/.ssh" ] && [ "$(ls -A /mnt/.ssh 2>/dev/null)" ]; then
-    echo "Copying SSH keys from /mnt/.ssh..."
-    cp -R /mnt/.ssh/* /home/appuser/.ssh/ 2>/dev/null || true
-fi
-
-# Sync SSH keys between /home/appuser/.ssh and /root/.ssh so both users have credentials
-if [ -d "/home/appuser/.ssh" ] && [ "$(ls -A /home/appuser/.ssh 2>/dev/null)" ]; then
-    if [ ! "$(ls -A /root/.ssh 2>/dev/null)" ]; then
-        cp -R /home/appuser/.ssh/* /root/.ssh/ 2>/dev/null || true
+# --- SSH credential provisioning -------------------------------------------
+# Host keys are mounted READ-ONLY at /mnt/.ssh and then *copied* into each
+# user's home directory. They are deliberately not bind-mounted onto
+# ~/.ssh: a bind mount preserves the host UID, so /root/.ssh files stay owned
+# by appuser and OpenSSH aborts with "Bad owner or permissions". chown cannot
+# fix that because the inode is shared with the host. Copying gives each user
+# a private, correctly-owned copy.
+SSH_SRC=""
+for candidate in /mnt/.ssh /mnt/ssh; do
+    if [ -d "$candidate" ] && [ "$(ls -A "$candidate" 2>/dev/null)" ]; then
+        SSH_SRC="$candidate"
+        break
     fi
-elif [ -d "/root/.ssh" ] && [ "$(ls -A /root/.ssh 2>/dev/null)" ]; then
-    cp -R /root/.ssh/* /home/appuser/.ssh/ 2>/dev/null || true
-fi
+done
 
-# Set safe permissions on SSH files where writable
-chown -R appuser:appuser /home/appuser/.ssh 2>/dev/null || true
-chmod 700 /home/appuser/.ssh /root/.ssh 2>/dev/null || true
-find /home/appuser/.ssh /root/.ssh -type f -exec chmod 600 {} \; 2>/dev/null || true
-chmod 644 /home/appuser/.ssh/*.pub /home/appuser/.ssh/known_hosts /root/.ssh/*.pub /root/.ssh/known_hosts 2>/dev/null || true
-chmod 600 /home/appuser/.ssh/config /root/.ssh/config 2>/dev/null || true
+provision_ssh_dir() {
+    dest="$1"
+    owner="$2"
+
+    mkdir -p "$dest" || return 0
+
+    if [ -n "$SSH_SRC" ]; then
+        # -L dereferences symlinked keys so the copy is self-contained
+        cp -RL "$SSH_SRC"/. "$dest"/ 2>/dev/null || true
+    fi
+
+    if [ -f "$dest/config" ]; then
+        # UseKeychain is macOS-only and makes OpenSSH on Linux fail to parse
+        sed -i -E 's/^([[:space:]]*)([Uu]se[Kk]eychain.*)$/\1# \2/' "$dest/config" 2>/dev/null || true
+        # Rewrite host-style key paths (e.g. /Users/alice/.ssh) to this container path
+        sed -i -E "s#(/Users/[^/[:space:]]+|/home/[^/[:space:]]+)/\.ssh#$dest#g" "$dest/config" 2>/dev/null || true
+    fi
+
+    # Non-interactive defaults so automated git sync never blocks on a prompt
+    if ! grep -qi "StrictHostKeyChecking" "$dest/config" 2>/dev/null; then
+        cat >> "$dest/config" << 'EOF' 2>/dev/null || true
+
+Host *
+    StrictHostKeyChecking accept-new
+    BatchMode yes
+    ConnectTimeout 15
+EOF
+    fi
+
+    chown -R "$owner" "$dest" 2>/dev/null || true
+    chmod 700 "$dest" 2>/dev/null || true
+    find "$dest" -type f -exec chmod 600 {} \; 2>/dev/null || true
+    chmod 644 "$dest"/*.pub "$dest/known_hosts" 2>/dev/null || true
+}
+
+if [ -n "$SSH_SRC" ]; then
+    echo "Provisioning SSH credentials from $SSH_SRC for appuser and root..."
+fi
+provision_ssh_dir /home/appuser/.ssh appuser:appuser
+provision_ssh_dir /root/.ssh root:root
 
 # Ensure system-wide SSH client config allows non-interactive host key acceptance for automated git sync
 if [ -d "/etc/ssh" ] && ! grep -qi "StrictHostKeyChecking accept-new" /etc/ssh/ssh_config 2>/dev/null; then
@@ -52,21 +83,6 @@ Host *
     BatchMode yes
     ConnectTimeout 15
 EOF
-fi
-
-# Ensure appuser SSH config allows non-interactive host key acceptance if writable
-if [ -w /home/appuser/.ssh/config ] || { [ ! -f /home/appuser/.ssh/config ] && [ -w /home/appuser/.ssh ]; }; then
-    if ! grep -qi "StrictHostKeyChecking" /home/appuser/.ssh/config 2>/dev/null; then
-        cat >> /home/appuser/.ssh/config << 'EOF' 2>/dev/null || true
-
-Host *
-    StrictHostKeyChecking accept-new
-    BatchMode yes
-    ConnectTimeout 15
-EOF
-        chown appuser:appuser /home/appuser/.ssh/config 2>/dev/null || true
-        chmod 600 /home/appuser/.ssh/config 2>/dev/null || true
-    fi
 fi
 
 # Configure Git safe.directory for both root and appuser to support mounted volumes

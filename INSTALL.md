@@ -133,7 +133,7 @@ The system automatically schedules periodic Git resolution for two separate Git 
 
 ### Configuration & Credentials
 
-- **SSH Authentication**: Mounted from host (`~/.ssh` -> container's `~/.ssh`). Keys are mapped to both `appuser` (`/home/appuser/.ssh`) and `root` (`/root/.ssh`) with permissions and non-interactive settings automatically configured for git operations.
+- **SSH Authentication**: Host keys are mounted **read-only** at `/mnt/.ssh`, then copied by the entrypoint into `/home/appuser/.ssh` (owned by `appuser`) and `/root/.ssh` (owned by `root`), with permissions and non-interactive settings applied to each copy. They are not bind-mounted onto `~/.ssh` directly: a bind mount preserves the host UID, so `/root/.ssh/config` would appear owned by `appuser` and OpenSSH would fail with `Bad owner or permissions`. Because the copies are made at container start, re-run `docker compose up -d --force-recreate` (or restart the container) after changing keys on the host.
 - **Non-Interactive SSH**: Non-interactive `BatchMode` and `StrictHostKeyChecking=accept-new` are enabled via `GIT_SSH_COMMAND` to prevent hanging during automated scheduled jobs.
 - **Git Safe Directories**: `safe.directory '*'` is configured system-wide to permit Git operations across mounted Docker volumes.
 - **Git Identity**: `GIT_USER_NAME` and `GIT_USER_EMAIL` are configured in `docker-compose.yml` (and copied from host `~/.gitconfig` if mounted).

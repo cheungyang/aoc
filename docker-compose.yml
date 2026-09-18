@@ -32,9 +32,11 @@ services:
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app
-      # Host SSH keys mapped directly to container ~/.ssh for git operations
-      - ~/.ssh:/home/appuser/.ssh
-      - ~/.ssh:/root/.ssh
+      # Host SSH keys staged read-only; entrypoint copies them into
+      # /home/appuser/.ssh and /root/.ssh with correct per-user ownership.
+      # Mounting directly onto ~/.ssh breaks root's git ("Bad owner or
+      # permissions") because bind mounts keep the host UID.
+      - ~/.ssh:/mnt/.ssh:ro
       # PKM storage directory mount (mapped to ../pkm on host machine)
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)

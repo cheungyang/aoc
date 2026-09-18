@@ -17,12 +17,16 @@ else
 fi
 
 # Check for SSH keys directory
+# Keys are staged read-only at /mnt/.ssh; the entrypoint copies them into
+# /home/appuser/.ssh and /root/.ssh with correct per-user ownership. Mounting
+# them directly onto ~/.ssh makes OpenSSH reject root's config ("Bad owner or
+# permissions"), since bind mounts preserve the host UID.
 SSH_DIR="$HOME/.ssh"
 if [ ! -d "$SSH_DIR" ]; then
     echo "Warning: $SSH_DIR not found. SSH keys will not be mounted."
     SSH_OPT=""
 else
-    SSH_OPT="-v $SSH_DIR:/home/appuser/.ssh -v $SSH_DIR:/root/.ssh"
+    SSH_OPT="-v $SSH_DIR:/mnt/.ssh:ro"
 fi
 
 # Gogcli config directory lives in project root (./.gogcli)
