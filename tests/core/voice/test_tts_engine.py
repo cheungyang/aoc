@@ -14,6 +14,22 @@ def test_text_sanitizer_xml_and_custom_tags():
     assert "<job" not in cleaned
     assert "Pizza" not in cleaned # Full XML tag block stripped
 
+def test_text_sanitizer_memory_and_vote_tags():
+    raw = "<memory>User prefers dark mode.</memory>Here is the plan. <vote>yes</vote>"
+    cleaned = TextSanitizer.sanitize(raw)
+    assert "<memory>" not in cleaned
+    assert "dark mode" not in cleaned
+    assert "<vote>" not in cleaned
+    assert "yes" not in cleaned
+    assert cleaned == "Here is the plan."
+
+def test_text_sanitizer_nested_and_unclosed_xml():
+    raw = "<vote><choice>approve</choice></vote>Done. <memory>dangling unclosed"
+    cleaned = TextSanitizer.sanitize(raw)
+    assert "approve" not in cleaned
+    assert "dangling" not in cleaned
+    assert cleaned == "Done."
+
 def test_text_sanitizer_code_blocks():
     raw = "Here is the solution:\n```python\ndef add(a, b):\n    return a + b\n```\nLet me know!"
     cleaned = TextSanitizer.sanitize(raw)
@@ -89,3 +105,27 @@ async def test_tts_engine_synthesize_error():
     with patch("edge_tts.Communicate", side_effect=RuntimeError("TTS failure")):
         file_path = await engine.synthesize_to_file("Hello there!")
         assert file_path == ""
+
+@pytest.mark.asyncio
+async def test_tts_engine_synthesizes_with_xml_stripped():
+    engine = TTSEngine()
+    mock_comm = MagicMock()
+    mock_comm.save = AsyncMock()
+
+    with patch("edge_tts.Communicate", return_value=mock_comm) as mock_class:
+        file_path = await engine.synthesize_to_file(
+            "<memory>Remember user likes tea.</memory>Here is your tea. <vote>yes</vote>"
+        )
+        assert file_path != ""
+        mock_class.assert_called_once_with("Here is your tea.", voice="en-US-JennyNeural", rate="+0%")
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+
+@pytest.mark.asyncio
+async def test_tts_engine_synthesize_xml_only_returns_empty():
+    engine = TTSEngine()
+    with patch("edge_tts.Communicate") as mock_class:
+        result = await engine.synthesize_to_file("<memory>Remember this</memory><vote>yes</vote>")
+        assert result == ""
+        mock_class.assert_not_called()
+
