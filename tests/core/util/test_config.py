@@ -239,7 +239,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.projects_db_path, os.path.expanduser("~/pkm/projects.db"))
             self.assertEqual(self.config.projects_dir, os.path.join(os.path.expanduser("~/pkm"), "vault", "projects"))
             self.assertEqual(self.config.knowledge_db_path, os.path.expanduser("~/pkm/.lancedb"))
-            self.assertEqual(self.config.embedding_model, "text-embedding-3-small")
+            self.assertEqual(self.config.embedding_model, "gemini-embedding-001")
             self.assertEqual(self.config.embedding_dimensions, 1536)
             self.assertEqual(self.config.pkm_dir, os.path.expanduser("~/pkm"))
 

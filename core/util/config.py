@@ -316,7 +316,13 @@ class Config:
     def embedding_model(self) -> str:
         if self._embedding_model is not None:
             return self._embedding_model
-        return os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+        # Names an actual Gemini model rather than the OpenAI-shaped
+        # "text-embedding-3-small" this used to default to. That name survived
+        # a provider switch and was never sent anywhere: the indexer treated it
+        # as a sentinel meaning "pick something Gemini serves", so the default
+        # advertised a provider the code cannot use. Retired names, that one
+        # included, are still remapped for existing .env files.
+        return os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
 
     @embedding_model.setter
     def embedding_model(self, value):

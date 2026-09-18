@@ -10,6 +10,8 @@ from core.knowledge.vector.indexer import (
     get_embedding_client,
     generate_embeddings,
     generate_query_embedding,
+    resolve_embedding_model,
+    DEFAULT_EMBEDDING_MODEL,
 )
 
 
@@ -199,6 +201,47 @@ Tools allow agents to query data.
         q_vec = generate_query_embedding("query text", client=mock_client)
         self.assertEqual(q_vec, [0.1, 0.2])
         mock_client.embed_query.assert_called_once_with("query text")
+
+
+class TestResolveEmbeddingModel(unittest.TestCase):
+    """The remap table is what keeps older .env files working.
+
+    The config default is now a real Gemini model, but deployments that pinned
+    EMBEDDING_MODEL to a retired or OpenAI-shaped name still have it in their
+    .env, and those values reach the API unless this resolver rewrites them.
+    """
+
+    def test_retired_and_foreign_names_are_remapped(self):
+        for name in ("text-embedding-004", "models/text-embedding-004",
+                     "embedding-001", "models/embedding-001",
+                     "text-embedding-3-small"):
+            with self.subTest(model=name):
+                self.assertEqual(resolve_embedding_model(name), DEFAULT_EMBEDDING_MODEL)
+
+    def test_blank_values_fall_back_to_the_default(self):
+        for name in (None, "", "   "):
+            with self.subTest(model=name):
+                self.assertEqual(resolve_embedding_model(name), DEFAULT_EMBEDDING_MODEL)
+
+    def test_supported_names_are_normalized_not_replaced(self):
+        self.assertEqual(
+            resolve_embedding_model("gemini-embedding-001"),
+            "models/gemini-embedding-001"
+        )
+        self.assertEqual(
+            resolve_embedding_model("models/gemini-embedding-2"),
+            "models/gemini-embedding-2"
+        )
+
+    def test_config_default_survives_resolution(self):
+        # Guards the seam between the two changes: if the config default ever
+        # drifts to something the resolver rejects, embeddings would silently
+        # fall back to deterministic vectors again.
+        Config().reset()
+        self.assertEqual(
+            resolve_embedding_model(Config().embedding_model),
+            DEFAULT_EMBEDDING_MODEL
+        )
 
 
 if __name__ == "__main__":
