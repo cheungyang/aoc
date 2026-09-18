@@ -7,10 +7,11 @@ your own pull request.
 
 Two rules shape this module:
 
-1. The token never enters the repository, the manifest, the graph state, a log
-   line or a remote URL. It is read from a file outside the repo and handed to
-   individual subprocesses through their environment, for the lifetime of that
-   subprocess only.
+1. The token never enters the repository's history, the manifest, the graph
+   state, a log line or a remote URL. It is read from an untracked file that
+   both git and the Docker build context ignore, and handed to individual
+   subprocesses through their environment, for the lifetime of that subprocess
+   only.
 2. A misconfigured credential fails loudly and early. Preflight runs before any
    LLM work, so an expired token costs zero tokens rather than a whole run.
 """
@@ -18,9 +19,16 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-# Kept outside the repo on purpose: anything under the working tree can be read
-# by the agent itself, committed by accident, or synced somewhere unintended.
-DEFAULT_TOKEN_PATH = "~/github_bot_token"
+# The token sits at the project root: that single location is the same file on
+# the host and, through the `.:/app` bind mount, inside the container at
+# /app/github_bot_token -- so one credential serves both without a home
+# directory that the container does not share. Living inside the working tree
+# is only safe because it is excluded from git (.gitignore) and from the image
+# build context (.dockerignore); keep both entries if you move this file.
+# Derived from __file__ rather than the process CWD, which is a worktree under
+# WORKSPACES_DIR while the coding graph runs.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_TOKEN_PATH = os.path.join(PROJECT_ROOT, "github_bot_token")
 
 # Override for tests and for anyone who keeps credentials elsewhere.
 TOKEN_PATH_ENV_VAR = "AOC_BOT_TOKEN_FILE"

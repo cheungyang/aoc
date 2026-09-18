@@ -30,6 +30,12 @@ services:
       - GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15
       - GIT_USER_NAME=${GIT_USER_NAME:-AOC Bot}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-aoc@localhost}
+      # Machine-user PAT for git push / gh pr. The file lives in the project
+      # directory on the host (chmod 600, gitignored) and arrives here through
+      # the `.:/app` bind mount, so the default ~/github_bot_token never exists
+      # in the container. Deliberately a path, not the token itself: putting the
+      # secret in the environment would let `gh` pick it up for every call.
+      - AOC_BOT_TOKEN_FILE=${AOC_BOT_TOKEN_FILE:-/app/github_bot_token}
       # Store gogcli auth and config in ./.gogcli in project root (no ~/.config/gogcli needed on host)
       - GOG_HOME=${GOG_HOME:-/app/.gogcli}
       - GOG_KEYRING_BACKEND=${GOG_KEYRING_BACKEND:-file}

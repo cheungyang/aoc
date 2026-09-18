@@ -5,6 +5,10 @@ __pycache__/
 .git
 .gitignore
 .gogcli/
+# Secret, not a build input: `COPY . .` would bake the PAT into an image layer
+# that survives docker save/push. The container reads it from the /app bind
+# mount at run time (see AOC_BOT_TOKEN_FILE in docker-compose.yml).
+*bot_token*
 .pytest_cache/
 .venv
 .vscode/
