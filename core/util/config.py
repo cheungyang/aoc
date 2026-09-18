@@ -46,6 +46,7 @@ class Config:
             cls._instance._context_pruning_timeout = None
             cls._instance._gog_keyring_backend = None
             cls._instance._gog_keyring_password = None
+            cls._instance._timezone = None
             cls._instance.load_from_env()
         return cls._instance
 
@@ -80,6 +81,7 @@ class Config:
         self._context_pruning_timeout = None
         self._gog_keyring_backend = None
         self._gog_keyring_password = None
+        self._timezone = None
 
     def get(self, key: str, default: Any = None) -> Any:
         """Generic access to environment variables via the central Config."""
@@ -268,6 +270,27 @@ class Config:
     @gog_keyring_password.setter
     def gog_keyring_password(self, value):
         self._gog_keyring_password = str(value) if value is not None else None
+
+    # -------------------------------------------------------------------------
+    # Locale settings
+    # -------------------------------------------------------------------------
+    @property
+    def timezone(self) -> str:
+        """IANA timezone name used for every user-facing date/time.
+
+        The container runs on UTC, so relying on the host clock made the agent
+        believe it was already tomorrow for the whole PST evening. Pinning the
+        user's zone here keeps "today" meaningful no matter where the process
+        happens to run. TZ is honoured as a fallback so a deployment that
+        already sets the standard variable does not need a second one.
+        """
+        if self._timezone is not None:
+            return self._timezone
+        return os.getenv("TIMEZONE", os.getenv("TZ", "America/Los_Angeles"))
+
+    @timezone.setter
+    def timezone(self, value):
+        self._timezone = str(value) if value is not None else None
 
     # -------------------------------------------------------------------------
     # PKM & Tasks Storage Paths
@@ -523,6 +546,7 @@ class Config:
         self._context_pruning_timeout = None
         self._gog_keyring_backend = None
         self._gog_keyring_password = None
+        self._timezone = None
         self.load_from_env()
 
 

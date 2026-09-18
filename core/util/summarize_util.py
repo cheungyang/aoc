@@ -105,10 +105,13 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
 
     try:
         from core.util.config import Config
+        from core.util.time_util import get_local_now
         from tools.filesystem import filesystem
 
         pkm_dir = Config().pkm_dir
-        now = datetime.datetime.now()
+        # User's wall clock, not the container's UTC: the log file is named by
+        # date, so a UTC stamp would start "tomorrow's" log mid-evening.
+        now = get_local_now()
         today_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
         log_file = os.path.join(pkm_dir, "agents", agent_id, "memory_logs", f"{today_str}.md")

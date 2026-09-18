@@ -8,6 +8,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.schedule_runner import ScheduleRunner
+from core.util.time_util import get_local_now
 
 class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
 
@@ -29,13 +30,63 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         
         self.assertEqual(len(runner.schedules), 1)
         self.assertEqual(runner.schedules[0]["agent_id"], "agent1")
         self.assertEqual(runner.schedules[0]["cron"], "* * * * *")
+
+    @patch('core.runtime.schedule_runner.AgentsLoader')
+    @patch('core.runtime.schedule_runner.BotsLoader')
+    @patch('core.runtime.schedule_runner.croniter')
+    async def test_schedule_uses_configured_timezone(
+        self, mock_croniter, mock_bots_loader, mock_agents_loader
+    ):
+        """Cron runs on the user's clock, not the UTC host's."""
+        from zoneinfo import ZoneInfo
+        from core.util.config import Config
+
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.list_agent_ids.return_value = ["agent1"]
+
+        mock_agent = MagicMock()
+        mock_loader.get_agent.return_value = mock_agent
+        mock_agent.config = {
+            "schedules": [
+                {
+                    "cron": "0 9 * * *",
+                    "prompt": "morning brief",
+                    "enabled": "true",
+                }
+            ]
+        }
+
+        mock_iter = MagicMock()
+        mock_croniter.return_value = mock_iter
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
+
+        Config().timezone = "Asia/Tokyo"
+        try:
+            ScheduleRunner()
+        finally:
+            Config().timezone = None
+
+        # croniter derives the next fire time from the datetime it is handed,
+        # so that datetime carrying the user's zone is what makes "0 9 * * *"
+        # mean 9am locally.
+        _, passed_now = mock_croniter.call_args[0]
+        self.assertEqual(passed_now.tzinfo, ZoneInfo("Asia/Tokyo"))
+        self.assertEqual(
+            passed_now.utcoffset(),
+            datetime.datetime.now(ZoneInfo("Asia/Tokyo")).utcoffset(),
+        )
 
     @patch('core.runtime.schedule_runner.AgentsLoader')
     @patch('core.runtime.schedule_runner.BotsLoader')
@@ -55,7 +106,9 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         
@@ -63,7 +116,6 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.schedules[0]["prompt"], "line1\nline2")
 
     @patch('core.runtime.schedule_runner.AgentsLoader')
-
     @patch('core.runtime.schedule_runner.BotsLoader')
     @patch('core.runtime.schedule_runner.croniter')
     async def test_execute_schedule(self, mock_croniter, mock_bots_loader, mock_agents_loader):
@@ -100,7 +152,9 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         
@@ -143,7 +197,9 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         
@@ -188,7 +244,9 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         await runner._execute_schedule(runner.schedules[0])
@@ -216,8 +274,8 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        past_time = datetime.datetime.now() - datetime.timedelta(minutes=1)
-        future_time = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        past_time = get_local_now() - datetime.timedelta(minutes=1)
+        future_time = get_local_now() + datetime.timedelta(minutes=1)
         mock_iter.get_next.return_value = future_time
         
         runner = ScheduleRunner()
@@ -261,7 +319,9 @@ class TestScheduleRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_iter = MagicMock()
         mock_croniter.return_value = mock_iter
-        mock_iter.get_next.return_value = datetime.datetime.now() + datetime.timedelta(minutes=1)
+        mock_iter.get_next.return_value = (
+            get_local_now() + datetime.timedelta(minutes=1)
+        )
         
         runner = ScheduleRunner()
         await runner._execute_schedule(runner.schedules[0])

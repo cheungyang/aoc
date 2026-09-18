@@ -3,10 +3,12 @@ from unittest.mock import patch, mock_open
 import os
 import sys
 import datetime
+from zoneinfo import ZoneInfo
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+from core.util.config import Config
 from core.util.prompt_util import (
     get_knowledge_prompt,
     get_formatting_prompt,
@@ -17,18 +19,43 @@ from core.util.prompt_util import (
 
 class TestPromptUtil(unittest.TestCase):
 
+    def tearDown(self):
+        Config().timezone = None
+
     def test_get_knowledge_prompt(self):
+        Config().timezone = "America/Los_Angeles"
         prompt = get_knowledge_prompt()
         self.assertIn("<common_knowledge>", prompt)
         self.assertIn("Today's Date:", prompt)
         self.assertNotIn("Current Time:", prompt)  # Omitted to preserve LLM prompt cache prefix
-        
-        now = datetime.datetime.now()
+
+        now = datetime.datetime.now(ZoneInfo("America/Los_Angeles"))
         date_str = now.strftime("%Y-%m-%d")
         self.assertIn(date_str, prompt)
+        self.assertIn("America/Los_Angeles", prompt)
+        self.assertIn(now.strftime("%Z"), prompt)
 
         prompt_again = get_knowledge_prompt()
         self.assertEqual(prompt, prompt_again)
+
+    def test_get_knowledge_prompt_uses_configured_timezone(self):
+        """The host clock (UTC in prod) must not decide what 'today' is."""
+        Config().timezone = "Asia/Tokyo"
+        prompt = get_knowledge_prompt()
+
+        tokyo_now = datetime.datetime.now(ZoneInfo("Asia/Tokyo"))
+        self.assertIn(tokyo_now.strftime("%Y-%m-%d"), prompt)
+        self.assertIn(tokyo_now.strftime("%A"), prompt)
+        self.assertIn("Asia/Tokyo", prompt)
+        self.assertIn("UTC+09:00", prompt)
+
+    def test_get_knowledge_prompt_falls_back_on_bad_timezone(self):
+        Config().timezone = "Not/AZone"
+        prompt = get_knowledge_prompt()
+        self.assertIn("<common_knowledge>", prompt)
+        self.assertIn("Today's Date:", prompt)
+        self.assertIn("Current Timezone:", prompt)
+
 
     def test_get_formatting_prompt(self):
         prompt = get_formatting_prompt()

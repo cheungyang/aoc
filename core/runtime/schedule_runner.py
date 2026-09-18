@@ -5,6 +5,7 @@ from core.loaders.agents_loader import AgentsLoader
 from core.channel.discord.loader import BotsLoader
 from core.runtime.session_manager import SessionManager
 from core.util.config import Config
+from core.util.time_util import get_local_now
 
 class ScheduleRunner:
     def __init__(self):
@@ -15,7 +16,11 @@ class ScheduleRunner:
 
     def _load_schedules(self):
         agent_ids = self.loader.list_agent_ids()
-        now = datetime.datetime.now()
+        # Cron expressions are authored as the user's wall clock. The container
+        # runs on UTC, so evaluating them against a naive now() fired every job
+        # 7-8 hours early. croniter keeps the tzinfo it is handed, so passing an
+        # aware local datetime also makes the schedules follow DST.
+        now = get_local_now()
         for agent_id in agent_ids:
             agent = self.loader.get_agent(agent_id)
             config = agent.config
@@ -50,7 +55,7 @@ class ScheduleRunner:
         print("ScheduleRunner started.")
         while True:
             await asyncio.sleep(30)
-            now = datetime.datetime.now()
+            now = get_local_now()
             triggered = False
             for item in self.schedules:
                 if not item["enabled"]:

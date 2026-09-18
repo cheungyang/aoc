@@ -93,7 +93,7 @@ docker compose exec app env AOC_BOOTSTRAP_INDEX=always \
 Provisioning failures are logged but non-fatal by default, so a flaky mirror
 cannot break an otherwise good image. Build with
 `--build-arg AOC_PROVISION_STRICT=1` to make them fail the build instead.
-See sections 8 and 9 of `.env.example` for the available knobs.
+See sections 9 and 10 of `.env.example` for the available knobs.
 
 ---
 

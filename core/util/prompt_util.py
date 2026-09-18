@@ -1,7 +1,7 @@
-import datetime
-import time
 import os
 from typing import Optional
+
+from core.util.time_util import format_timezone_label, get_local_now
 
 
 def get_formatting_prompt() -> str:
@@ -68,20 +68,19 @@ def get_channel_prompt(channel_name: Optional[str] = None) -> str:
 
 
 def get_knowledge_prompt() -> str:
-    now = datetime.datetime.now()
+    now = get_local_now()
     date_str = now.strftime("%Y-%m-%d")
     day_of_week = now.strftime("%A")
     weekday = now.weekday()
     day_type = "Weekday" if weekday < 5 else "Weekend"
-    
-    tz_str = time.strftime('%Z')
-    if not tz_str:
-        tz_str = "UTC-7"
-        
+
     knowledge = [
         f"Today's Date: {date_str}",
         f"Today is: {day_of_week} ({day_type})",
-        f"Current Timezone: {tz_str}",
+        f"Current Timezone: {format_timezone_label(now)}",
+        "All dates and times you state or receive are in this timezone "
+        "unless explicitly labeled otherwise. Convert timestamps coming "
+        "from tools/APIs (commonly UTC) into it before reporting them.",
     ]
 
     return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"

@@ -15,6 +15,10 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      # Container clock defaults to UTC. Align both the app-level setting and
+      # the OS zone so dates in prompts, logs, and shell tools match the user.
+      - TIMEZONE=${TIMEZONE:-America/Los_Angeles}
+      - TZ=${TIMEZONE:-America/Los_Angeles}
       # Default PKM, codebase, and workspaces paths inside the container (can be overridden via .env)
       - PKM_DIR=${PKM_DIR:-/home/appuser/pkm}
       - CODEBASE_DIR=${CODEBASE_DIR:-/app}

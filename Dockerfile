@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     procps \
     chromium \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure Git safe.directory and system defaults for mounted repositories
