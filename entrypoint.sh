@@ -10,13 +10,33 @@ if [ -n "$TARGET_UID" ] && [ "$TARGET_UID" -ne 0 ] && [ "$TARGET_UID" != "$(id -
     chown -R appuser:appuser /home/appuser 2>/dev/null || true
 fi
 
-# Ensure /app and its files are readable and directories are executable
-chmod -R a+rX /app 2>/dev/null || true
+# Secrets that live in the project directory. /app is a bind mount of the host
+# checkout, so every chmod below writes through to the host's inodes -- these
+# names are held out of the blanket `a+rX` sweep and locked to 600 afterwards.
+# Mirrors the ignore lists in .gitignore / .dockerignore. .env.example is
+# tracked sample config, not a secret, so it is excluded from the match.
+AOC_SECRET_NAMES=( '*bot_token*' 'client_secret_*' '.env' '.env.*' )
+
+secret_match=()
+for pattern in "${AOC_SECRET_NAMES[@]}"; do
+    secret_match+=( -o -name "$pattern" )
+done
+# Drop the leading -o, then exempt the committed example file
+secret_match=( \( "${secret_match[@]:1}" \) ! -name '.env.example' )
+
+# Ensure /app and its files are readable and directories are executable.
+# -prune keeps the secrets out of it: a+rX would leave the host copies
+# world-readable, which is how a 600 token silently became 644 on restart.
+find /app "${secret_match[@]}" -prune -o -exec chmod a+rX {} + 2>/dev/null || true
 
 # If appuser still cannot read /app/main.py, ensure ownership
 if ! runuser -u appuser -- test -r /app/main.py 2>/dev/null; then
     chown -R appuser:appuser /app 2>/dev/null || true
 fi
+
+# Restrict secrets to owner-only. Runs after the chown above so it has the
+# final say on the mode regardless of which branch ran.
+find /app "${secret_match[@]}" -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # --- SSH credential provisioning -------------------------------------------
 # Host keys are mounted READ-ONLY at /mnt/.ssh and then *copied* into each
