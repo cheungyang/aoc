@@ -189,6 +189,35 @@ def split_markdown_into_chunks(
     return chunks
 
 
+# Google retired text-embedding-004: the v1beta endpoint now answers 404 for it,
+# which silently demoted every index to the deterministic fallback vectors.
+# gemini-embedding-001 is the current general-purpose model and supports
+# Matryoshka output dimensions, so an existing 1536-wide table stays valid.
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+# Names that must not be sent to the API: either retired, or an OpenAI model
+# name left over from the config default.
+_RETIRED_EMBEDDING_MODELS = {
+    "text-embedding-3-small",
+    "text-embedding-004",
+    "models/text-embedding-004",
+    "embedding-001",
+    "models/embedding-001",
+}
+
+
+def resolve_embedding_model(model_name: Optional[str]) -> str:
+    """Normalizes a configured embedding model into a servable Gemini model id."""
+    model = (model_name or "").strip()
+    if not model or model in _RETIRED_EMBEDDING_MODELS:
+        return DEFAULT_EMBEDDING_MODEL
+    if not model.startswith("models/"):
+        model = f"models/{model}"
+    if model in _RETIRED_EMBEDDING_MODELS:
+        return DEFAULT_EMBEDDING_MODEL
+    return model
+
+
 def get_embedding_client(model_name: Optional[str] = None):
     """
     Returns a GoogleGenerativeAIEmbeddings client if Gemini API key is configured.
@@ -200,11 +229,7 @@ def get_embedding_client(model_name: Optional[str] = None):
 
     try:
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        model = model_name or config.embedding_model
-        if not model or model == "text-embedding-3-small":
-            model = "models/text-embedding-004"
-        elif not model.startswith("models/"):
-            model = f"models/{model}"
+        model = resolve_embedding_model(model_name or config.embedding_model)
 
         kwargs = {"model": model, "google_api_key": gemini_key}
         if "gemini-embedding" in model:

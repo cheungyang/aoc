@@ -44,6 +44,18 @@ services:
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)
       - ${WORKSPACES_HOST_DIR:-../workspaces}:/home/appuser/workspaces
+      # Baked assets that are not in git (faster-whisper weights, ~150MB).
+      # A named volume, not a bind mount: Docker populates it from the image the
+      # first time it is used, so a fresh deploy still starts with the weights
+      # the build downloaded, while later rebuilds reuse the volume instead of
+      # re-fetching. Survives `docker compose down`; clear it with
+      # `docker compose down -v` or `docker volume rm aoc_aoc-assets`.
+      # NOTE: /opt/aoc-seed is deliberately NOT mounted -- it must track the
+      # image, since Docker only seeds a volume while that volume is empty.
+      - aoc-assets:/opt/aoc
     ports:
       # Chrome remote debugging port for visual AI browser automation (optional)
       - "9222:9222"
+
+volumes:
+  aoc-assets:

@@ -14,6 +14,86 @@ This guide explains how to set up and run the LangGraph system in a Docker conta
 - `.dockerignore`: Excludes local caches, `.venv`, and artifacts from the build context.
 - `entrypoint.sh`: Handles copying SSH keys and setting permissions inside the container.
 - `install.sh`: A helper script to run the container directly with `docker run`.
+- `scripts/provision_assets.py`: Downloads or generates the assets that are not checked into git.
+
+---
+
+## Assets Not Checked Into Git
+
+Several things the app needs at run time are excluded by `.gitignore` and therefore
+absent from a fresh clone or a fresh image: the faster-whisper STT weights, the
+generated audio cues, the LanceDB vector index, and the ignored working
+directories (`sessions/`, `workspaces/`, `.gogcli/`). `scripts/provision_assets.py`
+provisions all of them in two stages.
+
+| Stage | Runs from | Does |
+| --- | --- | --- |
+| `build` | `Dockerfile` | Downloads the faster-whisper model, verifies the Silero VAD graph, stages audio cues (generating any that are missing via edge-tts) |
+| `runtime` | `entrypoint.sh` | Re-fetches the model if the volume lacks it, restores staged files the bind mount hides, creates ignored directories, warns on a missing `.env`, bootstraps the vector index |
+
+### Where assets live, and why
+
+Nothing is provisioned into `/app`: `docker-compose.yml` mounts the host checkout
+there, which hides anything the build wrote. Instead there are two directories,
+and the distinction between them matters.
+
+| Path | Mapped to | Holds | Why there |
+| --- | --- | --- | --- |
+| `/opt/aoc` | named volume `aoc-assets` | faster-whisper weights (~150MB) under `hf/` | Persists across image rebuilds and `docker compose down`, so the download happens once |
+| `/opt/aoc-seed` | image layer only | audio cues destined for `/app` | Must track the image — see below |
+
+> [!WARNING]
+> Do not move the seed directory inside `/opt/aoc`. Docker copies image content
+> into a named volume **only while that volume is empty**. A seed stored inside
+> the volume would be frozen at the first image that ever populated it, and no
+> later build could correct it.
+
+The same rule cuts the other way for the model cache: a volume created by an
+older image will not pick up a newer one's weights. The runtime stage therefore
+treats the cache as possibly-empty and re-fetches when needed, so a stale volume
+costs a slow first start rather than a failed transcription.
+
+Two things keep rebuilds cheap:
+
+- Provisioning runs **before** `COPY . .` in the Dockerfile. Editing application
+  code no longer invalidates the download layer; only `provision_assets.py` or
+  `assets/` can.
+- The `aoc-assets` volume outlives the image, so even a fully rebuilt image
+  reuses the weights already on the host.
+
+```bash
+# Inspect the persisted cache
+docker volume inspect aoc_aoc-assets
+
+# Force a clean re-download (e.g. after changing AOC_STT_MODEL)
+docker compose down && docker volume rm aoc_aoc-assets
+```
+
+`HF_HOME` is pinned to `/opt/aoc/hf` for build and run alike, so `STTEngine`
+reads the cache the build populated rather than pulling it again on the first
+transcription.
+
+> [!IMPORTANT]
+> The first start against a PKM that has no `.lancedb` blocks while the index is
+> built, which can take several minutes on a large vault. This happens once.
+> Set `AOC_BOOTSTRAP_INDEX=never` to start immediately and index separately with
+> `scripts/regenerate_lancedb.py`.
+
+Run it manually to inspect or re-run a stage:
+
+```bash
+# See what a stage would do without writing anything
+docker compose exec app python3 scripts/provision_assets.py --stage runtime --dry-run
+
+# Force a vector index rebuild
+docker compose exec app env AOC_BOOTSTRAP_INDEX=always \
+    python3 scripts/provision_assets.py --stage runtime --only index
+```
+
+Provisioning failures are logged but non-fatal by default, so a flaky mirror
+cannot break an otherwise good image. Build with
+`--build-arg AOC_PROVISION_STRICT=1` to make them fail the build instead.
+See sections 8 and 9 of `.env.example` for the available knobs.
 
 ---
 

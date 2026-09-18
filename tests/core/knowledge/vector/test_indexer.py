@@ -138,21 +138,45 @@ Tools allow agents to query data.
         self.assertIsNone(client)
 
     @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
-    def test_get_embedding_client_with_gemini_key(self, mock_gemini_class):
+    def test_get_embedding_client_remaps_retired_model(self, mock_gemini_class):
+        """text-embedding-004 was retired; the client must not request it anymore."""
         mock_instance = MagicMock()
         mock_gemini_class.return_value = mock_instance
 
         Config().gemini_api_key = "test-gemini-key"
         Config().embedding_model = "text-embedding-004"
+        Config().embedding_dimensions = 1536
 
         client = get_embedding_client()
         self.assertEqual(client, mock_instance)
         mock_gemini_class.assert_called_once_with(
-            model="models/text-embedding-004",
-            google_api_key="test-gemini-key"
+            model="models/gemini-embedding-001",
+            google_api_key="test-gemini-key",
+            output_dimensionality=1536
         )
 
-    def test_generate_embeddings_deterministic_fallback(self):
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
+    def test_get_embedding_client_respects_custom_model(self, mock_gemini_class):
+        mock_instance = MagicMock()
+        mock_gemini_class.return_value = mock_instance
+
+        Config().gemini_api_key = "test-gemini-key"
+        Config().embedding_model = "gemini-embedding-2"
+        Config().embedding_dimensions = 768
+
+        client = get_embedding_client()
+        self.assertEqual(client, mock_instance)
+        mock_gemini_class.assert_called_once_with(
+            model="models/gemini-embedding-2",
+            google_api_key="test-gemini-key",
+            output_dimensionality=768
+        )
+
+    @patch("core.knowledge.vector.indexer.get_embedding_client", return_value=None)
+    def test_generate_embeddings_deterministic_fallback(self, _mock_client):
+        # get_embedding_client is patched out on purpose: with a real key in the
+        # environment this test would otherwise hit the live API, and it only
+        # ever exercised the fallback because that endpoint happened to 404.
         Config().embedding_dimensions = 8
         texts = ["First chunk of text", "Second chunk of text"]
         vectors = generate_embeddings(texts, client=None)

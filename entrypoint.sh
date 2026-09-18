@@ -168,6 +168,24 @@ if [ -d "/app" ]; then
     chmod +x /app/scripts/*.py 2>/dev/null || true
 fi
 
+# The named volume mounted at $AOC_ASSET_ROOT carries the ownership baked into
+# the image, which stops matching appuser after the UID remap at the top of this
+# script; a volume created before that directory existed is owned by root
+# instead. Either way appuser could not refresh the cache, so realign it.
+ASSET_ROOT="${AOC_ASSET_ROOT:-/opt/aoc}"
+if [ -d "$ASSET_ROOT" ]; then
+    chown -R appuser:appuser "$ASSET_ROOT" 2>/dev/null || true
+fi
+
+# Restore assets the /app bind mount hid, create ignored runtime directories,
+# and build the vector index if the mounted PKM has none. Runs as appuser so
+# everything it writes is owned by the account that later reads it. Never
+# fatal: a missing index degrades search, it should not block startup.
+if [ "${AOC_PROVISION_RUNTIME:-1}" = "1" ] && [ -f /app/scripts/provision_assets.py ]; then
+    runuser -u appuser -- python3 /app/scripts/provision_assets.py --stage runtime || \
+        echo "Warning: runtime asset provisioning reported errors; continuing startup."
+fi
+
 # Start Chromium in the background as appuser for the browser tool
 runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
 

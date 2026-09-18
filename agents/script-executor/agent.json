@@ -13,31 +13,9 @@
       "cron": "0 0 * * *",
       "prompt": [
         "script sync_tasks.py",
-        "script sync_projects.py"
-      ]
-    },
-    {
-      "channel": "general",
-      "thread": "cronjobs",
-      "cron": "0 0 */2 * *",
-      "prompt": [
-        "script sync_knowledge.py"
-      ]
-    },
-    {
-      "channel": "general",
-      "thread": "cronjobs",
-      "cron": "0 0 * * *",
-      "prompt": [
-        "script sync_git.py",
+        "script sync_projects.py",
+        "script sync_knowledge.py",
         "script wiki_scanner.py"
-      ]
-    },
-    {
-      "channel": "software-dev",
-      "cron": "*/5 * * * *",
-      "prompt": [
-        "script coding_tick.py"
       ]
     },
     {
@@ -46,6 +24,21 @@
       "cron": "0 23 * * *",
       "prompt": [
         "script dream_standup.py"
+      ]
+    },
+    {
+      "channel": "general",
+      "thread": "cronjobs",
+      "cron": "0 */1 * * *",
+      "prompt": [
+        "script sync_git.py"
+      ]
+    },
+    {
+      "channel": "software-dev",
+      "cron": "*/5 * * * *",
+      "prompt": [
+        "script coding_tick.py"
       ]
     }
   ]
