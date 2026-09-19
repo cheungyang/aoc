@@ -41,3 +41,9 @@ pillow
 GitPython>=3.1.40
 python-dateutil
 requests
+# Home Assistant's registries (entities, devices, areas) are only reachable over
+# its WebSocket API. This is the synchronous client: the tools in this repo are
+# plain `def` and LangChain runs them in a worker thread, so the async
+# `websockets` package -- present here only as a transitive dependency -- would
+# mean driving an event loop from inside a sync call for no benefit.
+websocket-client

@@ -26,6 +26,13 @@ from typing import Any, Dict, Optional
 
 import requests
 
+# Importing Config is what loads .env (it calls load_dotenv at import time), so
+# every environment read below goes through it rather than os.environ directly.
+# Reading os.environ straight would work inside the running app -- something else
+# always imports Config first -- but would fail for any script, probe or test that
+# imports this module on its own, which is a trap worth closing here.
+from core.util.config import Config
+
 # The token sits at the project root: one file serves both the host and, through
 # the `.:/app` bind mount, the container at /app/home_assistant_token. Living
 # inside the working tree is only safe because it is excluded from git
@@ -62,7 +69,7 @@ class HomeAssistantError(Exception):
 
 def resolve_token_path(token_path: Optional[str] = None) -> str:
     """Resolves the credential file path: argument, then env var, then default."""
-    raw = token_path or os.environ.get(TOKEN_PATH_ENV_VAR) or DEFAULT_TOKEN_PATH
+    raw = token_path or Config().get(TOKEN_PATH_ENV_VAR) or DEFAULT_TOKEN_PATH
     return os.path.abspath(os.path.expanduser(raw))
 
 
@@ -120,7 +127,7 @@ def write_enabled() -> bool:
     all?" has exactly one answer, available before any action is dispatched.
     Enforcement lands with the guards in Phase 3; nothing in this module mutates.
     """
-    return str(os.environ.get(WRITE_ENABLED_ENV_VAR, "")).strip().lower() in {"1", "true", "yes", "on"}
+    return str(Config().get(WRITE_ENABLED_ENV_VAR, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class HomeAssistantClient:
@@ -139,7 +146,7 @@ class HomeAssistantClient:
         session: Optional[requests.Session] = None,
         token_path: Optional[str] = None,
     ):
-        resolved_base = (base_url or os.environ.get(BASE_URL_ENV_VAR) or "").strip()
+        resolved_base = (base_url or Config().get(BASE_URL_ENV_VAR) or "").strip()
         if not resolved_base:
             raise HomeAssistantError(
                 f"{BASE_URL_ENV_VAR} is not set. Add it to .env, e.g. "
@@ -153,7 +160,7 @@ class HomeAssistantClient:
         # logged/repr'd client cannot leak it.
         self._token = token if token is not None else read_token(token_path)
 
-        self.timeout = int(timeout if timeout is not None else os.environ.get(TIMEOUT_ENV_VAR, DEFAULT_TIMEOUT))
+        self.timeout = int(timeout if timeout is not None else Config().get(TIMEOUT_ENV_VAR, DEFAULT_TIMEOUT))
         self._session = session or requests.Session()
 
     def __repr__(self) -> str:

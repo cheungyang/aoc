@@ -125,6 +125,19 @@ class ToolsLoader:
         self._agent_permissions_cache[cache_key] = merged_tools
         return merged_tools
 
+    def get_tool_permissions(self, ctx, tool_id: str):
+        """Returns the merged permission scope for one tool, or None if ungranted.
+
+        `check_permission` answers "may this happen?", which is the right question
+        almost everywhere. This answers "what shape is the grant?", which a tool
+        needs when the *form* of the grant matters and not just its verdict --
+        specifically, to tell an explicit grant from a blanket one. An empty dict
+        or list means allow-all here (see check_permission), and a tool holding
+        dangerous actions may reasonably refuse to honour that.
+        """
+        self._require_ctx(ctx, "get_tool_permissions")
+        return self._merge_tool_permissions(ctx).get(tool_id)
+
     def check_permission(self, ctx, tool_id: str, action_name: str = None, path: str = None, **kwargs) -> bool:
         import os
         self._require_ctx(ctx, "check_permission")
