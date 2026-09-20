@@ -122,6 +122,13 @@ class ToolsLoader:
             if agent_workspace_pkm not in merged_tools["filesystem"]:
                 merged_tools["filesystem"][agent_workspace_pkm] = default_actions.copy()
 
+        # Resolve named bundles (@read, @observe, ...) into concrete actions. This
+        # happens after every merge source has contributed and before the cache is
+        # written, so it costs nothing per call and `check_permission` never has to
+        # know bundles exist. Tools with no bundles defined pass through untouched.
+        from core.loaders.permission_bundles import expand_permissions
+        expand_permissions(merged_tools)
+
         self._agent_permissions_cache[cache_key] = merged_tools
         return merged_tools
 
