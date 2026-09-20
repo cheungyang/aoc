@@ -69,21 +69,22 @@ class TestToolAgreesWithTable(unittest.TestCase):
     """
 
     def setUp(self):
-        from tools.home_assistant import IMPLEMENTED
+        from tools.home_assistant import IMPLEMENTED, WRITE_IMPLEMENTED
 
         self.implemented = IMPLEMENTED
+        self.write_implemented = WRITE_IMPLEMENTED
 
     def test_every_implemented_action_is_routed(self):
         unrouted = self.implemented - routing.ALL_ACTIONS
         self.assertEqual(unrouted, frozenset(), f"implemented but not in the routing table: {sorted(unrouted)}")
 
     def test_no_implemented_action_is_a_write(self):
-        """Phase 2 is read-only; a write reaching IMPLEMENTED would skip the guards."""
+        """IMPLEMENTED is the read dispatch table; a write here would skip the guards."""
         writes = self.implemented & routing.WRITE_ACTIONS
         self.assertEqual(writes, frozenset(), f"mutating actions in IMPLEMENTED: {sorted(writes)}")
 
     def test_implemented_is_exactly_the_non_mcp_reads(self):
-        """Pins the Phase 2 boundary: REST and WS reads are live, MCP reads are not.
+        """Pins the read boundary: REST and WS reads are live, MCP reads are not.
 
         If a REST-backed read is added to the table but never dispatched, this
         fails -- which is the point, since the tool would otherwise report it as
@@ -91,6 +92,24 @@ class TestToolAgreesWithTable(unittest.TestCase):
         """
         expected = {a for a in routing.READ_ACTIONS if routing.backend_for(a) != routing.MCP}
         self.assertEqual(set(self.implemented), expected)
+
+    def test_every_dispatched_write_is_a_declared_write(self):
+        """A write that is dispatched but not in WRITE_ACTIONS would never be guarded.
+
+        The tool only routes an action through `_guard_write` when it is in
+        `routing.WRITE_ACTIONS`. Something dispatched as a write but absent from
+        that set would be treated as a read: no confirmation, no deny-list, no
+        kill switch. This is the most safety-critical assertion in the file.
+        """
+        undeclared = self.write_implemented - routing.WRITE_ACTIONS
+        self.assertEqual(
+            undeclared, frozenset(),
+            f"dispatched as writes but not declared as writes: {sorted(undeclared)}",
+        )
+
+    def test_the_two_dispatch_tables_do_not_overlap(self):
+        overlap = self.implemented & self.write_implemented
+        self.assertEqual(overlap, frozenset(), f"in both dispatch tables: {sorted(overlap)}")
 
 
 if __name__ == "__main__":

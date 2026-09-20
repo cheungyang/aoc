@@ -190,11 +190,20 @@ class HomeAssistantClient:
         path: str,
         json: Optional[Any] = None,
         params: Optional[Dict[str, Any]] = None,
+        retry: bool = True,
     ) -> Any:
         """Performs one request, retrying only what is worth retrying.
 
         Returns parsed JSON when the response carries it, otherwise the body text.
         Raises HomeAssistantError -- already redacted -- on any failure.
+
+        Set `retry=False` for anything that is not idempotent. A 502/504, or a
+        connection error on the way back, does not tell you whether Home Assistant
+        processed the request -- only that the answer was lost. Re-sending is
+        harmless for a config `POST` (same id, same body, same result) but not for
+        `POST /api/services/...`, where a second delivery runs the service twice.
+        Retrying a `script.turn_on` that already fired is a real change to the
+        house, so the write path opts out rather than guessing.
         """
         url = self._url(path)
         last_error = None
@@ -215,12 +224,12 @@ class HomeAssistantClient:
                 last_error = HomeAssistantError(
                     f"Could not reach Home Assistant at {url}: {redact(exc, self._token)}"
                 )
-                if attempt < MAX_ATTEMPTS:
+                if retry and attempt < MAX_ATTEMPTS:
                     time.sleep(BACKOFF_SECONDS * attempt)
                     continue
                 raise last_error from None
 
-            if response.status_code in RETRY_STATUS and attempt < MAX_ATTEMPTS:
+            if retry and response.status_code in RETRY_STATUS and attempt < MAX_ATTEMPTS:
                 time.sleep(BACKOFF_SECONDS * attempt)
                 continue
 
@@ -268,11 +277,11 @@ class HomeAssistantClient:
     def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         return self.request("GET", path, params=params)
 
-    def post(self, path: str, json: Optional[Any] = None) -> Any:
-        return self.request("POST", path, json=json)
+    def post(self, path: str, json: Optional[Any] = None, retry: bool = True) -> Any:
+        return self.request("POST", path, json=json, retry=retry)
 
-    def delete(self, path: str) -> Any:
-        return self.request("DELETE", path)
+    def delete(self, path: str, retry: bool = True) -> Any:
+        return self.request("DELETE", path, retry=retry)
 
     def ping(self) -> str:
         """Verifies credentials and reachability in one call.

@@ -12,9 +12,10 @@ One tool, many actions, rather than one tool per capability. Two reasons:
 
 Which transport serves an action is decided by `routing.py`, never by the model.
 
-Phase 2: read-only. Mutating actions are declared in the routing table so the
-permission layer can see the whole vocabulary, but none are dispatched yet; they
-arrive in Phase 4 behind the guards in Phase 3.
+Reads apply immediately. Mutating actions run the guard chain in `guards.py`
+first, and config writes are snapshotted and verified by `writes.py` so a bad
+change can be undone. `upsert_helper` is declared and guarded but not yet
+dispatched; it is served by the WebSocket API.
 """
 import json
 
@@ -22,6 +23,7 @@ from langchain_core.tools import tool
 
 from core.integrations.homeassistant import guards
 from core.integrations.homeassistant import inventory as inventory_mod
+from core.integrations.homeassistant import writes as writes_mod
 from core.integrations.homeassistant.client import HomeAssistantClient, HomeAssistantError
 from core.integrations.homeassistant.routing import READ_ACTIONS, WRITE_ACTIONS
 from core.integrations.homeassistant.ws import HomeAssistantWebSocket
@@ -48,10 +50,24 @@ IMPLEMENTED = frozenset({
     "get_automation",
 })
 
+# The same distinction on the write side. `upsert_helper` is declared in the
+# routing table and passes the guards, but is served by the WebSocket API with a
+# different schema per helper domain, so it is not dispatched yet.
+WRITE_IMPLEMENTED = frozenset({
+    "call_service",
+    "upsert_automation",
+    "upsert_script",
+    "upsert_scene",
+    "delete_automation",
+    "delete_script",
+    "delete_scene",
+    "reload",
+})
+
 
 @tool
 def home_assistant(instructions: list[dict]) -> str:
-    """Read from Home Assistant: entities, areas, devices, automations and state.
+    """Read and control Home Assistant: entities, areas, devices, automations, state.
 
     Supports several actions in one call. Each instruction is a dict with an
     "action" key plus that action's arguments.
@@ -88,7 +104,32 @@ def home_assistant(instructions: list[dict]) -> str:
       {"action": "list_automations"} / {"action": "get_automation", "id": "<id>"}
           Existing automations, and one automation's full config.
 
-    Writing (creating automations, calling services) is not available yet.
+    Writing:
+      {"action": "call_service", "entity_id": "light.porch", "service": "turn_on",
+       "service_data": {"brightness": 180}}
+          Calls a service. Reversible domains (light, switch, fan, media_player,
+          climate in band, ...) apply immediately. Pass "domain" instead of
+          "entity_id" for services that target no entity.
+      {"action": "upsert_automation", "config": {...}, "id": "<optional>"}
+          Creates an automation, or replaces it when "id" matches an existing one.
+          Omit "id" to create; one is generated and returned.
+      {"action": "upsert_script", "id": "goodnight", "config": {...}}
+          "id" is required here: it becomes the entity id (script.goodnight).
+      {"action": "upsert_scene", "config": {...}, "id": "<optional>"}
+      {"action": "delete_automation" | "delete_script" | "delete_scene", "id": "<id>"}
+      {"action": "reload", "domain": "automation"}
+          Reloads YAML config without restarting. Defaults to reloading everything.
+
+    Confirmation protocol. Config writes, scripts and automation triggers return
+    <confirmation_required> with a confirm_token instead of applying. Show the
+    proposed change to the user, get explicit approval, then repeat the *identical*
+    instruction with "confirm_token" added. Changing the payload invalidates the
+    token, so do not "improve" it between proposing and confirming.
+
+    Every config write snapshots the previous version to disk first and verifies
+    the result by reading it back; a write that does not verify is rolled back
+    automatically. Some domains (locks, alarms, covers, valves, water heaters) are
+    refused outright and cannot be granted.
 
     Args:
         instructions: List of action dicts, executed in order.
@@ -180,14 +221,15 @@ def home_assistant(instructions: list[dict]) -> str:
 
 
 def _guard_write(instruction, action, target, ctx, tools_loader) -> str:
-    """Runs the guard chain for one mutating action and renders the outcome.
+    """Runs the guard chain for one mutating action, then dispatches it.
 
-    Returns an XML element: a <confirmation_required> when a human is needed, or
-    an <instruction_error> when the action is refused or cannot yet be performed.
+    Returns an XML element: a <confirmation_required> when a human is needed, an
+    <instruction_error> when the action is refused or failed, or an
+    <instruction_result> when it was applied and verified.
 
-    Phase 3 wires the guards; Phase 4 adds the dispatch behind them. That order is
-    deliberate -- there is no build in which a mutating action exists without its
-    safety rail, so the rail cannot be forgotten under deadline later.
+    Dispatch lives behind the guards rather than beside them, so there is no path
+    to a mutating call that skips authorisation -- the only way to reach the write
+    is to fall off the end of `guards.authorise` without it raising.
     """
     # Everything except the bookkeeping keys is what the human is approving, and
     # therefore what the confirmation token is bound to.
@@ -221,10 +263,64 @@ def _guard_write(instruction, action, target, ctx, tools_loader) -> str:
     except guards.GuardRejection as rejection:
         return f'<instruction_error action="{action}">{rejection}</instruction_error>'
 
-    return (
-        f'<instruction_error action="{action}">Guards passed, but write dispatch is '
-        f'not implemented yet (arrives in Phase 4).</instruction_error>'
-    )
+    if action not in WRITE_IMPLEMENTED:
+        return (
+            f'<instruction_error action="{action}">Guards passed, but \'{action}\' is not '
+            f'dispatched yet (it is served by the WebSocket API and lands with helper '
+            f'support).</instruction_error>'
+        )
+
+    try:
+        result = _dispatch_write(action, instruction, payload, ctx)
+    except HomeAssistantError as exc:
+        return f'<instruction_error action="{action}">{exc}</instruction_error>'
+    except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
+        return f'<instruction_error action="{action}">{type(exc).__name__}: {exc}</instruction_error>'
+
+    # A WriteResult that was applied but not verified has been rolled back (or
+    # failed to roll back). Either way it is not a success, so it is reported as
+    # an error -- but with the full result attached, because the snapshot path and
+    # the rollback outcome are exactly what the agent needs to relay.
+    if isinstance(result, writes_mod.WriteResult) and not result.verified:
+        return (
+            f'<instruction_error action="{action}">{_render(result.as_dict())}</instruction_error>'
+        )
+
+    rendered = result.as_dict() if isinstance(result, writes_mod.WriteResult) else result
+    return f'<instruction_result action="{action}">{_render(rendered)}</instruction_result>'
+
+
+def _dispatch_write(action, instruction, payload, ctx):
+    """Performs one authorised mutating action."""
+    rest = HomeAssistantClient()
+    agent_id = getattr(ctx, "agent_id", None)
+
+    if action == "call_service":
+        domain = instruction.get("domain")
+        service = instruction.get("service")
+        entity_id = instruction.get("entity_id")
+
+        # A bare entity_id carries the domain, so accept either form rather than
+        # making the agent repeat itself.
+        if not domain and entity_id:
+            domain = guards.domain_of(entity_id)
+        if not domain or not service:
+            raise HomeAssistantError(
+                "call_service requires 'service' plus either 'domain' or 'entity_id' "
+                "(e.g. {'action':'call_service','entity_id':'light.porch','service':'turn_on'})."
+            )
+        return writes_mod.call_service(
+            rest,
+            domain=domain,
+            service=service,
+            entity_id=entity_id,
+            service_data=instruction.get("service_data") or instruction.get("data"),
+        )
+
+    if action == "reload":
+        return writes_mod.reload(rest, domain=instruction.get("domain") or "homeassistant")
+
+    return writes_mod.apply_config_write(rest, action, payload, agent_id=agent_id)
 
 
 def _render(result) -> str:
