@@ -177,7 +177,11 @@ def home_assistant(instructions: list[dict]) -> str:
                 continue
 
             outcome = _guard_write(instruction, action, target, ctx, tools_loader)
-            (payload_elements if outcome.startswith("<confirmation") else error_elements).append(outcome)
+            # Classify on the element that came back, not on one specific success
+            # shape. `_guard_write` returns a confirmation request, a successful
+            # result, or an error; testing for "is it a confirmation?" filed every
+            # applied write under <errors> once writes could actually succeed.
+            (error_elements if outcome.startswith("<instruction_error") else payload_elements).append(outcome)
             continue
 
         if action not in IMPLEMENTED:

@@ -47,11 +47,18 @@ class FakeRest:
             return match[0]
         return {}
 
-    def post(self, path, json=None):
+    def post(self, path, json=None, retry=True):
         self.calls.append(("POST", path))
         if path == "/api/template":
             return "2"
+        if path.startswith("/api/services/"):
+            # HA answers a service call with the list of states it changed.
+            return [{"entity_id": "light.porch"}]
         return {"result": "valid"}
+
+    def delete(self, path, retry=True):
+        self.calls.append(("DELETE", path))
+        return {"result": "ok"}
 
 
 class FakeWs:
@@ -120,9 +127,11 @@ class TestEnvelope(unittest.TestCase):
         self.assertIn("no errors", out)              # second still ran
 
 
-class TestReadOnly(unittest.TestCase):
+class TestWritesDisabled(unittest.TestCase):
+    """With HA_WRITE_ENABLED off, no mutating action may get through."""
+
     def test_write_actions_are_refused(self):
-        """Phase 2 is read-only: every mutating action must be turned away.
+        """Every mutating action must be turned away while the switch is off.
 
         Asserted on the shape of the refusal -- an <instruction_error> for that
         action, and nothing in the payload -- rather than on the wording. The
@@ -148,6 +157,68 @@ class TestReadOnly(unittest.TestCase):
     def test_unimplemented_backend_says_so(self):
         out = run([{"action": "live_context"}])
         self.assertIn("MCP backend", out)
+
+
+class TestWriteEnvelope(unittest.TestCase):
+    """Where a write outcome lands in the response envelope.
+
+    Regression: outcomes from the write path were sorted by asking "is this a
+    confirmation?", with everything else treated as an error. That was correct
+    while a write could only be refused or deferred, but once writes could
+    succeed it filed every applied change under <errors> -- telling the agent its
+    change had failed when it had in fact been applied.
+
+    The live probe missed this because it asserted the result string appeared
+    somewhere in the response, not that it appeared in the right section. These
+    assert on the section.
+    """
+
+    def setUp(self):
+        from core.integrations.homeassistant import guards
+
+        patcher = patch.object(guards, "write_enabled", lambda: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        guards.reset_pending()
+        self.addCleanup(guards.reset_pending)
+
+    @staticmethod
+    def _payload(out):
+        return out.split("<payload>")[1].split("</payload>")[0]
+
+    @staticmethod
+    def _errors(out):
+        return out.split("<errors>")[1].split("</errors>")[0]
+
+    def test_a_successful_write_is_reported_as_a_success(self):
+        out = run([{"action": "call_service", "entity_id": "light.porch", "service": "turn_on"}])
+
+        self.assertIn('<instruction_result action="call_service"', self._payload(out))
+        self.assertEqual(self._errors(out).strip(), "None")
+
+    def test_a_confirmation_request_is_not_an_error(self):
+        out = run([{"action": "upsert_automation", "id": "a1", "config": {"alias": "X"}}])
+
+        self.assertIn("<confirmation_required", self._payload(out))
+        self.assertEqual(self._errors(out).strip(), "None")
+
+    def test_a_refused_write_is_an_error(self):
+        out = run([{"action": "call_service", "entity_id": "lock.front", "service": "unlock"}])
+
+        self.assertIn('<instruction_error action="call_service"', self._errors(out))
+        self.assertEqual(self._payload(out).strip(), "")
+
+    def test_a_successful_write_does_not_poison_a_batch(self):
+        """A write succeeding must not make its read siblings look failed."""
+        out = run([
+            {"action": "call_service", "entity_id": "light.porch", "service": "turn_on"},
+            {"action": "get_config"},
+        ])
+
+        payload = self._payload(out)
+        self.assertIn('<instruction_result action="call_service"', payload)
+        self.assertIn('<instruction_result action="get_config"', payload)
+        self.assertEqual(self._errors(out).strip(), "None")
 
 
 class TestActions(unittest.TestCase):
