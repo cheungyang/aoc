@@ -5,6 +5,21 @@ from langchain_core.tools import tool
 from core.util import format_tool_response
 from core.runtime.execution_context import try_context
 
+# Named action bundles for `agent.json` grants, e.g. {"pkm/wiki": ["@write"]}.
+# Declared here, beside the actions they name, so that adding an action and
+# deciding which bundle it belongs to are the same edit -- a central registry
+# drifts the moment someone adds an action and forgets the other file.
+# `ToolsLoader` resolves these during permission merge; see
+# core/loaders/permission_bundles.py for the mechanism.
+PERMISSION_BUNDLES = {
+    "@read": ["read", "read_image", "ls", "find", "grep"],
+    "@write": ["@read", "write", "overwrite", "append", "replace_block"],
+    # `move` is here rather than in @write because renaming a file can break
+    # references elsewhere, which is a different kind of consequence from
+    # editing one in place.
+    "@manage": ["@write", "move", "delete", "rmdir"],
+}
+
 @tool
 def filesystem(instructions: list[dict]) -> str:
     """

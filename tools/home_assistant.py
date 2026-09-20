@@ -64,6 +64,29 @@ WRITE_IMPLEMENTED = frozenset({
     "reload",
 })
 
+# Named action bundles for `agent.json` grants, e.g. {"light.*": ["@control"]}.
+# Declared here, beside the action vocabulary, so adding an action and deciding
+# which bundle it belongs to are the same edit. `ToolsLoader` resolves these
+# during permission merge; see core/loaders/permission_bundles.py.
+PERMISSION_BUNDLES = {
+    # Every read action. Safe to run unattended, so this is the grant most
+    # agents should have and nothing more.
+    "@observe": sorted(READ_ACTIONS),
+    # Actuating existing things. Deliberately does *not* include @observe: the
+    # two are granted against different selectors (observe on "*", control on
+    # "light.*"), so folding one into the other would silently widen the narrow
+    # grant to everything the broad one covers.
+    "@control": ["call_service"],
+    # Creating and changing stored config. Everything here requires human
+    # confirmation at the guard layer regardless of the grant.
+    "@author": [
+        "upsert_automation", "upsert_script", "upsert_scene",
+        "upsert_helper", "reload",
+    ],
+    # Authoring plus destruction.
+    "@admin": ["@author", "delete_automation", "delete_script", "delete_scene"],
+}
+
 
 @tool
 def home_assistant(instructions: list[dict]) -> str:

@@ -13,21 +13,63 @@ changes the meaning of an existing grant is a security bug.
 import copy
 import json
 import os
+import re
 import unittest
 from unittest.mock import patch
 
 from core.loaders import permission_bundles as pb
 
 
-AGENTS_DIR = os.path.join(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")), "agents"
-)
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+AGENTS_DIR = os.path.join(REPO_ROOT, "agents")
+
+
+def filesystem_actions():
+    """The filesystem tool's real action names, read from its dispatch branches.
+
+    Derived from the source rather than restated here, so a bundle naming a
+    removed action fails instead of agreeing with a stale copy.
+    """
+    with open(os.path.join(REPO_ROOT, "tools", "filesystem.py"), encoding="utf-8") as handle:
+        return set(re.findall(r'action == "([a-z_]+)"', handle.read()))
+
+
+class TestDiscovery(unittest.TestCase):
+    """Definitions live on the tool modules; this module only finds them."""
+
+    def setUp(self):
+        pb.clear_cache()
+        self.addCleanup(pb.clear_cache)
+
+    def test_filesystem_declares_its_bundles(self):
+        self.assertIn("@read", pb.definitions_for("filesystem"))
+
+    def test_home_assistant_declares_its_bundles(self):
+        self.assertIn("@observe", pb.definitions_for("home_assistant"))
+
+    def test_a_tool_without_bundles_yields_nothing(self):
+        self.assertEqual(pb.definitions_for("git"), {})
+
+    def test_an_unknown_tool_yields_nothing_rather_than_raising(self):
+        """A missing tool must not break the whole permission merge."""
+        self.assertEqual(pb.definitions_for("no_such_tool_exists"), {})
+
+    def test_definitions_come_from_the_tool_module(self):
+        """Proves discovery reads the module, rather than a copy kept here."""
+        import tools.filesystem as fs_tool
+
+        self.assertIs(pb.definitions_for("filesystem"), fs_tool.PERMISSION_BUNDLES)
 
 
 class TestDefinitions(unittest.TestCase):
+    def setUp(self):
+        pb.clear_cache()
+        self.addCleanup(pb.clear_cache)
+
     def test_every_bundle_resolves(self):
         """Catches a typo'd cross-reference or an empty bundle at build time."""
-        pb.validate()
+        for tool_id in ("filesystem", "home_assistant"):
+            pb.validate(tool_id)
 
     def test_home_assistant_bundles_name_real_actions(self):
         """A bundle naming an action that does not exist is a dead grant.
@@ -38,7 +80,7 @@ class TestDefinitions(unittest.TestCase):
         """
         from core.integrations.homeassistant.routing import ALL_ACTIONS
 
-        for name in pb.BUNDLES["home_assistant"]:
+        for name in pb.definitions_for("home_assistant"):
             for action in pb.expand_actions("home_assistant", [name]):
                 self.assertIn(action, ALL_ACTIONS, f"{name} names unknown action '{action}'")
 
@@ -53,7 +95,7 @@ class TestDefinitions(unittest.TestCase):
         from core.integrations.homeassistant.routing import ALL_ACTIONS
 
         covered = set()
-        for name in pb.BUNDLES["home_assistant"]:
+        for name in pb.definitions_for("home_assistant"):
             covered.update(pb.expand_actions("home_assistant", [name]))
 
         self.assertEqual(
@@ -63,20 +105,16 @@ class TestDefinitions(unittest.TestCase):
 
     def test_filesystem_bundles_name_real_actions(self):
         """Mirrors the HA check against the filesystem tool's dispatch branches."""
-        import re
-
-        source = open(
-            os.path.join(
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
-                "tools", "filesystem.py",
-            ),
-            encoding="utf-8",
-        ).read()
-        real_actions = set(re.findall(r'action == "([a-z_]+)"', source))
-
-        for name in pb.BUNDLES["filesystem"]:
+        for name in pb.definitions_for("filesystem"):
             for action in pb.expand_actions("filesystem", [name]):
-                self.assertIn(action, real_actions, f"{name} names unknown action '{action}'")
+                self.assertIn(action, filesystem_actions(), f"{name} names unknown action '{action}'")
+
+    def test_filesystem_bundles_cover_the_whole_vocabulary(self):
+        covered = set()
+        for name in pb.definitions_for("filesystem"):
+            covered.update(pb.expand_actions("filesystem", [name]))
+
+        self.assertEqual(filesystem_actions() - covered, set(), "actions in no bundle")
 
 
 class TestExpansion(unittest.TestCase):
@@ -117,9 +155,14 @@ class TestExpansion(unittest.TestCase):
         self.assertEqual(pb.expand_actions("filesystem", []), [])
 
     def test_a_cyclic_definition_terminates(self):
-        """A self-referential bundle must not hang the loader at startup."""
-        cyclic = {"demo": {"@a": ["@b", "x"], "@b": ["@a", "y"]}}
-        with patch.object(pb, "BUNDLES", cyclic):
+        """A self-referential bundle must not hang the loader at startup.
+
+        Injected through the discovery cache rather than a real tool, since no
+        shipped tool should ever define one.
+        """
+        pb.clear_cache()
+        self.addCleanup(pb.clear_cache)
+        with patch.dict(pb._definitions_cache, {"demo": {"@a": ["@b", "x"], "@b": ["@a", "y"]}}):
             self.assertEqual(sorted(pb.expand_actions("demo", ["@a"])), ["x", "y"])
 
 
@@ -132,6 +175,10 @@ class TestFailsClosed(unittest.TestCase):
     spelling mistake.
     """
 
+    def setUp(self):
+        pb.clear_cache()
+        self.addCleanup(pb.clear_cache)
+
     def test_an_unknown_bundle_is_not_dropped(self):
         self.assertEqual(pb.expand_actions("filesystem", ["@nope"]), ["@nope"])
 
@@ -139,17 +186,19 @@ class TestFailsClosed(unittest.TestCase):
         self.assertNotEqual(pb.expand_actions("filesystem", ["@nope"]), [])
 
     def test_an_unknown_bundle_matches_no_real_action(self):
-        import re
+        self.assertEqual(
+            set(pb.expand_actions("filesystem", ["@nope"])) & filesystem_actions(), set()
+        )
 
-        source = open(
-            os.path.join(
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
-                "tools", "filesystem.py",
-            ),
-            encoding="utf-8",
-        ).read()
-        real_actions = set(re.findall(r'action == "([a-z_]+)"', source))
-        self.assertEqual(set(pb.expand_actions("filesystem", ["@nope"])) & real_actions, set())
+    def test_a_tool_that_fails_to_import_does_not_widen_its_grant(self):
+        """A broken tool module must deny, not grant.
+
+        With no definitions discoverable, `@write` stays unexpanded -- non-empty
+        and matching nothing -- rather than collapsing to the allow-all `[]`.
+        """
+        with patch.object(pb, "_tool_module_path", side_effect=ImportError("boom")):
+            pb.clear_cache()
+            self.assertEqual(pb.expand_actions("filesystem", ["@write"]), ["@write"])
 
 
 class TestScopeShapes(unittest.TestCase):
