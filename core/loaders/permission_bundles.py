@@ -26,7 +26,10 @@ Bundles are still code, not configuration: `@write` means the same thing for
 every agent and cannot be quietly widened in one `agent.json`.
 """
 import importlib
+import logging
 from typing import Any, Dict, Iterable, List, Set
+
+logger = logging.getLogger(__name__)
 
 BUNDLE_PREFIX = "@"
 
@@ -65,6 +68,11 @@ def definitions_for(tool_id: str) -> Dict[str, List[str]]:
     is the safe direction: with no definitions, `@` names stay unexpanded, and an
     unexpanded name matches no action (see `expand_actions`). A broken tool
     therefore denies rather than grants.
+
+    It is logged rather than swallowed outright. Failing closed is correct, but
+    the symptom it produces -- an agent inexplicably denied everything it was
+    granted -- points at the permission system, not at the broken tool that
+    actually caused it. The log line is what makes that a two-minute diagnosis.
     """
     if tool_id in _definitions_cache:
         return _definitions_cache[tool_id]
@@ -75,7 +83,12 @@ def definitions_for(tool_id: str) -> Dict[str, List[str]]:
         declared = getattr(module, BUNDLES_ATTR, None)
         if isinstance(declared, dict):
             definitions = declared
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Could not load permission bundles for tool '%s' (%s: %s). Any '@' "
+            "names in its grants will stay unexpanded and match no action.",
+            tool_id, type(exc).__name__, exc,
+        )
         definitions = {}
 
     _definitions_cache[tool_id] = definitions

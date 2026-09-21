@@ -23,17 +23,19 @@ from langchain_core.tools import tool
 
 from core.integrations.homeassistant import guards
 from core.integrations.homeassistant import inventory as inventory_mod
+from core.integrations.homeassistant import live_context as live_context_mod
 from core.integrations.homeassistant import writes as writes_mod
 from core.integrations.homeassistant.client import HomeAssistantClient, HomeAssistantError
 from core.integrations.homeassistant.routing import READ_ACTIONS, WRITE_ACTIONS
 from core.integrations.homeassistant.ws import HomeAssistantWebSocket
+from core.integrations.mcp.client_manager import MCPError, MCPUnavailable
 from core.loaders.tools_loader import ToolsLoader
 from core.runtime.execution_context import try_context
 from core.util import format_tool_response
 
-# Actions this phase can actually perform. Kept separate from routing.READ_ACTIONS
-# so that `live_context` -- routed to MCP, which lands in Phase 6 -- produces a
-# clear "not available yet" instead of an obscure failure.
+# Actions this tool can actually perform. Kept separate from routing.READ_ACTIONS
+# so that an action which is declared and routed but not yet dispatched produces
+# a clear "not available" message instead of an obscure failure.
 IMPLEMENTED = frozenset({
     "inventory",
     "search_registry",
@@ -48,6 +50,7 @@ IMPLEMENTED = frozenset({
     "check_config",
     "list_automations",
     "get_automation",
+    "live_context",
 })
 
 # The same distinction on the write side. `upsert_helper` is declared in the
@@ -106,6 +109,12 @@ def home_assistant(instructions: list[dict]) -> str:
        "area": "Garage", "include_disabled": false, "limit": 40}
           Filtered entity lookup. Reports the pre-cap total when truncated.
           All filters optional, but pass at least one.
+      {"action": "live_context", "max_chars": 8000}
+          Home Assistant's own prose summary of the entities exposed to Assist,
+          with their current states. Narrower than `inventory` (exposed entities
+          only) but includes live values. Expensive -- prefer `inventory` to
+          orient and `search_registry` to look things up; reach for this when
+          you need a broad picture of what is happening right now.
       {"action": "get_state", "entity_id": "light.porch"}
           Current state and attributes of one entity.
       {"action": "list_entities", "domain": "light"}
@@ -209,12 +218,8 @@ def home_assistant(instructions: list[dict]) -> str:
 
         if action not in IMPLEMENTED:
             known = ", ".join(sorted(IMPLEMENTED))
-            hint = (
-                " (routed to the MCP backend, which is not wired up yet)"
-                if action in READ_ACTIONS else ""
-            )
             error_elements.append(
-                f'<instruction_error action="{action}">Unknown action{hint}. '
+                f'<instruction_error action="{action}">Unknown action. '
                 f'Available: {known}</instruction_error>'
             )
             continue
@@ -233,6 +238,19 @@ def home_assistant(instructions: list[dict]) -> str:
             payload_elements.append(
                 f'<instruction_result action="{action}">{_render(result)}</instruction_result>'
             )
+        except MCPUnavailable as exc:
+            # Home Assistant is unreachable on the MCP plane. Name a fallback that
+            # answers a similar question over a different transport, so a batch
+            # does not dead-end on one unavailable backend. Still an error: the
+            # agent asked for a snapshot and there isn't one, and reporting that
+            # as a result would be a quiet lie.
+            error_elements.append(
+                f'<instruction_error action="{action}">{exc} '
+                f'Try \'inventory\' or \'search_registry\', which read the registries '
+                f'over a different transport.</instruction_error>'
+            )
+        except MCPError as exc:
+            error_elements.append(f'<instruction_error action="{action}">{exc}</instruction_error>')
         except HomeAssistantError as exc:
             error_elements.append(f'<instruction_error action="{action}">{exc}</instruction_error>')
         except Exception as exc:  # noqa: BLE001 - surfaced to the agent, not swallowed
@@ -370,6 +388,21 @@ def _registry_rows(cache: dict, rest_client: HomeAssistantClient):
 
 
 def _dispatch(action, instruction, rest, cache):
+    if action == "live_context":
+        # Returned as text, not a dict: `_render` passes strings through, so the
+        # snapshot keeps its line structure. Wrapping it in JSON would escape
+        # every newline, making it both larger and harder to read -- which is
+        # exactly what HA's own GetLiveContext tool does, and why the read-only
+        # resource is preferred over it.
+        text, shown, total = live_context_mod.snapshot(instruction.get("max_chars"))
+        if shown < total:
+            text += (
+                f"\n\n[Showing {shown} of {total} exposed entities. Truncated to fit; "
+                f"use 'search_registry' for specific entities, or raise 'max_chars' "
+                f"(maximum {live_context_mod.HARD_MAX_CHARS}).]"
+            )
+        return text
+
     if action == "inventory":
         return inventory_mod.summarise(_registry_rows(cache, rest))
 

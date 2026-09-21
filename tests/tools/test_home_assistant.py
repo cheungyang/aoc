@@ -2,12 +2,14 @@
 
 Covers the parts the agent depends on: the batch envelope, per-action dispatch,
 that read-only really is read-only, and that permission denials are refusals
-rather than silent no-ops. The REST client and WebSocket are both faked.
+rather than silent no-ops. All three backends -- REST, WebSocket and MCP -- are
+faked; see `FakeMCP` for why the third one had to be added.
 """
 import unittest
 from unittest.mock import patch
 
 from core.integrations.homeassistant.client import HomeAssistantError
+from core.integrations.mcp.client_manager import MCPUnavailable
 from tools import home_assistant as ha_tool
 
 
@@ -87,11 +89,41 @@ class FakeWs:
         return [{"area_id": "porch", "name": "Porch"}]
 
 
-def run(instructions, rest=None, ws=None):
+class FakeMCP:
+    """Stands in for the MCP client behind `live_context`.
+
+    This exists because of a real leak: `run()` faked REST and the WebSocket,
+    but `live_context` builds its own client, so the first version of these
+    tests reached the live Home Assistant instance and spent 20 seconds timing
+    out. A unit test that needs the network is not a unit test, and one that
+    passes only when the house is reachable is worse than no test.
+    """
+
+    SNAPSHOT = (
+        "Live Context: An overview of the areas and the devices in this smart home:\n"
+        "- names: Porch\n  domain: light\n  state: 'on'\n"
+        "- names: Pump\n  domain: switch\n  state: 'off'\n"
+    )
+
+    def __init__(self, error=None, text=None):
+        self.error = error
+        self.text = self.SNAPSHOT if text is None else text
+        self.calls = []
+
+    def call(self, method, params=None):
+        self.calls.append((method, params))
+        if self.error:
+            raise self.error
+        return {"contents": [{"text": self.text}]}
+
+
+def run(instructions, rest=None, ws=None, mcp=None):
     rest = rest or FakeRest()
     ws = ws or FakeWs()
+    mcp = mcp or FakeMCP()
     with patch.object(ha_tool, "HomeAssistantClient", lambda *a, **k: rest), \
          patch.object(ha_tool, "HomeAssistantWebSocket", lambda *a, **k: ws), \
+         patch.object(ha_tool.live_context_mod, "build_client", lambda *a, **k: mcp), \
          patch.object(ha_tool, "try_context", lambda: None):
         return ha_tool.home_assistant.invoke({"instructions": instructions})
 
@@ -154,9 +186,47 @@ class TestWritesDisabled(unittest.TestCase):
         self.assertIn("Unknown action", out)
         self.assertIn("inventory", out)
 
-    def test_unimplemented_backend_says_so(self):
+    def test_live_context_returns_the_snapshot(self):
         out = run([{"action": "live_context"}])
-        self.assertIn("MCP backend", out)
+        self.assertIn("Live Context:", out)
+        self.assertNotIn("instruction_error", out)
+
+    def test_live_context_reads_a_resource_and_never_calls_a_tool(self):
+        """The safety boundary, observed from the tool's own dispatch.
+
+        `client_manager` refuses `tools/call` outright; this checks the layer
+        above never even tries, so the refusal is a backstop rather than the
+        only thing standing between an agent and HassTurnOff.
+        """
+        mcp = FakeMCP()
+        run([{"action": "live_context"}], mcp=mcp)
+
+        self.assertTrue(mcp.calls)
+        self.assertTrue(all(method == "resources/read" for method, _ in mcp.calls),
+                        f"unexpected MCP methods: {[m for m, _ in mcp.calls]}")
+
+    def test_live_context_does_not_touch_the_network(self):
+        """Guards the fixture leak that made this suite depend on a live house."""
+        mcp = FakeMCP()
+        run([{"action": "live_context"}], mcp=mcp)
+        self.assertEqual(len(mcp.calls), 1, "the fake was bypassed")
+
+    def test_an_unreachable_instance_degrades_with_an_alternative(self):
+        mcp = FakeMCP(error=MCPUnavailable("Could not reach the MCP endpoint at http://x"))
+        out = run([{"action": "live_context"}], mcp=mcp)
+
+        self.assertIn("instruction_error", out)
+        self.assertIn("search_registry", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_an_unreachable_instance_does_not_abort_the_batch(self):
+        """One dead backend must not cost the agent the rest of its answers."""
+        mcp = FakeMCP(error=MCPUnavailable("down"))
+        out = run([{"action": "live_context"}, {"action": "get_state",
+                                                "entity_id": "light.porch"}], mcp=mcp)
+
+        self.assertIn("instruction_error", out)
+        self.assertIn("light.porch", out.split("<payload>", 1)[1].split("</payload>", 1)[0])
 
 
 class TestWriteEnvelope(unittest.TestCase):

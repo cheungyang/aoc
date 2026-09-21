@@ -200,6 +200,21 @@ class TestFailsClosed(unittest.TestCase):
             pb.clear_cache()
             self.assertEqual(pb.expand_actions("filesystem", ["@write"]), ["@write"])
 
+    def test_a_tool_that_fails_to_import_says_so(self):
+        """Failing closed silently is its own bug.
+
+        The visible symptom is an agent denied everything it was granted, which
+        points at the permission system rather than at the tool that actually
+        broke. Without this line the cause is invisible, so it is worth a test.
+        """
+        with patch.object(pb, "_tool_module_path", side_effect=ImportError("boom")):
+            pb.clear_cache()
+            with self.assertLogs(pb.logger, level="WARNING") as captured:
+                pb.definitions_for("filesystem")
+
+        self.assertIn("filesystem", captured.output[0])
+        self.assertIn("boom", captured.output[0])
+
 
 class TestScopeShapes(unittest.TestCase):
     def test_dict_scopes_expand_per_selector(self):

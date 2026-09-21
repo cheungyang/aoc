@@ -83,15 +83,17 @@ class TestToolAgreesWithTable(unittest.TestCase):
         writes = self.implemented & routing.WRITE_ACTIONS
         self.assertEqual(writes, frozenset(), f"mutating actions in IMPLEMENTED: {sorted(writes)}")
 
-    def test_implemented_is_exactly_the_non_mcp_reads(self):
-        """Pins the read boundary: REST and WS reads are live, MCP reads are not.
+    def test_implemented_is_exactly_the_declared_reads(self):
+        """Pins the read boundary: every routed read is dispatched, and nothing
+        is dispatched that the table does not declare.
 
-        If a REST-backed read is added to the table but never dispatched, this
-        fails -- which is the point, since the tool would otherwise report it as
-        an unknown action while the table claims it exists.
+        This used to exclude MCP-backed reads, which were routed but not yet
+        served. Phase 6 closed that gap, so the carve-out is gone and the two
+        sets must now match exactly. A REST-backed read added to the table but
+        never dispatched fails here -- otherwise the tool reports it as an
+        unknown action while the table claims it exists.
         """
-        expected = {a for a in routing.READ_ACTIONS if routing.backend_for(a) != routing.MCP}
-        self.assertEqual(set(self.implemented), expected)
+        self.assertEqual(set(self.implemented), set(routing.READ_ACTIONS))
 
     def test_every_dispatched_write_is_a_declared_write(self):
         """A write that is dispatched but not in WRITE_ACTIONS would never be guarded.
