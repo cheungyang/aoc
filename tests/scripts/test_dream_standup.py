@@ -16,6 +16,7 @@ from scripts.dream_standup import (
     dream,
     extract_tag,
     parse_dream_response,
+    quiet_stdout,
     render,
     render_row,
     resolve_channel,
@@ -193,6 +194,7 @@ class TestDream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args["agent_id"], "property-scout")
         self.assertEqual(args["channel"], "real-estate")
         self.assertEqual(result["status"], "Dreamed")
+        self.assertEqual(result["learnings"], "User prefers morning workouts.")
 
     async def test_reported_errors_become_a_failed_row(self):
         with patch("scripts.dream_standup.agent_call") as mock_tool:
@@ -210,6 +212,48 @@ class TestDream(unittest.IsolatedAsyncioTestCase):
             result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1))
 
         self.assertEqual(result["error"], "boom")
+
+    async def test_timeout_does_not_abort_the_standup(self):
+        with patch("scripts.dream_standup.agent_call") as mock_tool:
+            mock_tool.ainvoke = AsyncMock(side_effect=asyncio.TimeoutError())
+            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1))
+
+        self.assertIn("timed out", result["error"])
+
+    async def test_cancellation_does_not_abort_the_standup(self):
+        with patch("scripts.dream_standup.agent_call") as mock_tool:
+            mock_tool.ainvoke = AsyncMock(side_effect=asyncio.CancelledError())
+            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1))
+
+        self.assertIn("CancelledError", result["error"])
+
+
+class TestQuietStdout(unittest.TestCase):
+
+    def test_quiet_stdout_suppresses_runtime_narration(self):
+        import io
+        import contextlib
+
+        outer_buf = io.StringIO()
+        with contextlib.redirect_stdout(outer_buf):
+            with quiet_stdout(verbose=False):
+                print("GraphsLoader: Loaded/Reloaded graph 'main'")
+                print("Loaded 5 tools for agent-designer")
+
+        self.assertEqual(outer_buf.getvalue(), "")
+
+    def test_quiet_stdout_emits_to_stderr_under_verbose(self):
+        import io
+        import contextlib
+
+        outer_buf = io.StringIO()
+        err_buf = io.StringIO()
+        with contextlib.redirect_stdout(outer_buf), contextlib.redirect_stderr(err_buf):
+            with quiet_stdout(verbose=True):
+                print("GraphsLoader: Loaded/Reloaded graph 'main'")
+
+        self.assertEqual(outer_buf.getvalue(), "")
+        self.assertIn("GraphsLoader", err_buf.getvalue())
 
 
 if __name__ == "__main__":

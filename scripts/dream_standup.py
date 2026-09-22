@@ -17,7 +17,9 @@ anything printed to stdout is user-facing and anything diagnostic goes to stderr
 """
 import argparse
 import asyncio
+import contextlib
 import datetime
+import io
 import os
 import re
 import sys
@@ -42,10 +44,31 @@ EXCLUDED_AGENTS = {"script-executor"}
 # The agents run real model turns. Firing all of them at once is a burst of
 # concurrent pro/flash calls against one quota; a small pool keeps the standup
 # well inside it while still finishing far faster than sequential execution.
-MAX_CONCURRENCY = 4
+MAX_CONCURRENCY = int(os.getenv("AOC_DREAM_CONCURRENCY", "2"))
+DREAM_AGENT_TIMEOUT = int(os.getenv("AOC_DREAM_AGENT_TIMEOUT", "120"))
 
 STATUS_DREAMED = "Dreamed"
 STATUS_EMPTY = "No new memories"
+
+
+@contextlib.contextmanager
+def quiet_stdout(verbose: bool = False):
+    """Keeps stdout for the standup report alone.
+
+    The runtime narrates itself on stdout — graph reloads, tool rosters, every
+    tool call the worker makes. That is fine in a terminal and wrong here: the
+    script-executor posts this script's stdout to Discord verbatim, so the
+    narration became the message and the one line that mattered was buried in it.
+    Captured chatter is discarded, or sent to stderr under `--verbose`.
+    """
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            yield
+    finally:
+        noise = buffer.getvalue()
+        if verbose and noise.strip():
+            sys.stderr.write(noise)
 
 
 def standup_agents(loader):
@@ -89,13 +112,15 @@ def parse_dream_response(raw):
     at: an agent that answered conversationally has not dreamt, and quietly
     rendering it as "No new memories" would hide that.
     """
-    payload = extract_tag("payload", raw)
-    status = extract_tag("status", payload or raw)
-    learnings = extract_tag("learnings", raw)
+    if not raw or not raw.strip():
+        return None, "empty response"
+
+    dream_xml = extract_tag("dream_response", raw) or raw
+    payload = extract_tag("payload", dream_xml)
+    status = extract_tag("status", payload or dream_xml)
+    learnings = extract_tag("learnings", dream_xml)
 
     if not status:
-        if not (raw or "").strip():
-            return None, "empty response"
         return None, "no <dream_response> in reply"
 
     return status, learnings
@@ -104,23 +129,35 @@ def parse_dream_response(raw):
 async def dream(agent_id, config, semaphore):
     """Triggers one agent's dream skill and normalises the outcome."""
     channel = resolve_channel(config)
+    memory_logs_dir = os.path.join("pkm", "agents", agent_id, "memory_logs")
+    try:
+        os.makedirs(memory_logs_dir, exist_ok=True)
+    except Exception:
+        pass
+
+    prompt = f"{DREAM_TRIGGER} Process memory logs in pkm/agents/{agent_id}/memory_logs/."
     async with semaphore:
         try:
-            raw = await agent_call.ainvoke({
-                "agent_id": agent_id,
-                "prompt": DREAM_TRIGGER,
-                "channel": channel,
-                "caller": "script-executor",
-            })
-        except Exception as e:  # noqa: BLE001 - reported as a standup row
-            return {"agent_id": agent_id, "config": config, "error": str(e)}
+            raw = await asyncio.wait_for(
+                agent_call.ainvoke({
+                    "agent_id": agent_id,
+                    "prompt": prompt,
+                    "channel": channel,
+                    "caller": "script-executor",
+                }),
+                timeout=DREAM_AGENT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return {"agent_id": agent_id, "config": config, "error": f"timed out after {DREAM_AGENT_TIMEOUT}s"}
+        except (Exception, asyncio.CancelledError) as e:
+            return {"agent_id": agent_id, "config": config, "error": str(e) or type(e).__name__}
 
-    errors = extract_tag("errors", raw)
+    dream_xml = extract_tag("dream_response", raw)
+    errors = extract_tag("errors", dream_xml) if dream_xml else extract_tag("errors", raw)
     if errors and errors.lower() not in ("none", ""):
         return {"agent_id": agent_id, "config": config, "error": errors}
 
-    payload = extract_tag("payload", raw) or raw
-    status, learnings = parse_dream_response(payload)
+    status, learnings = parse_dream_response(raw)
     if status is None:
         return {"agent_id": agent_id, "config": config, "error": learnings}
 
@@ -157,19 +194,39 @@ def render(results, today=None):
     return "\n".join(lines)
 
 
-async def run_standup():
-    loader = AgentsLoader()
-    agents = standup_agents(loader)
-    if not agents:
-        print("No agents to include in the standup.", file=sys.stderr)
-        return ""
+async def run_standup(verbose: bool = False):
+    with quiet_stdout(verbose=verbose):
+        loader = AgentsLoader()
+        agents = standup_agents(loader)
+        if not agents:
+            print("No agents to include in the standup.", file=sys.stderr)
+            return ""
 
-    print(f"Dream standup: triggering {len(agents)} agents...", file=sys.stderr)
+        print(f"Dream standup: triggering {len(agents)} agents...", file=sys.stderr)
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-    results = await asyncio.gather(
-        *(dream(agent_id, config, semaphore) for agent_id, config in agents)
-    )
+        semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+        raw_results = await asyncio.gather(
+            *(dream(agent_id, config, semaphore) for agent_id, config in agents),
+            return_exceptions=True,
+        )
+
+        results = []
+        for (agent_id, config), res in zip(agents, raw_results):
+            if isinstance(res, BaseException):
+                results.append({
+                    "agent_id": agent_id,
+                    "config": config,
+                    "error": str(res) or type(res).__name__,
+                })
+            elif isinstance(res, dict):
+                results.append(res)
+            else:
+                results.append({
+                    "agent_id": agent_id,
+                    "config": config,
+                    "error": f"Unexpected result: {res}",
+                })
+
     return render(results)
 
 
@@ -180,6 +237,12 @@ def main():
         action="store_true",
         help="List the agents that would be triggered, without calling them.",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Write captured runtime narration to stderr.",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
@@ -188,9 +251,13 @@ def main():
             print(f"{agent_id} -> #{resolve_channel(config)}")
         return
 
-    summary = asyncio.run(run_standup())
-    if summary:
-        print(summary)
+    try:
+        summary = asyncio.run(run_standup(verbose=args.verbose))
+        if summary:
+            print(summary)
+    except Exception as e:
+        print(f"Standup execution failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

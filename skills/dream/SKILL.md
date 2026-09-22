@@ -15,6 +15,7 @@ This skill is triggered EXCLUSIVELY by a cron schedule or explicit system prompt
 - **Tool Optimization**: Bundle your tool instructions! Perform all necessary `read` operations in a single `filesystem` call, and all your `overwrite` and `delete` operations in another single call to conserve token usage.
 - **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure. YOU MUST NOT OUTPUT CONVERSATIONAL TEXT outside the XML payload.
 - **Strict Tool Usage**: You MUST strictly use the `filesystem` tool for all file and directory actions (`read`, `overwrite`, `delete`, `ls`, `find`).
+- **Exact Path with `pkm/` Prefix**: All memory logs and context files reside strictly under `pkm/agents/<agent_id>/` (e.g. `pkm/agents/<agent_id>/memory_logs/`). You MUST include the `pkm/` prefix. Never omit `pkm/` or attempt to access `agents/<agent_id>/memory_logs`, as permission will be denied.
 
 ## Workflow
 
