@@ -1,6 +1,7 @@
 import os
 import inspect
 import asyncio
+import time
 import discord
 import base64
 from collections import OrderedDict
@@ -17,14 +18,19 @@ from core.voice.voice_manager import VoiceManager
 
 class BotRunner:
     def __init__(self, discord_token, agent_id):
+        self.discord_token = discord_token
+        self.agent_id = agent_id
+        self._shutdown_requested = False
+        self._processed_message_ids = OrderedDict()
+        self.bot = None
+        self._init_bot()
+        self.voice_manager = VoiceManager(self)
+
+    def _init_bot(self):
         intents = discord.Intents.default()
         intents.message_content = True # Required to read message content
         intents.voice_states = True # Required for voice channel tracking
         self.bot = commands.Bot(command_prefix="!", intents=intents)
-        self.discord_token = discord_token
-        self.agent_id = agent_id
-        self.voice_manager = VoiceManager(self)
-        self._processed_message_ids = OrderedDict()
         
         # Register events
         self.bot.event(self.on_ready)
@@ -48,6 +54,19 @@ class BotRunner:
         async def cmd_leave(ctx):
             await self.voice_manager.leave_voice_channel()
             await ctx.send("Disconnected from voice channel. 👋")
+
+        if hasattr(self, "voice_manager") and self.voice_manager:
+            self.voice_manager.bot = self.bot
+
+    async def stop(self):
+        """Cleanly shuts down the bot and prevents reconnect attempts."""
+        self._shutdown_requested = True
+        if self.bot and not self.bot.is_closed():
+            await self.bot.close()
+
+    async def close(self):
+        """Alias for stop()."""
+        await self.stop()
 
     def get_hosted_voice_channels(self, agent) -> list:
         """Resolves target voice channels for an agent from explicit voice_config or channel_hosts convention."""
@@ -86,6 +105,7 @@ class BotRunner:
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
+        self._touch_heartbeat()
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
         
         # Auto-join voice channel if configured
@@ -288,20 +308,59 @@ class BotRunner:
                 except Exception as se:
                     print(f"Error sending failure message: {se}")
 
-    async def run_bot(self):
+    def _touch_heartbeat(self):
+        try:
+            with open("/tmp/bot_heartbeat", "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+
+    async def _heartbeat_loop(self):
+        while not self._shutdown_requested:
+            if self.bot and not self.bot.is_closed():
+                self._touch_heartbeat()
+            await asyncio.sleep(20)
+
+    async def run_bot(self, max_retries: int | None = None):
         print(f"Starting Discord bot for agent {self.agent_id}...")
         delay = 5
-        while not self.bot.is_closed():
+        retries = 0
+        self._shutdown_requested = False
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        try:
+            while not self._shutdown_requested:
+                if self.bot.is_closed():
+                    self._init_bot()
+
+                try:
+                    async with self.bot:
+                        await self.bot.start(self.discord_token)
+                except discord.errors.LoginFailure as e:
+                    print(f"[BotRunner:{self.agent_id}] Fatal login error: {e}")
+                    self._shutdown_requested = True
+                    raise
+                except asyncio.CancelledError:
+                    print(f"[BotRunner:{self.agent_id}] Bot task cancelled.")
+                    self._shutdown_requested = True
+                    raise
+                except Exception as e:
+                    print(f"[BotRunner:{self.agent_id}] Discord bot disconnected with error: {e}")
+
+                if self._shutdown_requested:
+                    print(f"[BotRunner:{self.agent_id}] Discord bot closed.")
+                    break
+
+                retries += 1
+                if max_retries is not None and retries >= max_retries:
+                    print(f"[BotRunner:{self.agent_id}] Max reconnect retries ({max_retries}) reached.")
+                    break
+
+                print(f"[BotRunner:{self.agent_id}] Discord bot disconnected. Reconnecting in {delay} seconds...")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
+        finally:
+            heartbeat_task.cancel()
             try:
-                async with self.bot:
-                    await self.bot.start(self.discord_token)
-            except Exception as e:
-                print(f"Discord bot for agent {self.agent_id} stopped with error: {e}")
-            
-            if self.bot.is_closed():
-                print(f"Discord bot for agent {self.agent_id} closed.")
-                break
-                
-            print(f"Discord bot for agent {self.agent_id} disconnected. Reconnecting in {delay} seconds...")
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 60)
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass

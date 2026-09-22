@@ -34,7 +34,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output, "command output")
         self.assertNotIn("executed successfully", output)
-        mock_run.assert_called_once_with(['scripts/echo', 'hello'], capture_output=True, text=True, check=True)
+        mock_run.assert_called_once_with(['scripts/echo', 'hello'], capture_output=True, text=True, check=True, timeout=300)
 
     @patch('importlib.import_module')
     async def test_execute_tool_success(self, mock_import):

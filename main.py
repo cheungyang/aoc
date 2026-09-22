@@ -1,10 +1,23 @@
 import sys
+import os
 import argparse
 import asyncio
+import faulthandler
+import discord
 from core.util.config import Config
 from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.schedule_runner import ScheduleRunner
+
+# Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
+faulthandler.enable()
+
+# Setup discord.py logging to capture gateway reconnects, heartbeat lag warnings, and rate limits
+if hasattr(discord, "utils") and hasattr(discord.utils, "setup_logging"):
+    try:
+        discord.utils.setup_logging()
+    except Exception:
+        pass
 
 config = Config()
 GEMINI_API_KEY = config.gemini_api_key

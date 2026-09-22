@@ -214,8 +214,14 @@ if [ "${AOC_PROVISION_RUNTIME:-1}" = "1" ] && [ -f /app/scripts/provision_assets
         echo "Warning: runtime asset provisioning reported errors; continuing startup."
 fi
 
-# Start Chromium in the background as appuser for the browser tool
-runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
+# Start Chromium in the background as appuser for visual AI browser automation if enabled.
+# Disabled by default (0) to conserve CPU cores and RAM on NAS hosts.
+if [ "${AOC_ENABLE_BROWSER:-0}" = "1" ]; then
+    echo "Starting headless Chromium on port 9222..."
+    runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
+else
+    echo "Headless Chromium disabled (set AOC_ENABLE_BROWSER=1 in .env to enable)."
+fi
 
 # Execute the command passed to docker run as appuser
 exec runuser -u appuser -- "$@"

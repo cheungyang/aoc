@@ -110,7 +110,7 @@ class BotsLoader:
             bot_runner = self._bots[agent_id]
             print(f"BotsLoader: Closing Discord bot for agent {agent_id}...")
             try:
-                await bot_runner.bot.close()
+                await bot_runner.stop()
             except Exception as e:
                 print(f"BotsLoader: Error closing bot for agent {agent_id}: {e}")
             del self._bots[agent_id]

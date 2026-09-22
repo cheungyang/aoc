@@ -112,7 +112,15 @@ class ScriptExecutorAgent(BaseAgent):
                             cmd = [sys.executable] + expanded_args
                         else:
                             cmd = expanded_args
-                        res = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, check=True)
+                        timeout_sec = int(os.getenv("AOC_SCRIPT_TIMEOUT", "300"))
+                        res = await asyncio.to_thread(
+                            subprocess.run,
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                            timeout=timeout_sec,
+                        )
                         # The script's own stdout *is* the message. A script that
                         # succeeded and said nothing gets no message at all, and one
                         # that did say something gets no banner wrapped around it:
@@ -121,6 +129,8 @@ class ScriptExecutorAgent(BaseAgent):
                         stdout = (res.stdout or "").strip()
                         if stdout:
                             results.append(stdout)
+                    except subprocess.TimeoutExpired as e:
+                        results.append(f"Error executing script '{rest}': timed out after {timeout_sec}s")
                     except subprocess.CalledProcessError as e:
                         results.append(f"Error executing script '{rest}': {e.stderr}")
                     except Exception as e:

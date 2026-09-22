@@ -232,13 +232,9 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.channel.discord.runner.commands.Bot')
     async def test_run_bot_success(self, mock_bot_class):
-        
         # Bot mock
         mock_bot = MagicMock()
-        mock_bot.start = AsyncMock()
-        
-        # Mock is_closed to control the loop
-        mock_bot.is_closed.side_effect = [False, True]
+        mock_bot.is_closed.return_value = False
         
         # Mock async context manager
         mock_bot.__aenter__ = AsyncMock(return_value=mock_bot)
@@ -248,11 +244,48 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner = BotRunner("test_token", "main")
         
+        async def fake_start(token):
+            await runner.stop()
+        mock_bot.start = AsyncMock(side_effect=fake_start)
+        
         # Run
         await runner.run_bot()
         
         # Assertions
         mock_bot.start.assert_called_once_with("test_token")
+
+    @patch('core.channel.discord.runner.commands.Bot')
+    @patch('asyncio.sleep', AsyncMock())
+    async def test_run_bot_reconnects_on_disconnect(self, mock_bot_class):
+        mock_bot1 = MagicMock()
+        mock_bot1.is_closed.return_value = False
+        mock_bot1.__aenter__ = AsyncMock(return_value=mock_bot1)
+        mock_bot1.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_bot2 = MagicMock()
+        mock_bot2.is_closed.return_value = False
+        mock_bot2.__aenter__ = AsyncMock(return_value=mock_bot2)
+        mock_bot2.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_bot_class.side_effect = [mock_bot1, mock_bot2]
+        
+        runner = BotRunner("test_token", "main")
+        
+        # First start raises a network error; second start stops runner
+        async def fake_start_1(token):
+            mock_bot1.is_closed.return_value = True
+            raise ConnectionResetError("Connection lost")
+            
+        async def fake_start_2(token):
+            await runner.stop()
+            
+        mock_bot1.start = AsyncMock(side_effect=fake_start_1)
+        mock_bot2.start = AsyncMock(side_effect=fake_start_2)
+        
+        await runner.run_bot()
+        
+        mock_bot1.start.assert_called_once_with("test_token")
+        mock_bot2.start.assert_called_once_with("test_token")
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')

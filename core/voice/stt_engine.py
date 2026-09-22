@@ -1,4 +1,5 @@
 import io
+import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from faster_whisper import WhisperModel
@@ -17,12 +18,13 @@ class STTEngine:
     def _ensure_model_loaded(self):
         key = f"{self.model_size}:{self.device}:{self.compute_type}"
         if key not in self._models:
-            print(f"[STTEngine] Loading faster-whisper model '{self.model_size}' (device={self.device}, compute_type={self.compute_type})...")
+            threads = int(os.getenv("AOC_STT_THREADS", "2"))
+            print(f"[STTEngine] Loading faster-whisper model '{self.model_size}' (device={self.device}, compute_type={self.compute_type}, cpu_threads={threads})...")
             self._models[key] = WhisperModel(
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type,
-                cpu_threads=4
+                cpu_threads=threads
             )
             print(f"[STTEngine] Model '{self.model_size}' ready.")
         self.model = self._models[key]

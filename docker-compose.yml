@@ -49,6 +49,10 @@ services:
       - HA_TOKEN_FILE=${HA_TOKEN_FILE:-/app/home_assistant_token}
       - HA_WRITE_ENABLED=${HA_WRITE_ENABLED:-false}
       - HA_REQUEST_TIMEOUT=${HA_REQUEST_TIMEOUT:-20}
+      # Resource and stability tuning for NAS and multi-core hosts
+      - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
+      - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
+      - AOC_SCRIPT_TIMEOUT=${AOC_SCRIPT_TIMEOUT:-300}
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app
@@ -74,8 +78,19 @@ services:
       # image, since Docker only seeds a volume while that volume is empty.
       - aoc-assets:/opt/aoc
     ports:
-      # Chrome remote debugging port for visual AI browser automation (optional)
-      - "9222:9222"
+      # Chrome remote debugging port for visual AI browser automation (scoped to localhost)
+      - "127.0.0.1:9222:9222"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import time, os, sys; p=\"/tmp/bot_heartbeat\"; sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 180 else 1)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 volumes:
   aoc-assets:
