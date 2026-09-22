@@ -132,7 +132,10 @@ class ScriptExecutorAgent(BaseAgent):
                     except subprocess.TimeoutExpired as e:
                         results.append(f"Error executing script '{rest}': timed out after {timeout_sec}s")
                     except subprocess.CalledProcessError as e:
-                        results.append(f"Error executing script '{rest}': {e.stderr}")
+                        err = (e.stderr or "").strip()
+                        if not err:
+                            err = (e.stdout or "").strip() or f"process exited with code {e.returncode}"
+                        results.append(f"Error executing script '{rest}': {err}")
                     except Exception as e:
                         results.append(f"Error running script '{rest}': {str(e)}")
                 else:
