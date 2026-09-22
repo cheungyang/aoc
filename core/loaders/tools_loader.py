@@ -162,7 +162,20 @@ class ToolsLoader:
                 
             if target_path_to_check is None:
                 return False
-                
+
+            # A tool whose targets are not filesystem paths can say how its
+            # selectors are matched. Consulted before the path arithmetic below,
+            # which would otherwise run os.path.abspath() over things like
+            # "light.porch" and produce grants that read as permissive but deny.
+            # Tools that declare no matcher are unaffected.
+            from core.loaders.permission_matchers import matcher_for, matches
+            matcher = matcher_for(tool_id)
+            if matcher is not None:
+                for selector, actions in permissions.items():
+                    if matches(matcher, selector, target_path_to_check) and action_name in actions:
+                        return True
+                return False
+
             workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
             target_abs_path = os.path.abspath(target_path_to_check)
             

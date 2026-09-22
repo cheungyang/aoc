@@ -18,6 +18,7 @@ import unittest
 from unittest.mock import patch
 
 from core.loaders import permission_bundles as pb
+from core.loaders import tool_declarations as td
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -162,7 +163,8 @@ class TestExpansion(unittest.TestCase):
         """
         pb.clear_cache()
         self.addCleanup(pb.clear_cache)
-        with patch.dict(pb._definitions_cache, {"demo": {"@a": ["@b", "x"], "@b": ["@a", "y"]}}):
+        injected = {("demo", pb.BUNDLES_ATTR): {"@a": ["@b", "x"], "@b": ["@a", "y"]}}
+        with patch.dict(td._cache, injected):
             self.assertEqual(sorted(pb.expand_actions("demo", ["@a"])), ["x", "y"])
 
 
@@ -196,7 +198,7 @@ class TestFailsClosed(unittest.TestCase):
         With no definitions discoverable, `@write` stays unexpanded -- non-empty
         and matching nothing -- rather than collapsing to the allow-all `[]`.
         """
-        with patch.object(pb, "_tool_module_path", side_effect=ImportError("boom")):
+        with patch.object(td, "_module_path", side_effect=ImportError("boom")):
             pb.clear_cache()
             self.assertEqual(pb.expand_actions("filesystem", ["@write"]), ["@write"])
 
@@ -207,9 +209,9 @@ class TestFailsClosed(unittest.TestCase):
         points at the permission system rather than at the tool that actually
         broke. Without this line the cause is invisible, so it is worth a test.
         """
-        with patch.object(pb, "_tool_module_path", side_effect=ImportError("boom")):
+        with patch.object(td, "_module_path", side_effect=ImportError("boom")):
             pb.clear_cache()
-            with self.assertLogs(pb.logger, level="WARNING") as captured:
+            with self.assertLogs(td.logger, level="WARNING") as captured:
                 pb.definitions_for("filesystem")
 
         self.assertIn("filesystem", captured.output[0])

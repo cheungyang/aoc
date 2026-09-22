@@ -25,9 +25,11 @@ copy that lives away from the code is the one that goes stale.
 Bundles are still code, not configuration: `@write` means the same thing for
 every agent and cannot be quietly widened in one `agent.json`.
 """
-import importlib
 import logging
 from typing import Any, Dict, Iterable, List, Set
+
+from core.loaders.tool_declarations import clear_cache as _clear_declarations
+from core.loaders.tool_declarations import declaration
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +37,6 @@ BUNDLE_PREFIX = "@"
 
 # The attribute a tool module exposes to declare its bundles.
 BUNDLES_ATTR = "PERMISSION_BUNDLES"
-
-# tool_id -> definitions. Populated on first use; a tool module is imported at
-# most once per process for this purpose.
-_definitions_cache: Dict[str, Dict[str, List[str]]] = {}
 
 
 class BundleError(ValueError):
@@ -49,55 +47,20 @@ def is_bundle(token: Any) -> bool:
     return isinstance(token, str) and token.startswith(BUNDLE_PREFIX)
 
 
-def _tool_module_path(tool_id: str) -> str:
-    """Resolves `tool_id` to its module path using the loader's own discovery.
-
-    Imported lazily: `tools.home_assistant` imports `ToolsLoader`, so a top-level
-    import here would close a cycle through the loader that imports this module.
-    """
-    from core.loaders.tools_loader import ToolsLoader
-
-    folder = ToolsLoader()._discover_tools().get(tool_id)
-    return f"tools.{folder}.{tool_id}" if folder else f"tools.{tool_id}"
-
-
 def definitions_for(tool_id: str) -> Dict[str, List[str]]:
     """Returns a tool's bundle definitions, or `{}` if it declares none.
 
-    A tool that fails to import yields no definitions rather than raising. That
-    is the safe direction: with no definitions, `@` names stay unexpanded, and an
-    unexpanded name matches no action (see `expand_actions`). A broken tool
-    therefore denies rather than grants.
-
-    It is logged rather than swallowed outright. Failing closed is correct, but
-    the symptom it produces -- an agent inexplicably denied everything it was
-    granted -- points at the permission system, not at the broken tool that
-    actually caused it. The log line is what makes that a two-minute diagnosis.
+    `{}` is the safe default. With no definitions, `@` names stay unexpanded,
+    and an unexpanded name matches no action (see `expand_actions`), so a tool
+    that fails to import denies rather than grants.
     """
-    if tool_id in _definitions_cache:
-        return _definitions_cache[tool_id]
-
-    definitions: Dict[str, List[str]] = {}
-    try:
-        module = importlib.import_module(_tool_module_path(tool_id))
-        declared = getattr(module, BUNDLES_ATTR, None)
-        if isinstance(declared, dict):
-            definitions = declared
-    except Exception as exc:
-        logger.warning(
-            "Could not load permission bundles for tool '%s' (%s: %s). Any '@' "
-            "names in its grants will stay unexpanded and match no action.",
-            tool_id, type(exc).__name__, exc,
-        )
-        definitions = {}
-
-    _definitions_cache[tool_id] = definitions
-    return definitions
+    declared = declaration(tool_id, BUNDLES_ATTR, None)
+    return declared if isinstance(declared, dict) else {}
 
 
 def clear_cache() -> None:
     """Forgets discovered definitions. For tests and hot reload."""
-    _definitions_cache.clear()
+    _clear_declarations()
 
 
 def expand_actions(tool_id: str, actions: Iterable[str]) -> List[str]:

@@ -17,6 +17,7 @@ first, and config writes are snapshotted and verified by `writes.py` so a bad
 change can be undone. `upsert_helper` is declared and guarded but not yet
 dispatched; it is served by the WebSocket API.
 """
+import fnmatch
 import json
 
 from langchain_core.tools import tool
@@ -89,6 +90,36 @@ PERMISSION_BUNDLES = {
     # Authoring plus destruction.
     "@admin": ["@author", "delete_automation", "delete_script", "delete_scene"],
 }
+
+
+def PERMISSION_MATCHER(selector: str, target: str) -> bool:
+    """Whether a grant selector covers the entity this instruction touches.
+
+    Home Assistant targets are entity ids (`light.porch`), domains (`light`), or
+    `"*"` when an instruction names neither. None of those are filesystem paths,
+    and the loader's default matcher treats them as such -- which made
+    `{"light.*": [...]}` match nothing and `{"*": [...]}` match only instructions
+    with no entity at all. Both measured. See core/loaders/permission_matchers.py.
+
+    Globs, because that is what the selectors already look like:
+
+        "*"          -> everything
+        "light.*"    -> every entity in the light domain
+        "light.porch"-> exactly that entity
+
+    A bare domain selector also covers its entities, so `{"light": [...]}` and
+    `{"light.*": [...]}` agree. Without that, `{"light": ["call_service"]}` would
+    permit only the literal target `"light"` -- which the tool passes when an
+    instruction gives `domain` but no `entity_id` -- and deny every actual light.
+    Two spellings of the same intent silently meaning different things is how a
+    grant gets written once, tested once, and misread forever after.
+    """
+    if selector == target:
+        return True
+    if fnmatch.fnmatchcase(target, selector):
+        return True
+    # Domain selector covering entities in that domain.
+    return "." not in selector and target.startswith(f"{selector}.")
 
 
 @tool
