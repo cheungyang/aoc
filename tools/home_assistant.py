@@ -119,7 +119,36 @@ def PERMISSION_MATCHER(selector: str, target: str) -> bool:
     if fnmatch.fnmatchcase(target, selector):
         return True
     # Domain selector covering entities in that domain.
-    return "." not in selector and target.startswith(f"{selector}.")
+    if "." not in selector and target.startswith(f"{selector}."):
+        return True
+    # Domain glob covering bare domain, e.g. "automation.*" covering "automation".
+    return selector.endswith(".*") and selector[:-2] == target
+
+
+def _target_of(instruction: dict) -> str:
+    """Resolves the entity selector or domain target for permission checks and guards."""
+    if instruction.get("entity_id"):
+        return str(instruction["entity_id"])
+    if isinstance(instruction.get("target"), dict) and instruction["target"].get("entity_id"):
+        eid = instruction["target"]["entity_id"]
+        return str(eid[0]) if isinstance(eid, list) and eid else str(eid)
+    if instruction.get("domain"):
+        return str(instruction["domain"])
+
+    action = instruction.get("action")
+    if action in ("upsert_automation", "delete_automation", "list_automations", "get_automation"):
+        obj_id = instruction.get("id") or instruction.get("automation_id")
+        return f"automation.{obj_id}" if obj_id else "automation"
+    if action in ("upsert_script", "delete_script"):
+        obj_id = instruction.get("id") or instruction.get("script_id")
+        return f"script.{obj_id}" if obj_id else "script"
+    if action in ("upsert_scene", "delete_scene"):
+        obj_id = instruction.get("id") or instruction.get("scene_id")
+        return f"scene.{obj_id}" if obj_id else "scene"
+    if action == "upsert_helper":
+        return "helper"
+
+    return "*"
 
 
 @tool
@@ -229,7 +258,7 @@ def home_assistant(instructions: list[dict]) -> str:
 
         # The permission target is the entity selector the action touches, which
         # keeps grants readable as {"light.*": [...]} in agent.json.
-        target = instruction.get("entity_id") or instruction.get("domain") or "*"
+        target = _target_of(instruction)
 
         if action in WRITE_ACTIONS:
             if ctx is not None and not tools_loader.check_permission(ctx, "home_assistant", action, target):

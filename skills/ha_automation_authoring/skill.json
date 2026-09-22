@@ -1,0 +1,14 @@
+{
+  "skill_id": "ha_automation_authoring",
+  "name": "Home Assistant Automation Authoring",
+  "description": "Designs, modifies, and validates Home Assistant automations, scripts, and scenes using the propose-confirm-verify protocol.",
+  "emoji": "⚡",
+  "tools": {
+    "home_assistant": {
+      "*": ["@observe"],
+      "automation.*": ["@control", "@author"],
+      "script.*": ["@control", "@author"],
+      "scene.*": ["@control", "@author"]
+    }
+  }
+}

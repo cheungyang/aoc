@@ -1,0 +1,11 @@
+{
+  "skill_id": "ha_inventory",
+  "name": "Home Assistant Inventory",
+  "description": "Inspects, summarizes, and searches smart home entities, devices, and areas across Home Assistant.",
+  "emoji": "🏠",
+  "tools": {
+    "home_assistant": {
+      "*": ["@observe"]
+    }
+  }
+}

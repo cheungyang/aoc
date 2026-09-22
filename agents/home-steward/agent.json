@@ -1,0 +1,69 @@
+{
+  "agent_id": "home-steward",
+  "name": "Butler",
+  "emoji": "🛎️",
+  "model": "FLASH",
+  "description": "Smart Home Steward: manages, automates, audits, and observes Home Assistant devices and configurations safely.",
+  "discord_token_key": "DISCORD_TOKEN_HOME_STEWARD",
+  "channels": [
+    "home-automation",
+    "general"
+  ],
+  "channel_hosts": [
+    "home-automation"
+  ],
+  "tools": {
+    "home_assistant": {
+      "*": [
+        "@observe"
+      ],
+      "light.*": [
+        "@control"
+      ],
+      "switch.*": [
+        "@control"
+      ],
+      "fan.*": [
+        "@control"
+      ],
+      "media_player.*": [
+        "@control"
+      ],
+      "scene.*": [
+        "@control"
+      ],
+      "climate.*": [
+        "@control"
+      ],
+      "automation.*": [
+        "@control",
+        "@author"
+      ],
+      "script.*": [
+        "@control",
+        "@author"
+      ]
+    }
+  },
+  "skills": [
+    "ha_inventory",
+    "ha_automation_authoring",
+    "ha_config_audit"
+  ],
+  "schedules": [
+    {
+      "channel": "home-automation",
+      "cron": "0 8 * * *",
+      "prompt": [
+        "Ask home-steward to load ha_config_audit skill and run a daily audit of Home Assistant health, error logs, and unavailable entities. Report any issues concisely or confirm all systems normal."
+      ]
+    },
+    {
+      "channel": "home-automation",
+      "cron": "0 20 * * 0",
+      "prompt": [
+        "Ask home-steward to load ha_inventory skill and generate a weekly inventory summary of devices, areas, and newly discovered or unassigned entities."
+      ]
+    }
+  ]
+}

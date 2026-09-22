@@ -51,6 +51,12 @@ class TestHomeAssistantMatcher(unittest.TestCase):
         for target in ("lock.front", "switch.pump", "automation.dusk"):
             self.assertFalse(ha_matches("light.*", target), target)
 
+    def test_domain_glob_covers_bare_domain(self):
+        """`automation.*` covers `automation` for domain-level calls like reload."""
+        self.assertTrue(ha_matches("automation.*", "automation"))
+        self.assertTrue(ha_matches("light.*", "light"))
+        self.assertFalse(ha_matches("automation.*", "switch"))
+
     def test_exact_entity_matches_only_itself(self):
         self.assertTrue(ha_matches("light.porch", "light.porch"))
         self.assertFalse(ha_matches("light.porch", "light.hall"))

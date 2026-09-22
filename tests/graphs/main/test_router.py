@@ -248,6 +248,7 @@ class TestLiveRoutingTable(unittest.TestCase):
         "content-creation": None,
         "day-planning": "day-planner",
         "general": None,
+        "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
         "meal-planning": "meal-planner",
         "pkm-wiki": "wiki-gardener",

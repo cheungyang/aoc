@@ -141,6 +141,55 @@ First boot handles this automatically: the provisioner looks for the *active*
 backend's own files, so a host still carrying an index from the other backend is
 treated as un-indexed and rebuilt rather than silently starting up empty.
 
+---
+
+## Home Assistant Integration
+
+AOC integrates directly with Home Assistant to provide safe, agentic smart home observation, device control, automation authoring, and health auditing.
+
+### 1. Architecture & Security Rails
+
+- **Single-Tool Facade (`home_assistant`)**: All agents interact via a single structured tool that routes internally between REST (states, configs, services), WebSocket (entity/device/area registries), and internal MCP (live Assist context snapshot).
+- **Physical Safety Deny-List**: Hardcoded in `guards.py`. Critical security domains (`lock`, `alarm_control_panel`, `cover`, `garage_door`, `valve`, `water_heater`) are blocked outright in code and cannot be controlled or embedded in automations.
+- **Climate Safety Band**: Target temperatures outside 12.0°C – 28.0°C are rejected.
+- **Propose → Confirm → Apply Protocol**: Any configuration modification (`upsert_automation`, `upsert_script`, `upsert_scene`, `reload`) or opaque trigger (`script.turn_on`, `automation.trigger`) generates a rendered diff and a single-use SHA-256 bound confirmation token. The agent must obtain explicit user approval before applying.
+- **Automatic Before-Image Rollbacks**: Before applying any config write, an API before-image snapshot is persisted to `pkm/agents/home-steward/ha_snapshots/`. If post-write verification (`check_config`, error log inspection, entity read-back) fails, the prior state is rolled back automatically.
+
+### 2. Setup & Credentials
+
+1. **Long-Lived Access Token**:
+   - Create a long-lived access token in Home Assistant (**Profile > Security > Long-Lived Access Tokens**).
+   - Write the token to `./home_assistant_token` at the project root with mode `600`:
+     ```bash
+     install -m 600 /dev/null ./home_assistant_token
+     pbpaste > ./home_assistant_token
+     ```
+   - *Note*: Both `.gitignore` and `.dockerignore` exclude `home_assistant_token`. The file is passed into the container via the `.:/app` volume mount.
+
+2. **Configure Environment in `.env`**:
+   ```bash
+   # Base URL without trailing slash
+   HA_BASE_URL=https://ha.yngnas220.synology.me
+
+   # Path to token inside container (default: /app/home_assistant_token)
+   # HA_TOKEN_FILE=/app/home_assistant_token
+
+   # Master kill switch: set to true to enable mutating actions (service calls, automations)
+   HA_WRITE_ENABLED=false
+
+   # Request timeout in seconds
+   HA_REQUEST_TIMEOUT=20
+   ```
+
+3. **Butler Agent (`home-steward`)**:
+   - Butler is the dedicated smart home steward agent hosted on the `#home-automation` Discord channel.
+   - Equipped with 3 specialized skills:
+     - `ha_inventory`: Area × domain matrix and filtered device/entity searches.
+     - `ha_automation_authoring`: Rigorous design, validation, and propose-confirm-verify authoring.
+     - `ha_config_audit`: Daily health and configuration integrity checks.
+   - Schedules:
+     - Daily 8:00 AM: Configuration audit & unavailable device scan.
+     - Sunday 8:00 PM: Weekly inventory summary.
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "skill_id": "ha_config_audit",
+  "name": "Home Assistant Configuration Audit",
+  "description": "Audits Home Assistant health, error logs, unavailable entities, and automation integrity.",
+  "emoji": "🔍",
+  "tools": {
+    "home_assistant": {
+      "*": ["@observe"]
+    }
+  }
+}

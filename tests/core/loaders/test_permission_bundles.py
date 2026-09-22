@@ -268,10 +268,25 @@ class TestBackwardsCompatibility(unittest.TestCase):
 
     def test_no_real_agent_config_is_changed_by_expansion(self):
         for name, config in self.agent_configs():
+            if name == "home-steward":
+                continue
             tools = config.get("tools", {})
             before = copy.deepcopy(tools)
             pb.expand_permissions(tools)
             self.assertEqual(tools, before, f"{name}: expansion altered its grants")
+
+    def test_home_steward_bundles_expand_correctly(self):
+        configs = dict(self.agent_configs())
+        self.assertIn("home-steward", configs)
+        tools = configs["home-steward"].get("tools", {})
+        self.assertIn("@observe", tools.get("home_assistant", {}).get("*", []))
+        pb.expand_permissions(tools)
+        ha_grants = tools.get("home_assistant", {})
+        self.assertNotIn("@observe", ha_grants.get("*", []))
+        self.assertIn("list_entities", ha_grants.get("*", []))
+        self.assertIn("get_state", ha_grants.get("*", []))
+        self.assertIn("call_service", ha_grants.get("light.*", []))
+        self.assertIn("upsert_automation", ha_grants.get("automation.*", []))
 
     def test_expansion_is_idempotent(self):
         """Running twice must equal running once.
