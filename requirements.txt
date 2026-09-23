@@ -9,6 +9,10 @@ langchain-google-genai
 langchain-mcp-adapters
 # Used by graph_builder for ChatOllama when a model sets provider: ollama.
 langchain-ollama
+# Used by graph_builder for ChatOpenAI when an agent sets provider: local. The
+# on-device server speaks the OpenAI wire format; this is a protocol client for
+# it, not a dependency on the hosted API.
+langchain-openai
 langgraph
 langsmith>=0.1.0
 playwright

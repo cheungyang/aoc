@@ -7,6 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.agent import Agent
+from core.util import Config
 from tests.helpers import make_context
 
 class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
@@ -206,6 +207,122 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              agent_id="main",
              config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}}
          )
+
+     def _local_provider_mocks(self, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+          """Shared setup for the provider: local tests."""
+          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+
+          mock_tool1 = MagicMock()
+          mock_tool1.name = "tool1"
+          mock_loader = MagicMock()
+          mock_tool_loader_class.return_value = mock_loader
+          mock_loader.get_tools.return_value = [mock_tool1]
+
+          mock_skills_loader = MagicMock()
+          mock_skills_loader_class.return_value = mock_skills_loader
+          mock_skills_loader.get_skills_overview.return_value = "Mock Skills"
+
+          mock_openai = MagicMock()
+          return mock_tool1, mock_openai, mock_openai.ChatOpenAI
+
+     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.SkillsLoader')
+     @patch('core.runtime.graph_builder.ToolsLoader')
+     @patch('core.runtime.graph_builder.SqliteCheckpointer')
+     async def test_build_graph_local_provider(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+          """A tier under provider: local resolves to the on-device model."""
+          from core.util import models
+
+          mock_tool1, mock_openai, mock_openai_class = self._local_provider_mocks(
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+          )
+
+          from core.runtime.graph_builder import GraphBuilder
+          builder = GraphBuilder()
+
+          with patch.dict('sys.modules', {'langchain_openai': mock_openai}):
+              graph = await builder.build_graph(
+                  make_context(agent_id="main"),
+                  config={"provider": "local", "model": "FLASH", "tools": {"tool1": {}}}
+              )
+
+          self.assertEqual(graph, "MockGraph")
+
+          kwargs = mock_openai_class.call_args.kwargs
+          # The agent asked for a tier, not a build id; the local table supplies
+          # the id. This is what makes moving an agent on-device a one-key change.
+          self.assertEqual(kwargs["model"], models.LOCAL_TIERS["FLASH"])
+          self.assertNotEqual(kwargs["model"], models.FLASH)
+
+          self.assertEqual(kwargs["base_url"], Config().local_llm_base_url)
+          self.assertEqual(kwargs["timeout"], Config().local_llm_timeout)
+          # The server handles one request at a time, so a retry joins the back
+          # of the queue rather than finding spare capacity.
+          self.assertEqual(kwargs["max_retries"], 0)
+          # Without this there is no usage metadata under streaming, and the
+          # token log silently records nothing.
+          self.assertTrue(kwargs["stream_usage"])
+
+          self.mock_create_graph.assert_called_once_with(
+              llm=mock_openai_class.return_value,
+              tools=[mock_tool1.model_copy.return_value],
+              prompt=unittest.mock.ANY,
+              checkpointer=mock_sqlite_checkpointer.return_value,
+              agent_id="main",
+              config={"provider": "local", "model": "FLASH", "tools": {"tool1": {}}}
+          )
+
+     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-a-real-paid-credential"})
+     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.SkillsLoader')
+     @patch('core.runtime.graph_builder.ToolsLoader')
+     @patch('core.runtime.graph_builder.SqliteCheckpointer')
+     async def test_local_provider_never_sends_the_openai_api_key(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+          """ChatOpenAI falls back to OPENAI_API_KEY from the environment when no
+          key is passed, and .env exports one. Omitting the argument would post a
+          paid credential to an unauthenticated socket on this machine, and
+          nothing downstream would report it -- the request would simply succeed.
+          """
+          _, mock_openai, mock_openai_class = self._local_provider_mocks(
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+          )
+
+          from core.runtime.graph_builder import GraphBuilder
+          builder = GraphBuilder()
+
+          with patch.dict('sys.modules', {'langchain_openai': mock_openai}):
+              await builder.build_graph(
+                  make_context(agent_id="main"),
+                  config={"provider": "local", "model": "FLASH_LITE", "tools": {}}
+              )
+
+          kwargs = mock_openai_class.call_args.kwargs
+          self.assertIn("api_key", kwargs, "api_key must be passed explicitly, never inherited")
+          self.assertNotEqual(kwargs["api_key"], "sk-a-real-paid-credential")
+          # An empty string is rejected by the openai client, so the placeholder
+          # has to be a non-empty constant.
+          self.assertTrue(kwargs["api_key"])
+
+     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.SkillsLoader')
+     @patch('core.runtime.graph_builder.ToolsLoader')
+     @patch('core.runtime.graph_builder.SqliteCheckpointer')
+     async def test_local_provider_rejects_the_image_tier(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+          """The device generates no images. Failing at build time keeps the
+          error next to the config that asked for it."""
+          _, mock_openai, _ = self._local_provider_mocks(
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+          )
+
+          from core.runtime.graph_builder import GraphBuilder
+          builder = GraphBuilder()
+
+          with patch.dict('sys.modules', {'langchain_openai': mock_openai}):
+              with self.assertRaises(ValueError):
+                  await builder.build_graph(
+                      make_context(agent_id="main"),
+                      config={"provider": "local", "model": "IMAGE", "tools": {}}
+                  )
 
      @patch('core.runtime.graph_builder.get_agent_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')

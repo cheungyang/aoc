@@ -31,6 +31,10 @@ class Config:
             cls._instance._runway_api_key = None
             cls._instance._seats_aero_api_key = None
             cls._instance._rapidapi_key = None
+            cls._instance._local_llm_base_url = None
+            cls._instance._local_llm_timeout = None
+            cls._instance._local_llm_context_tokens = None
+            cls._instance._local_llm_history_tokens = None
             cls._instance._tasks_db_path = None
             cls._instance._projects_db_path = None
             cls._instance._projects_dir = None
@@ -67,6 +71,10 @@ class Config:
         self._runway_api_key = None
         self._seats_aero_api_key = None
         self._rapidapi_key = None
+        self._local_llm_base_url = None
+        self._local_llm_timeout = None
+        self._local_llm_context_tokens = None
+        self._local_llm_history_tokens = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None
@@ -251,6 +259,94 @@ class Config:
         self._rapidapi_key = str(value) if value is not None else None
 
     # -------------------------------------------------------------------------
+    # On-device LLM (OpenAI-compatible server)
+    # -------------------------------------------------------------------------
+    # Read by graph_builder when an agent sets `"provider": "local"`. Only the
+    # endpoint and the timeout live here. Which model a tier maps to is in
+    # core/util/models.py, and there is deliberately no API key setting: the
+    # server does not authenticate, and offering the knob would invite pointing
+    # the paid OPENAI_API_KEY at a local socket.
+    @property
+    def local_llm_base_url(self) -> str:
+        if self._local_llm_base_url is not None:
+            return self._local_llm_base_url
+        return os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:9379/v1")
+
+    @local_llm_base_url.setter
+    def local_llm_base_url(self, value):
+        self._local_llm_base_url = str(value) if value is not None else None
+
+    @property
+    def local_llm_timeout(self) -> float:
+        """Seconds before a request to the on-device server is abandoned.
+
+        Far above the openai client's 60s default, and not because generation
+        is slow -- short turns measure about a second. The server handles one
+        request at a time, so a turn's latency includes everything queued ahead
+        of it, and the default would abort turns that were merely waiting.
+        """
+        if self._local_llm_timeout is not None:
+            return self._local_llm_timeout
+        try:
+            return float(os.getenv("LOCAL_LLM_TIMEOUT", "300"))
+        except (TypeError, ValueError):
+            return 300.0
+
+    @local_llm_timeout.setter
+    def local_llm_timeout(self, value):
+        self._local_llm_timeout = float(value) if value is not None else None
+
+    @property
+    def local_llm_context_tokens(self) -> int:
+        """The on-device server's hard context window, in tokens.
+
+        This is a property of how the server was launched, not of the model
+        file: LiteRT-LM applies its own maximum, and loading a model advertising
+        a larger window does not change it. Measure it rather than assume it --
+        overflow the streaming endpoint and the server states the limit in its
+        rejection ("... too long ... 7142 >= 4096").
+        """
+        if self._local_llm_context_tokens is not None:
+            return self._local_llm_context_tokens
+        try:
+            return int(os.getenv("LOCAL_LLM_CONTEXT_TOKENS", "4096"))
+        except (TypeError, ValueError):
+            return 4096
+
+    @local_llm_context_tokens.setter
+    def local_llm_context_tokens(self, value):
+        self._local_llm_context_tokens = int(value) if value is not None else None
+
+    @property
+    def local_llm_history_tokens(self) -> int:
+        """Pruning threshold for agents running on the on-device server.
+
+        `context_max_tokens` (30000) is sized for Gemini's million-token window
+        and is over seven times the local server's entire capacity, so the
+        pruner never fires before the server rejects the request. This gives
+        local agents their own budget.
+
+        Only conversation history is measured by the pruner -- the system
+        prompt and tool schemas are charged to the same window but counted
+        nowhere, so half the window is reserved for them and for the reply.
+        Agents whose static prompt already exceeds that reservation cannot run
+        locally at any history budget.
+        """
+        if self._local_llm_history_tokens is not None:
+            return self._local_llm_history_tokens
+        env_val = os.getenv("LOCAL_LLM_HISTORY_TOKENS")
+        if env_val:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return max(512, self.local_llm_context_tokens // 2)
+
+    @local_llm_history_tokens.setter
+    def local_llm_history_tokens(self, value):
+        self._local_llm_history_tokens = int(value) if value is not None else None
+
+    # -------------------------------------------------------------------------
     # Gogcli Keyring Settings
     # -------------------------------------------------------------------------
     @property
@@ -428,6 +524,16 @@ class Config:
 
     @property
     def context_max_tokens(self) -> int:
+        """History budget for agents on a remote (Gemini) model.
+
+        Lowered from 30000 to 10000. Simulating a realistic turn (~724 tokens:
+        a user line, a tool call, a tool result and a reply) against the real
+        pruner puts the cost of this at roughly 12% of turns triggering a
+        summarisation, against 10% at 30000 -- so the saving in carried context
+        is large and the extra summarisation is marginal.
+
+        Local agents do not use this; see `local_llm_history_tokens`.
+        """
         if self._context_max_tokens is not None:
             return self._context_max_tokens
         env_val = os.getenv("CONTEXT_MAX_TOKENS")
@@ -436,7 +542,7 @@ class Config:
                 return int(env_val)
             except ValueError:
                 pass
-        return 30000
+        return 10000
 
     @context_max_tokens.setter
     def context_max_tokens(self, value):
@@ -551,6 +657,10 @@ class Config:
         self._runway_api_key = None
         self._seats_aero_api_key = None
         self._rapidapi_key = None
+        self._local_llm_base_url = None
+        self._local_llm_timeout = None
+        self._local_llm_context_tokens = None
+        self._local_llm_history_tokens = None
         self._tasks_db_path = None
         self._projects_db_path = None
         self._projects_dir = None

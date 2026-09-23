@@ -73,7 +73,9 @@ class Agent(BaseAgent):
         # Auto-prune session checkpoint in SQLite storage before execution if history exceeds thresholds
         if not session.is_stateless():
             try:
-                await ContextPruner().aauto_prune_session(session=session)
+                await ContextPruner(
+                    provider=self.config.get("provider")
+                ).aauto_prune_session(session=session)
             except Exception as e:
                 print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
 

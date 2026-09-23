@@ -263,8 +263,16 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
         saved_messages = mock_tuple.checkpoint["channel_values"]["messages"]
         self.assertIsInstance(saved_messages[0], SystemMessage)
         self.assertIn("Async worker summary of the older turns", saved_messages[0].content)
-        # Only the summary plus the configured recent window survives.
-        self.assertEqual(len(saved_messages), 6)
+        # Retention is token-aware, so the count depends on message size rather
+        # than being a fixed `context_window_messages`. These messages are ~381
+        # tokens each against a 1000-token budget, so the old expectation of 5
+        # retained messages (~1905 tokens) was nearly twice the budget it was
+        # supposed to be enforcing. What matters is that the result fits.
+        self.assertGreaterEqual(len(saved_messages), 2)
+        self.assertLessEqual(
+            estimate_total_tokens(saved_messages), Config().context_max_tokens,
+            "pruned context is still over budget, so the next turn prunes again"
+        )
         self.assertTrue(all(isinstance(m, HumanMessage) for m in saved_messages[1:]))
 
     async def test_summarize_with_graph_worker_timeout_fallback(self):
@@ -349,5 +357,186 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cfg.context_pruning_timeout, 60)
 
 
+class TestProviderAwarePruningBudget(unittest.TestCase):
+    """The pruning threshold must track the window the agent actually has.
+
+    `context_max_tokens` defaults to 30000, which is over seven times the
+    on-device server's whole capacity. A local agent would therefore never be
+    pruned before the server rejected the request outright.
+    """
+
+    def setUp(self):
+        Config().reset()
+
+    def tearDown(self):
+        Config().reset()
+
+    def test_google_agents_keep_the_large_budget(self):
+        pruner = ContextPruner()
+        self.assertEqual(pruner.token_threshold, Config().context_max_tokens)
+        self.assertEqual(pruner.token_threshold, 10000)
+
+    def test_unset_provider_is_treated_as_remote(self):
+        self.assertEqual(ContextPruner(provider=None).token_threshold, 10000)
+        self.assertEqual(ContextPruner(provider="google").token_threshold, 10000)
+
+    def test_local_agents_get_a_window_sized_budget(self):
+        pruner = ContextPruner(provider="local")
+        # Half of the default 4096 window; the rest is for prompt, tools, reply.
+        self.assertEqual(pruner.token_threshold, 2048)
+
+    def test_local_budget_follows_the_configured_window(self):
+        cfg = Config()
+        cfg.local_llm_context_tokens = 16384
+        self.assertEqual(ContextPruner(provider="local").token_threshold, 8192)
+
+    def test_local_budget_can_be_set_explicitly(self):
+        cfg = Config()
+        cfg.local_llm_context_tokens = 8192
+        cfg.local_llm_history_tokens = 1000
+        self.assertEqual(ContextPruner(provider="local").token_threshold, 1000)
+
+    def test_local_budget_never_collapses_to_nothing(self):
+        cfg = Config()
+        cfg.local_llm_context_tokens = 256
+        self.assertEqual(ContextPruner(provider="local").token_threshold, 512)
+
+    def test_the_regression_this_guards(self):
+        """A local agent must not inherit a budget larger than its window."""
+        pruner = ContextPruner(provider="local")
+        window = Config().local_llm_context_tokens
+        self.assertLess(
+            pruner.token_threshold, window,
+            "history budget exceeds the server's entire context window"
+        )
+
+
+class TestPruningConverges(unittest.TestCase):
+    """A prune must leave the context under budget.
+
+    The pruner triggers on tokens but used to retain a fixed *message count*,
+    with nothing tying the two together. When the budget was small relative to
+    the retained window, every turn pruned, paid a summarisation, and was still
+    over budget — 82% of turns in simulation, none of them converging.
+    """
+
+    def setUp(self):
+        Config().reset()
+
+    def tearDown(self):
+        Config().reset()
+
+    @staticmethod
+    def _turn(i):
+        """A turn shaped like the real ones: the tool result dominates."""
+        return [
+            HumanMessage(content=f"[{i}] " + "u" * 200),
+            AIMessage(content="a" * 150,
+                      tool_calls=[{"name": "filesystem", "args": {}, "id": f"t{i}"}]),
+            ToolMessage(content="r" * 1600, tool_call_id=f"t{i}"),
+            AIMessage(content="p" * 800),
+        ]
+
+    def _run(self, threshold, turns=25):
+        cfg = Config()
+        cfg.context_max_tokens = threshold
+        pruner = ContextPruner()
+
+        messages = []
+        prunes = 0
+        non_convergent = 0
+        for i in range(turns):
+            messages.extend(self._turn(i))
+            should, _, _, _, recent, _, _ = pruner._prepare_pruning_split(messages)
+            if should:
+                prunes += 1
+                after = estimate_total_tokens(recent) + pruner.summary_token_budget
+                if after > threshold:
+                    non_convergent += 1
+                messages = recent
+        return prunes, non_convergent
+
+    def test_large_budget_converges(self):
+        prunes, non_convergent = self._run(10000)
+        self.assertGreater(prunes, 0, "nothing was pruned; the test is not exercising it")
+        self.assertEqual(non_convergent, 0)
+
+    def test_small_budget_converges(self):
+        """The local case. This is the one that used to fail every time."""
+        prunes, non_convergent = self._run(2048)
+        self.assertGreater(prunes, 0)
+        self.assertEqual(
+            non_convergent, 0,
+            "pruning left the context over budget, so the next turn prunes again"
+        )
+
+    def test_retained_context_respects_the_target(self):
+        cfg = Config()
+        cfg.context_max_tokens = 2048
+        pruner = ContextPruner()
+
+        messages = []
+        for i in range(12):
+            messages.extend(self._turn(i))
+        should, _, _, _, recent, _, _ = pruner._prepare_pruning_split(messages)
+
+        self.assertTrue(should)
+        self.assertLessEqual(estimate_total_tokens(recent), pruner.retain_target)
+        self.assertTrue(recent, "everything was discarded")
+        self.assertIsInstance(recent[0], HumanMessage,
+                              "retained context must start on a clean user turn")
+
+    def test_over_budget_short_conversation_can_still_prune(self):
+        """Few but huge messages must not be exempt from the budget.
+
+        The count check used to return early whenever there were fewer than
+        `context_window_messages`, so a context that was over budget on tokens
+        but short on messages could never be pruned at all.
+        """
+        cfg = Config()
+        cfg.context_max_tokens = 1000
+        cfg.context_window_messages = 30
+        pruner = ContextPruner()
+
+        messages = []
+        for i in range(4):          # 16 messages, well under the window of 30
+            messages.extend(self._turn(i))
+        self.assertLess(len(messages), cfg.context_window_messages)
+        self.assertGreater(estimate_total_tokens(messages), cfg.context_max_tokens)
+
+        should, _, _, _, recent, _, _ = pruner._prepare_pruning_split(messages)
+        self.assertTrue(should, "an over-budget context refused to prune")
+
+        # The tail may exceed retain_target only when it is a single turn --
+        # the request being answered is never dropped. What must hold either
+        # way is that the result fits the threshold, so the next turn does not
+        # immediately prune again.
+        retained = estimate_total_tokens(recent)
+        if retained > pruner.retain_target:
+            self.assertEqual(
+                sum(isinstance(m, HumanMessage) for m in recent), 1,
+                "tail is over target but is not the irreducible single turn"
+            )
+        self.assertLessEqual(retained + pruner.summary_token_budget,
+                             cfg.context_max_tokens)
+
+    def test_summary_budget_scales_with_the_threshold(self):
+        cfg = Config()
+        cfg.context_max_tokens = 10000
+        self.assertEqual(ContextPruner().summary_token_budget, 1000)
+
+        cfg.context_max_tokens = 2048
+        # A flat 1000-token summary would be half of this budget on its own.
+        self.assertEqual(ContextPruner().summary_token_budget, 512)
+
+    def test_local_agents_summarize_without_an_llm_call(self):
+        """Pruning often must not mean calling a remote model often."""
+        self.assertTrue(ContextPruner(provider="local").use_deterministic_summary)
+        self.assertFalse(ContextPruner(provider="google").use_deterministic_summary)
+        self.assertFalse(ContextPruner().use_deterministic_summary)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+

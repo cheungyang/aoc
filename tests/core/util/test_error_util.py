@@ -100,5 +100,135 @@ class TestErrorUtil(unittest.TestCase):
         self.assertFalse(is_service_error(IndexError("list index out of range")))
 
 
+class TestUnreachableLocalLlm(unittest.TestCase):
+    """A refused socket on this machine is a configuration fault, not an outage.
+
+    The generic path classifies anything from openai/httpx as a service error
+    and suggests trying again later. For a server that is simply not running,
+    or is bound to 127.0.0.1 while the caller is in a container, that advice is
+    wrong -- retrying never fixes either one.
+
+    These build real `openai.APIConnectionError` objects rather than Exceptions
+    carrying lookalike text. That distinction caught a bug: `str()` of the real
+    exception is only "Connection error.", with neither host nor URL in it, so
+    an earlier message-matching implementation passed synthetic tests and did
+    nothing at all against the live server.
+    """
+
+    def setUp(self):
+        from core.util.config import Config
+
+        self.config = Config()
+        self.config.local_llm_base_url = "http://localhost:9379/v1"
+
+    def tearDown(self):
+        self.config.reset()
+
+    @staticmethod
+    def _connection_error(url="http://localhost:9379/v1/chat/completions"):
+        import httpx
+        import openai
+
+        return openai.APIConnectionError(request=httpx.Request("POST", url))
+
+    def test_connection_error_names_the_endpoint_and_the_cause(self):
+        message = format_error_message(self._connection_error())
+        self.assertIn("http://localhost:9379/v1", message)
+        self.assertIn("configuration problem", message)
+        self.assertIn("127.0.0.1", message)
+
+    def test_it_does_not_advise_retrying(self):
+        """The whole reason this branch exists."""
+        message = format_error_message(self._connection_error())
+        self.assertNotIn("try again later", message.lower())
+
+    def test_the_bare_message_alone_would_be_useless(self):
+        """Pins the reason detection cannot be message-based: the exception
+        says nothing about where it was going."""
+        self.assertNotIn("9379", str(self._connection_error()))
+
+    def test_a_wrapped_connection_error_is_still_recognised(self):
+        """LangGraph wraps failures raised inside a node."""
+        outer = RuntimeError("Error in node 'agent'")
+        outer.__cause__ = self._connection_error()
+        self.assertIn("on-device model server", format_error_message(outer))
+
+    def test_a_different_endpoint_is_left_alone(self):
+        """The same exception type covers every OpenAI-compatible endpoint, so
+        the request URL has to be checked before claiming the failure."""
+        err = self._connection_error("https://api.openai.com/v1/chat/completions")
+        self.assertNotIn("on-device model server", format_error_message(err))
+
+    def test_a_non_connection_failure_is_left_alone(self):
+        """A 500 from a server that answered is a real service error; only an
+        unreachable socket is a configuration fault."""
+        err = Exception('500 Internal Server Error. {"error": {"code": 500, "message": "model failed to load"}}')
+        self.assertNotIn("on-device model server", format_error_message(err))
+
+    def test_an_unrelated_exception_is_left_alone(self):
+        self.assertNotIn("on-device model server", format_error_message(KeyError("nope")))
+
+
+class TestStringErrorBodyIsSurfaced(unittest.TestCase):
+    """A server diagnostic must not be replaced by the client's placeholder.
+
+    openai's SSE reader raises `APIError(message="An error occurred during
+    streaming")` whenever the error payload is not a mapping carrying a
+    "message" key. A server answering `{"error": "<text>"}` hits exactly that,
+    and the only copy of what went wrong survives on `.body`.
+
+    This is not hypothetical: it is how an exceeded context window on the
+    on-device server reached the user as six words that said nothing, while the
+    exception was carrying "Input token ids are too long. Exceeding the maximum
+    number of tokens allowed: 7142 >= 4096".
+    """
+
+    @staticmethod
+    def _streaming_api_error(body):
+        import httpx
+        import openai
+
+        return openai.APIError(
+            message="An error occurred during streaming",
+            request=httpx.Request("POST", "http://localhost:9379/v1/chat/completions"),
+            body=body,
+        )
+
+    def test_a_string_body_replaces_the_placeholder(self):
+        err = self._streaming_api_error(
+            "RuntimeError: INVALID_ARGUMENT: Input token ids are too long. "
+            "Exceeding the maximum number of tokens allowed: 7142 >= 4096\n"
+        )
+        message = format_error_message(err)
+        self.assertIn("Input token ids are too long", message)
+        self.assertIn("7142", message)
+        self.assertNotEqual(message, "An error occurred during streaming")
+
+    def test_the_placeholder_survives_when_there_is_nothing_better(self):
+        """No body means no diagnostic to recover; the placeholder is all there
+        is, and inventing something would be worse."""
+        self.assertEqual(
+            format_error_message(self._streaming_api_error(None)),
+            "An error occurred during streaming",
+        )
+
+    def test_a_structured_body_still_wins(self):
+        """The usual shape keeps taking the documented path."""
+        err = self._streaming_api_error({"error": {"code": 400, "message": "bad request"}})
+        self.assertEqual(format_error_message(err), "[400] bad request")
+
+    def test_an_informative_message_is_not_overridden_by_its_body(self):
+        """Only the known placeholder is treated as worthless."""
+        import httpx
+        import openai
+
+        err = openai.APIError(
+            message="Model is overloaded",
+            request=httpx.Request("POST", "http://localhost:9379/v1/chat/completions"),
+            body="some less useful context",
+        )
+        self.assertEqual(format_error_message(err), "Model is overloaded")
+
+
 if __name__ == "__main__":
     unittest.main()

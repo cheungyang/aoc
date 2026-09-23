@@ -143,6 +143,141 @@ treated as un-indexed and rebuilt rather than silently starting up empty.
 
 ---
 
+## Using an On-Device Model
+
+Individual agents can run against a local OpenAI-compatible server (LiteRT-LM,
+llama.cpp, LM Studio, or similar) instead of Gemini. This is opt-in per agent —
+everything else keeps using Gemini.
+
+### 1. Start the server and point AOC at it
+
+```bash
+# .env -- no API key: the server does not authenticate.
+LOCAL_LLM_BASE_URL=http://localhost:9379/v1
+LOCAL_LLM_TIMEOUT=300
+```
+
+Verify it before wiring an agent to it:
+
+```bash
+curl http://localhost:9379/v1/models
+```
+
+The server must support **tool calling**. Agents in this system are ReAct agents
+and bind their tools on every turn; a server that accepts the `tools` parameter
+and ignores it produces an agent that never calls a tool and merely looks
+unhelpful. Check for a `tool_calls` array in the response to:
+
+```bash
+curl http://localhost:9379/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "<your-model-id>",
+  "messages": [{"role": "user", "content": "What is the weather in Paris? Use the tool."}],
+  "tools": [{"type": "function", "function": {
+    "name": "get_weather",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+  }}]
+}'
+```
+
+### 2. Measure the context window, and size the history budget to it
+
+> [!IMPORTANT]
+> Do this before anything else. It is the single most common reason a local
+> agent fails, and the failure is a hard rejection rather than a degradation.
+
+The window is set **when the server starts**, not by the model file. Loading a
+model that advertises a larger window does not raise it. Measure it rather than
+trusting the model card — overflow the endpoint and the server states its own
+limit. Use `"stream": true`: the non-streaming path may return an HTML 500
+instead of a diagnostic.
+
+```bash
+curl -sN http://localhost:9379/v1/chat/completions -H "Content-Type: application/json" \
+  -d "{\"model\":\"<your-model-id>\",\"stream\":true,\"messages\":[{\"role\":\"user\",
+       \"content\":\"$(python3 -c 'print("word "*20000)')\"}]}" | grep -o 'Exceeding[^"]*'
+# Exceeding the maximum number of tokens allowed: 20009 >= 4096
+#                                                          ^^^^ the real window
+```
+
+Then record it, so the context pruner can size history against it:
+
+```bash
+# .env
+LOCAL_LLM_CONTEXT_TOKENS=4096      # match the number above
+# LOCAL_LLM_HISTORY_TOKENS=2048    # optional; defaults to half the window
+```
+
+`CONTEXT_MAX_TOKENS` (30000) is sized for Gemini's window and is over seven
+times a 4096-token server's entire capacity, so without a separate budget the
+pruner never fires before the server rejects the request. Local agents use
+`LOCAL_LLM_HISTORY_TOKENS`; remote agents are unaffected.
+
+Half the window is reserved by default because the pruner measures
+**conversation history only**. The system prompt and tool schemas are charged to
+the same window but counted nowhere, and for these agents they are the larger
+share:
+
+| Agent | System prompt | Tool schemas | Total before any conversation |
+|---|---:|---:|---:|
+| topic-researcher | 4,455 | 2,721 | 7,176 |
+| day-planner | 4,466 | 2,285 | 6,751 |
+| main | 3,930 | 1,703 | 5,633 |
+| meal-planner | 1,950 | 636 | 2,586 |
+| graph-worker | 1,429 | 636 | 2,065 |
+| script-executor | 798 | 636 | 1,434 |
+
+An agent whose static cost already exceeds the window cannot run locally at any
+history budget. Note also that the three PKM vault files in an agent's persona
+grow by roughly 300 tokens per month, so leave headroom rather than fitting
+exactly.
+
+### 3. Register the model as a tier
+
+Add the server's model id to `LOCAL_TIERS` in
+[`core/util/models.py`](core/util/models.py), mapping each tier to whichever
+build serves that intent. With a single on-device model, all three point at it.
+The id stays here rather than in agent configs because it is a date-stamped
+build artifact specific to one machine's weights.
+
+### 4. Move an agent on-device
+
+Add one key to its `agent.json`:
+
+```json
+{
+  "model": "FLASH_LITE",
+  "provider": "local"
+}
+```
+
+Both providers answer the same tier names, so the `model` line is untouched.
+Deleting the `provider` key moves the agent back to Gemini.
+
+### Constraints worth knowing first
+
+- **The server handles one request at a time.** Two local agents queue behind
+  each other, and the effect compounds once a queue forms. Keep the local roster
+  small and prefer low-volume, single-purpose agents. This is also why
+  `LOCAL_LLM_TIMEOUT` defaults to 300s: a turn's latency includes everything
+  queued ahead of it, and the OpenAI client's 60s default would abort turns that
+  were merely waiting.
+- **Do not move `graph-worker-low` or the voice verbalizer.** Both call a model
+  *inside* another turn — `graph-worker-low` summarizes context before the user's
+  request is processed, and the verbalizer runs mid-speech. On a serializing
+  server they queue behind the very turn they are serving. `graph-worker-low`
+  looks like an ideal candidate (toolless, stateless, cheapest tier) and is
+  precisely the wrong one.
+- **`IMAGE` is not available locally.** Configuring it raises at graph-build
+  time rather than failing later at an image call site.
+- **In Docker, `localhost` is the container.** `docker-compose.yml` overrides
+  `LOCAL_LLM_BASE_URL` to `host.docker.internal` and declares the
+  `host-gateway` alias. The server must then bind `0.0.0.0` rather than
+  `127.0.0.1` — which also exposes it to the LAN, so add a firewall rule.
+  Note the deployment NAS (Synology DS220+) cannot host a model of this size;
+  that deployment stays on Gemini.
+
+---
+
 ## Home Assistant Integration
 
 AOC integrates directly with Home Assistant to provide safe, agentic smart home observation, device control, automation authoring, and health auditing.

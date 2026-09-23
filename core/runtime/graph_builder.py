@@ -68,8 +68,8 @@ class GraphBuilder:
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
-        model_name = resolve_model(config.get("model"))
         provider = config.get("provider", "google")
+        model_name = resolve_model(config.get("model"), provider=provider)
         
         loader = ToolsLoader()
         allowed_tools = loader.get_tools(ctx)
@@ -119,6 +119,33 @@ class GraphBuilder:
         if provider == "ollama":
             from langchain_ollama import ChatOllama
             llm = ChatOllama(model=model_name)
+        elif provider == "local":
+            # An on-device server speaking the OpenAI wire format. ChatOpenAI is
+            # a protocol client here, not a route to the hosted API.
+            from langchain_openai import ChatOpenAI
+
+            cfg = Config()
+            llm = ChatOpenAI(
+                model=model_name,
+                base_url=cfg.local_llm_base_url,
+                # Load-bearing, despite the server ignoring it. Omitting the
+                # argument makes ChatOpenAI fall back to OPENAI_API_KEY from the
+                # environment -- which .env exports -- so a machine holding a
+                # real key would post that paid credential to an
+                # unauthenticated local socket. A constant makes that
+                # impossible. The client also rejects an empty string, so this
+                # cannot simply be "".
+                api_key="not-needed",
+                timeout=cfg.local_llm_timeout,
+                # The client's default of 2 assumes an elastic hosted service.
+                # This server handles one request at a time, so a retry does not
+                # find spare capacity -- it joins the back of the queue every
+                # other agent is already waiting in.
+                max_retries=0,
+                # Sends stream_options.include_usage, without which the usage
+                # metadata LoggingHandler records is absent under streaming.
+                stream_usage=True,
+            )
         else:
             from langchain_google_genai import ChatGoogleGenerativeAI
             llm = ChatGoogleGenerativeAI(model=model_name)

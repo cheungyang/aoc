@@ -2,6 +2,14 @@ import re
 import ast
 import json
 from typing import Any
+from urllib.parse import urlparse
+
+# Messages a client substitutes when it cannot find the server's own text.
+# Carrying one of these means the exception's real diagnostic, if any, is
+# somewhere other than `.message`.
+_PLACEHOLDER_MESSAGES = frozenset({
+    "An error occurred during streaming",
+})
 
 
 def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> str:
@@ -11,10 +19,76 @@ def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> 
 </{tool_name}_response>"""
 
 
+def _describe_unreachable_local_llm(error: Any) -> str:
+    """Names an on-device server that could not be reached, or "".
+
+    Worth special-casing because the generic path below classifies anything
+    from `openai`/`httpx` as a service error and suggests trying again later.
+    For a socket on this machine that is not merely unhelpful, it is wrong:
+    retrying never fixes it. The server is not running, or it is bound to
+    127.0.0.1 while the caller is in a container. Both are configuration
+    faults, and naming the URL is what makes the second one visible.
+
+    Detection is by exception type and request URL rather than by message text.
+    `str(openai.APIConnectionError)` is just "Connection error." -- it carries
+    neither the host nor the URL -- so matching on the message would either
+    never fire or fire on everything.
+    """
+    seen = []
+
+    def walk(e):
+        if e is None or any(c is e for c in seen):
+            return
+        seen.append(e)
+        if isinstance(e, BaseException):
+            walk(e.__cause__)
+            walk(e.__context__)
+
+    walk(error)
+
+    for err in seen:
+        if type(err).__name__ not in ("APIConnectionError", "APITimeoutError"):
+            continue
+        if not getattr(type(err), "__module__", "").startswith("openai"):
+            continue
+
+        try:
+            from core.util.config import Config
+
+            base_url = Config().local_llm_base_url
+        except Exception:
+            return ""
+
+        # The request URL is the only reliable way to tell this server apart
+        # from any other OpenAI-compatible endpoint. When it is absent, claim
+        # the error anyway: in this codebase the openai client is constructed
+        # only by graph_builder's `local` branch.
+        request_url = str(getattr(getattr(err, "request", None), "url", "") or "")
+        if request_url:
+            expected_host = urlparse(base_url).netloc
+            actual_host = urlparse(request_url).netloc
+            if expected_host and actual_host and expected_host != actual_host:
+                return ""
+
+        return (
+            f"Cannot reach the on-device model server at {base_url}. "
+            "This is a configuration problem, not a temporary outage: check the "
+            "server is running, and that it is bound to an address this process "
+            "can reach (a server listening only on 127.0.0.1 is invisible from "
+            "inside Docker)."
+        )
+
+    return ""
+
+
 def format_error_message(error: Any) -> str:
     """Formats an exception or error payload into a clean, informative error message."""
     if not error:
         return "Sorry, I encountered an error processing the request."
+
+    unreachable_local = _describe_unreachable_local_llm(error)
+    if unreachable_local:
+        return unreachable_local
 
     candidate_errors = []
 
@@ -62,6 +136,24 @@ def format_error_message(error: Any) -> str:
         elif hasattr(err, "detail") and getattr(err, "detail") and isinstance(getattr(err, "detail"), str):
             message = getattr(err, "detail")
 
+        # Some providers put the diagnostic somewhere the client does not look.
+        # openai's SSE reader raises APIError(message="An error occurred during
+        # streaming") whenever the error payload is not a mapping carrying a
+        # "message" key -- a server answering {"error": "<text>"} hits exactly
+        # that, and the only copy of what actually went wrong survives on
+        # `.body`. Without this, a precise server-side complaint (an exceeded
+        # context window, say) reaches the user as six words that say nothing.
+        if message in _PLACEHOLDER_MESSAGES:
+            body = getattr(err, "body", None)
+            if isinstance(body, str) and body.strip():
+                message = body.strip()
+            else:
+                # Drop it. Every path below fills `message` only when it is
+                # empty, so leaving the placeholder in place would let six
+                # useless words outrank a structured body that says exactly
+                # what went wrong.
+                message = None
+
         # Check response_json / body dicts if present on exception object
         for dict_attr in ("response_json", "body", "error", "data"):
             if hasattr(err, dict_attr):
@@ -75,6 +167,8 @@ def format_error_message(error: Any) -> str:
                             message = err_obj.get("message") or err_obj.get("detail")
                     elif isinstance(err_obj, str) and not message:
                         message = err_obj
+                elif isinstance(val, str) and val.strip() and not message:
+                    message = val.strip()
 
         # Try to parse dict/json from error_str
         if error_str:

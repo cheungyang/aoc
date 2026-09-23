@@ -4,7 +4,6 @@
   "emoji": "🛎️",
   "model": "FLASH",
   "description": "Smart Home Steward: manages, automates, audits, and observes Home Assistant devices and configurations safely.",
-  "discord_token_key": "DISCORD_TOKEN_HOME_STEWARD",
   "channels": [
     "home-automation",
     "general"

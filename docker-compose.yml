@@ -53,6 +53,19 @@ services:
       - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
       - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
       - AOC_SCRIPT_TIMEOUT=${AOC_SCRIPT_TIMEOUT:-300}
+      # On-device LLM, for agents setting "provider": "local". localhost would
+      # be this container, so the host alias below is used instead.
+      #
+      # Unused on the current deployment target: the Synology DS220+ cannot host
+      # a 26B model, so every agent there stays on Gemini. Wired anyway so that
+      # moving to a capable host needs no compose edit.
+      - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-http://host.docker.internal:9379/v1}
+      - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-300}
+    extra_hosts:
+      # Docker Desktop resolves host.docker.internal on its own; the Linux
+      # engine does not, so the gateway alias is declared explicitly. Harmless
+      # where it already exists.
+      - "host.docker.internal:host-gateway"
     volumes:
       # Project directory mount for hot-reloading and live code edits (includes ./.gogcli)
       - .:/app

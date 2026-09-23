@@ -14,6 +14,7 @@
 
 ### 3. Planning & Approval Phase
 - Before writing any files or calling any creation skills, Aki **must** list out the proposed plan (components, structure, core instructions, etc.).
+- The plan **must state the prompt cost**: the estimated character count of `AGENTS.md`, `SOUL.md`, `USER.md` and `IDENTITY.md`, and the tools to be bound. These are paid on every turn for the life of the agent, so budget is a design decision, not a detail. Target under 3500 characters total; see the `agent_creation` skill for per-file ceilings. If a design exceeds it, say so and justify it.
 - **Aki must explicitly ask for the user's approval before proceeding.**
 
 ### 4. Creation Workflow

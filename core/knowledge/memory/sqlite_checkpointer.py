@@ -28,6 +28,39 @@ def sanitize_table_name(thread_id: str) -> str:
     return f"ctx_{clean}"
 
 
+class UnreconstructableError(RuntimeError):
+    """Stand-in for an exception that could not survive a pickle round trip.
+
+    Carries the original type and message as text so the diagnostic survives
+    even though the original object could not.
+    """
+
+
+def _make_picklable(value: Any) -> Any:
+    """Replaces exceptions that cannot be unpickled with a surrogate that can.
+
+    `BaseException.__reduce__` reconstructs via `type(exc)(*exc.args)`. Any
+    exception whose `__init__` requires arguments beyond `args` therefore
+    pickles cleanly but raises `TypeError` on load. `openai.APIError` is one:
+    its signature is `(message, request, *, body)` while `args` holds only the
+    message.
+
+    LangGraph stores failures as a `("__error__", exc)` pending write, so such
+    an exception is written into the checkpoint and then makes the entire
+    session permanently unreadable. Verifying the round trip here keeps a bad
+    object out of the database in the first place.
+    """
+    if not isinstance(value, BaseException):
+        return value
+    try:
+        pickle.loads(pickle.dumps(value))
+        return value
+    except Exception:
+        origin = f"{type(value).__module__}.{type(value).__qualname__}"
+        return UnreconstructableError(f"{origin}: {value}")
+
+
+
 def _evict_base64_from_content(content: Any) -> Any:
     """Evicts large base64 payloads from historical tool messages."""
     if isinstance(content, str):
@@ -191,11 +224,15 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         if not blob:
             return None
         try:
-            decompressed = zlib.decompress(blob)
-            return pickle.loads(decompressed)
-        except Exception:
-            # Fallback for uncompressed legacy blobs
-            return pickle.loads(blob)
+            raw = zlib.decompress(blob)
+        except zlib.error:
+            # Legacy uncompressed blob: the pickle stream was stored directly.
+            raw = blob
+        # Deliberately not guarded. A pickle failure here is a real problem with
+        # the stored object; retrying it against the still-compressed bytes only
+        # ever yields "invalid load key, 'x'" (0x78 being the zlib header), which
+        # hides the actual cause.
+        return pickle.loads(raw)
 
     def _ensure_table(self, conn: sqlite3.Connection, table_name: str):
         conn.execute(f"""
@@ -279,7 +316,19 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             )
             pending_writes = []
             for w_row in writes_cursor.fetchall():
-                write_info = self._deserialize_blob(w_row["data"])
+                try:
+                    write_info = self._deserialize_blob(w_row["data"])
+                except Exception as e:
+                    # Pending writes are resumption state for an interrupted
+                    # turn, not conversation history. Dropping one loses at most
+                    # an in-flight retry, whereas propagating makes the thread
+                    # unusable forever. Databases written before _make_picklable
+                    # existed can contain such rows.
+                    print(
+                        f"SqliteCheckpointer: skipping unreadable pending write in "
+                        f"{table_name} (checkpoint {cp_id}): {type(e).__name__}: {e}"
+                    )
+                    continue
                 if isinstance(write_info, dict) and "writes" in write_info:
                     for w in write_info["writes"]:
                         pending_writes.append((write_info.get("task_id", ""), w[0], w[1]))
@@ -384,7 +433,10 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         now = time.time()
 
         write_data = {
-            "writes": writes,
+            # LangGraph records task failures as a ("__error__", exc) write. If
+            # that exception cannot be unpickled, every later read of this
+            # session fails, so it is swapped for a surrogate before storage.
+            "writes": [(channel, _make_picklable(value)) for channel, value in writes],
             "task_id": task_id,
             "task_path": task_path,
             "checkpoint_id": checkpoint_id

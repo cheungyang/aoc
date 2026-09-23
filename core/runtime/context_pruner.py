@@ -1,3 +1,4 @@
+import os
 import re
 import sys
 import asyncio
@@ -94,8 +95,66 @@ class ContextPruner:
     and semantic context summarization for long-running agent threads.
     """
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Optional[Config] = None, provider: Optional[str] = None):
         self.config = config or Config()
+        self.provider = provider
+
+    @property
+    def token_threshold(self) -> int:
+        """History budget for this agent, in tokens.
+
+        `context_max_tokens` assumes a Gemini-sized window. An agent on the
+        on-device server has a far smaller one, and exceeding it is a hard
+        rejection rather than a degradation, so local agents get their own
+        budget derived from the server's capacity.
+        """
+        if self.provider == "local":
+            return self.config.local_llm_history_tokens
+        return self.config.context_max_tokens
+
+    @property
+    def summary_token_budget(self) -> int:
+        """Cap on the injected summary, kept proportional to the budget.
+
+        A flat 1000-token summary is a quarter of a 4096-token window before a
+        single message is retained. Scaling it keeps the summary from crowding
+        out the conversation it is meant to make room for.
+        """
+        return min(self.config.context_summary_max_tokens,
+                   max(200, self.token_threshold // 4))
+
+    @property
+    def retain_target(self) -> int:
+        """Token ceiling for the messages kept after a prune.
+
+        Pruning triggers on tokens but historically retained a fixed *message
+        count*, so nothing guaranteed the result was any smaller than the
+        threshold. With a large budget that was invisible; with a small one it
+        means every turn prunes, pays a summarisation, and is still over
+        budget afterwards -- pruning that never converges.
+
+        Retaining to half the budget also supplies hysteresis: the summary is
+        capped at a quarter, so a prune lands near 75% of the threshold and
+        several turns fit before the next one.
+        """
+        return max(256, self.token_threshold // 2)
+
+    @property
+    def use_deterministic_summary(self) -> bool:
+        """Whether to summarise without spending an LLM call.
+
+        A small window prunes often -- measured at ~48% of turns for a
+        4096-token server against ~8% for Gemini. Each prune otherwise costs a
+        `graph-worker-low` round trip, so a local agent would generate a steady
+        stream of *remote* calls, which is most of what moving it on-device was
+        meant to avoid. `build_heuristic_summary` is deterministic, free and
+        instant; it is already the fallback when the worker fails.
+
+        Set LOCAL_LLM_DETERMINISTIC_SUMMARY=0 to use the worker anyway.
+        """
+        if self.provider != "local":
+            return False
+        return os.getenv("LOCAL_LLM_DETERMINISTIC_SUMMARY", "1") not in ("0", "false", "False")
 
     def _extract_existing_summary(self, messages: Sequence[BaseMessage]) -> Tuple[str, List[BaseMessage]]:
         """
@@ -227,10 +286,13 @@ class ContextPruner:
         if is_direct:
             return transcript
 
+        if self.use_deterministic_summary:
+            return build_heuristic_summary(older_messages, previous_summary=previous_summary)
+
         worker_summary = self._summarize_with_graph_worker(
             transcript=transcript,
             previous_summary=previous_summary,
-            max_summary_tokens=self.config.context_summary_max_tokens,
+            max_summary_tokens=self.summary_token_budget,
             channel=channel
         )
         if worker_summary:
@@ -250,10 +312,13 @@ class ContextPruner:
         if is_direct:
             return transcript
 
+        if self.use_deterministic_summary:
+            return build_heuristic_summary(older_messages, previous_summary=previous_summary)
+
         worker_summary = await self._asummarize_with_graph_worker(
             transcript=transcript,
             previous_summary=previous_summary,
-            max_summary_tokens=self.config.context_summary_max_tokens,
+            max_summary_tokens=self.summary_token_budget,
             channel=channel
         )
         if worker_summary:
@@ -282,7 +347,7 @@ class ContextPruner:
         if not force and not self.config.context_pruning_enabled:
             return False, messages, "", [], [], 0, 0
 
-        token_threshold = self.config.context_max_tokens
+        token_threshold = self.token_threshold
         window_size = self.config.context_window_messages
 
         total_tokens = estimate_total_tokens(messages)
@@ -292,22 +357,36 @@ class ContextPruner:
             return False, messages, "", [], [], total_count, total_tokens
 
         prev_summary, clean_messages = self._extract_existing_summary(messages)
-        if len(clean_messages) <= window_size:
+        # A short conversation is normally left alone, but "short" is a message
+        # count and the budget is tokens: a handful of large tool results can
+        # be over budget in well under `window_size` messages. Only bail out
+        # here if the token budget is also satisfied, otherwise an over-budget
+        # context could never be pruned at all.
+        over_budget = total_tokens > token_threshold
+        if len(clean_messages) <= window_size and not (force or over_budget):
             if prev_summary:
                 return False, [SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"), *clean_messages], "", [], [], total_count, total_tokens
             return False, messages, "", [], [], total_count, total_tokens
 
         split_idx = find_safe_boundary(clean_messages, window_messages=window_size)
-        if split_idx <= 0:
+        if split_idx <= 0 and not (force or over_budget):
             if prev_summary:
                 return False, [SystemMessage(content=f"{SUMMARY_PREFIX}\n{prev_summary}\n{SUMMARY_SUFFIX}"), *clean_messages], "", [], [], total_count, total_tokens
             return False, clean_messages, "", [], [], total_count, total_tokens
 
-        older_messages = list(clean_messages[:split_idx])
-        recent_messages = list(clean_messages[split_idx:])
+        older_messages = list(clean_messages[:max(split_idx, 0)])
+        recent_messages = list(clean_messages[max(split_idx, 0):])
 
         while recent_messages and not isinstance(recent_messages[0], HumanMessage):
             older_messages.append(recent_messages.pop(0))
+
+        # The message-count window above is only a starting point. Tighten it
+        # until what we keep actually fits the budget, otherwise the prune does
+        # not reduce the context below the threshold and the next turn prunes
+        # again -- summarising every turn and never converging.
+        recent_messages, older_messages = self._tighten_to_budget(
+            recent_messages, older_messages
+        )
 
         if not recent_messages:
             if prev_summary:
@@ -315,6 +394,33 @@ class ContextPruner:
             return False, clean_messages, "", [], [], total_count, total_tokens
 
         return True, None, prev_summary, older_messages, recent_messages, total_count, total_tokens
+
+    def _tighten_to_budget(
+        self,
+        recent_messages: List[BaseMessage],
+        older_messages: List[BaseMessage]
+    ) -> Tuple[List[BaseMessage], List[BaseMessage]]:
+        """Moves whole turns from `recent` into `older` until `recent` fits.
+
+        Always leaves the final user turn in place: dropping it would discard
+        the request currently being answered. If that one turn is itself over
+        budget, no split can help and the caller is over budget regardless --
+        the honest outcome, rather than silently returning nothing.
+        """
+        target = self.retain_target
+        while estimate_total_tokens(recent_messages) > target:
+            # Find the next turn boundary after the first message.
+            next_turn = next(
+                (i for i in range(1, len(recent_messages))
+                 if isinstance(recent_messages[i], HumanMessage)),
+                None
+            )
+            if next_turn is None:
+                break  # one turn left; keep it
+            older_messages.extend(recent_messages[:next_turn])
+            recent_messages = recent_messages[next_turn:]
+        return recent_messages, older_messages
+
 
     def _finalize_pruned_messages(
         self,

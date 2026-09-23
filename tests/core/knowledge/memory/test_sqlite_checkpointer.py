@@ -456,5 +456,127 @@ class TestSqliteCheckpointer(unittest.TestCase):
             )
 
 
+class TestUnpicklableExceptionWrites(unittest.TestCase):
+    """Regression tests for the 'invalid load key, x' poison pill.
+
+    An `openai.APIError` stored as LangGraph's ("__error__", exc) pending write
+    pickles cleanly but cannot be unpickled, because `BaseException.__reduce__`
+    reconstructs via `type(exc)(*exc.args)` while the signature requires
+    `request`. That made every subsequent read of the session fail.
+
+    These use the real exception class, not a stand-in: the whole defect lives
+    in the mismatch between a specific `__init__` and `args`, which a synthetic
+    exception would not reproduce.
+    """
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.test_dir, "poison.db")
+        self.checkpointer = SqliteCheckpointer(db_path=self.db_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    @staticmethod
+    def _api_error():
+        import httpx
+        import openai
+        return openai.APIError(
+            message="An error occurred during streaming",
+            request=httpx.Request("POST", "http://localhost:9379/v1/chat/completions"),
+            body={"error": "INVALID_ARGUMENT: Input token ids are too long."},
+        )
+
+    def test_the_exception_really_is_unpicklable(self):
+        """Guards the premise. If openai ever fixes this, the rest is moot."""
+        import pickle
+        exc = self._api_error()
+        pickle.dumps(exc)  # must succeed - that is why it reaches the database
+        with self.assertRaises(TypeError):
+            pickle.loads(pickle.dumps(exc))
+
+    def test_error_write_does_not_poison_the_session(self):
+        config = {"configurable": {"thread_id": "poison1", "checkpoint_id": "cp1"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+        self.checkpointer.put_writes(config, [("__error__", self._api_error())], "task1")
+
+        # Before the fix this raised UnpicklingError("invalid load key, 'x'.")
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple)
+        self.assertIsNotNone(cp_tuple.pending_writes)
+
+        _, channel, value = cp_tuple.pending_writes[0]
+        self.assertEqual(channel, "__error__")
+        self.assertIsInstance(value, Exception)
+        # The diagnostic must survive the substitution.
+        self.assertIn("openai.APIError", str(value))
+        self.assertIn("An error occurred during streaming", str(value))
+
+    def test_ordinary_exceptions_are_left_alone(self):
+        """Only exceptions that cannot round trip should be replaced."""
+        config = {"configurable": {"thread_id": "poison2", "checkpoint_id": "cp1"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+        original = ValueError("a perfectly normal failure")
+        self.checkpointer.put_writes(config, [("__error__", original)], "task1")
+
+        cp_tuple = self.checkpointer.get_tuple(config)
+        _, _, value = cp_tuple.pending_writes[0]
+        self.assertIsInstance(value, ValueError)
+        self.assertEqual(str(value), "a perfectly normal failure")
+
+    def test_non_exception_writes_are_untouched(self):
+        config = {"configurable": {"thread_id": "poison3", "checkpoint_id": "cp1"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+        self.checkpointer.put_writes(config, [("messages", {"a": [1, 2, 3]})], "task1")
+
+        cp_tuple = self.checkpointer.get_tuple(config)
+        _, channel, value = cp_tuple.pending_writes[0]
+        self.assertEqual(channel, "messages")
+        self.assertEqual(value, {"a": [1, 2, 3]})
+
+    def test_preexisting_poisoned_row_is_skipped_not_fatal(self):
+        """Databases written before the fix must still load."""
+        import pickle
+        import zlib
+
+        config = {"configurable": {"thread_id": "poison4", "checkpoint_id": "cp1"}}
+        self.checkpointer.put(config, {"id": "cp1"}, {"step": 1}, {})
+
+        # Write the bad row the way the old code would have.
+        bad = zlib.compress(pickle.dumps(
+            {"writes": [("__error__", self._api_error())], "task_id": "t"}
+        ))
+        table = sanitize_table_name("poison4")
+        with self.checkpointer._get_connection() as conn:
+            conn.execute(
+                f'INSERT INTO "{table}" (entry_type, checkpoint_id, data, created_at) '
+                f"VALUES ('write', 'cp1', ?, 0)", (bad,)
+            )
+            conn.commit()
+
+        cp_tuple = self.checkpointer.get_tuple(config)
+        self.assertIsNotNone(cp_tuple, "a single bad write row bricked the whole session")
+        self.assertEqual(cp_tuple.checkpoint["id"], "cp1")
+
+    def test_pickle_errors_are_reported_not_masked(self):
+        """The real cause must surface instead of 'invalid load key'."""
+        import pickle
+        import zlib
+
+        blob = zlib.compress(pickle.dumps({"k": "v"}))
+        # Corrupt the payload inside a valid zlib envelope.
+        broken = zlib.compress(b"\x80\x04not-a-pickle")
+
+        with self.assertRaises(Exception) as ctx:
+            self.checkpointer._deserialize_blob(broken)
+        self.assertNotIn(
+            "invalid load key, 'x'", str(ctx.exception),
+            "the zlib header byte is leaking out instead of the real error"
+        )
+        # Sanity: a good blob still round trips.
+        self.assertEqual(self.checkpointer._deserialize_blob(blob), {"k": "v"})
+
+
 if __name__ == "__main__":
     unittest.main()
+

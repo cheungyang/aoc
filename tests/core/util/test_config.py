@@ -314,12 +314,51 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.embedding_dimensions, 1024)
             self.assertEqual(self.config.pkm_dir, "/env/pkm")
 
+    def test_local_llm_settings(self):
+        # Defaults. localhost, not host.docker.internal: the compose file
+        # overrides it for containers, but a direct run talks to this machine.
+        with patch.dict(os.environ, {}, clear=True):
+            self.config.reset()
+            self.assertEqual(self.config.local_llm_base_url, "http://localhost:9379/v1")
+            self.assertEqual(self.config.local_llm_timeout, 300.0)
+
+        # Programmatic setters
+        self.config.local_llm_base_url = "http://192.168.1.50:9379/v1"
+        self.assertEqual(self.config.local_llm_base_url, "http://192.168.1.50:9379/v1")
+
+        self.config.local_llm_timeout = 45
+        self.assertEqual(self.config.local_llm_timeout, 45.0)
+
+        # Environment variable loading
+        with patch.dict(os.environ, {
+            "LOCAL_LLM_BASE_URL": "http://host.docker.internal:9379/v1",
+            "LOCAL_LLM_TIMEOUT": "120",
+        }, clear=True):
+            self.config.reset()
+            self.assertEqual(self.config.local_llm_base_url, "http://host.docker.internal:9379/v1")
+            self.assertEqual(self.config.local_llm_timeout, 120.0)
+
+        # A non-numeric timeout falls back rather than raising at import time,
+        # which would take the whole process down over one typo in .env.
+        with patch.dict(os.environ, {"LOCAL_LLM_TIMEOUT": "five minutes"}, clear=True):
+            self.config.reset()
+            self.assertEqual(self.config.local_llm_timeout, 300.0)
+
+    def test_local_llm_has_no_api_key_setting(self):
+        """There is deliberately no `local_llm_api_key`.
+
+        The server does not authenticate, and a knob here would invite someone
+        to point the paid OPENAI_API_KEY at a local socket. graph_builder passes
+        a placeholder constant instead, which cannot be misconfigured.
+        """
+        self.assertFalse(hasattr(self.config, "local_llm_api_key"))
+
     def test_context_pruning_settings(self):
         # Default values
         with patch.dict(os.environ, {}, clear=True):
             self.config.reset()
             self.assertTrue(self.config.context_pruning_enabled)
-            self.assertEqual(self.config.context_max_tokens, 30000)
+            self.assertEqual(self.config.context_max_tokens, 10000)
             self.assertEqual(self.config.context_window_messages, 30)
             self.assertEqual(self.config.context_summary_max_tokens, 1000)
 
