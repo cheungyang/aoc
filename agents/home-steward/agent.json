@@ -51,15 +51,29 @@
   ],
   "schedules": [
     {
+      "id": "daily-audit",
+      "kind": "prompt",
       "channel": "home-automation",
       "cron": "0 8 * * *",
+      "precondition": {
+        "type": "always",
+        "reason": "Audits live Home Assistant state (errors, unavailable entities); there is no local signal that says it has changed."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask home-steward to load ha_config_audit skill and run a daily audit of Home Assistant health, error logs, and unavailable entities. Report any issues concisely or confirm all systems normal."
       ]
     },
     {
+      "id": "weekly-inventory",
+      "kind": "prompt",
       "channel": "home-automation",
       "cron": "0 20 * * 0",
+      "precondition": {
+        "type": "always",
+        "reason": "Weekly digest of live Home Assistant inventory; runs once a week by design."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask home-steward to load ha_inventory skill and generate a weekly inventory summary of devices, areas, and newly discovered or unassigned entities."
       ]

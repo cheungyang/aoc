@@ -12,15 +12,29 @@
     "name": "Daisy",
     "schedules": [
         {
+            "id": "morning-plan",
+            "kind": "prompt",
             "channel": "day-planning",
             "cron": "0 6 * * *",
+            "precondition": {
+                "type": "always",
+                "reason": "The daily plan is a fresh morning briefing; every day needs one."
+            },
+            "session_policy": "stateless",
             "prompt": [
                 "Ask day-planner to execute morning routine to generate the daily plan."
             ]
         },
         {
+            "id": "weekly-review",
+            "kind": "prompt",
             "channel": "day-planning",
             "cron": "0 15 * * 5",
+            "precondition": {
+                "type": "always",
+                "reason": "Weekly review ritual; runs once a week by design."
+            },
+            "session_policy": "stateless",
             "prompt": [
                 "Ask day-planner to trigger the `weekly_review` skill for a weekly review."
             ]

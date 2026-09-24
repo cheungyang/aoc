@@ -5,6 +5,27 @@ import sys
 
 _CONTEXT_SECRET = object()
 
+# The interface a turn arrived through, recorded per token row so usage can be
+# split by surface. Voice reuses the text channel's session, so it cannot be
+# told apart by session id -- it has to be tagged explicitly (see `with_surface`).
+#
+# "job" is detached work minted with no ambient caller (source="job": callerless
+# graph_call, run_tool, post-turn summarisation, the coding worker). It is NOT
+# assumed to be scheduled -- a job can just as well trace back to a user's turn.
+# Work that does have a caller inherits the caller's surface instead: async
+# agent_call delegations are source="tool", and `with_graph`/`with_agent`
+# carry an explicit surface across.
+SURFACES = frozenset({"voice", "text", "scheduled", "tool", "job"})
+
+# Default surface for contexts that were not tagged explicitly. Any source not
+# listed here (e.g. 'discord') is an interactive text surface.
+_SOURCE_SURFACES = {
+    "voice": "voice",
+    "scheduled": "scheduled",
+    "job": "job",
+    "tool": "tool",
+}
+
 # The single ambient identity for the currently executing agent.
 # Replaces the former `current_execution_context` and `current_graph_id` pair.
 #
@@ -72,6 +93,10 @@ class ExecutionContext:
       the agent's own configured graph). It is an authority field: it decides
       which tools and skills are merged in, and is never inferred from ambient
       state at construction time.
+    - `surface` is reporting metadata only (see `SURFACES`): which interface
+      the turn arrived through, recorded on token rows. It never affects the
+      session id, so a voice turn still shares its text channel's session.
+      When unset it is derived from `source` (see `get_surface`).
     """
     agent_id: str
     source: str
@@ -79,6 +104,7 @@ class ExecutionContext:
     job_id: Optional[str] = None
     stateless: bool = False
     graph_id: Optional[str] = None
+    surface: Optional[str] = field(default=None, compare=False)
     _secret: Any = field(default=None, repr=False, compare=False)
 
     @staticmethod
@@ -99,6 +125,10 @@ class ExecutionContext:
             raise ValueError(
                 "ExecutionContext requires a non-empty 'source' "
                 "(e.g. 'discord', 'tool', 'job', 'scheduled', 'voice')."
+            )
+        if self.surface is not None and self.surface not in SURFACES:
+            raise ValueError(
+                f"Unknown surface '{self.surface}'; expected one of {sorted(SURFACES)}."
             )
 
         # Auto-generate job_id if not explicitly passed
@@ -123,6 +153,7 @@ class ExecutionContext:
         job_id: Optional[str] = None,
         stateless: bool = False,
         graph_id: Optional[str] = None,
+        surface: Optional[str] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
         return cls(
@@ -132,6 +163,7 @@ class ExecutionContext:
             job_id=job_id,
             stateless=stateless,
             graph_id=graph_id,
+            surface=surface,
             _secret=_CONTEXT_SECRET,
         )
 
@@ -151,6 +183,18 @@ class ExecutionContext:
         if agent_id == self.agent_id:
             return self
         return replace(self, agent_id=agent_id)
+
+    def with_surface(self, surface: Optional[str]) -> "ExecutionContext":
+        """Derives a context tagged with `surface`, keeping the same session identity."""
+        if surface == self.surface:
+            return self
+        return replace(self, surface=surface)
+
+    def get_surface(self) -> str:
+        """The explicit surface if set, otherwise the one implied by `source`."""
+        if self.surface:
+            return self.surface
+        return _SOURCE_SURFACES.get(self.source, "text")
 
     @property
     def channel_name(self) -> str:

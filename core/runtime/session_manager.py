@@ -19,13 +19,18 @@ class SessionManager:
         channel: Optional[Union[str, Any]] = None,
         job_id: Optional[str] = None,
         stateless: bool = False,
-        graph_id: Optional[str] = None
+        graph_id: Optional[str] = None,
+        surface: Optional[str] = None,
     ) -> ExecutionContext:
         """
         Creates an ExecutionContext instance.
 
         `graph_id` binds the execution to a graph's grants; pass it when delegating into a
         graph so the callee is evaluated against that graph rather than ambient state.
+
+        `surface` optionally tags which interface the turn came through (voice / text /
+        scheduled / tool) for token accounting. It does not affect the session id; when
+        omitted it is derived from `source`.
         """
         return ExecutionContext._create(
             agent_id=str(agent_id or ""),
@@ -34,6 +39,7 @@ class SessionManager:
             job_id=job_id,
             stateless=stateless,
             graph_id=graph_id,
+            surface=surface,
         )
 
     def clear_session(self, session: ExecutionContext) -> str:

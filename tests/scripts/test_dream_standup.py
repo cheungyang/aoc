@@ -256,5 +256,94 @@ class TestQuietStdout(unittest.TestCase):
         self.assertIn("GraphsLoader", err_buf.getvalue())
 
 
+class TestWorkGate(unittest.IsolatedAsyncioTestCase):
+    """Level 1 skips the whole standup; level 2 skips agents with nothing new."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        patcher = patch("scripts.dream_standup.project_root", self.root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def log(self, agent_id, name="log.md", mtime=None):
+        logs = os.path.join(self.root, "pkm", "agents", agent_id, "memory_logs")
+        os.makedirs(logs, exist_ok=True)
+        path = os.path.join(logs, name)
+        with open(path, "w") as f:
+            f.write("x")
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def test_schedulable_by_the_scheduler(self):
+        from core.scheduler.script_runner import check_script
+        self.assertEqual(check_script("dream_standup.py"), [])
+
+    def test_no_logs_means_no_standup(self):
+        from scripts.dream_standup import has_work
+        os.makedirs(os.path.join(self.root, "pkm", "agents", "a", "memory_logs"))
+        self.log("a", name=".DS_Store")
+        has, reason = has_work(MagicMock())
+        self.assertFalse(has)
+        self.assertIn("no memory logs", reason)
+
+    def test_any_existing_log_counts_regardless_of_age(self):
+        # A failed dream leaves its logs behind; they must be retried.
+        from scripts.dream_standup import agents_with_logs, has_work
+        self.log("old", mtime=1000.0)
+        self.log("new", mtime=3000.0)
+        self.assertEqual(agents_with_logs(), {"old", "new"})
+        has, reason = has_work(MagicMock(last_success_at=5000.0))
+        self.assertTrue(has)
+        self.assertIn("new, old", reason)
+
+    def test_filter_keeps_only_agents_with_logs(self):
+        from scripts.dream_standup import filter_agents_with_logs
+        self.log("b")
+        agents = [("a", {}), ("b", {}), ("c", {})]
+        self.assertEqual(filter_agents_with_logs(agents), [("b", {})])
+
+    async def test_run_standup_dreams_only_agents_with_logs(self):
+        from scripts import dream_standup as ds
+        self.log("b")
+        loader = MagicMock()
+        loader.list_agent_ids.return_value = ["a", "b"]
+        loader.get_agent_config.side_effect = lambda aid: {"channels": ["general"]}
+        with patch.object(ds, "AgentsLoader", return_value=loader), \
+             patch.object(ds, "agent_call") as tool:
+            tool.ainvoke = AsyncMock(return_value=_tool_response(DREAMED_XML))
+            out = await ds.run_standup()
+            self.assertEqual(tool.ainvoke.await_count, 1)
+            self.assertEqual(tool.ainvoke.await_args.args[0]["agent_id"], "b")
+            self.assertIn("Dreamed", out)
+
+            tool.ainvoke.reset_mock()
+            await ds.run_standup(include_all=True)
+            self.assertEqual(tool.ainvoke.await_count, 2)
+
+    async def test_nothing_new_prints_nothing(self):
+        from scripts import dream_standup as ds
+        loader = MagicMock()
+        loader.list_agent_ids.return_value = ["a"]
+        loader.get_agent_config.side_effect = lambda aid: {}
+        with patch.object(ds, "AgentsLoader", return_value=loader), \
+             patch.object(ds, "agent_call") as tool:
+            tool.ainvoke = AsyncMock()
+            self.assertEqual(await ds.run_standup(), "")
+            tool.ainvoke.assert_not_called()
+
+    async def test_dream_does_not_create_directories(self):
+        from scripts import dream_standup as ds
+        with patch.object(ds, "agent_call") as tool:
+            tool.ainvoke = AsyncMock(return_value=_tool_response(EMPTY_XML))
+            await ds.dream("ghost", {"channels": ["general"]}, asyncio.Semaphore(1))
+        self.assertFalse(os.path.exists(os.path.join("pkm", "agents", "ghost")))
+
+
 if __name__ == "__main__":
     unittest.main()

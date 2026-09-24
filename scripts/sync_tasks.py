@@ -20,6 +20,29 @@ from core.knowledge.tasks.sync import sync_tasks, get_pkm_dir
 from core.knowledge.tasks.db import get_db_path
 
 
+def has_work(ctx):
+    """Scheduler gate: tasks come only from ~/pkm/ticktick and ~/pkm/vault.
+
+    Unchanged markdown there means the database already matches it. Deletions
+    count too — they change the parent directory's mtime.
+    """
+    from core.scheduler.preconditions import first_changed_path
+
+    if ctx.last_success_at is None:
+        return True, "no previous successful sync"
+    if not os.path.exists(get_db_path()):
+        return True, "tasks.db does not exist yet"
+    pkm_dir = get_pkm_dir()
+    changed = first_changed_path(
+        [os.path.join(pkm_dir, "ticktick"), os.path.join(pkm_dir, "vault")],
+        ctx.last_success_at,
+        suffixes=(".md",),
+    )
+    if changed:
+        return True, f"{os.path.relpath(changed, pkm_dir)} changed"
+    return False, "no task files changed since the last sync"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Synchronize Obsidian PKM tasks into SQLite database.")
     parser.add_argument("--pkm-dir", type=str, default=None, help="Path to PKM directory (defaults to ~/pkm)")

@@ -10,14 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.voice.prompts import build_verbalizer_prompt
-from core.voice.verbalizer import (
-    Verbalizer,
-    VoiceStream,
-    has_structure,
-    speak_priority_symbols,
-    strip_hashtags,
-    strip_xml,
-)
+from core.voice.tts_engine import TextSanitizer
+from core.voice.verbalizer import Verbalizer, has_structure
+from tests.helpers import GOLDEN_INPUT, voice_session
 
 
 # --------------------------------------------------------------------------
@@ -90,10 +85,16 @@ async def test_verbalize_prose_is_still_sanitized():
 async def test_verbalize_disabled_skips_the_model_even_with_structure():
     v = Verbalizer(enabled=False)
     with patch.object(Verbalizer, "_get_llm") as get_llm:
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
     get_llm.assert_not_called()
     # Falls back to the sanitizer: speakable, just flatter.
     assert "eggs" in result and "milk" in result
+
+
+# A nested list is structure the deterministic fast path declines, so these
+# inputs still reach the model. Flat lists no longer do; see the fast-path
+# tests below.
+NESTED_LIST = "- eggs\n  - free range\n- milk"
 
 
 @pytest.mark.asyncio
@@ -104,12 +105,12 @@ async def test_verbalize_structured_text_calls_the_model():
         content="First, eggs. After that, milk."
     ))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
 
     assert result == "First, eggs. After that, milk."
     messages = llm.ainvoke.call_args[0][0]
     assert messages[0].content == build_verbalizer_prompt()
-    assert messages[1].content == "- eggs\n- milk"
+    assert messages[1].content == NESTED_LIST
 
 
 @pytest.mark.asyncio
@@ -120,7 +121,7 @@ async def test_verbalize_sanitizes_model_output():
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=MagicMock(content="**First**, eggs \U0001F95A."))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs")
+        result = await v.verbalize(NESTED_LIST)
 
     assert "*" not in result
     assert "\U0001F95A" not in result
@@ -135,7 +136,7 @@ async def test_verbalize_joins_multipart_content():
         content=[{"text": "First eggs. "}, {"text": "Then milk."}]
     ))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
 
     assert result == "First eggs. Then milk."
 
@@ -146,8 +147,9 @@ async def test_verbalize_falls_back_when_model_raises():
     llm = MagicMock()
     llm.ainvoke = AsyncMock(side_effect=RuntimeError("quota exceeded"))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
 
+    llm.ainvoke.assert_called_once()
     assert "eggs" in result and "milk" in result
 
 
@@ -161,7 +163,7 @@ async def test_verbalize_falls_back_on_timeout():
     llm = MagicMock()
     llm.ainvoke = never_returns
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
 
     assert "eggs" in result and "milk" in result
 
@@ -172,225 +174,14 @@ async def test_verbalize_falls_back_on_empty_model_output():
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=MagicMock(content="   "))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("- eggs\n- milk")
+        result = await v.verbalize(NESTED_LIST)
 
     assert "eggs" in result and "milk" in result
 
 
 # --------------------------------------------------------------------------
-# VoiceStream
+# XML handling
 # --------------------------------------------------------------------------
-
-class RecordingVerbalizer:
-    """Stand-in that records every block it is handed."""
-
-    def __init__(self, transform=None):
-        self.blocks = []
-        self._transform = transform or (lambda b: b.replace("\n", " ").strip())
-
-    async def verbalize(self, text):
-        self.blocks.append(text)
-        return self._transform(text)
-
-
-async def _feed(stream, text, chunk_size=7):
-    """Streams text through the voice stream in small token deltas."""
-    chunks = []
-    for i in range(0, len(text), chunk_size):
-        chunks.extend(await stream.add_token(text[i:i + chunk_size]))
-    chunks.extend(await stream.flush())
-    return chunks
-
-
-@pytest.mark.asyncio
-async def test_stream_prose_never_touches_the_verbalizer():
-    verbalizer = RecordingVerbalizer()
-    stream = VoiceStream(verbalizer=verbalizer)
-
-    chunks = await _feed(stream, "I booked the table for seven. It is under your name.")
-
-    assert verbalizer.blocks == []
-    assert chunks
-    assert "booked the table" in " ".join(chunks)
-
-
-@pytest.mark.asyncio
-async def test_stream_emits_prose_before_the_turn_ends():
-    # The point of the prose fast path: audio starts while tokens are still
-    # arriving, rather than after the reply is complete.
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-
-    early = await stream.add_token("I booked the table for seven. ")
-    assert early, "a complete sentence should be speakable immediately"
-    assert "booked the table for seven" in early[0]
-
-
-@pytest.mark.asyncio
-async def test_stream_holds_a_structured_block_until_it_is_complete():
-    verbalizer = RecordingVerbalizer()
-    stream = VoiceStream(verbalizer=verbalizer)
-
-    pending = await stream.add_token("- eggs\n- milk\n- bread")
-    assert pending == [], "a list cannot be rewritten until it stops growing"
-    assert verbalizer.blocks == []
-
-    emitted = await stream.add_token("\n\n")
-    assert verbalizer.blocks == ["- eggs\n- milk\n- bread"]
-    assert emitted
-
-
-@pytest.mark.asyncio
-async def test_stream_flush_emits_a_trailing_structured_block():
-    verbalizer = RecordingVerbalizer()
-    stream = VoiceStream(verbalizer=verbalizer)
-
-    await stream.add_token("- eggs\n- milk")
-    chunks = await stream.flush()
-
-    assert verbalizer.blocks == ["- eggs\n- milk"]
-    assert "eggs" in " ".join(chunks)
-
-
-@pytest.mark.asyncio
-async def test_stream_breaks_a_runaway_block_at_a_line_boundary():
-    # A list that never reaches a blank line still has to be spoken.
-    verbalizer = RecordingVerbalizer()
-    stream = VoiceStream(verbalizer=verbalizer, max_block_chars=120)
-
-    long_list = "".join(f"- item number {i}\n" for i in range(30))
-    await _feed(stream, long_list)
-
-    assert len(verbalizer.blocks) > 1
-    for block in verbalizer.blocks:
-        # No bullet was cut down the middle.
-        assert not block.startswith("tem"), f"bullet split mid-word: {block!r}"
-
-
-@pytest.mark.asyncio
-async def test_stream_handles_prose_followed_by_a_list():
-    verbalizer = RecordingVerbalizer()
-    stream = VoiceStream(verbalizer=verbalizer)
-
-    chunks = await _feed(
-        stream,
-        "Here is what I found today.\n\n- eggs\n- milk\n",
-    )
-
-    spoken = " ".join(chunks)
-    assert "Here is what I found today" in spoken
-    assert "eggs" in spoken and "milk" in spoken
-
-
-@pytest.mark.asyncio
-async def test_stream_is_empty_for_empty_input():
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-    assert await stream.add_token("") == []
-    assert await stream.flush() == []
-
-
-# --------------------------------------------------------------------------
-# Golden: nothing may be dropped
-# --------------------------------------------------------------------------
-
-GOLDEN_INPUT = """## Weekend options
-
-1. **Point Reyes** - 2 hour drive, $0 entry, best in the morning fog.
-2. **Mount Tam** - 45 minutes, $8 parking, steep but short.
-3. **Muir Woods** - 1 hour, $15 plus a $9 reservation, book ahead.
-4. **Stinson Beach** - 1 hour 15, free, windy after noon.
-5. **Tennessee Valley** - 40 minutes, free, flat and stroller friendly.
-"""
-
-GOLDEN_SPOKEN = (
-    "Here are your weekend options. "
-    "First, Point Reyes, a two hour drive with no entry fee, best in the morning fog. "
-    "Second, Mount Tam, forty five minutes away, eight dollars for parking, steep but short. "
-    "Third, Muir Woods, an hour out, fifteen dollars plus a nine dollar reservation, so book ahead. "
-    "Fourth, Stinson Beach, an hour and fifteen minutes, free, though it gets windy after noon. "
-    "Fifth, Tennessee Valley, forty minutes, free, flat and stroller friendly."
-)
-
-
-@pytest.mark.asyncio
-async def test_golden_stream_preserves_every_item():
-    # Guards the plumbing rather than the model: given a faithful rewrite, the
-    # chunking must not lose a clause on the way to the synthesiser.
-    stream = VoiceStream(verbalizer=RecordingVerbalizer(lambda _: GOLDEN_SPOKEN))
-
-    chunks = await _feed(stream, GOLDEN_INPUT)
-    spoken = " ".join(chunks)
-
-    for place in ("Point Reyes", "Mount Tam", "Muir Woods",
-                  "Stinson Beach", "Tennessee Valley"):
-        assert place in spoken, f"{place} was dropped"
-    for detail in ("morning fog", "steep but short", "book ahead",
-                   "windy after noon", "stroller friendly"):
-        assert detail in spoken, f"{detail} was dropped"
-
-
-@pytest.mark.asyncio
-async def test_golden_stream_preserves_item_order():
-    stream = VoiceStream(verbalizer=RecordingVerbalizer(lambda _: GOLDEN_SPOKEN))
-
-    chunks = await _feed(stream, GOLDEN_INPUT)
-    spoken = " ".join(chunks)
-
-    positions = [
-        spoken.index(place)
-        for place in ("Point Reyes", "Mount Tam", "Muir Woods",
-                      "Stinson Beach", "Tennessee Valley")
-    ]
-    assert positions == sorted(positions), "items were reordered"
-
-
-@pytest.mark.asyncio
-async def test_golden_fallback_preserves_every_item():
-    # Even with the model unavailable, the sanitizer path must not drop a row.
-    verbalizer = Verbalizer()
-    llm = MagicMock()
-    llm.ainvoke = AsyncMock(side_effect=RuntimeError("model down"))
-    with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        stream = VoiceStream(verbalizer=verbalizer)
-        chunks = await _feed(stream, GOLDEN_INPUT)
-
-    spoken = " ".join(chunks)
-    for place in ("Point Reyes", "Mount Tam", "Muir Woods",
-                  "Stinson Beach", "Tennessee Valley"):
-        assert place in spoken, f"{place} was dropped by the fallback"
-
-
-# --------------------------------------------------------------------------
-# XML stripping
-# --------------------------------------------------------------------------
-
-def test_strip_xml_removes_memory_and_vote_blocks():
-    text = "<memory>User prefers concise answers.</memory>Here is the plan."
-    assert strip_xml(text) == "Here is the plan."
-
-    text = "<vote>yes</vote>The vote was recorded."
-    assert strip_xml(text) == "The vote was recorded."
-
-    text = "<memory>Note 1</memory><vote>Note 2</vote>All clear."
-    assert strip_xml(text) == "All clear."
-
-
-def test_strip_xml_removes_nested_and_multiline_blocks():
-    text = "<vote><choice>yes</choice><reason>fast</reason></vote>Done."
-    assert strip_xml(text) == "Done."
-
-    text = "<memory>\n- User likes tea\n- User likes coffee\n</memory>\nHere is your tea."
-    assert strip_xml(text).strip() == "Here is your tea."
-
-
-def test_strip_xml_removes_unclosed_or_dangling_tags():
-    assert strip_xml("<memory>unclosed tag without closing") == ""
-    assert strip_xml("Here is content.<memory>unclosed") == "Here is content."
-
-
-def test_strip_xml_preserves_plain_text_and_comparisons():
-    assert strip_xml("The price is < 50 dollars.") == "The price is < 50 dollars."
-    assert strip_xml("Sure, I booked the table.") == "Sure, I booked the table."
-
 
 def test_has_structure_ignores_structure_only_in_xml():
     # If the only bullets/headers are inside <memory> or <vote>, it should not trigger structuring
@@ -411,7 +202,7 @@ async def test_verbalize_strips_xml_before_model_call():
         content="First, eggs. After that, milk."
     ))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        result = await v.verbalize("<memory>User likes grocery lists</memory>\n<vote>yes</vote>\n- eggs\n- milk")
+        result = await v.verbalize("<memory>User likes grocery lists</memory>\n<vote>yes</vote>\n" + NESTED_LIST)
 
     assert result == "First, eggs. After that, milk."
     messages = llm.ainvoke.call_args[0][0]
@@ -419,7 +210,7 @@ async def test_verbalize_strips_xml_before_model_call():
     assert "<memory>" not in messages[1].content
     assert "User likes grocery lists" not in messages[1].content
     assert "<vote>" not in messages[1].content
-    assert "- eggs\n- milk" in messages[1].content
+    assert NESTED_LIST in messages[1].content
 
 
 @pytest.mark.asyncio
@@ -442,129 +233,9 @@ async def test_verbalize_prose_with_xml_skips_the_model():
     assert "Seattle" not in result
 
 
-@pytest.mark.asyncio
-async def test_stream_strips_memory_and_vote_blocks():
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-    chunks = await _feed(
-        stream,
-        "<memory>Remember user preferences.</memory> I booked the table for seven. It is under your name.",
-    )
-    spoken = " ".join(chunks)
-    assert "Remember user preferences" not in spoken
-    assert "booked the table for seven" in spoken
-
-
-@pytest.mark.asyncio
-async def test_stream_holds_in_flight_xml_tokens():
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-    # Add tokens where XML block is split across chunks
-    tokens = ["<mem", "ory>User likes pizza.</mem", "ory> I booked ", "the table for seven. "]
-    chunks = []
-    for t in tokens:
-        chunks.extend(await stream.add_token(t))
-    chunks.extend(await stream.flush())
-
-    spoken = " ".join(chunks)
-    assert "pizza" not in spoken.lower()
-    assert "booked the table for seven" in spoken
-
-
-@pytest.mark.asyncio
-async def test_stream_only_xml_emits_nothing():
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-    chunks = await _feed(stream, "<memory>Internal agent notes</memory><vote>approve</vote>")
-    assert chunks == []
-
-
 # --------------------------------------------------------------------------
-# Task notation: hashtags and priority symbols
+# Task notation
 # --------------------------------------------------------------------------
-
-@pytest.mark.parametrize("text,expected", [
-    ("Read this #a/read today.", "Read this today."),
-    ("Buy milk #shopping", "Buy milk"),
-    ("Filed under #project/home/kitchen now.", "Filed under now."),
-    ("Two tags #a/read #b/write here.", "Two tags here."),
-    ("Tagged #work-stuff and #home_stuff.", "Tagged and."),
-])
-def test_strip_hashtags_removes_tags_and_tidies_spacing(text, expected):
-    assert strip_hashtags(text) == expected
-
-
-@pytest.mark.parametrize("text", [
-    "# Heading",                          # markdown header, not a tag
-    "###### Deep heading",
-    "The build uses C# and F#.",
-    "See issue #4 for the details.",
-    "Open https://example.com/page#section for more.",
-    "Press the # key twice.",
-])
-def test_strip_hashtags_leaves_non_tags_alone(text):
-    """A hash is only a tag when it opens a word. Everything else here is
-    content a listener needs."""
-    assert strip_hashtags(text) == text
-
-
-def test_strip_hashtags_preserves_line_structure():
-    """`has_structure` reads line beginnings; flattening here would route a
-    list down the prose path and lose the rewriting."""
-    cleaned = strip_hashtags("- eggs #shopping\n- milk #shopping")
-    assert cleaned == "- eggs\n- milk"
-    assert has_structure(cleaned) is True
-
-
-def test_strip_hashtags_drops_a_tag_only_line_entirely():
-    """Leaving the line blank would read as a block boundary downstream and
-    split the list in two."""
-    assert strip_hashtags("- eggs\n#shopping\n- milk") == "- eggs\n- milk"
-    assert strip_hashtags("- eggs\n- #shopping\n- milk") == "- eggs\n- milk"
-
-
-def test_strip_hashtags_keeps_genuinely_blank_lines():
-    """Only lines emptied *by tag removal* are dropped; a real paragraph
-    break is a block boundary the stream relies on."""
-    assert strip_hashtags("First para.\n\nSecond para.") == "First para.\n\nSecond para."
-
-
-def test_strip_hashtags_empty():
-    assert strip_hashtags("") == ""
-
-
-@pytest.mark.parametrize("symbol,words", [
-    ("\U0001F53A", "highest priority"),
-    ("\u23EB", "high priority"),
-    ("\U0001F53C", "medium priority"),
-    ("\U0001F53D", "low priority"),
-    ("\u23EC", "lowest priority"),
-])
-def test_speak_priority_symbols_covers_every_level(symbol, words):
-    assert speak_priority_symbols(f"Call the dentist {symbol}") == (
-        f"Call the dentist, {words}"
-    )
-
-
-def test_speak_priority_symbols_reads_a_leading_symbol_as_a_label():
-    assert speak_priority_symbols("\u23EB Call the dentist") == (
-        "high priority: Call the dentist"
-    )
-
-
-def test_speak_priority_symbols_handles_a_symbol_after_a_bullet():
-    assert speak_priority_symbols("- \u23EB Call the dentist") == (
-        "- high priority: Call the dentist"
-    )
-
-
-def test_speak_priority_symbols_does_not_double_up_punctuation():
-    assert speak_priority_symbols("Call the dentist. \u23EB") == (
-        "Call the dentist. high priority"
-    )
-
-
-def test_speak_priority_symbols_leaves_plain_text_alone():
-    text = "Call the dentist tomorrow."
-    assert speak_priority_symbols(text) == text
-
 
 @pytest.mark.asyncio
 async def test_verbalize_prose_speaks_priority_the_sanitizer_would_delete():
@@ -595,7 +266,7 @@ async def test_verbalize_normalises_notation_before_the_model_sees_it():
     llm = MagicMock()
     llm.ainvoke = AsyncMock(return_value=MagicMock(content="First, eggs."))
     with patch.object(Verbalizer, "_get_llm", return_value=llm):
-        await v.verbalize("- eggs #shopping \u23EB\n- milk #shopping")
+        await v.verbalize("- eggs #shopping \u23EB\n  - free range\n- milk #shopping")
 
     sent = llm.ainvoke.call_args[0][0][1].content
     assert "#" not in sent
@@ -614,21 +285,6 @@ async def test_verbalize_tag_only_text_returns_empty_without_a_model_call():
 
 
 @pytest.mark.asyncio
-async def test_stream_prose_handles_notation_on_the_fast_path():
-    """The prose branch never calls `verbalize`, so it needs its own pass."""
-    stream = VoiceStream(verbalizer=RecordingVerbalizer())
-    chunks = await _feed(
-        stream,
-        "Call the dentist \u23EB. Then read the briefing #a/read today.",
-    )
-    spoken = " ".join(chunks)
-    assert "high priority" in spoken
-    assert "#" not in spoken
-    assert "a/read" not in spoken
-    assert "briefing" in spoken
-
-
-@pytest.mark.asyncio
 async def test_fallback_keeps_priority_on_a_structured_task_list():
     """Model disabled: the sanitizer runs alone, and the levels still have
     to survive it."""
@@ -644,3 +300,95 @@ async def test_fallback_keeps_priority_on_a_structured_task_list():
     assert "#" not in result
 
 
+# --------------------------------------------------------------------------
+# Deterministic fast path for simple structure
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "- eggs\n- milk",
+    "## Weekend\n1. Point Reyes\n2. Mount Tam",
+    "Remember this is **urgent**.",
+    "| Day | Forecast |\n| --- | --- |\n| Monday | Sunny |",
+])
+@pytest.mark.asyncio
+async def test_verbalize_simple_structure_skips_the_model(text):
+    v = Verbalizer()
+    with patch.object(Verbalizer, "_get_llm") as get_llm:
+        result = await v.verbalize(text)
+    get_llm.assert_not_called()
+    assert result
+    assert "*" not in result and "|" not in result and "#" not in result
+
+
+@pytest.mark.asyncio
+async def test_verbalize_fast_path_keeps_priority_words():
+    v = Verbalizer()
+    with patch.object(Verbalizer, "_get_llm") as get_llm:
+        result = await v.verbalize("- \u23EB Call the dentist #admin\n- Buy milk")
+    get_llm.assert_not_called()
+    assert result == "high priority: Call the dentist. Buy milk."
+
+
+@pytest.mark.asyncio
+async def test_golden_input_takes_the_fast_path_and_keeps_every_item():
+    v = Verbalizer()
+    with patch.object(Verbalizer, "_get_llm") as get_llm:
+        spoken = await v.verbalize(GOLDEN_INPUT)
+    get_llm.assert_not_called()
+    assert spoken.startswith("Weekend options. First, Point Reyes")
+    for detail in ("morning fog", "steep but short", "book ahead",
+                   "windy after noon", "stroller friendly"):
+        assert detail in spoken
+
+
+# --------------------------------------------------------------------------
+# Token attribution for the model call
+# --------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_verbalize_model_call_carries_token_logging_callbacks():
+    from core.runtime.token_usage_handler import TokenUsageHandler
+
+    session = voice_session()
+    v = Verbalizer()
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="Eggs, then milk."))
+    with patch.object(Verbalizer, "_get_llm", return_value=llm):
+        await v.verbalize(NESTED_LIST, session=session)
+
+    config = llm.ainvoke.call_args.kwargs["config"]
+    handlers = config["callbacks"]
+    assert len(handlers) == 1 and isinstance(handlers[0], TokenUsageHandler)
+    assert handlers[0].session is session
+    assert config["metadata"]["agent_id"] == "main"
+    assert config["metadata"]["surface"] == "voice"
+
+
+@pytest.mark.asyncio
+async def test_verbalize_falls_back_to_the_ambient_context_for_attribution():
+    from core.runtime.execution_context import current_execution_context
+
+    session = voice_session()
+    v = Verbalizer()
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="Eggs, then milk."))
+    token = current_execution_context.set(session)
+    try:
+        with patch.object(Verbalizer, "_get_llm", return_value=llm):
+            await v.verbalize(NESTED_LIST)
+    finally:
+        current_execution_context.reset(token)
+
+    handler = llm.ainvoke.call_args.kwargs["config"]["callbacks"][0]
+    assert handler.session is session
+
+
+@pytest.mark.asyncio
+async def test_verbalize_without_any_context_still_calls_the_model():
+    v = Verbalizer()
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(return_value=MagicMock(content="Eggs, then milk."))
+    with patch.object(Verbalizer, "_get_llm", return_value=llm):
+        result = await v.verbalize(NESTED_LIST)
+    assert result == "Eggs, then milk."
+    assert "callbacks" not in llm.ainvoke.call_args.kwargs["config"]

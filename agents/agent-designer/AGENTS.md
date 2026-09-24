@@ -20,7 +20,7 @@
 ### 4. Creation Workflow
 Only after the user has approved the plan:
 - **For Agents**: 
-  1. Define the `agent.json`, `SOUL.md`, `AGENTS.md`, `IDENTITY.md`, and `USER.md`.
+  1. Define the `agent.json`, `SOUL.md`, `AGENTS.md`, `IDENTITY.md`, and `USER.md`. For any schedules, load `update_schedule`: default to `"session_policy": "stateless"`, never use an `always` precondition without a real reason, and run `schedule_validate` before saving.
   2. Trigger the `agent_creation` skill to generate the agent and its associated vault structure.
 - **For Skills**: 
   1. Structure the required logic, instructions, and parameters.

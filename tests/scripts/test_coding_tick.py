@@ -421,5 +421,48 @@ class TestErrorCaching(TickScriptTestCase):
             self.assertEqual(r3, err)
 
 
+class TestHasWork(TickScriptTestCase):
+    """The scheduler asks this in-process before spawning a tick at all."""
+
+    def has_work(self, manifests):
+        with patch("graphs.coding.utils.dag.discover_manifests", return_value=manifests):
+            return self.module.has_work(None)
+
+    def test_schedulable_by_the_scheduler(self):
+        from core.scheduler.script_runner import check_script
+        self.assertEqual(check_script("coding_tick.py"), [])
+
+    def test_no_projects_means_no_work(self):
+        self.assertFalse(self.has_work([]))
+
+    def test_idle_queue_means_no_work(self):
+        self.write([{"task_id": "T1", "status": "done", "stage": "merged", "dependencies": []}])
+        self.assertFalse(self.has_work([self.manifest_path]))
+
+    def test_runnable_task_is_work(self):
+        self.write([{
+            "task_id": "T1", "status": "pending", "stage": "queued",
+            "dependencies": [], "verification_command": "pytest -q"
+        }])
+        self.assertTrue(self.has_work([self.manifest_path]))
+
+    def test_expired_lease_is_work(self):
+        self.write([{
+            "task_id": "T1", "status": "active", "stage": "implementing",
+            "dependencies": [], "lease_owner": "tick_dead", "lease_expires_at": 1.0
+        }])
+        self.assertTrue(self.has_work([self.manifest_path]))
+
+    def test_unreadable_manifest_is_work_so_the_tick_reports_it(self):
+        with open(self.manifest_path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        self.assertTrue(self.has_work([self.manifest_path]))
+
+    def test_import_does_not_change_directory(self):
+        cwd = os.getcwd()
+        _load_module()
+        self.assertEqual(os.getcwd(), cwd)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,9 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.runtime.logging_handler import LoggingHandler, format_tool_extra_str
+from core.runtime.logging_handler import LoggingHandler
 from core.runtime.session_manager import SessionManager
+from tests.helpers import LLM_USAGE as USAGE, llm_result as _llm_result
 
 
 class TestLoggingHandler(unittest.TestCase):
@@ -262,7 +263,7 @@ class TestLoggingHandler(unittest.TestCase):
         handler.on_chain_end({})
         
         handler.manager.append_token_usage.assert_called_once_with(
-            "test-agent:discord:session1", "gemini-pro", 100, 50, 20.0, 1.234
+            "test-agent:discord:session1", "gemini-pro", 100, 50, 20.0, 1.234, surface="text"
         )
 
     def test_on_llm_start_and_end_tracks_execution_time(self):
@@ -415,98 +416,106 @@ class TestLoggingHandler(unittest.TestCase):
         handler_main.manager.append_token_usage.assert_not_called()
 
 
-class TestFormatToolExtraStr(unittest.TestCase):
-    def test_format_filesystem_multiple_instructions_dict(self):
-        input_data = {
-            "instructions": [
-                {"action": "ls", "path": "{directory1}"},
-                {"action": "read", "path": "{file2}"}
-            ]
-        }
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, ' [action "ls" on {directory1}, "read" on {file2}]')
+class TestHandlerModelName(unittest.TestCase):
+    """The handler stores the name `extract_model_name` finds on the token row."""
 
-    def test_format_filesystem_multiple_instructions_str(self):
-        input_str = "{'instructions': [{'action': 'ls', 'path': '/var/log'}, {'action': 'read', 'path': '/etc/hosts'}]}"
-        res = format_tool_extra_str(input_str)
-        self.assertEqual(res, ' [action "ls" on /var/log, "read" on /etc/hosts]')
+    def setUp(self):
+        self.session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="session1")
 
-    def test_format_filesystem_single_instruction(self):
-        input_data = {"instructions": [{"action": "ls", "path": "/tmp"}]}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, ' [action "ls" on /tmp]')
+    def test_handler_records_model_from_message_end_to_end(self):
+        handler = LoggingHandler(session=self.session)
+        handler.manager = MagicMock()
+        handler.on_llm_end(_llm_result(
+            usage=USAGE,
+            response_metadata={"model_name": "gemini-3.1-pro-preview"},
+            llm_output={"prompt_feedback": {"block_reason": 0}},
+        ))
+        handler.on_chain_end({})
+        args = handler.manager.append_token_usage.call_args[0]
+        self.assertEqual(args[1], "gemini-3.1-pro-preview")
 
-    def test_format_filesystem_action_only(self):
-        input_data = {"instructions": [{"action": "list_all"}]}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, ' [action "list_all"]')
+    def test_handler_records_unknown_without_llm_output(self):
+        # Previously 'model' was only set when llm_output was truthy, so a
+        # missing llm_output silently dropped the key.
+        handler = LoggingHandler(session=self.session)
+        handler.manager = MagicMock()
+        handler.on_llm_end(_llm_result(usage=USAGE))
+        self.assertEqual(handler.last_token_usage["model"], "unknown")
 
-    def test_format_filesystem_path_only(self):
-        input_data = {"instructions": [{"path": "/tmp/test"}]}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, ' [action on /tmp/test]')
+class TestSurface(unittest.TestCase):
 
-    def test_format_filesystem_serialized_json_instructions(self):
-        input_data = {'instructions': '[{"action": "ls", "path": "/tmp"}]'}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, ' [action "ls" on /tmp]')
+    def _logged_surface(self, session):
+        handler = LoggingHandler(session=session)
+        handler.manager = MagicMock()
+        handler.last_token_usage = {"input_tokens": 1, "output_tokens": 1, "model": "m"}
+        handler.on_chain_end({})
+        return handler.manager.append_token_usage.call_args.kwargs["surface"]
 
-    def test_format_action_path_skill_id(self):
-        input_data = {"action": "create", "path": "/tmp", "skill_id": "skill_123"}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, " [action: create, path: /tmp, skill_id: skill_123]")
+    def test_discord_text_turn_is_text(self):
+        s = SessionManager.get_session(agent_id="main", source="discord", channel="general")
+        self.assertEqual(self._logged_surface(s), "text")
 
-    def test_format_path_only(self):
-        input_str = "{'command': 'status', 'path': '/repo'}"
-        res = format_tool_extra_str(input_str)
-        self.assertEqual(res, " [path: /repo]")
+    def test_voice_turn_is_voice_but_shares_the_text_session(self):
+        text = SessionManager.get_session(agent_id="main", source="discord", channel="general")
+        voice = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
+        self.assertEqual(voice.session_id, text.session_id)
+        self.assertEqual(self._logged_surface(voice), "voice")
 
-    def test_format_skill_id_only(self):
-        input_data = {"skill_id": "code_search", "agent_id": "main"}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, " [skill_id: code_search]")
+    def test_scheduled_and_tool_sources(self):
+        sched = SessionManager.get_session(agent_id="main", source="scheduled", channel="general")
+        job = SessionManager.get_session(agent_id="main", source="job")
+        tool = SessionManager.get_session(agent_id="sub", source="tool", channel="general")
+        self.assertEqual(self._logged_surface(sched), "scheduled")
+        self.assertEqual(self._logged_surface(job), "job")
+        self.assertEqual(self._logged_surface(tool), "tool")
 
-    def test_format_action_only(self):
-        input_str = "{'action': 'search', 'query': 'fix bug'}"
-        res = format_tool_extra_str(input_str)
-        self.assertEqual(res, " [action: search]")
 
-    def test_format_no_matching_keys(self):
-        input_data = {"query": "python langgraph"}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, "")
+class TestSurfaceColumnStorage(unittest.TestCase):
+    """The surface column lands in memory.db, including tables created before it existed."""
 
-    def test_format_graph_name(self):
-        input_data = {"graph_name": "coding", "query": "implement feature"}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, " [graph_id: coding]")
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmp.name, "memory.db")
 
-    def test_format_graph_id(self):
-        input_str = "{'graph_id': 'content_creation', 'query': 'create post'}"
-        res = format_tool_extra_str(input_str)
-        self.assertEqual(res, " [graph_id: content_creation]")
+    def tearDown(self):
+        self.tmp.cleanup()
 
-    def test_format_subgraph_name(self):
-        input_data = {"subgraph_name": "coding", "query": "fix bug"}
-        res = format_tool_extra_str(input_data)
-        self.assertEqual(res, " [graph_id: coding]")
+    def test_round_trip(self):
+        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+        store = SqliteSessionStore(db_path=self.db_path)
+        store.append_token_usage("main:discord:general", "m", 1, 2, 0.0, 0.5, surface="voice")
+        store.append_token_usage("main:discord:general", "m", 1, 2, 0.0, 0.5)
+        rows = store.load_token_history("main:discord:general")
+        self.assertEqual([r["surface"] for r in rows], ["voice", None])
 
-    def test_format_agent_call_with_tool_name(self):
-        input_data = {"agent_id": "graph-worker", "prompt": "run task", "channel": "dev"}
-        res = format_tool_extra_str(input_data, tool_name="agent_call")
-        self.assertEqual(res, " [agent_id: graph-worker]")
+    def test_migrates_a_legacy_table(self):
+        import sqlite3
+        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
+        table = sanitize_table_name("main:discord:general")
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(f"""
+            CREATE TABLE "{table}" (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, entry_type TEXT NOT NULL,
+                checkpoint_id TEXT, step INTEGER DEFAULT -1, data BLOB, metadata TEXT,
+                config TEXT, parent_config TEXT, from_role TEXT, message TEXT, model TEXT,
+                input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+                cached_tokens REAL DEFAULT 0.0, execution_time REAL DEFAULT 0.0,
+                created_at REAL NOT NULL
+            )""")
+        conn.execute(
+            f'INSERT INTO "{table}" (entry_type, model, input_tokens, output_tokens, created_at) '
+            "VALUES ('token', 'old', 3, 4, 1.0)"
+        )
+        conn.commit()
+        conn.close()
 
-    def test_format_agent_id_standalone(self):
-        input_str = "{'agent_id': 'graph-worker', 'prompt': 'run task'}"
-        res = format_tool_extra_str(input_str)
-        self.assertEqual(res, " [agent_id: graph-worker]")
-
-    def test_format_empty_or_none_or_invalid_inputs(self):
-        self.assertEqual(format_tool_extra_str(None), "")
-        self.assertEqual(format_tool_extra_str({}), "")
-        self.assertEqual(format_tool_extra_str(""), "")
-        self.assertEqual(format_tool_extra_str("invalid {string"), "")
-        self.assertEqual(format_tool_extra_str(12345), "")
+        store = SqliteSessionStore(db_path=self.db_path)
+        # Reading an unmigrated table must not fail.
+        self.assertEqual(store.load_token_history("main:discord:general")[0]["surface"], None)
+        store.append_token_usage("main:discord:general", "new", 1, 1, 0.0, surface="scheduled")
+        rows = store.load_token_history("main:discord:general")
+        self.assertEqual([(r["model"], r["surface"]) for r in rows], [("old", None), ("new", "scheduled")])
 
 
 if __name__ == "__main__":

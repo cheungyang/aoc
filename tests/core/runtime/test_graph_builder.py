@@ -23,21 +23,25 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              "create_graph": self.mock_create_graph
          }
          self.mock_graphs_loader.get_graphs_overview.return_value = "Mock Subgraphs"
+         # The mutable PKM half reads real pkm/ files; default it to empty.
+         self.memory_prompt_patcher = patch('core.runtime.graph_builder.get_agent_memory_prompt', return_value="")
+         self.mock_memory_prompt = self.memory_prompt_patcher.start()
 
      def tearDown(self):
          self.graphs_loader_patcher.stop()
+         self.memory_prompt_patcher.stop()
 
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
          mock_llm_class.return_value = MagicMock()
          
-         mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+         mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
@@ -66,14 +70,14 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              config={"tools": {"tool1": {}}}
          )
  
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
-         mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+         mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
  
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
@@ -98,7 +102,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              config={"tools": {"tool1": {}}, "skills": ["skill1"]}
          )
  
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('langchain_google_genai.ChatGoogleGenerativeAI')
@@ -106,9 +110,9 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.try_context')
      @patch('core.runtime.graph_builder.JobManager')
      @patch('core.runtime.graph_builder.interrupt')
-     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_try_context, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_wraps_tools(self, mock_interrupt, mock_job_manager_class, mock_try_context, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
-         mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+         mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
@@ -165,13 +169,13 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_job_manager.update_job.assert_called_with("job1", "killed")
          mock_interrupt.assert_called_once_with("Job was killed")
  
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_build_graph_ollama(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_ollama(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
-         mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+         mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
          
          mock_tool1 = MagicMock()
          mock_tool1.name = "tool1"
@@ -208,9 +212,9 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              config={"provider": "ollama", "model": "gemma:4b", "tools": {"tool1": {}}}
          )
 
-     def _local_provider_mocks(self, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     def _local_provider_mocks(self, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
           """Shared setup for the provider: local tests."""
-          mock_get_agent_prompt.return_value = "Mock Agent Prompt"
+          mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
 
           mock_tool1 = MagicMock()
           mock_tool1.name = "tool1"
@@ -225,16 +229,16 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           mock_openai = MagicMock()
           return mock_tool1, mock_openai, mock_openai.ChatOpenAI
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_build_graph_local_provider(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_build_graph_local_provider(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
           """A tier under provider: local resolves to the on-device model."""
           from core.util import models
 
           mock_tool1, mock_openai, mock_openai_class = self._local_provider_mocks(
-              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt
           )
 
           from core.runtime.graph_builder import GraphBuilder
@@ -273,18 +277,18 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           )
 
      @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-a-real-paid-credential"})
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_local_provider_never_sends_the_openai_api_key(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_local_provider_never_sends_the_openai_api_key(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
           """ChatOpenAI falls back to OPENAI_API_KEY from the environment when no
           key is passed, and .env exports one. Omitting the argument would post a
           paid credential to an unauthenticated socket on this machine, and
           nothing downstream would report it -- the request would simply succeed.
           """
           _, mock_openai, mock_openai_class = self._local_provider_mocks(
-              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt
           )
 
           from core.runtime.graph_builder import GraphBuilder
@@ -303,15 +307,15 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           # has to be a non-empty constant.
           self.assertTrue(kwargs["api_key"])
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
-     async def test_local_provider_rejects_the_image_tier(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt):
+     async def test_local_provider_rejects_the_image_tier(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
           """The device generates no images. Failing at build time keeps the
           error next to the config that asked for it."""
           _, mock_openai, _ = self._local_provider_mocks(
-              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_prompt
+              mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt
           )
 
           from core.runtime.graph_builder import GraphBuilder
@@ -324,11 +328,11 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
                       config={"provider": "local", "model": "IMAGE", "tools": {}}
                   )
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.get_knowledge_prompt')
-     def test_get_prompt_template_escapes_braces(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
-          mock_get_agent_prompt.return_value = "Prompt with braces {} and {variable}"
+     def test_get_prompt_template_escapes_braces(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_static_prompt):
+          mock_get_agent_static_prompt.return_value = "Prompt with braces {} and {variable}"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
           mock_skills_loader.get_skills_overview.return_value = "Skills with braces {}"
@@ -350,11 +354,11 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertTrue(any("Mock Subgraphs" in msg.content for msg in messages))
           self.assertTrue(any("Knowledge with braces {}" in msg.content for msg in messages))
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.get_knowledge_prompt')
-     def test_get_prompt_template_formats_messages(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_prompt):
-          mock_get_agent_prompt.return_value = "Agent System Prompt"
+     def test_get_prompt_template_formats_messages(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_static_prompt):
+          mock_get_agent_static_prompt.return_value = "Agent System Prompt"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
           mock_skills_loader.get_skills_overview.return_value = "Skills Prompt"
@@ -378,7 +382,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertEqual(formatted[-2], input_messages[0])
           self.assertEqual(formatted[-1], input_messages[1])
 
-     @patch('core.runtime.graph_builder.get_agent_prompt')
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.get_knowledge_prompt')
      @patch('core.runtime.graph_builder.get_channel_prompt')
@@ -392,6 +396,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.mock_graphs_loader.get_graphs_overview.return_value = "SUBGRAPHS_OVERVIEW"
           mock_knowledge.return_value = "KNOWLEDGE_CONTEXT"
           mock_channel.return_value = "CHANNEL_CONTEXT"
+          self.mock_memory_prompt.return_value = "AGENT_MEMORY"
 
           from core.runtime.graph_builder import GraphBuilder
           from langchain_core.messages import HumanMessage, SystemMessage
@@ -406,6 +411,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
               "SKILLS_OVERVIEW",
               "SUBGRAPHS_OVERVIEW",
               "KNOWLEDGE_CONTEXT",
+              "AGENT_MEMORY",
               "CHANNEL_CONTEXT"
           ])
 

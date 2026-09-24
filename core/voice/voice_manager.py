@@ -8,7 +8,8 @@ from .stt_engine import STTEngine
 from .tts_engine import TTSEngine
 from .blurp_generator import BlurpGenerator
 from .sentence_chunker import SentenceChunker
-from .verbalizer import Verbalizer, VoiceStream
+from .verbalizer import Verbalizer
+from .voice_stream import VoiceStream
 from .audio_queue import AudioStreamQueue
 from .bridge_manager import BridgeManager
 from core.loaders.agents_loader import AgentsLoader
@@ -337,7 +338,17 @@ class VoiceManager:
                 # spoken.
                 from core.channel.discord.stream_buffer import DiscordStreamBuffer
 
-                voice_stream = VoiceStream(verbalizer=self.verbalizer)
+                # Same session as the text channel (so context is shared), but
+                # tagged as voice so token rows can tell spoken turns from typed
+                # ones. The verbalizer bills its calls to this same context.
+                session_ident = SessionManager().get_session(
+                    agent_id=self.agent_id,
+                    source="discord",
+                    channel=target_channel,
+                    surface="voice",
+                )
+
+                voice_stream = VoiceStream(verbalizer=self.verbalizer, session=session_ident)
                 text_buffer = DiscordStreamBuffer(target_channel, edit_interval=1.5)
                 has_emitted_speech = False
                 final_text = ""
@@ -346,11 +357,6 @@ class VoiceManager:
                 self.audio_queue.start()
 
                 # Stream agent execution events (tokens, tool bridge phrases, and final audio)
-                session_ident = SessionManager().get_session(
-                    agent_id=self.agent_id,
-                    source="discord",
-                    channel=target_channel
-                )
                 async for event in agent.execute_stream(
                     transcript,
                     session=session_ident
@@ -410,7 +416,7 @@ class VoiceManager:
 
                 # Fallback for short direct answers (e.g. "Done.") that never streamed a token
                 if not has_emitted_speech and final_text:
-                    spoken = await self.verbalizer.verbalize(final_text)
+                    spoken = await self.verbalizer.verbalize(final_text, session=session_ident)
                     for sentence in SentenceChunker().split_into_sentences(spoken):
                         if turn_id != self._active_turn:
                             return

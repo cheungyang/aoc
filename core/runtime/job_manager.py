@@ -12,6 +12,19 @@ from core.runtime.execution_context import ExecutionContext
 SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "sessions"))
 DEFAULT_DB_PATH = os.path.join(SESSIONS_DIR, "memory.db")
 
+# Jobs that are still in flight. Rows stuck here past a max age are reaped.
+# `killing` is included so a kill that never completed (process died) can't leak.
+ACTIVE_STATUSES = ("queued", "running", "killing")
+# Terminal states. `timeout` is an error state written by the reaper and kept
+# for record-keeping; `killed` is written after a successful kill.
+TERMINAL_STATUSES = ("completed", "error", "partial", "timeout", "killed")
+# Default `get_jobs()` allowlist: what an agent sees when it lists jobs.
+# Deliberately excludes `timeout`, `killed` and `completed` so reaped/finished
+# jobs never re-enter an agent context.
+IN_MEMORY_STATUS = ("queued", "running", "error", "partial")
+DEFAULT_STALE_SECONDS = 1800
+TERMINAL_RETENTION_SECONDS = 7 * 24 * 3600
+
 
 @dataclass
 class Job:
@@ -27,8 +40,11 @@ class Job:
 class JobManager:
     _instance = None
 
-    def __new__(cls, db_path: str = DEFAULT_DB_PATH):
+    def __new__(cls, db_path: Optional[str] = None):
         if cls._instance is None:
+            # Resolved at call time (not def time) so tests can redirect it.
+            if db_path is None:
+                db_path = DEFAULT_DB_PATH
             cls._instance = super(JobManager, cls).__new__(cls)
             cls._instance.db_path = db_path
             cls._instance._jobs: Dict[str, Job] = {}
@@ -166,22 +182,86 @@ class JobManager:
         for jid in list(self._job_ids):
             if jid in self._jobs:
                 job = self._jobs[jid]
-                if job.status in ["completed", "error", "partial"]:
+                if job.status in TERMINAL_STATUSES:
                     to_remove.append(jid)
             else:
                 to_remove.append(jid)
-        for jid in to_remove:
-            if jid in self._job_ids:
-                self._job_ids.remove(jid)
-            if jid in self._jobs:
-                del self._jobs[jid]
+        self._forget(to_remove)
 
+        placeholders = ",".join("?" * len(TERMINAL_STATUSES))
         try:
             with self._get_connection() as conn:
-                conn.execute("DELETE FROM jobs WHERE status IN ('completed', 'error', 'partial')")
+                conn.execute(f"DELETE FROM jobs WHERE status IN ({placeholders})", TERMINAL_STATUSES)
                 conn.commit()
         except Exception as e:
             print(f"Error cleaning jobs in sqlite: {e}")
+
+    def _forget(self, job_ids: List[str]):
+        for jid in job_ids:
+            if jid in self._job_ids:
+                self._job_ids.remove(jid)
+            self._jobs.pop(jid, None)
+
+    def has_stale(self, max_age_seconds: int = DEFAULT_STALE_SECONDS) -> bool:
+        """True if any running/queued job has not been updated within max_age_seconds."""
+        cutoff = time.time() - max_age_seconds
+        placeholders = ",".join("?" * len(ACTIVE_STATUSES))
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    f"SELECT 1 FROM jobs WHERE status IN ({placeholders}) AND updated < ? LIMIT 1",
+                    (*ACTIVE_STATUSES, cutoff),
+                ).fetchone()
+                return row is not None
+        except Exception as e:
+            print(f"Error checking stale jobs: {e}")
+            return False
+
+    def reap_stale(self, max_age_seconds: int = DEFAULT_STALE_SECONDS) -> List[str]:
+        """Marks stale running/queued jobs as `timeout` and returns their ids.
+
+        Also purges terminal jobs (completed/error/partial/timeout/killed) whose
+        last update is older than the 7-day retention window.
+        """
+        now = time.time()
+        cutoff = now - max_age_seconds
+        retention_cutoff = now - TERMINAL_RETENTION_SECONDS
+        active_ph = ",".join("?" * len(ACTIVE_STATUSES))
+        terminal_ph = ",".join("?" * len(TERMINAL_STATUSES))
+        reaped: List[str] = []
+        purged: List[str] = []
+        try:
+            with self._get_connection() as conn:
+                reaped = [r["job_id"] for r in conn.execute(
+                    f"SELECT job_id FROM jobs WHERE status IN ({active_ph}) AND updated < ?",
+                    (*ACTIVE_STATUSES, cutoff),
+                ).fetchall()]
+                if reaped:
+                    conn.executemany(
+                        "UPDATE jobs SET status = 'timeout', updated = ? WHERE job_id = ?",
+                        [(now, jid) for jid in reaped],
+                    )
+                purged = [r["job_id"] for r in conn.execute(
+                    f"SELECT job_id FROM jobs WHERE status IN ({terminal_ph}) AND updated < ?",
+                    (*TERMINAL_STATUSES, retention_cutoff),
+                ).fetchall()]
+                if purged:
+                    conn.execute(
+                        f"DELETE FROM jobs WHERE status IN ({terminal_ph}) AND updated < ?",
+                        (*TERMINAL_STATUSES, retention_cutoff),
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f"Error reaping stale jobs: {e}")
+            return []
+
+        for jid in reaped:
+            job = self._jobs.get(jid)
+            if job is not None:
+                job.status = "timeout"
+                job.updated = now
+        self._forget(purged)
+        return reaped
 
     def add_job(
         self,
@@ -220,7 +300,10 @@ class JobManager:
         except Exception as e:
             print(f"Error saving job {job_id}: {e}")
  
-    def get_jobs(self, allowlist: List[str] = ["queued", "running", "error", "partial"]) -> List[Job]:
+    def get_jobs(self, allowlist: Optional[List[str]] = None) -> List[Job]:
+        """Returns in-memory jobs whose status is in allowlist (default `IN_MEMORY_STATUS`)."""
+        if allowlist is None:
+            allowlist = IN_MEMORY_STATUS
         filtered_jobs = []
         for job in self._jobs.values():
             if job.status in allowlist:

@@ -13,7 +13,8 @@ from core.util.prompt_util import (
     get_knowledge_prompt,
     get_formatting_prompt,
     get_channel_prompt,
-    get_agent_prompt,
+    get_agent_memory_prompt,
+    get_agent_static_prompt,
 )
 
 
@@ -119,7 +120,7 @@ class TestPromptUtil(unittest.TestCase):
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
-    def test_get_agent_prompt(self, mock_file, mock_exists):
+    def test_agent_static_and_memory_prompts(self, mock_file, mock_exists):
         mock_exists.return_value = True
         
         file_contents = [
@@ -135,7 +136,8 @@ class TestPromptUtil(unittest.TestCase):
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
         
-        prompt = get_agent_prompt("test-agent")
+        # Static then memory: the order the files are read in, matching mock_file.side_effect.
+        prompt = get_agent_static_prompt("test-agent") + get_agent_memory_prompt("test-agent")
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
         self.assertIn("<description>Your purpose, specialization and workflow</description>", prompt)
@@ -156,7 +158,7 @@ class TestPromptUtil(unittest.TestCase):
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
-    def test_get_agent_prompt_with_headers(self, mock_file, mock_exists):
+    def test_agent_prompts_with_headers(self, mock_file, mock_exists):
         mock_exists.return_value = True
         
         file_contents = [
@@ -172,7 +174,8 @@ class TestPromptUtil(unittest.TestCase):
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
         
-        prompt = get_agent_prompt("test-agent")
+        # Static then memory: the order the files are read in, matching mock_file.side_effect.
+        prompt = get_agent_static_prompt("test-agent") + get_agent_memory_prompt("test-agent")
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
         self.assertIn("<content>agents content\n\ninstructions content</content>", prompt)
@@ -191,7 +194,7 @@ class TestPromptUtil(unittest.TestCase):
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=mock_open)
-    def test_get_agent_prompt_with_only_instructions(self, mock_file, mock_exists):
+    def test_agent_prompts_with_only_instructions(self, mock_file, mock_exists):
         def fake_exists(path):
             return path.endswith("INSTRUCTIONS.md") or path.endswith("IDENTITY.md")
         mock_exists.side_effect = fake_exists
@@ -203,7 +206,8 @@ class TestPromptUtil(unittest.TestCase):
         mocks = [mock_open(read_data=c).return_value for c in file_contents]
         mock_file.side_effect = mocks
         
-        prompt = get_agent_prompt("test-agent")
+        # Static then memory: the order the files are read in, matching mock_file.side_effect.
+        prompt = get_agent_static_prompt("test-agent") + get_agent_memory_prompt("test-agent")
         
         self.assertIn("<SYSTEM_PURPOSE>", prompt)
         self.assertIn("<content>only instructions content</content>", prompt)

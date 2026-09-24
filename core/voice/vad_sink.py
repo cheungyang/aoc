@@ -36,8 +36,16 @@ class VADSink(voice_recv.AudioSink):
     Discord voice receive AudioSink with built-in pure ONNX Silero VAD.
     Extracts speech per-SSRC and delivers speech events to VoiceManager.
     """
-    
-    def __init__(self, voice_manager, loop=None, silence_duration_ms=400, min_speech_ms=250):
+
+    # How much silence ends an utterance. Every utterance is dispatched as a
+    # full agent turn, and natural pauses (a breath, a hesitation before a
+    # noun) run well past 400ms -- at that cutoff one question became two
+    # turns, each resending the whole prompt and history. 900ms keeps a
+    # mid-sentence pause inside the utterance at the cost of a slightly later
+    # reply. Per-agent override: `voice_config.vad_silence_ms`.
+    DEFAULT_SILENCE_MS = 900
+
+    def __init__(self, voice_manager, loop=None, silence_duration_ms=DEFAULT_SILENCE_MS, min_speech_ms=250):
         self._voice_client = None
         self.user_states: dict[Union[int, str], UserVADState] = {}
         super().__init__()

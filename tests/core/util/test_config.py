@@ -17,6 +17,27 @@ class TestConfig(unittest.TestCase):
     def tearDown(self):
         self.config.reset()
 
+    def test_max_concurrency_default_env_and_clamping(self):
+        from core.util.config import DEFAULT_MAX_CONCURRENCY
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AOC_MAX_CONCURRENCY", None)
+            self.assertEqual(self.config.max_concurrency, DEFAULT_MAX_CONCURRENCY)
+        with patch.dict(os.environ, {"AOC_MAX_CONCURRENCY": "5"}):
+            self.assertEqual(self.config.max_concurrency, 5)
+        with patch.dict(os.environ, {"AOC_MAX_CONCURRENCY": "0"}):
+            self.assertEqual(self.config.max_concurrency, 1)
+        with patch.dict(os.environ, {"AOC_MAX_CONCURRENCY": "lots"}):
+            self.assertEqual(self.config.max_concurrency, DEFAULT_MAX_CONCURRENCY)
+
+    def test_max_concurrency_setter_overrides_env(self):
+        with patch.dict(os.environ, {"AOC_MAX_CONCURRENCY": "5"}):
+            self.config.max_concurrency = 2
+            self.assertEqual(self.config.max_concurrency, 2)
+            self.config.max_concurrency = 0
+            self.assertEqual(self.config.max_concurrency, 1)
+            self.config.max_concurrency = None
+            self.assertEqual(self.config.max_concurrency, 5)
+
     def test_default_values(self):
         self.config.is_debug = False
         self.config.debug_channel = ""

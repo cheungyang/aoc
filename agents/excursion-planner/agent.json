@@ -10,8 +10,15 @@
     "description": "An enthusiastic, adventurous weekend excursion planner.",
     "schedules": [
         {
+            "id": "weekend-outlook",
+            "kind": "prompt",
             "channel": "weekend-planning",
             "cron": "0 8 * * 0",
+            "precondition": {
+                "type": "always",
+                "reason": "Looks ahead at calendar and external events for the coming weekends; date-driven."
+            },
+            "session_policy": "stateless",
             "prompt": [
                 "Ask excursion-planner to help plan for the next 3 weekends based on location",
                 "and existing calendar events, and tell excellent event opportunities to prep for."

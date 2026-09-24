@@ -19,6 +19,21 @@ from core.knowledge.projects.sync import sync_projects, get_pkm_dir, get_project
 from core.knowledge.projects.db import get_db_path
 
 
+def has_work(ctx):
+    """Scheduler gate: projects come only from ~/pkm/vault/projects."""
+    from core.scheduler.preconditions import first_changed_path
+
+    if ctx.last_success_at is None:
+        return True, "no previous successful sync"
+    if not os.path.exists(get_db_path()):
+        return True, "projects.db does not exist yet"
+    projects_dir = get_projects_dir(get_pkm_dir())
+    changed = first_changed_path([projects_dir], ctx.last_success_at, suffixes=(".md",))
+    if changed:
+        return True, f"{os.path.relpath(changed, projects_dir)} changed"
+    return False, "no project files changed since the last sync"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Synchronize Obsidian PKM projects into SQLite database.")
     parser.add_argument("--pkm-dir", type=str, default=None, help="Path to PKM directory (defaults to ~/pkm)")

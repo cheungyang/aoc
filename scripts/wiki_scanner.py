@@ -22,6 +22,13 @@ if project_root not in sys.path:
 from core.knowledge.vector.db import init_knowledge_db, scan_by_category
 
 
+def has_work(ctx):
+    """Scheduler gate. Always yes: a stub becomes stale by ageing past six months,
+    with no file change to detect, so "nothing changed" does not mean "nothing
+    new to report". The scan is local and makes no model call."""
+    return True, "stale-stub detection is time-based"
+
+
 def compute_cosine_similarity(vectors):
     """Computes pairwise cosine similarity for a batch of vectors."""
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)

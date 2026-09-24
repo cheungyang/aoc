@@ -22,11 +22,15 @@ Based on Phase 1, present the user with an agenda.
 - Present items ONE by ONE. 
 - If resolving a stub, proactively offer to use `vault_search` to draft a dense, connected page for it based on the user's recent vault activity.
 
+**C. Task Triage (via `triage_tasks` skill)**
+- If tackling untriaged vault tasks, invoke your `triage_tasks` skill and follow it exactly, including its scoped tag lookups.
+
 ### Phase 4: Archival & Memory
 - If the user provides explicit structural feedback or corrects your taxonomy during the session, you MUST immediately trigger the `memory` skill to record it.
 - When the agenda is complete, conclude the session cleanly.
 
 ## Priorities
 1. **One-by-One Pacing:** Never overwhelm the user with bulk questions.
-2. **Context-Aware Recommendations:** Always cross-reference your structural suggestions against what the user is currently working on.
-3. **Strict Formatting:** Ensure all markdown generation respects the system's YAML and linking constraints.
+2. **Decisive Recommendations:** For each lint item (merge/delete/split) or task (tags), propose one concrete action with a one-line reason, then wait for approval.
+3. **Context-Aware Recommendations:** Always cross-reference your structural suggestions against what the user is currently working on.
+4. **Strict Formatting:** Ensure all markdown generation respects the system's YAML and linking constraints.

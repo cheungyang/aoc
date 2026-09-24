@@ -108,3 +108,67 @@ def test_vad_sink_cleanup():
         sink.user_states[123] = UserVADState()
         sink.cleanup()
         assert len(sink.user_states) == 0
+
+
+def test_vad_sink_default_silence_threshold_is_900ms():
+    """400ms split natural mid-sentence pauses into separate agent turns."""
+    mock_vm = MagicMock()
+    mock_vm.config = {}
+    with patch("onnxruntime.InferenceSession"):
+        sink = VADSink(mock_vm)
+    assert VADSink.DEFAULT_SILENCE_MS == 900
+    assert sink.silence_duration_ms == 900
+
+
+def test_vad_sink_silence_threshold_is_configurable_per_agent():
+    mock_vm = MagicMock()
+    mock_vm.config = {"vad_silence_ms": 1200}
+    with patch("onnxruntime.InferenceSession"):
+        sink = VADSink(mock_vm)
+    assert sink.silence_duration_ms == 1200
+
+
+async def _run_pause(silence_duration_ms=None):
+    """Speech, a ~540ms pause, then more speech. Returns the VoiceManager mock."""
+    mock_vm = MagicMock()
+    mock_vm.config = {}
+    mock_vm.on_speech_started = AsyncMock()
+    mock_vm.on_speech_finished = AsyncMock()
+
+    call_count = 0
+
+    def mock_run(output_names, input_feed):
+        nonlocal call_count
+        call_count += 1
+        # 10 speech windows, 15 silent windows (15 * 36ms = 540ms), then speech.
+        speaking = call_count <= 10 or call_count > 25
+        prob = np.array([0.9 if speaking else 0.1], dtype=np.float32)
+        return prob, np.zeros((1, 1, 128), dtype=np.float32), np.zeros((1, 1, 128), dtype=np.float32)
+
+    session = MagicMock()
+    session.run.side_effect = mock_run
+    kwargs = {} if silence_duration_ms is None else {"silence_duration_ms": silence_duration_ms}
+    with patch("onnxruntime.InferenceSession", return_value=session):
+        sink = VADSink(mock_vm, loop=asyncio.get_running_loop(), min_speech_ms=50, **kwargs)
+        user = MagicMock(id=7, display_name="Pauser")
+        frame = np.ones(1920, dtype=np.int16).tobytes()
+        try:
+            for _ in range(80):
+                sink.write(user, MagicMock(pcm=frame))
+                await asyncio.sleep(0.001)
+        finally:
+            sink.cleanup()
+    return mock_vm
+
+
+@pytest.mark.asyncio
+async def test_vad_sink_default_keeps_a_mid_sentence_pause_in_one_utterance():
+    mock_vm = await _run_pause()
+    mock_vm.on_speech_finished.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_vad_sink_old_400ms_threshold_would_have_split_the_utterance():
+    # Control for the test above: the same audio at the old cutoff is cut in two.
+    mock_vm = await _run_pause(silence_duration_ms=400)
+    assert mock_vm.on_speech_finished.call_count >= 1

@@ -7,7 +7,7 @@ import discord
 from core.util.config import Config
 from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.runtime.schedule_runner import ScheduleRunner
+from core.scheduler.schedule_runner import ScheduleRunner
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
 faulthandler.enable()

@@ -29,10 +29,45 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _bootstrap import (  # noqa: E402
     ensure_project_interpreter,
     enter_project_root,
+    project_root as _project_root,
 )
 
-ensure_project_interpreter()
-project_root = enter_project_root()
+# Import-safe: the scheduler imports this module in-process to call
+# `has_work`, so re-exec and chdir happen only under `__main__`.
+project_root = _project_root()
+
+
+def has_work(ctx) -> bool:
+    """Scheduler gate: is there anything a tick could advance?
+
+    True when any project's queue has a runnable task or a review to sync, or
+    holds an expired lease the tick would reclaim. A manifest that cannot be
+    read also counts, so the tick runs and reports it rather than going quiet.
+    """
+    from graphs.coding.nodes.scheduler import select_task
+    from graphs.coding.utils import manifest as manifest_store
+    from graphs.coding.utils.dag import SOFTWARE_ROOT, discover_manifests
+
+    now = time.time()
+    for manifest_path in discover_manifests(
+        os.path.join(project_root, SOFTWARE_ROOT)
+    ):
+        try:
+            queue = manifest_store.load_manifest(manifest_path).get("queue") or []
+        except Exception:
+            return True
+        for task in queue:
+            if task.get("lease_owner") and not manifest_store.lease_is_active(
+                task, now
+            ):
+                return True
+        try:
+            task, _route = select_task(queue, handled=[], now=now)
+        except Exception:
+            return True
+        if task is not None:
+            return True
+    return False
 
 
 def parse_args(argv=None):
@@ -304,4 +339,6 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    ensure_project_interpreter()
+    enter_project_root()
     sys.exit(main())

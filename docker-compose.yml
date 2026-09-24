@@ -53,6 +53,8 @@ services:
       - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
       - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
       - AOC_SCRIPT_TIMEOUT=${AOC_SCRIPT_TIMEOUT:-300}
+      # One cap on concurrent model-driven executions (schedules, dream fan-out)
+      - AOC_MAX_CONCURRENCY=${AOC_MAX_CONCURRENCY:-3}
       # On-device LLM, for agents setting "provider": "local". localhost would
       # be this container, so the host alias below is used instead.
       #

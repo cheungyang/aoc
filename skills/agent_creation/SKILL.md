@@ -41,6 +41,7 @@ Create `agents/<agent_id>/agent.json`. You MUST use the exact JSON structure tem
 *Critical Constraints for agent.json:*
 - The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
 - Do not explicitly add tools to the `tools` object if they are already inherited via the skills listed in the `skills` array (e.g., `filesystem` permissions are inherited via the `dream` skill).
+- Omit `schedules` unless the agent needs recurring work. To add schedules, load the `update_schedule` skill: every entry needs a `kind` and, for prompt schedules, a `precondition`, and it must pass `schedule_validate` before it is saved. Invalid entries are rejected at load and never run.
 - The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite` or an
   on-device build id. This holds for every provider. Valid tiers are defined per provider in
   `core/util/models.py`; omit the field to accept the default. Choose `FLASH_LITE` for narrow,

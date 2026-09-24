@@ -8,7 +8,8 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt, get_agent_prompt, get_channel_prompt, Config, resolve_model
+from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, Config, resolve_model
+from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt
 from langgraph.types import interrupt
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import try_context
@@ -21,8 +22,10 @@ class GraphBuilder:
         agent_id = ctx.agent_id
 
         def dynamic_prompt(state):
-            # 1. Agent Prompt
-            agent_prompt = get_agent_prompt(agent_id)
+            # 1. Agent Prompt, split for caching: the checked-in definition
+            # (static) and the PKM memory files (mutable at runtime).
+            agent_static_prompt = get_agent_static_prompt(agent_id)
+            agent_memory_prompt = get_agent_memory_prompt(agent_id)
 
             # 2. Skills Prompt
             skills_loader = SkillsLoader()
@@ -42,18 +45,28 @@ class GraphBuilder:
             # 5. Formatting Prompt
             formatting_prompt = get_formatting_prompt()
 
-            # Order from most static to most dynamic to maximize prefix prompt caching
+            # Order from most static to most dynamic to maximize prefix prompt caching.
+            # Every block is a part of one system_instruction; tool schemas are NOT
+            # in this list -- the LLM client sends them in a separate request field.
+            #   formatting, agent definition, skills, subgraphs  -> change on deploy
+            #   knowledge                                        -> changes once a day
+            #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
+            #   channel                                          -> differs per channel/thread
+            # Memory precedes channel: memory is identical across all of an agent's
+            # channels and changes rarely, so channel-varying calls (e.g. agent_call
+            # into another channel) still share the prefix up to and including memory.
             system_messages = [
                 ("system", formatting_prompt),
-                ("system", agent_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", agent_static_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", agent_memory_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", channel_prompt.replace("{", "{{").replace("}", "}}")),
             ]
 
             # Filter out empty prompt messages (e.g. when channel_prompt is empty)
-            system_messages = [msg for msg in system_messages if msg[1]]
+            system_messages = [msg for msg in system_messages if msg[1].strip()]
             system_messages.append(MessagesPlaceholder(variable_name="messages"))
 
             prompt = ChatPromptTemplate.from_messages(system_messages)

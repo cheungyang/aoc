@@ -50,6 +50,7 @@ class SqliteSessionStore:
             output_tokens INTEGER DEFAULT 0,
             cached_tokens REAL DEFAULT 0.0,
             execution_time REAL DEFAULT 0.0,
+            surface TEXT,
             created_at REAL NOT NULL
         );
         """)
@@ -57,6 +58,9 @@ class SqliteSessionStore:
         columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}");').fetchall()]
         if "execution_time" not in columns:
             conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN execution_time REAL DEFAULT 0.0;')
+        # Rows written before the column existed stay NULL: their surface is unknown, not "text".
+        if "surface" not in columns:
+            conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN surface TEXT;')
 
         conn.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_type" ON "{table_name}" (entry_type);')
         conn.execute(f'CREATE INDEX IF NOT EXISTS "idx_{table_name}_cp_id" ON "{table_name}" (checkpoint_id);')
@@ -93,7 +97,7 @@ class SqliteSessionStore:
             conn.commit()
         return f"Appended message to {session_id}"
 
-    def append_token_usage(self, session_id: str, model: str, input_token: int, output_token: int, cached_token: float, execution_time: float = 0.0) -> str:
+    def append_token_usage(self, session_id: str, model: str, input_token: int, output_token: int, cached_token: float, execution_time: float = 0.0, surface: Optional[str] = None) -> str:
         table_name = sanitize_table_name(session_id)
         now = time.time()
         with self._get_connection() as conn:
@@ -101,10 +105,10 @@ class SqliteSessionStore:
             conn.execute(
                 f"""
                 INSERT INTO "{table_name}" (
-                    entry_type, model, input_tokens, output_tokens, cached_tokens, execution_time, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    entry_type, model, input_tokens, output_tokens, cached_tokens, execution_time, surface, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("token", model, input_token, output_token, cached_token, execution_time, now)
+                ("token", model, input_token, output_token, cached_token, execution_time, surface, now)
             )
             conn.commit()
         return f"Appended token usage to {session_id}"
@@ -218,7 +222,7 @@ class SqliteSessionStore:
 
             self._ensure_table(conn, table_name)
             cursor = conn.execute(
-                f'SELECT model, input_tokens, output_tokens, cached_tokens, execution_time, created_at FROM "{table_name}" WHERE entry_type = \'token\' ORDER BY id ASC'
+                f'SELECT model, input_tokens, output_tokens, cached_tokens, execution_time, surface, created_at FROM "{table_name}" WHERE entry_type = \'token\' ORDER BY id ASC'
             )
             rows = cursor.fetchall()
             data = [
@@ -228,7 +232,8 @@ class SqliteSessionStore:
                     "input_token": r["input_tokens"],
                     "output_token": r["output_tokens"],
                     "cached_token": r["cached_tokens"],
-                    "execution_time": r["execution_time"] if "execution_time" in r.keys() and r["execution_time"] is not None else 0.0
+                    "execution_time": r["execution_time"] if "execution_time" in r.keys() and r["execution_time"] is not None else 0.0,
+                    "surface": r["surface"],
                 }
                 for r in rows
             ]

@@ -6,8 +6,8 @@
   ],
   "name": "William",
   "emoji": "🌿",
-  "description": "Intellectual Sparring Partner & Knowledge Weaver. Proactively triages inbox notes, links knowledge via wiki_query, and flags research gaps to the topic-researcher.",
-  "model": "PRO",
+  "description": "Wiki Gardener & Knowledge Weaver. Triages inbox notes and vault tasks, links knowledge via wiki_query, resolves wiki_lint anomalies, and flags research gaps to the topic-researcher.",
+  "model": "FLASH",
   "tools": {},
   "skills": [
     "wiki_lint",
@@ -17,29 +17,50 @@
   ],
   "schedules": [
     {
+      "id": "workflow-a-inbox",
+      "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 7 * * *",
+      "precondition": {
+        "type": "files_exist",
+        "paths": ["pkm/inbox/**"]
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask wiki-gardener to execute Workflow A: scan inbox for new articles.",
-        "If empty, terminate silently. If populated, ingest using wiki_ingest & wiki_query",
-        "to weave connections, then pause and prompt user for Phase 2 (Sparring)."
+        "Ingest them using wiki_ingest & wiki_query",
+        "to weave connections, then pause and prompt user for Phase 2 (Summary & Gap Check)."
       ]
     },
     {
+      "id": "workflow-b-lint",
+      "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 10 * * 5",
+      "precondition": {
+        "type": "json_non_empty",
+        "path": "pkm/wiki/pending_lint.json",
+        "keys": ["stale_stubs", "duplicate_candidates", "review_queue"]
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask wiki-gardener to execute Workflow B: review pending_lint for anomalies.",
-        "If empty, terminate silently. If populated, execute wiki_lint skill and propose",
+        "Execute the wiki_lint skill and propose",
         "a cleanup agenda to the user."
       ]
     },
     {
+      "id": "triage-tasks",
+      "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 17 * * *",
+      "precondition": {
+        "type": "task_list_non_empty",
+        "filter": "untriaged"
+      },
+      "session_policy": "stateless",
       "prompt": [
-        "Ask wiki-gardener to initiate the triage_tasks loop to process untriaged tasks in the vault.",
-        "If untriaged tasks are zero, terminate silently."
+        "Ask wiki-gardener to initiate the triage_tasks loop to process untriaged tasks in the vault."
       ]
     }
   ]

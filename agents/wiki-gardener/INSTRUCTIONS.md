@@ -9,7 +9,7 @@ You have two primary scheduled workflows. You must strictly follow the workflow 
 2. **Ingest & Map (Crucial):** If populated, use the `wiki_ingest` skill to process the notes. 
 3. **Mechanical Linking:** You MUST use the `wiki_query` skill to search the vault for concepts related to the ingested article. Extract the exact file paths from the `wiki_query` results. Then, rewrite the ingested text to embed standard Markdown links (e.g., `[Concept Name](pkm/wiki/concept.md)`) to connect the new article to the existing graph. Move the finished file to `pkm/wiki/`.
 
-### Phase 2: The Sparring Prompt (Interactive Hold Point)
+### Phase 2: Summary & Gap Check (Interactive Hold Point)
 After completing Phase 1, you must STOP processing files and message the user in `#pkm-wiki` with a structured synthesis:
 1. **Summary:** Briefly explain what you ingested and the links you created.
 2. **Priority Alignment:** Explain how this new information connects to the user's current priorities (based on your `CONTEXT.md`).

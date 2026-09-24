@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Any, Optional
 from dotenv import load_dotenv
 
@@ -9,6 +10,9 @@ if os.path.exists(env_path):
     load_dotenv(dotenv_path=env_path, override=True)
 else:
     load_dotenv(override=True)
+
+# The one cap on concurrent model-driven executions across the system.
+DEFAULT_MAX_CONCURRENCY = 3
 
 
 class Config:
@@ -49,6 +53,7 @@ class Config:
             cls._instance._context_window_messages = None
             cls._instance._context_summary_max_tokens = None
             cls._instance._context_pruning_timeout = None
+            cls._instance._max_concurrency = None
             cls._instance._gog_keyring_backend = None
             cls._instance._gog_keyring_password = None
             cls._instance._timezone = None
@@ -89,6 +94,7 @@ class Config:
         self._context_window_messages = None
         self._context_summary_max_tokens = None
         self._context_pruning_timeout = None
+        self._max_concurrency = None
         self._gog_keyring_backend = None
         self._gog_keyring_password = None
         self._timezone = None
@@ -596,6 +602,28 @@ class Config:
     def context_pruning_timeout(self, value):
         self._context_pruning_timeout = int(value) if value is not None else None
 
+    @property
+    def max_concurrency(self) -> int:
+        """The one cap on concurrent model-driven executions across the system
+        (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1."""
+        if self._max_concurrency is not None:
+            return self._max_concurrency
+        env_val = os.getenv("AOC_MAX_CONCURRENCY")
+        if env_val and env_val.strip():
+            try:
+                return max(1, int(env_val))
+            except ValueError:
+                print(
+                    f"Config: ignoring non-integer AOC_MAX_CONCURRENCY={env_val!r}; "
+                    f"using {DEFAULT_MAX_CONCURRENCY}.",
+                    file=sys.stderr,
+                )
+        return DEFAULT_MAX_CONCURRENCY
+
+    @max_concurrency.setter
+    def max_concurrency(self, value):
+        self._max_concurrency = max(1, int(value)) if value is not None else None
+
     # -------------------------------------------------------------------------
     # Channel Filtering Logic
     # -------------------------------------------------------------------------
@@ -675,6 +703,7 @@ class Config:
         self._context_window_messages = None
         self._context_summary_max_tokens = None
         self._context_pruning_timeout = None
+        self._max_concurrency = None
         self._gog_keyring_backend = None
         self._gog_keyring_password = None
         self._timezone = None

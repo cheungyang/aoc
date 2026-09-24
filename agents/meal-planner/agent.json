@@ -15,8 +15,15 @@
   ],
   "schedules": [
     {
+      "id": "dinner-checkin",
+      "kind": "prompt",
       "channel": "meal-planning",
       "cron": "0 21 * * *",
+      "precondition": {
+        "type": "always",
+        "reason": "Nightly check-in that asks the user what they cooked; the question itself is the point."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask meal-planner to ask the user what they cooked for dinner tonight.",
         "Upon reply, deduce ingredients, update inventory, and propose 3 new dinner ideas."

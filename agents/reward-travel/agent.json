@@ -33,8 +33,15 @@
   ],
   "schedules": [
     {
+      "id": "award-search",
+      "kind": "prompt",
       "channel": "lifestyle-perk",
       "cron": "0 9 * * 1,3,5",
+      "precondition": {
+        "type": "always",
+        "reason": "Award availability lives in seats.aero; there is no local signal for new seats."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask reward-travel to load flight_search skill, read travel preferences,",
         "and use seats_aero to run searches for business class award availability.",
@@ -42,8 +49,15 @@
       ]
     },
     {
+      "id": "credit-windows",
+      "kind": "prompt",
       "channel": "lifestyle-perk",
       "cron": "0 9 * * 2,4",
+      "precondition": {
+        "type": "always",
+        "reason": "Statement-credit deadlines depend on today's date, not on any file change."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask reward-travel to read credit-card state files, calculate the delta for",
         "recurring credits to determine usage windows. Voice out ONLY if falling behind",

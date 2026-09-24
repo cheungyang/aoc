@@ -132,5 +132,52 @@ class TestExecutionContext(unittest.TestCase):
         self.assertEqual(ident_main.get_session_thread_id("content_creation"), "content_creation:main:discord:general")
 
 
+class TestExecutionContextSurface(unittest.TestCase):
+    """`surface` is reporting metadata: it tags token rows and never changes identity."""
+
+    def test_defaults_derive_from_source(self):
+        cases = {
+            ("discord", "general"): "text",
+            ("scheduled", "general"): "scheduled",
+            ("tool", "general"): "tool",
+            ("voice", "general"): "voice",
+        }
+        for (source, channel), expected in cases.items():
+            ctx = SessionManager.get_session(agent_id="a", source=source, channel=channel)
+            self.assertIsNone(ctx.surface)
+            self.assertEqual(ctx.get_surface(), expected, source)
+        # A job only means "no ambient caller" -- it can trace back to a user's
+        # turn (e.g. an async call), so it must not be booked as scheduled.
+        job = SessionManager.get_session(agent_id="a", source="job")
+        self.assertEqual(job.get_surface(), "job")
+
+    def test_explicit_surface_overrides_source(self):
+        ctx = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
+        self.assertEqual(ctx.get_surface(), "voice")
+
+    def test_surface_does_not_change_session_identity(self):
+        text = SessionManager.get_session(agent_id="a", source="discord", channel="general")
+        voice = text.with_surface("voice")
+        self.assertEqual(voice.session_id, text.session_id)
+        self.assertEqual(voice.get_session_thread_id(), text.get_session_thread_id())
+        self.assertEqual(voice.job_id, text.job_id)
+        self.assertEqual(voice, text)  # compare=False: equality is about identity
+        self.assertEqual(text.get_surface(), "text")
+        self.assertEqual(voice.get_surface(), "voice")
+
+    def test_with_surface_same_value_returns_self(self):
+        ctx = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
+        self.assertIs(ctx.with_surface("voice"), ctx)
+
+    def test_surface_survives_derivation(self):
+        ctx = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
+        self.assertEqual(ctx.with_graph("coding").get_surface(), "voice")
+        self.assertEqual(ctx.with_agent("b").get_surface(), "voice")
+
+    def test_unknown_surface_rejected(self):
+        with self.assertRaises(ValueError):
+            SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="telepathy")
+
+
 if __name__ == "__main__":
     unittest.main()

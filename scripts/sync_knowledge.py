@@ -19,6 +19,29 @@ from core.knowledge.vector.sync import sync_knowledge, get_pkm_dir
 from core.knowledge.vector.db import get_knowledge_db_path
 
 
+def has_work(ctx):
+    """Scheduler gate: the index covers markdown under ~/pkm/vault and ~/pkm/wiki.
+
+    Only `.md` files count, so the scanner's `pending_lint.json` (written into
+    wiki/ every night) does not force a re-index on its own.
+    """
+    from core.scheduler.preconditions import first_changed_path
+
+    if ctx.last_success_at is None:
+        return True, "no previous successful sync"
+    if not os.path.exists(get_knowledge_db_path()):
+        return True, "the knowledge store does not exist yet"
+    pkm_dir = get_pkm_dir()
+    changed = first_changed_path(
+        [os.path.join(pkm_dir, "vault"), os.path.join(pkm_dir, "wiki")],
+        ctx.last_success_at,
+        suffixes=(".md",),
+    )
+    if changed:
+        return True, f"{os.path.relpath(changed, pkm_dir)} changed"
+    return False, "no vault or wiki notes changed since the last sync"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Synchronize Obsidian PKM notes into LanceDB vector database.")
     parser.add_argument("--pkm-dir", type=str, default=None, help="Path to PKM directory (defaults to ~/pkm)")

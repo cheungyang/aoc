@@ -113,12 +113,12 @@ def _load_prompt_from_file(file_inputs, tag, group_desc=None) -> str:
     return ""
 
 
-def get_agent_prompt(agent_id: str) -> str:
+def _agent_prompt_files(agent_id: str) -> dict:
     agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
     agent_path = os.path.join(agents_dir, agent_id)
     pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm", "agents", agent_id))
 
-    files = {
+    return {
         "AGENT": (os.path.join(agent_path, "AGENTS.md"), "Your specialization and workflow:"),
         "INSTRUCTIONS": (os.path.join(agent_path, "INSTRUCTIONS.md"), "Your instructions and workflow:"),
         "IDENTITY": (os.path.join(agent_path, "IDENTITY.md"), "Short description of who you are:"),
@@ -128,13 +128,35 @@ def get_agent_prompt(agent_id: str) -> str:
         "CONTEXT": (os.path.join(pkm_dir, "CONTEXT.md"), "Context about your human to improve personalization:"),
         "FEEDBACK": (os.path.join(pkm_dir, "FEEDBACK.md"), "Feedbacks from human to adhere to, avoid repeating the same mistake:")
     }
-    
+
+
+def get_agent_static_prompt(agent_id: str) -> str:
+    """The agent's checked-in definition: purpose and persona.
+
+    These files change only on deploy, so this half belongs in the stable
+    prefix of the system prompt.
+    """
+    files = _agent_prompt_files(agent_id)
     prompt_parts = [
         _load_prompt_from_file([files["AGENT"], files["INSTRUCTIONS"]], "SYSTEM_PURPOSE", "Your purpose, specialization and workflow"),
         _load_prompt_from_file([files["IDENTITY"], files["SOUL"]], "PERSONA", "This is who you are and how you behave"),
+    ]
+    return "\n\n".join(prompt_parts)
+
+
+def get_agent_memory_prompt(agent_id: str) -> str:
+    """The agent's mutable PKM memory: human context, memory and feedback.
+
+    pkm/agents/<id>/{CONTEXT,MEMORY,FEEDBACK}.md are rewritten by the memory
+    and dream skills at runtime. Any write changes this text, so it must sit
+    at the END of the system prompt, after every stable block -- otherwise a
+    memory write invalidates the implicit prompt cache for everything behind
+    it. HUMAN_CONTEXT is kept whole (USER.md + CONTEXT.md) in one block.
+    """
+    files = _agent_prompt_files(agent_id)
+    prompt_parts = [
         _load_prompt_from_file([files["USER"], files["CONTEXT"]], "HUMAN_CONTEXT", "Information about your human"),
         _load_prompt_from_file([files["MEMORY"]], "MEMORY_AND_PRECEDENTS", "Long term memory on key decisions and learnings to make your tasks successful."),
         _load_prompt_from_file([files["FEEDBACK"]], "FEEDBACK_TO_ADHERE_TO", "Feedbacks from human that you MUST adhere.")
     ]
-
-    return "\n\n".join(prompt_parts) if prompt_parts else ""
+    return "\n\n".join(prompt_parts)

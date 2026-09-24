@@ -32,21 +32,20 @@
   ],
   "schedules": [
     {
+      "id": "mode-a-queue",
+      "kind": "prompt",
       "channel": "topic-research",
       "cron": "0 8 * * *",
+      "precondition": {
+        "type": "file_matches",
+        "path": "pkm/wiki/topics/research_requests.md",
+        "pattern": "<[A-Za-z_][^>]*>"
+      },
+      "session_policy": "persistent",
       "prompt": [
         "Ask topic-researcher to execute Mode A: Queue Initialization. Read requests.",
-        "If empty, terminate silently. If populated, outline syllabus, flesh out Chapter 1,",
+        "Outline the syllabus, flesh out Chapter 1,",
         "save syllabus to pending topics, and remove the request from the queue."
-      ]
-    },
-    {
-      "channel": "topic-research",
-      "cron": "0 0 1 1 *",
-      "prompt": [
-        "Ask topic-researcher to execute Mode B: Proactive Nudge. Scan pending syllabi.",
-        "If empty, terminate silently. If populated, pick ONE idle topic (oldest/important)",
-        "and proactively ping the user in the channel to resume it."
       ]
     }
   ]

@@ -16,7 +16,8 @@ from core.util.prompt_util import (
     get_formatting_prompt,
     get_channel_prompt,
     get_knowledge_prompt,
-    get_agent_prompt,
+    get_agent_static_prompt,
+    get_agent_memory_prompt,
 )
 from core.util.summarize_util import (
     compress_image_bytes,
@@ -82,7 +83,8 @@ __all__ = [
     "get_formatting_prompt",
     "get_channel_prompt",
     "get_knowledge_prompt",
-    "get_agent_prompt",
+    "get_agent_static_prompt",
+    "get_agent_memory_prompt",
     "compress_image_bytes",
     "save_agent_memory_log",
     "build_heuristic_summary",

@@ -31,6 +31,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from core.loaders.agents_loader import AgentsLoader
+from core.util.config import Config
 from tools.agent_call import agent_call
 
 DREAM_TRIGGER = "Run your dream skill."
@@ -42,13 +43,56 @@ DREAM_TRIGGER = "Run your dream skill."
 EXCLUDED_AGENTS = {"script-executor"}
 
 # The agents run real model turns. Firing all of them at once is a burst of
-# concurrent pro/flash calls against one quota; a small pool keeps the standup
-# well inside it while still finishing far faster than sequential execution.
-MAX_CONCURRENCY = int(os.getenv("AOC_DREAM_CONCURRENCY", "2"))
+# concurrent pro/flash calls against one quota; the system-wide
+# `Config().max_concurrency` pool keeps the standup well inside it while still
+# finishing far faster than sequential execution.
 DREAM_AGENT_TIMEOUT = int(os.getenv("AOC_DREAM_AGENT_TIMEOUT", "120"))
 
 STATUS_DREAMED = "Dreamed"
 STATUS_EMPTY = "No new memories"
+
+def memory_logs_root(root=None):
+    return os.path.join(root or project_root, "pkm", "agents")
+
+
+def agents_with_logs(root=None):
+    """Agent ids with at least one memory log.
+
+    A dream consumes and deletes its logs, so "has a log" is exactly "has
+    something to dream about". An agent whose dream fails keeps its logs and
+    is dreamed again the next night.
+    """
+    base = memory_logs_root(root)
+    found = set()
+    try:
+        agent_ids = os.listdir(base)
+    except OSError:
+        return found
+    for agent_id in agent_ids:
+        logs_dir = os.path.join(base, agent_id, "memory_logs")
+        try:
+            entries = os.listdir(logs_dir)
+        except OSError:
+            continue
+        for name in entries:
+            if name.startswith("."):
+                continue
+            path = os.path.join(logs_dir, name)
+            try:
+                if os.path.isfile(path):
+                    found.add(agent_id)
+                    break
+            except OSError:
+                continue
+    return found
+
+
+def has_work(ctx):
+    """Scheduler gate: skip the whole standup when no agent has a memory log."""
+    agents = agents_with_logs()
+    if not agents:
+        return False, "no memory logs to dream about"
+    return True, f"memory logs for: {', '.join(sorted(agents))}"
 
 
 @contextlib.contextmanager
@@ -129,11 +173,6 @@ def parse_dream_response(raw):
 async def dream(agent_id, config, semaphore):
     """Triggers one agent's dream skill and normalises the outcome."""
     channel = resolve_channel(config)
-    memory_logs_dir = os.path.join("pkm", "agents", agent_id, "memory_logs")
-    try:
-        os.makedirs(memory_logs_dir, exist_ok=True)
-    except Exception:
-        pass
 
     prompt = f"{DREAM_TRIGGER} Process memory logs in pkm/agents/{agent_id}/memory_logs/."
     async with semaphore:
@@ -194,17 +233,29 @@ def render(results, today=None):
     return "\n".join(lines)
 
 
-async def run_standup(verbose: bool = False):
+def filter_agents_with_logs(agents, root=None):
+    """Keeps only the agents that have something to dream about.
+
+    Each dream is a paid model turn; an agent with no memory log would only
+    answer "No new memories", so it is not asked at all.
+    """
+    with_logs = agents_with_logs(root)
+    return [(agent_id, config) for agent_id, config in agents if agent_id in with_logs]
+
+
+async def run_standup(verbose: bool = False, include_all: bool = False):
     with quiet_stdout(verbose=verbose):
         loader = AgentsLoader()
         agents = standup_agents(loader)
+        if not include_all:
+            agents = filter_agents_with_logs(agents)
         if not agents:
             print("No agents to include in the standup.", file=sys.stderr)
             return ""
 
         print(f"Dream standup: triggering {len(agents)} agents...", file=sys.stderr)
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+        semaphore = asyncio.Semaphore(Config().max_concurrency)
         raw_results = await asyncio.gather(
             *(dream(agent_id, config, semaphore) for agent_id, config in agents),
             return_exceptions=True,
@@ -230,7 +281,7 @@ async def run_standup(verbose: bool = False):
     return render(results)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the nightly dream standup.")
     parser.add_argument(
         "--dry-run",
@@ -243,16 +294,26 @@ def main():
         action="store_true",
         help="Write captured runtime narration to stderr.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Dream every eligible agent, even those with no memory logs.",
+    )
+    args = parser.parse_args(argv)
 
     if args.dry_run:
         loader = AgentsLoader()
-        for agent_id, config in standup_agents(loader):
+        agents = standup_agents(loader)
+        if not args.all:
+            agents = filter_agents_with_logs(agents)
+        for agent_id, config in agents:
             print(f"{agent_id} -> #{resolve_channel(config)}")
         return
 
     try:
-        summary = asyncio.run(run_standup(verbose=args.verbose))
+        summary = asyncio.run(
+            run_standup(verbose=args.verbose, include_all=args.all)
+        )
         if summary:
             print(summary)
     except Exception as e:

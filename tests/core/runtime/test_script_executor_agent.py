@@ -11,6 +11,15 @@ from core.runtime.script_executor_agent import ScriptExecutorAgent
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 
+
+def _scripts_of(schedule):
+    """Script names in a `"kind": "script"` schedule (string or list, args dropped)."""
+    raw = schedule.get("script") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(item).split()[0] for item in raw if str(item).strip()]
+
+
 class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from core.runtime.job_manager import JobManager
@@ -90,8 +99,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         agent = loader.get_agent("script-executor")
         self.assertIsInstance(agent, ScriptExecutorAgent)
         schedules = agent.config.get("schedules", [])
-        all_prompts = [p for s in schedules for p in s.get("prompt", [])]
-        self.assertIn("script sync_knowledge.py", all_prompts)
+        all_scripts = [p for s in schedules for p in _scripts_of(s)]
+        self.assertIn("sync_knowledge.py", all_scripts)
 
     @patch('subprocess.run')
     @patch('core.runtime.script_executor_agent.JobManager')
@@ -184,7 +193,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         agent = loader.get_agent("script-executor")
         entries = [s for s in agent.config.get("schedules", [])
-                   if "script coding_tick.py" in s.get("prompt", [])]
+                   if "coding_tick.py" in _scripts_of(s)]
 
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["cron"], "*/5 * * * *")
@@ -195,7 +204,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         loader = AgentsLoader()
         agent = loader.get_agent("script-executor")
         entry = next(s for s in agent.config.get("schedules", [])
-                     if "script coding_tick.py" in s.get("prompt", []))
+                     if "coding_tick.py" in _scripts_of(s))
 
         self.assertEqual(entry["channel"], "software-dev")
 
@@ -206,7 +215,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         """
         loader = AgentsLoader()
         entry = next(s for s in loader.get_agent("script-executor").config["schedules"]
-                     if "script coding_tick.py" in s.get("prompt", []))
+                     if "coding_tick.py" in _scripts_of(s))
 
         hosts = set()
         for agent_id in loader.list_agent_ids():
@@ -219,7 +228,7 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         log a fallback line on every single run -- 288 of them a day."""
         loader = AgentsLoader()
         entry = next(s for s in loader.get_agent("script-executor").config["schedules"]
-                     if "script coding_tick.py" in s.get("prompt", []))
+                     if "coding_tick.py" in _scripts_of(s))
 
         self.assertIsNone(entry.get("thread"))
 

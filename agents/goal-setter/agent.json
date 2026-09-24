@@ -10,8 +10,15 @@
     "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
     "schedules": [
         {
-            "channel": "goal-planning",
+            "id": "coach-executing",
+            "kind": "prompt",
+            "channel": "project-planning",
             "cron": "0 9 * * 1,3,5",
+            "precondition": {
+                "type": "project_list_non_empty",
+                "status": "executing"
+            },
+            "session_policy": "persistent",
             "prompt": [
                 "Ask goal-setter to view active executing projects using project_query tool,",
                 "pick the one needing most attention, run coach_project skill to update strategy,",

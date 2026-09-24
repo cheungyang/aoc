@@ -30,6 +30,12 @@ from core.util.git_sync import sync_all, GitSyncConflictError, GitSyncError
 from core.util.config import Config
 
 
+def has_work(ctx):
+    """Scheduler gate. Always yes: remote commits cannot be seen without a fetch,
+    and a fetch *is* most of the sync. The run is local git, no model."""
+    return True, "remote changes cannot be detected without a fetch"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Synchronize PKM Obsidian Vault and Main Codebase Git repositories."

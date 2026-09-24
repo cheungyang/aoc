@@ -9,6 +9,7 @@ from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import current_execution_context
 from core.runtime.session_manager import SessionManager
 from core.runtime.execution_context import ExecutionContext
+from core.scheduler.script_runner import run_legacy_script_line
 from core.util import split_message
 
 class ScriptExecutorAgent(BaseAgent):
@@ -102,42 +103,12 @@ class ScriptExecutorAgent(BaseAgent):
                     if not rest:
                         results.append("Error: script action requires a script name.")
                         continue
-                    try:
-                        import shlex
-                        args = shlex.split(rest)
-                        if args:
-                            args[0] = os.path.join("scripts", args[0])
-                        expanded_args = [os.path.expanduser(arg) for arg in args]
-                        if expanded_args and expanded_args[0].endswith(".py") and expanded_args[0] != sys.executable:
-                            cmd = [sys.executable] + expanded_args
-                        else:
-                            cmd = expanded_args
-                        timeout_sec = int(os.getenv("AOC_SCRIPT_TIMEOUT", "300"))
-                        res = await asyncio.to_thread(
-                            subprocess.run,
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                            timeout=timeout_sec,
-                        )
-                        # The script's own stdout *is* the message. A script that
-                        # succeeded and said nothing gets no message at all, and one
-                        # that did say something gets no banner wrapped around it:
-                        # on a five-minute schedule both the wrapper and the silence
-                        # would be the noise.
-                        stdout = (res.stdout or "").strip()
-                        if stdout:
-                            results.append(stdout)
-                    except subprocess.TimeoutExpired as e:
-                        results.append(f"Error executing script '{rest}': timed out after {timeout_sec}s")
-                    except subprocess.CalledProcessError as e:
-                        err = (e.stderr or "").strip()
-                        if not err:
-                            err = (e.stdout or "").strip() or f"process exited with code {e.returncode}"
-                        results.append(f"Error executing script '{rest}': {err}")
-                    except Exception as e:
-                        results.append(f"Error running script '{rest}': {str(e)}")
+                    # Dispatch lives in core/scheduler/script_runner.py; schedules
+                    # call it directly now, and this path remains for anything
+                    # that still sends the script-executor a `script …` prompt.
+                    result = await run_legacy_script_line(rest)
+                    if result.output:
+                        results.append(result.output)
                 else:
                     results.append(f"Unknown action: {action}")
                     

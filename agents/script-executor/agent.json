@@ -8,38 +8,48 @@
   "emoji": "⚙️",
   "schedules": [
     {
+      "id": "nightly-sync",
+      "kind": "script",
       "channel": "general",
       "thread": "cronjobs",
       "cron": "0 0 * * *",
-      "prompt": [
-        "script sync_tasks.py",
-        "script sync_projects.py",
-        "script sync_knowledge.py",
-        "script wiki_scanner.py"
+      "script": [
+        "sync_tasks.py",
+        "sync_projects.py",
+        "sync_knowledge.py",
+        "wiki_scanner.py"
       ]
     },
     {
+      "id": "dream-standup",
+      "kind": "script",
       "channel": "general",
       "thread": "dreams",
       "cron": "0 23 * * *",
-      "prompt": [
-        "script dream_standup.py"
-      ]
+      "script": "dream_standup.py"
     },
     {
+      "id": "hourly-git-sync",
+      "kind": "script",
       "channel": "general",
       "thread": "cronjobs",
       "cron": "0 */1 * * *",
-      "prompt": [
-        "script sync_git.py"
-      ]
+      "script": "sync_git.py"
     },
     {
+      "id": "coding-tick",
+      "kind": "script",
       "channel": "software-dev",
       "cron": "*/5 * * * *",
-      "prompt": [
-        "script coding_tick.py"
-      ]
+      "script": "coding_tick.py"
+    },
+    {
+      "id": "job-reaper",
+      "kind": "script",
+      "channel": "general",
+      "thread": "cronjobs",
+      "cron": "*/5 * * * *",
+      "script": "reap_jobs.py"
     }
   ]
 }

@@ -24,8 +24,15 @@
   ],
   "schedules": [
     {
+      "id": "weekly-scout",
+      "kind": "prompt",
       "channel": "real-estate",
       "cron": "0 8 * * 5",
+      "precondition": {
+        "type": "always",
+        "reason": "Listings live in Zillow; there is no local signal for new listings."
+      },
+      "session_policy": "stateless",
       "prompt": [
         "Ask property-scout to load real_estate_scout skill, read criteria, pull listings",
         "via zillow_query, and run Cap Rate/Price math. Discard failing properties.",
