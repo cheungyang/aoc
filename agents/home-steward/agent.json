@@ -3,6 +3,7 @@
   "name": "Butler",
   "emoji": "🛎️",
   "model": "FLASH",
+  "memory_topics": ["home"],
   "description": "Smart Home Steward: manages, automates, audits, and observes Home Assistant devices and configurations safely.",
   "channels": [
     "home-automation",

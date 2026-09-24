@@ -86,9 +86,10 @@ Target sizes when creating a new agent:
 
 Why it is worth being strict:
 
-- The three PKM vault files (`MEMORY.md`, `CONTEXT.md`, `FEEDBACK.md`) are
-  appended to the same prompt and **grow on their own**, at roughly 300 tokens
-  per month for an active agent. Whatever you author is a floor that only rises.
+- Memory is appended to the same prompt: the shared Profile, the topics in
+  `memory_topics`, and the agent's own `MEMORY.md` / `FEEDBACK.md`. The dream
+  keeps each within a budget, but together they add up to ~2,000 tokens for an
+  active agent. Whatever you author sits on top of that.
 - Measured across the current roster, the largest agents reach ~4,500 tokens of
   system prompt plus ~2,700 of tool schemas. The smallest do the same class of
   work at ~800 + 636.
@@ -104,7 +105,11 @@ Practical rules:
 - Do not paste examples into the persona if a skill can carry them — skills load
   on demand, the persona never unloads.
 - Put durable behaviour in the authored files and let the dream cycle own
-  `MEMORY.md` / `CONTEXT.md` / `FEEDBACK.md`. Never pre-seed the vault files.
+  memory. Never pre-seed the vault files. Facts about the user belong in the
+  shared Profile/topics, not in `USER.md`.
+- Set `memory_topics` in `agent.json` to the shared topics (from
+  `pkm/wiki/memory/TAGS.md`) the agent needs to read. List each one; subscribe
+  sparingly, since every topic costs prompt on every turn.
 - Fewer tools is also a prompt saving: each bound tool schema costs 130–550
   tokens on every turn.
 
@@ -116,7 +121,6 @@ Create the following folders in the Obsidian vault (assumed path `pkm/`):
 Create the following markdown files in the vault:
 - `pkm/agents/<agent_id>/MEMORY.md` (for long-term, curated memory).
 - `pkm/agents/<agent_id>/FEEDBACK.md` (for long-term, curated feedback from human).
-- `pkm/agents/<agent_id>/CONTEXT.md` (for long-term, curated context about the human).
 
 ### 6. Agent-Friendly Output & Memory (IPC Format)
 Once the files and directories are successfully written, finalize the execution by outputting the strict XML structure below. This format is required to ensure perfect readability for routing agents.
@@ -134,7 +138,6 @@ Once the files and directories are successfully written, finalize the execution 
       - agents/<agent_id>/IDENTITY.md
       - pkm/agents/<agent_id>/MEMORY.md
       - pkm/agents/<agent_id>/FEEDBACK.md
-      - pkm/agents/<agent_id>/CONTEXT.md
     </files_created>
     <capabilities>[Brief summary of the agent's specialization and assigned tools/skills]</capabilities>
   </payload>

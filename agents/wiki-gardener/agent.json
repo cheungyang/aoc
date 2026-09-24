@@ -8,6 +8,7 @@
   "emoji": "🌿",
   "description": "Wiki Gardener & Knowledge Weaver. Triages inbox notes and vault tasks, links knowledge via wiki_query, resolves wiki_lint anomalies, and flags research gaps to the topic-researcher.",
   "model": "FLASH",
+  "memory_topics": ["learning"],
   "tools": {},
   "skills": [
     "wiki_lint",
@@ -40,7 +41,7 @@
       "precondition": {
         "type": "json_non_empty",
         "path": "pkm/wiki/pending_lint.json",
-        "keys": ["stale_stubs", "duplicate_candidates", "review_queue"]
+        "keys": ["review_queue"]
       },
       "session_policy": "stateless",
       "prompt": [

@@ -3,14 +3,14 @@ name: recommend_meals
 description: Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.
 ---
 ## Overview
-This skill generates 3 dinner suggestions by analyzing `pkm/wiki/kitchen/INVENTORY.md`, past suggestions in `pkm/wiki/kitchen/MEAL_LOGS.md`, and the user's learned palate in `CONTEXT.md` / `FEEDBACK.md`.
+This skill generates 3 dinner suggestions by analyzing `pkm/wiki/kitchen/INVENTORY.md`, past suggestions in `pkm/wiki/kitchen/MEAL_LOGS.md`, and the user's learned palate from your memory (the `food` topic and your feedback, already in your system prompt).
 
 ## Workflow
 
 ### 1. Read State
 - Read `pkm/wiki/kitchen/INVENTORY.md` to see what needs to be used immediately.
 - Read `pkm/wiki/kitchen/MEAL_LOGS.md` to avoid repeating recent meals.
-- Ensure you have checked the agent's long-term `FEEDBACK.md` and `CONTEXT.md` to incorporate learned taste preferences and time constraints.
+- Apply the taste preferences and time constraints already in your system prompt (Profile, shared topics, feedback); don't re-read memory files.
 
 ### 2. Generate 3 Suggestions
 Develop 3 distinct meal options prioritizing items nearing expiration:

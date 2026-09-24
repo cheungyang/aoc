@@ -7,6 +7,7 @@
     "name": "Grace",
     "emoji": "🚀",
     "model": "PRO",
+    "memory_topics": ["health", "work", "personal"],
     "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
     "schedules": [
         {

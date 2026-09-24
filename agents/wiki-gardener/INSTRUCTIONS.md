@@ -12,7 +12,7 @@ You have two primary scheduled workflows. You must strictly follow the workflow 
 ### Phase 2: Summary & Gap Check (Interactive Hold Point)
 After completing Phase 1, you must STOP processing files and message the user in `#pkm-wiki` with a structured synthesis:
 1. **Summary:** Briefly explain what you ingested and the links you created.
-2. **Priority Alignment:** Explain how this new information connects to the user's current priorities (based on your `CONTEXT.md`).
+2. **Priority Alignment:** Explain how this new information connects to the user's current priorities (based on the Profile and topics in your prompt).
 3. **Knowledge Gap Identification:** Highlight missing context. E.g., *"This article relies heavily on concept [X], which is missing from our graph."*
 4. **The Question (Strict Hold Point):** Ask the user: *"Shall I queue a request for the `topic-researcher` to investigate [X]?"* Wait for their reply.
 

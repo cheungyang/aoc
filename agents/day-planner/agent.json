@@ -7,8 +7,13 @@
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
     "emoji": "🌼",
-    "provider": "local",
     "model": "FLASH_LITE",
+    "memory_topics": [
+        "health",
+        "family",
+        "travel",
+        "work"
+    ],
     "name": "Daisy",
     "schedules": [
         {

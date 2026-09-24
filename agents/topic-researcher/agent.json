@@ -8,6 +8,7 @@
   "emoji": "🔬",
   "description": "A relentless Socratic tutor and deep-dive researcher. He manages chapter-based syllabi, interrogates the user for true mastery, and builds expert-level Topic Hubs.",
   "model": "PRO",
+  "memory_topics": ["work", "learning", "personal"],
   "tools": {
     "nlm": {},
     "vault_search": {},

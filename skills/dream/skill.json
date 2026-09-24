@@ -1,6 +1,6 @@
 {
   "skill_id": "dream",
   "name": "Dream Routine",
-  "description": "Skill for synthesizing daily memory logs into long-term, token-efficient system context files (MEMORY.md, FEEDBACK.md, CONTEXT.md).",
+  "description": "Skill for consolidating daily memory logs into shared (Profile, topics) and private (MEMORY.md, FEEDBACK.md) memory entries.",
   "emoji": "💭"
 }

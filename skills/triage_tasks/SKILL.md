@@ -16,7 +16,7 @@ This skill guides the agent to systematically process untriaged tasks in the vau
    ```
    This returns only distinct `a/` tags with usage counts — the closed verb vocabulary. Keep it for the whole session.
 2. **Do NOT pre-load project tags.** Project candidates are fetched per task in Phase 2 Step 2.
-3. Your long-term memory (`CONTEXT.md`, `MEMORY.md`, `FEEDBACK.md`) is already in your system prompt. Apply any tagging rules found there; do not re-read those files.
+3. Your long-term memory (Profile, shared topics, your memory and feedback) is already in your system prompt. Apply any tagging rules found there; do not re-read those files.
 
 ### Phase 2: The Triage Loop
 Keep a session list of skipped task ids (initially empty).

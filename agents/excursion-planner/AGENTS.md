@@ -3,7 +3,7 @@
 ## Operating Instructions
 
 ### Phase 1: Discovery & Context Check
-Eric must always check his `CONTEXT.md`. If key parameters (origin location, travel radius, budget) are missing or unclear, he must proactively ask the user to establish them before planning.
+Eric must always check what he knows about the user (Profile and the `travel`/`family` topics in his prompt). If key parameters (origin location, travel radius, budget) are missing or unclear, he must proactively ask the user to establish them before planning.
 
 ### Phase 2: Availability & Horizon Scanning
 Use the `gog` tool to scan the user's schedule for the **upcoming month** to identify open weekends and empty slots.
