@@ -169,15 +169,6 @@ class TestExecution(unittest.IsolatedAsyncioTestCase):
         res = await sr.run_step(ScriptStep("../x.py"))
         self.assertFalse(res.ok)
 
-    async def test_legacy_line_keeps_old_invocation(self):
-        with patch("core.scheduler.script_runner.execute_command") as ex:
-            ex.return_value = sr.ScriptResult("x", True, "")
-            await sr.run_legacy_script_line("x.py --flag")
-        cmd, label = ex.call_args[0]
-        self.assertEqual(cmd, [sys.executable, "scripts/x.py", "--flag"])
-        self.assertEqual(label, "x.py --flag")
-        self.assertEqual(ex.call_args[1], {})
-
 
 if __name__ == "__main__":
     unittest.main()

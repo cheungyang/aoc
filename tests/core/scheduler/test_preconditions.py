@@ -215,6 +215,14 @@ class TestEvaluate(TmpDirCase):
         conn.close()
         self.assertTrue(p.evaluate(ctx()))
 
+    def test_project_list_non_empty_rejects_unknown_status(self):
+        with self.assertRaises(PreconditionError) as err:
+            build_precondition({"type": "project_list_non_empty", "status": "executng"})
+        self.assertIn("executing", str(err.exception))
+        # Every canonical status is accepted.
+        for status in ("executing", "planning", "considering", "paused", "done", "discontinued"):
+            build_precondition({"type": "project_list_non_empty", "status": status})
+
 
 if __name__ == "__main__":
     unittest.main()

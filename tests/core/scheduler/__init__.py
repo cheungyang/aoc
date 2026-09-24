@@ -1,9 +1,9 @@
 """Tests for core/scheduler: one test module per scheduler module.
 
-`tests/__init__.py` replaces `croniter` with a MagicMock for the whole suite,
-which would make every cron expression "valid" and every next-run time a mock.
-Scheduler tests need the real library; `use_real_croniter()` provides it for
-the duration of a test without changing what the rest of the suite sees.
+`tests/__init__.py` falls back to a MagicMock `croniter` only when the library
+is not installed. A mock would make every cron expression "valid" and every
+next-run time a mock, so scheduler tests use `use_real_croniter()`, which
+yields the real module or skips the test when it is unavailable.
 """
 import importlib
 import sys

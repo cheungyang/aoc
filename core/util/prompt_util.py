@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+from core.util.config import Config
 from core.util.time_util import format_timezone_label, get_local_now
 
 
@@ -116,7 +117,7 @@ def _load_prompt_from_file(file_inputs, tag, group_desc=None) -> str:
 def _agent_prompt_files(agent_id: str) -> dict:
     agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
     agent_path = os.path.join(agents_dir, agent_id)
-    pkm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "pkm", "agents", agent_id))
+    pkm_dir = os.path.join(Config().pkm_dir, "agents", agent_id)
 
     return {
         "AGENT": (os.path.join(agent_path, "AGENTS.md"), "Your specialization and workflow:"),

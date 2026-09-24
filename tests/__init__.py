@@ -32,5 +32,10 @@ if 'langchain_mcp_adapters' not in sys.modules:
     sys.modules['langchain_mcp_adapters'] = MagicMock()
     sys.modules['langchain_mcp_adapters.tools'] = MagicMock()
 
-if 'croniter' not in sys.modules:
-    sys.modules['croniter'] = MagicMock()
+# Mock croniter only when it is not installed: a mock accepts every cron
+# expression and returns mock run times, which hides real schedule bugs.
+try:
+    import croniter
+except ImportError:
+    if 'croniter' not in sys.modules:
+        sys.modules['croniter'] = MagicMock()

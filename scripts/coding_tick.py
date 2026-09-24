@@ -341,4 +341,9 @@ def main(argv=None) -> int:
 if __name__ == "__main__":
     ensure_project_interpreter()
     enter_project_root()
-    sys.exit(main())
+    from core.runtime.execution_context import surface_scope
+
+    # Run as a script, this is the scheduled tick: the worker calls it makes
+    # are booked as scheduled work.
+    with surface_scope("scheduled"):
+        sys.exit(main())

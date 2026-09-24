@@ -308,8 +308,17 @@ class ProjectListNonEmpty(Precondition):
     type_name = "project_list_non_empty"
 
     def validate(self):
+        from core.knowledge.projects.parser import STATUS_MAP
+
         self._check_keys(["status", "db_path"])
         self.status = str(self.config.get("status") or "executing").lower()
+        # A misspelt status would otherwise pass validation and then skip
+        # forever with "no <typo> projects".
+        known = sorted(set(STATUS_MAP.values()))
+        if self.status not in known:
+            raise PreconditionError(
+                f"'{self.type_name}' status '{self.status}' is not one of: {', '.join(known)}"
+            )
 
     def evaluate(self, ctx):
         from core.knowledge.projects.db import get_connection, get_db_path

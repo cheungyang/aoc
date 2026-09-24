@@ -1,6 +1,6 @@
 from typing import Optional, Any, Union
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-from core.runtime.execution_context import ExecutionContext
+from core.runtime.execution_context import ExecutionContext, inherited_surface
 
 
 class SessionManager:
@@ -29,9 +29,12 @@ class SessionManager:
         graph so the callee is evaluated against that graph rather than ambient state.
 
         `surface` optionally tags which interface the turn came through (voice / text /
-        scheduled / tool) for token accounting. It does not affect the session id; when
-        omitted it is derived from `source`.
+        scheduled / tool / job) for token accounting. It does not affect the session id.
+        When omitted it is inherited (`inherited_surface`: the current context's explicit
+        surface, then a `surface_scope`), and failing that derived from `source`.
         """
+        if surface is None:
+            surface = inherited_surface()
         return ExecutionContext._create(
             agent_id=str(agent_id or ""),
             source=source,

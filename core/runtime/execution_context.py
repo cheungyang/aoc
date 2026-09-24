@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Optional, Any, Union
 import contextvars
@@ -12,9 +13,9 @@ _CONTEXT_SECRET = object()
 # "job" is detached work minted with no ambient caller (source="job": callerless
 # graph_call, run_tool, post-turn summarisation, the coding worker). It is NOT
 # assumed to be scheduled -- a job can just as well trace back to a user's turn.
-# Work that does have a caller inherits the caller's surface instead: async
-# agent_call delegations are source="tool", and `with_graph`/`with_agent`
-# carry an explicit surface across.
+# Work that does have a caller inherits the caller's surface instead (see
+# `inherited_surface`): a context minted while another is current takes that
+# context's explicit surface, and `with_graph`/`with_agent` carry it across.
 SURFACES = frozenset({"voice", "text", "scheduled", "tool", "job"})
 
 # Default surface for contexts that were not tagged explicitly. Any source not
@@ -25,6 +26,38 @@ _SOURCE_SURFACES = {
     "job": "job",
     "tool": "tool",
 }
+
+# A surface declared for a block of work that has no context of its own yet.
+# A scheduled script wraps its entry point in `surface_scope("scheduled")`, so
+# the contexts it mints (the coding tick's worker, the dream standup's
+# agent_call fan-out) are booked as scheduled rather than as the `job` / `tool`
+# their sources imply. Set only through `surface_scope`.
+_scoped_surface = contextvars.ContextVar("scoped_surface", default=None)
+
+
+@contextmanager
+def surface_scope(surface: str):
+    """Declares the surface for contexts minted inside this block."""
+    if surface not in SURFACES:
+        raise ValueError(f"Unknown surface '{surface}'; expected one of {sorted(SURFACES)}.")
+    token = _scoped_surface.set(surface)
+    try:
+        yield
+    finally:
+        _scoped_surface.reset(token)
+
+
+def inherited_surface() -> Optional[str]:
+    """The surface a newly minted context inherits when none is given.
+
+    The current context's explicit surface first -- an agent called during a
+    voice turn is voice work -- then the one declared by `surface_scope`. None
+    leaves the new context to derive its surface from its own `source`.
+    """
+    ctx = current_execution_context.get()
+    if ctx is not None and ctx.surface:
+        return ctx.surface
+    return _scoped_surface.get()
 
 # The single ambient identity for the currently executing agent.
 # Replaces the former `current_execution_context` and `current_graph_id` pair.

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.runtime.execution_context import ExecutionContext
+from core.runtime.execution_context import ExecutionContext, current_execution_context, surface_scope
 from core.runtime.session_manager import SessionManager
 
 
@@ -173,6 +173,52 @@ class TestExecutionContextSurface(unittest.TestCase):
         ctx = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
         self.assertEqual(ctx.with_graph("coding").get_surface(), "voice")
         self.assertEqual(ctx.with_agent("b").get_surface(), "voice")
+
+    def test_surface_scope_tags_contexts_minted_inside_it(self):
+        """A scheduled script declares itself once; everything it mints follows."""
+        with surface_scope("scheduled"):
+            job = SessionManager.get_session(agent_id="a", source="job")
+            tool = SessionManager.get_session(agent_id="a", source="tool", channel="general")
+            voice = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
+            self.assertEqual(job.get_surface(), "scheduled")
+            self.assertEqual(tool.get_surface(), "scheduled")
+            self.assertEqual(voice.get_surface(), "voice")  # explicit still wins
+        self.assertEqual(SessionManager.get_session(agent_id="a", source="job").get_surface(), "job")
+
+    def test_unknown_scope_rejected(self):
+        with self.assertRaises(ValueError):
+            with surface_scope("telepathy"):
+                pass
+
+    def test_a_context_minted_under_a_caller_inherits_its_surface(self):
+        """An agent called during a voice turn is voice work, not generic tool work."""
+        caller = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
+        token = current_execution_context.set(caller)
+        try:
+            callee = SessionManager.get_session(agent_id="b", source="tool", channel="general")
+        finally:
+            current_execution_context.reset(token)
+        self.assertEqual(callee.get_surface(), "voice")
+
+    def test_an_untagged_caller_leaves_the_source_default(self):
+        caller = SessionManager.get_session(agent_id="main", source="discord", channel="general")
+        token = current_execution_context.set(caller)
+        try:
+            callee = SessionManager.get_session(agent_id="b", source="tool", channel="general")
+        finally:
+            current_execution_context.reset(token)
+        self.assertIsNone(callee.surface)
+        self.assertEqual(callee.get_surface(), "tool")
+
+    def test_the_callers_surface_wins_over_a_scope(self):
+        caller = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
+        with surface_scope("scheduled"):
+            token = current_execution_context.set(caller)
+            try:
+                callee = SessionManager.get_session(agent_id="b", source="tool", channel="general")
+            finally:
+                current_execution_context.reset(token)
+        self.assertEqual(callee.get_surface(), "voice")
 
     def test_unknown_surface_rejected(self):
         with self.assertRaises(ValueError):

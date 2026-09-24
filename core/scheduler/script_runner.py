@@ -232,7 +232,6 @@ async def execute_command(
     label: str,
     *,
     cwd: Optional[str] = None,
-    env: Optional[Dict[str, str]] = None,
     timeout: Optional[int] = None,
 ) -> ScriptResult:
     """Runs one command. stdout is the message; errors never come back silent."""
@@ -240,8 +239,6 @@ async def execute_command(
     kwargs = dict(capture_output=True, text=True, check=True, timeout=timeout_sec)
     if cwd is not None:
         kwargs["cwd"] = cwd
-    if env is not None:
-        kwargs["env"] = env
     try:
         res = await asyncio.to_thread(subprocess.run, cmd, **kwargs)
         # The script's own stdout *is* the message. A script that succeeded and
@@ -274,20 +271,3 @@ async def run_step(
 
     cmd = [sys.executable, path] + [os.path.expanduser(a) for a in step.args]
     return await execute_command(cmd, label, cwd=PROJECT_ROOT, timeout=timeout)
-
-
-async def run_legacy_script_line(rest: str) -> ScriptResult:
-    """The script-executor's `script <name> [args]` syntax, unchanged.
-
-    Kept for anything that still sends the script-executor agent a `script …`
-    prompt (e.g. a delegated `agent_call`). Schedules no longer do.
-    """
-    args = shlex.split(rest)
-    if args:
-        args[0] = os.path.join("scripts", args[0])
-    expanded_args = [os.path.expanduser(arg) for arg in args]
-    if expanded_args and expanded_args[0].endswith(".py") and expanded_args[0] != sys.executable:
-        cmd = [sys.executable] + expanded_args
-    else:
-        cmd = expanded_args
-    return await execute_command(cmd, rest)

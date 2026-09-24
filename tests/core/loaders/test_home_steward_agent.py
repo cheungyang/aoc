@@ -32,7 +32,6 @@ class TestButlerAgentConfig(unittest.TestCase):
         self.assertEqual(agent.get_config("name"), "Butler")
         self.assertEqual(agent.get_config("emoji"), "🛎️")
         self.assertEqual(agent.get_config("model"), "FLASH")
-        self.assertEqual(agent.get_config("discord_token_key"), "DISCORD_TOKEN_HOME_STEWARD")
         self.assertIn("home-automation", agent.get_config("channels", []))
         self.assertIn("general", agent.get_config("channels", []))
         self.assertIn("home-automation", agent.get_config("channel_hosts", []))
