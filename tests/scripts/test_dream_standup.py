@@ -2,9 +2,11 @@
 
 The value of moving this out of a prompt is that a missing or malformed reply
 becomes visible instead of being smoothed over, so most of these tests are about
-what the script does when an agent misbehaves.
+what the script does when an agent misbehaves. Memory v2: the dream replies
+with ops on numbered entries; `dream_ops` (tested on its own) applies them.
 """
 import asyncio
+import datetime
 import os
 import sys
 import tempfile
@@ -13,12 +15,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from core.knowledge.memory import dream_ops, store
+from core.knowledge.memory import state as mstate
+from core.knowledge.memory.entries import PRIVATE, PROFILE, Entry, MemoryFile
+from core.runtime.delegation import DelegationResult
+from core.util import format_tool_response
 from core.util.config import Config
+from scripts import dream_standup as ds
 from scripts.dream_standup import (
+    build_compaction_prompt,
     build_prompt,
     dream,
-    extract_tag,
-    parse_dream_response,
     quiet_stdout,
     render,
     render_row,
@@ -26,46 +33,24 @@ from scripts.dream_standup import (
     standup_agents,
 )
 
-DREAMED_XML = """
-<dream_response>
-  <status>Dreamed</status>
-  <memory_md>- Morning workouts stick. (Ref: 2026-09-20)</memory_md>
-  <feedback_md>- Keep plans under five items.</feedback_md>
-  <context_md></context_md>
-  <errors>None</errors>
-  <learnings>User prefers morning workouts.</learnings>
-</dream_response>
-"""
+TODAY = datetime.date(2026, 9, 24)
 
-EMPTY_XML = """
-<dream_response>
-  <status>No new memories</status>
-  <errors>None</errors>
-  <learnings></learnings>
-</dream_response>
-"""
 
-# What main and reward-travel sent back on 2026-09-21: the skill's template.
-ECHOED_TEMPLATE_XML = """
-<dream_response>
-  <status>Dreamed</status>
-  <memory_md>[full new contents of MEMORY.md]</memory_md>
-  <feedback_md>- Keep plans under five items.</feedback_md>
-  <context_md></context_md>
-  <errors>None</errors>
-  <learnings>[one-line highlight]</learnings>
-</dream_response>
-"""
+def dream_xml(ops="", status="Dreamed", learnings="User prefers morning workouts."):
+    return (f"<dream_response><status>{status}</status><ops>{ops}</ops>"
+            f"<errors>None</errors><learnings>{learnings}</learnings></dream_response>")
+
+
+EMPTY_XML = "<dream_response><status>No new memories</status><errors>None</errors><learnings></learnings></dream_response>"
+
+
+def ok(text):
+    return DelegationResult(agent_id="x", text=text)
 
 
 def _deadline(seconds=60):
     """A standup deadline `seconds` from now on the running loop."""
     return asyncio.get_running_loop().time() + seconds
-
-
-def _tool_response(inner):
-    """Wraps content the way `format_tool_response` does."""
-    return f"<tool_response><payload>{inner}</payload><errors>None</errors></tool_response>"
 
 
 class VaultMixin:
@@ -93,20 +78,21 @@ class VaultMixin:
             os.utime(path, (mtime, mtime))
         return path
 
-    def memory_file(self, agent_id, name, text):
-        os.makedirs(self.agent_dir(agent_id), exist_ok=True)
-        with open(os.path.join(self.agent_dir(agent_id), name), "w") as f:
-            f.write(text)
-
-    def read(self, agent_id, name):
-        with open(os.path.join(self.agent_dir(agent_id), name)) as f:
-            return f.read()
-
     def logs(self, agent_id):
         try:
             return sorted(os.listdir(self.logs_dir(agent_id)))
         except FileNotFoundError:
             return []
+
+    def night(self, tags=(("food", "Diet."),), subscriptions=None):
+        return {
+            "today": TODAY,
+            "tags": list(tags),
+            "tag_names": [name for name, _ in tags],
+            "subscriptions": subscriptions or {},
+            "state": mstate.load(),
+            "changed_topics": set(),
+        }
 
 
 class TestAgentSelection(unittest.TestCase):
@@ -125,19 +111,11 @@ class TestAgentSelection(unittest.TestCase):
             "graph-worker": {"channels": ["*"], "stateless": True},
             "day-planner": {"channels": ["day-planning", "general"]},
         })
-
-        selected = [agent_id for agent_id, _ in standup_agents(loader)]
-
-        self.assertEqual(selected, ["day-planner", "main"])
+        self.assertEqual([a for a, _ in standup_agents(loader)], ["day-planner", "main"])
 
     def test_order_is_stable(self):
-        loader = self._loader({
-            "wiki-gardener": {"channels": ["general"]},
-            "day-planner": {"channels": ["general"]},
-        })
-        self.assertEqual(
-            [a for a, _ in standup_agents(loader)], ["day-planner", "wiki-gardener"]
-        )
+        loader = self._loader({"wiki-gardener": {}, "day-planner": {}})
+        self.assertEqual([a for a, _ in standup_agents(loader)], ["day-planner", "wiki-gardener"])
 
 
 class TestChannelResolution(unittest.TestCase):
@@ -158,315 +136,272 @@ class TestChannelResolution(unittest.TestCase):
         self.assertEqual(resolve_channel({}), "general")
 
 
-class TestParsing(unittest.TestCase):
+class TestPrompt(unittest.TestCase):
 
-    def test_extract_tag(self):
-        self.assertEqual(extract_tag("learnings", DREAMED_XML), "User prefers morning workouts.")
-        self.assertEqual(extract_tag("missing", DREAMED_XML), "")
+    def test_inlines_the_input_and_the_contract(self):
+        prompt = build_prompt(dream_ops.DreamInput(xml="<dream_input>X</dream_input>", ids={}))
+        self.assertTrue(prompt.startswith("Run your dream skill."))
+        self.assertIn("<dream_input>X</dream_input>", prompt)
+        self.assertIn("Do not use any tools", prompt)
+        self.assertIn("<system_memory_log>", prompt)
+        self.assertIn(dream_ops.RESPONSE_FORMAT, prompt)
+        self.assertNotIn("pkm/", prompt)
+        self.assertNotIn("memory_logs/", prompt)
 
-    def test_parses_a_dreamed_response(self):
-        status, learnings = parse_dream_response(DREAMED_XML)
-        self.assertEqual(status, "Dreamed")
-        self.assertEqual(learnings, "User prefers morning workouts.")
-
-    def test_parses_an_empty_response(self):
-        status, learnings = parse_dream_response(EMPTY_XML)
-        self.assertEqual(status, "No new memories")
-        self.assertEqual(learnings, "")
-
-    def test_conversational_reply_is_not_treated_as_a_quiet_night(self):
-        """An agent that answered in prose did not dream. Rendering that as
-        'No new memories' is exactly the kind of invented row this replaces."""
-        status, detail = parse_dream_response("Sure! I'd be happy to help with that.")
-        self.assertIsNone(status)
-        self.assertIn("no <dream_response>", detail)
-
-    def test_empty_reply_is_reported(self):
-        status, detail = parse_dream_response("")
-        self.assertIsNone(status)
-        self.assertEqual(detail, "empty response")
+    def test_compaction_prompt(self):
+        prompt = build_compaction_prompt(dream_ops.DreamInput(xml="<compaction_input/>", ids={}))
+        self.assertIn("<compaction_input/>", prompt)
+        self.assertIn(dream_ops.COMPACTION_FORMAT, prompt)
+        self.assertIn("Do not add new facts", prompt)
 
 
 class TestRendering(unittest.TestCase):
+    CONFIG = {"emoji": "🌼", "name": "Daisy"}
+
+    def row(self, **result):
+        return render_row({"agent_id": "day-planner", "config": self.CONFIG, **result}, result.pop("state", None))
 
     def test_dreamed_row(self):
-        row = render_row({
-            "agent_id": "day-planner",
-            "config": {"emoji": "🌼", "name": "Daisy"},
-            "status": "Dreamed",
-            "learnings": "Prefers mornings.",
-        })
-        self.assertEqual(row, "🌼 Daisy | 🌙 Dreamed -> Key Update: Prefers mornings.")
+        self.assertEqual(self.row(status="Dreamed", learnings="Prefers mornings."),
+                         "🌼 Daisy | 🌙 Dreamed -> Key Update: Prefers mornings.")
 
     def test_quiet_row(self):
-        row = render_row({
-            "agent_id": "day-planner",
-            "config": {"emoji": "🌼", "name": "Daisy"},
-            "status": "No new memories",
-            "learnings": "",
-        })
-        self.assertEqual(row, "🌼 Daisy | 💤 No new memories to process today.")
-
-    def test_failure_is_visible_rather_than_omitted(self):
-        row = render_row({
-            "agent_id": "day-planner",
-            "config": {"emoji": "🌼", "name": "Daisy"},
-            "error": "timed out",
-        })
-        self.assertIn("⚠️ Standup failed: timed out", row)
+        self.assertEqual(self.row(status="No new memories", learnings=""),
+                         "🌼 Daisy | 💤 No new memories to process today.")
 
     def test_dreamed_without_learnings_still_reads_sensibly(self):
-        row = render_row({
-            "agent_id": "x",
-            "config": {"emoji": "🤖", "name": "X"},
-            "status": "Dreamed",
-            "learnings": "",
-        })
-        self.assertIn("no notable learnings recorded", row)
+        self.assertIn("no notable learnings recorded", self.row(status="Dreamed", learnings=""))
 
-    def test_header_and_body(self):
+    def test_failure_is_visible_rather_than_omitted(self):
+        self.assertIn("⚠️ Standup failed: timed out", self.row(error="timed out"))
+
+    def test_repeated_failure_is_an_alarm(self):
+        state = {"dreams": {"day-planner": {"consecutive_failures": 2}}}
+        row = render_row({"agent_id": "day-planner", "config": self.CONFIG, "error": "boom"}, state)
+        self.assertIn("🚨 Dream failed 2 nights in a row: boom", row)
+
+    def test_report_details_and_profile_changes(self):
+        report = dream_ops.Report(archived={"evicted": 1}, profile_changes=["PROFILE + Lives in San Jose."])
+        row = self.row(status="Dreamed", learnings="x", report=report)
+        self.assertEqual(row, "🌼 Daisy | 🌙 Dreamed -> Key Update: x (evicted 1)\n    PROFILE + Lives in San Jose.")
+
+    def test_header_body_and_sections(self):
         output = render(
-            [{
-                "agent_id": "day-planner",
-                "config": {"emoji": "🌼", "name": "Daisy"},
-                "status": "Dreamed",
-                "learnings": "Prefers mornings.",
-            }],
-            today="2026-09-17",
+            [{"agent_id": "day-planner", "config": self.CONFIG, "status": "Dreamed", "learnings": "x"}],
+            today="2026-09-17", extra=["🧹 Compacted food"], alerts=["🚨 a: stalled"], suggestions=["add it?"],
         )
         lines = output.split("\n")
         self.assertEqual(lines[0], "**Nightly Dream Standup - 2026-09-17**")
         self.assertEqual(lines[1], "")
         self.assertIn("🌼 Daisy", lines[2])
-
-
-class TestPrompt(unittest.TestCase):
-
-    def test_inlines_current_files_and_logs(self):
-        prompt = build_prompt(
-            "day-planner",
-            {"MEMORY.md": "old memory", "FEEDBACK.md": "", "CONTEXT.md": "ctx"},
-            {"2026-09-20.md": "- [09:00:00] prefers mornings"},
-        )
-        self.assertTrue(prompt.startswith("Run your dream skill."))
-        self.assertIn('<file name="MEMORY.md">\nold memory\n</file>', prompt)
-        self.assertIn('<log name="2026-09-20.md">\n- [09:00:00] prefers mornings\n</log>', prompt)
-        self.assertIn("Do not use any tools", prompt)
-        self.assertIn("<system_memory_log>", prompt)
-        self.assertIn("<memory_md>", prompt)
-
-    def test_no_filesystem_path_is_given_to_the_agent(self):
-        """The path was what the weak model got wrong; it no longer needs one."""
-        prompt = build_prompt("day-planner", {}, {})
-        self.assertNotIn("pkm/", prompt)
-        self.assertNotIn("memory_logs/", prompt)
+        self.assertEqual(lines[3:], ["🧹 Compacted food", "", "**Alerts**", "🚨 a: stalled",
+                                     "", "**Suggestions**", "- add it?"])
 
 
 class TestDream(VaultMixin, unittest.IsolatedAsyncioTestCase):
 
-    async def _dream(self, reply, agent_id="day-planner", side_effect=None):
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            if side_effect is not None:
-                mock_tool.ainvoke = AsyncMock(side_effect=side_effect)
-            else:
-                mock_tool.ainvoke = AsyncMock(return_value=reply)
-            result = await dream(agent_id, {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
-        return result, mock_tool
+    async def _dream(self, reply=None, agent_id="day-planner", config=None, side_effect=None, night=None,
+                     deadline=60):
+        night = night or self.night()
+        mock = AsyncMock(side_effect=side_effect) if side_effect else AsyncMock(return_value=ok(reply))
+        with patch.object(ds, "stream_delegate", mock):
+            result = await dream(agent_id, config or {"channels": ["general"]}, asyncio.Semaphore(1),
+                                 _deadline(deadline), night)
+        return result, mock
 
-    async def test_dreamed_writes_the_files_and_consumes_the_logs(self):
+    async def test_dreamed_applies_ops_and_consumes_the_logs(self):
         self.log("day-planner", "2026-09-20.md", "- prefers mornings")
-        self.memory_file("day-planner", "CONTEXT.md", "stale context")
+        night = self.night(subscriptions={"day-planner": ["food"]})
 
-        result, tool = await self._dream(_tool_response(DREAMED_XML))
+        result, call = await self._dream(dream_xml('<add tag="food">Oat milk OK.</add>'
+                                                    '<add tag="private">Mornings work.</add>'), night=night)
 
         self.assertEqual(result["status"], "Dreamed")
-        self.assertEqual(self.read("day-planner", "MEMORY.md"), "- Morning workouts stick. (Ref: 2026-09-20)\n")
-        self.assertEqual(self.read("day-planner", "FEEDBACK.md"), "- Keep plans under five items.\n")
-        self.assertEqual(self.read("day-planner", "CONTEXT.md"), "")
+        self.assertEqual(result["learnings"], "User prefers morning workouts.")
+        self.assertEqual([e.text for e in store.load(store.topic_scope("food")).entries], ["Oat milk OK."])
+        self.assertEqual([e.text for e in store.load(store.private_scope("day-planner", PRIVATE)).entries],
+                         ["Mornings work."])
         self.assertEqual(self.logs("day-planner"), [])
-        prompt = tool.ainvoke.await_args.args[0]["prompt"]
+        self.assertEqual(night["changed_topics"], {"food"})
+        prompt = call.await_args.kwargs["prompt"]
         self.assertIn("- prefers mornings", prompt)
-        self.assertIn("stale context", prompt)
+
+    async def test_dream_is_non_recording_and_floor_tiered(self):
+        self.log("day-planner")
+        _, call = await self._dream(EMPTY_XML, config={"channels": ["general"], "model": "FLASH_LITE"})
+        kwargs = call.await_args.kwargs
+        self.assertIs(kwargs["record_memory"], False)
+        self.assertEqual(kwargs["model"], "FLASH")
+        self.assertEqual(kwargs["caller"], "script-executor")
+
+        _, call = await self._dream(EMPTY_XML, config={"channels": ["general"], "model": "PRO"})
+        self.assertEqual(call.await_args.kwargs["model"], "PRO")
+
+    async def test_existing_entries_are_shown_with_ids(self):
+        self.log("day-planner")
+        store.save(store.profile_scope(), MemoryFile([Entry(PROFILE, "Lives in San Jose.", "main", TODAY, TODAY)]))
+        _, call = await self._dream(dream_xml('<confirm id="e1"/>'))
+        self.assertIn('<entry id="e1" tag="profile">Lives in San Jose.</entry>', call.await_args.kwargs["prompt"])
+        self.assertEqual(store.load(store.profile_scope()).entries[0].count, 2)
 
     async def test_no_new_memories_consumes_the_logs_and_writes_nothing(self):
         self.log("day-planner", "2026-09-20.md")
-        self.memory_file("day-planner", "MEMORY.md", "keep me")
-
-        result, _ = await self._dream(_tool_response(EMPTY_XML))
-
+        result, _ = await self._dream(EMPTY_XML)
         self.assertEqual(result["status"], "No new memories")
-        self.assertEqual(self.read("day-planner", "MEMORY.md"), "keep me")
         self.assertEqual(self.logs("day-planner"), [])
+        self.assertFalse(os.path.exists(store.private_scope("day-planner", PRIVATE).path))
 
-    async def test_missing_file_tag_keeps_the_logs(self):
-        self.log("day-planner", "2026-09-20.md")
-        self.memory_file("day-planner", "MEMORY.md", "keep me")
-        reply = DREAMED_XML.replace("<context_md></context_md>", "")
-
-        result, _ = await self._dream(reply)
-
-        self.assertIn("<context_md>", result["error"])
-        self.assertEqual(self.read("day-planner", "MEMORY.md"), "keep me")
-        self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
-
-    async def test_echoed_template_is_rejected(self):
-        self.log("day-planner", "2026-09-20.md")
-        self.memory_file("day-planner", "MEMORY.md", "keep me")
-
-        result, _ = await self._dream(ECHOED_TEMPLATE_XML)
-
-        self.assertIn("placeholder", result["error"])
-        self.assertEqual(self.read("day-planner", "MEMORY.md"), "keep me")
-        self.assertFalse(os.path.exists(os.path.join(self.agent_dir("day-planner"), "FEEDBACK.md")))
-        self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
-
-    async def test_unrecognised_status_keeps_the_logs(self):
-        self.log("day-planner", "2026-09-20.md")
-        reply = EMPTY_XML.replace("No new memories", "[Strictly either 'Dreamed' or 'No new memories']")
-
-        result, _ = await self._dream(reply)
-
-        self.assertIn("unrecognised status", result["error"])
-        self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
+    async def test_a_malformed_reply_keeps_the_logs(self):
+        for reply in ("Sure! Happy to help.", dream_xml(status="[Dreamed or No new memories]"),
+                      "<dream_response><status>Dreamed</status><errors>None</errors></dream_response>"):
+            self.log("day-planner", "2026-09-20.md")
+            result, _ = await self._dream(reply)
+            self.assertIn("error", result, reply)
+            self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
 
     async def test_a_log_written_by_the_dream_itself_is_removed(self):
-        """A dream reply with a <system_memory_log> is saved as today's log;
-        left alone it would make the agent dream every night forever."""
+        """A dream about logs that writes a log would dream every night forever."""
         self.log("day-planner", "2026-09-20.md", "old")
-        self_log = os.path.join(self.logs_dir("day-planner"), "2026-09-24.md")
 
-        async def reply_and_log(_args):
-            with open(self_log, "w") as f:
-                f.write("- dreamed")
+        async def reply_and_log(**_):
+            self.log("day-planner", "2026-09-24.md", "- dreamed")
             with open(os.path.join(self.logs_dir("day-planner"), "2026-09-20.md"), "a") as f:
                 f.write("\n- appended by the dream")
-            return EMPTY_XML
+            return ok(EMPTY_XML)
 
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = reply_and_log
-            await dream("day-planner", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
-
+        await self._dream(side_effect=reply_and_log)
         self.assertEqual(self.logs("day-planner"), [])
 
     async def test_a_failed_dream_restores_the_logs_it_was_given(self):
         self.log("day-planner", "2026-09-20.md", "old")
 
-        async def log_then_fail(_args):
-            with open(os.path.join(self.logs_dir("day-planner"), "2026-09-24.md"), "w") as f:
-                f.write("- dreamed")
+        async def log_then_fail(**_):
+            self.log("day-planner", "2026-09-24.md", "- dreamed")
             with open(os.path.join(self.logs_dir("day-planner"), "2026-09-20.md"), "a") as f:
                 f.write("\n- appended by the dream")
             raise RuntimeError("boom")
 
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = log_then_fail
-            result = await dream("day-planner", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
-
+        result, _ = await self._dream(side_effect=log_then_fail)
         self.assertEqual(result["error"], "boom")
         self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
         with open(os.path.join(self.logs_dir("day-planner"), "2026-09-20.md")) as f:
             self.assertEqual(f.read(), "old")
 
-    async def test_a_dream_queued_past_the_deadline_is_not_started(self):
-        """It keeps its logs untouched and is retried the next night."""
-        self.log("day-planner", "2026-09-20.md", "old")
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(return_value=EMPTY_XML)
-            result = await dream("day-planner", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline(-1))
+    async def test_a_delegation_error_becomes_a_failed_row(self):
+        self.log("day-planner")
+        result, _ = await self._dream(side_effect=lambda **_: DelegationResult("x", error="Agent unreachable"))
+        self.assertEqual(result["error"], "Agent unreachable")
+        self.assertEqual(self.logs("day-planner"), ["log.md"])
 
-        mock_tool.ainvoke.assert_not_called()
+    async def test_a_dream_queued_past_the_deadline_is_not_started(self):
+        self.log("day-planner", "2026-09-20.md", "old")
+        result, call = await self._dream(EMPTY_XML, deadline=-1)
+        call.assert_not_called()
         self.assertIn("deadline", result["error"])
         self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
 
     async def test_a_dream_is_cut_off_at_the_deadline(self):
         self.log("day-planner", "2026-09-20.md", "old")
 
-        async def slow(_args):
+        async def slow(**_):
             await asyncio.sleep(5)
 
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = slow
-            result = await dream("day-planner", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline(0.05))
-
+        result, _ = await self._dream(side_effect=slow, deadline=0.05)
         self.assertIn("deadline", result["error"])
         self.assertEqual(self.logs("day-planner"), ["2026-09-20.md"])
 
     async def test_the_deadline_stops_short_of_the_scheduler_kill(self):
-        from scripts import dream_standup as ds
         with patch.object(ds, "default_timeout", return_value=300):
             now = asyncio.get_running_loop().time()
             deadline = ds.standup_deadline()
         self.assertAlmostEqual(deadline - now, 300 - ds.DEADLINE_MARGIN, delta=1)
 
     async def test_triggers_the_agent_on_a_permitted_channel(self):
-        config = {"channels": ["real-estate"], "emoji": "🏠", "name": "Scout"}
+        _, call = await self._dream(EMPTY_XML, agent_id="property-scout", config={"channels": ["real-estate"]})
+        kwargs = call.await_args.kwargs
+        self.assertEqual((kwargs["agent_id"], kwargs["channel"]), ("property-scout", "real-estate"))
 
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(return_value=_tool_response(DREAMED_XML))
-            result = await dream("property-scout", config, asyncio.Semaphore(1), _deadline())
-
-        args = mock_tool.ainvoke.await_args.args[0]
-        self.assertEqual(args["agent_id"], "property-scout")
-        self.assertEqual(args["channel"], "real-estate")
-        self.assertEqual(result["status"], "Dreamed")
-        self.assertEqual(result["learnings"], "User prefers morning workouts.")
-
-    async def test_reported_errors_become_a_failed_row(self):
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(
-                return_value="<tool_response><payload></payload><errors>Agent unreachable</errors></tool_response>"
-            )
-            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
-
-        self.assertEqual(result["error"], "Agent unreachable")
-
-    async def test_an_exception_does_not_abort_the_standup(self):
+    async def test_exceptions_timeouts_and_cancellation_do_not_abort_the_standup(self):
         """One agent failing must not take the other eleven rows with it."""
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
-            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
+        for exc, expected in ((RuntimeError("boom"), "boom"), (asyncio.TimeoutError(), "timed out"),
+                              (asyncio.CancelledError(), "CancelledError")):
+            result, _ = await self._dream(side_effect=exc)
+            self.assertIn(expected, result["error"])
 
-        self.assertEqual(result["error"], "boom")
+    async def test_dream_does_not_create_directories(self):
+        await self._dream(EMPTY_XML, agent_id="ghost")
+        self.assertFalse(os.path.exists(self.agent_dir("ghost")))
 
-    async def test_timeout_does_not_abort_the_standup(self):
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(side_effect=asyncio.TimeoutError())
-            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
 
-        self.assertIn("timed out", result["error"])
+class TestCompactionAndAlerts(VaultMixin, unittest.IsolatedAsyncioTestCase):
 
-    async def test_cancellation_does_not_abort_the_standup(self):
-        with patch("scripts.dream_standup.agent_call") as mock_tool:
-            mock_tool.ainvoke = AsyncMock(side_effect=asyncio.CancelledError())
-            result = await dream("x", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
+    async def test_compacts_changed_topics_that_need_it(self):
+        store.save(store.topic_scope("food"), MemoryFile([Entry("food", "x" * 900, "a", TODAY, TODAY),
+                                                          Entry("food", "y" * 50, "a", TODAY, TODAY)]))
+        night = self.night()
+        night["changed_topics"] = {"food"}
+        reply = format_tool_response("agent_call", payload=dream_xml('<merge ids="e1 e2">short</merge>'))
+        with patch.object(ds, "agent_call") as tool:
+            tool.ainvoke = AsyncMock(return_value=reply)
+            line = await ds.compact(night, _deadline())
+        args = tool.ainvoke.await_args.args[0]
+        self.assertEqual((args["agent_id"], args["caller"]), ("graph-worker", "script-executor"))
+        self.assertIn("<compaction_input", args["prompt"])
+        self.assertTrue(line.startswith("🧹 Compacted food"))
+        self.assertEqual([e.text for e in store.load(store.topic_scope("food")).entries], ["short"])
 
-        self.assertIn("CancelledError", result["error"])
+    async def test_a_failed_worker_call_is_reported(self):
+        store.save(store.topic_scope("food"), MemoryFile([Entry("food", "x" * 900, "a", TODAY, TODAY)]))
+        night = self.night()
+        night["changed_topics"] = {"food"}
+        reply = format_tool_response("agent_call", payload="", errors="Error: quota exceeded")
+        with patch.object(ds, "agent_call") as tool:
+            tool.ainvoke = AsyncMock(return_value=reply)
+            line = await ds.compact(night, _deadline())
+        self.assertEqual(line, "🧹 Compaction failed (food): Error: quota exceeded")
+        self.assertEqual(len(store.load(store.topic_scope("food")).entries), 1)
+
+    async def test_nothing_to_compact(self):
+        night = self.night()
+        night["changed_topics"] = {"food"}
+        self.assertIsNone(await ds.compact(night, _deadline()))
+
+    def test_stalled_logs_raise_an_alert(self):
+        self.log("a", "2026-09-10.md")
+        self.log("b", "2026-09-22.md")
+        self.log("c", "notes.md")
+        alerts = ds.stall_alerts([("a", {}), ("b", {}), ("c", {})], TODAY)
+        self.assertEqual(alerts, ["🚨 a: oldest unconsumed memory log is 14 days old"])
+
+    def test_suggestions_only_on_sunday(self):
+        night = self.night()
+        for _ in range(3):
+            mstate.record_event(night["state"], mstate.UNKNOWN_TAG, "a", "pets", TODAY)
+        self.assertEqual(ds.weekly_suggestions(night), [])
+        night["today"] = datetime.date(2026, 9, 27)
+        self.assertTrue(any("`pets`" in line for line in ds.weekly_suggestions(night)))
 
 
 class TestQuietStdout(unittest.TestCase):
 
     def test_quiet_stdout_suppresses_runtime_narration(self):
-        import io
         import contextlib
+        import io
 
         outer_buf = io.StringIO()
         with contextlib.redirect_stdout(outer_buf):
             with quiet_stdout(verbose=False):
                 print("GraphsLoader: Loaded/Reloaded graph 'main'")
-                print("Loaded 5 tools for agent-designer")
-
         self.assertEqual(outer_buf.getvalue(), "")
 
     def test_quiet_stdout_emits_to_stderr_under_verbose(self):
-        import io
         import contextlib
+        import io
 
-        outer_buf = io.StringIO()
-        err_buf = io.StringIO()
+        outer_buf, err_buf = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(outer_buf), contextlib.redirect_stderr(err_buf):
             with quiet_stdout(verbose=True):
                 print("GraphsLoader: Loaded/Reloaded graph 'main'")
-
         self.assertEqual(outer_buf.getvalue(), "")
         self.assertIn("GraphsLoader", err_buf.getvalue())
 
@@ -474,68 +409,72 @@ class TestQuietStdout(unittest.TestCase):
 class TestWorkGate(VaultMixin, unittest.IsolatedAsyncioTestCase):
     """Level 1 skips the whole standup; level 2 skips agents with nothing new."""
 
+    def loader(self, ids, config=None):
+        loader = MagicMock()
+        loader.list_agent_ids.return_value = ids
+        loader.get_agent_config.side_effect = lambda aid: dict(config or {"channels": ["general"]})
+        return loader
+
     def test_schedulable_by_the_scheduler(self):
         from core.scheduler.script_runner import check_script
         self.assertEqual(check_script("dream_standup.py"), [])
 
     def test_no_logs_means_no_standup(self):
-        from scripts.dream_standup import has_work
         self.log("a", name=".DS_Store")
-        has, reason = has_work(MagicMock())
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["a"])):
+            has, reason = ds.has_work(MagicMock())
         self.assertFalse(has)
         self.assertIn("no memory logs", reason)
 
     def test_any_existing_log_counts_regardless_of_age(self):
         # A failed dream leaves its logs behind; they must be retried.
-        from scripts.dream_standup import agents_with_logs, has_work
         self.log("old", mtime=1000.0)
         self.log("new", mtime=3000.0)
-        self.assertEqual(agents_with_logs(), {"old", "new"})
-        has, reason = has_work(MagicMock(last_success_at=5000.0))
+        self.assertEqual(ds.agents_with_logs(), {"old", "new"})
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["old", "new"])):
+            has, reason = ds.has_work(MagicMock(last_success_at=5000.0))
         self.assertTrue(has)
         self.assertIn("new, old", reason)
 
+    def test_logs_of_ineligible_agents_do_not_wake_the_standup(self):
+        self.log("worker")
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["worker"], {"stateless": True})):
+            has, _ = ds.has_work(MagicMock())
+        self.assertFalse(has)
+
     def test_filter_keeps_only_agents_with_logs(self):
-        from scripts.dream_standup import filter_agents_with_logs
         self.log("b")
-        agents = [("a", {}), ("b", {}), ("c", {})]
-        self.assertEqual(filter_agents_with_logs(agents), [("b", {})])
+        self.assertEqual(ds.filter_agents_with_logs([("a", {}), ("b", {}), ("c", {})]), [("b", {})])
 
-    async def test_run_standup_dreams_only_agents_with_logs(self):
-        from scripts import dream_standup as ds
+    async def test_run_standup_dreams_only_agents_with_logs_and_records_health(self):
         self.log("b")
-        loader = MagicMock()
-        loader.list_agent_ids.return_value = ["a", "b"]
-        loader.get_agent_config.side_effect = lambda aid: {"channels": ["general"]}
-        with patch.object(ds, "AgentsLoader", return_value=loader), \
-             patch.object(ds, "agent_call") as tool:
-            tool.ainvoke = AsyncMock(return_value=_tool_response(DREAMED_XML))
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["a", "b"])), \
+             patch.object(ds, "get_local_now", return_value=datetime.datetime(2026, 9, 24, 3)), \
+             patch.object(ds, "stream_delegate", AsyncMock(return_value=ok(dream_xml()))) as call:
             out = await ds.run_standup()
-            self.assertEqual(tool.ainvoke.await_count, 1)
-            self.assertEqual(tool.ainvoke.await_args.args[0]["agent_id"], "b")
+            self.assertEqual(call.await_count, 1)
+            self.assertEqual(call.await_args.kwargs["agent_id"], "b")
             self.assertIn("Dreamed", out)
+            self.assertEqual(mstate.load()["dreams"]["b"]["last_success"], "2026-09-24")
 
-            tool.ainvoke.reset_mock()
+            call.reset_mock()
             await ds.run_standup(include_all=True)
-            self.assertEqual(tool.ainvoke.await_count, 2)
+            self.assertEqual(call.await_count, 2)
+
+    async def test_malformed_tags_stop_the_standup_visibly(self):
+        self.log("b")
+        store.write_atomic(store.tags_path(), "## Food\nDiet.\n")
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["b"])), \
+             patch.object(ds, "stream_delegate", AsyncMock()) as call:
+            out = await ds.run_standup()
+        call.assert_not_called()
+        self.assertIn("Not run", out)
 
     async def test_nothing_new_prints_nothing(self):
-        from scripts import dream_standup as ds
-        loader = MagicMock()
-        loader.list_agent_ids.return_value = ["a"]
-        loader.get_agent_config.side_effect = lambda aid: {}
-        with patch.object(ds, "AgentsLoader", return_value=loader), \
-             patch.object(ds, "agent_call") as tool:
-            tool.ainvoke = AsyncMock()
+        with patch.object(ds, "AgentsLoader", return_value=self.loader(["a"], {})), \
+             patch.object(ds, "stream_delegate", AsyncMock()) as call:
             self.assertEqual(await ds.run_standup(), "")
-            tool.ainvoke.assert_not_called()
-
-    async def test_dream_does_not_create_directories(self):
-        from scripts import dream_standup as ds
-        with patch.object(ds, "agent_call") as tool:
-            tool.ainvoke = AsyncMock(return_value=_tool_response(EMPTY_XML))
-            await ds.dream("ghost", {"channels": ["general"]}, asyncio.Semaphore(1), _deadline())
-        self.assertFalse(os.path.exists(self.agent_dir("ghost")))
+        call.assert_not_called()
 
 
 if __name__ == "__main__":

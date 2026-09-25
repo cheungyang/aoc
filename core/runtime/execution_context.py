@@ -59,6 +59,12 @@ def inherited_surface() -> Optional[str]:
         return ctx.surface
     return _scoped_surface.get()
 
+def inherited_record_memory() -> bool:
+    """False when the current context doesn't record memory: a non-recording
+    call stays non-recording through every delegation it makes."""
+    ctx = current_execution_context.get()
+    return True if ctx is None else ctx.record_memory
+
 # The single ambient identity for the currently executing agent.
 # Replaces the former `current_execution_context` and `current_graph_id` pair.
 #
@@ -130,6 +136,13 @@ class ExecutionContext:
       the turn arrived through, recorded on token rows. It never affects the
       session id, so a voice turn still shares its text channel's session.
       When unset it is derived from `source` (see `get_surface`).
+    - `record_memory` is an authority field: False means the runtime does not
+      save this turn's `<system_memory_log>`. Only Python callers can set it
+      (no tool exposes it), and it is inherited -- a context minted while a
+      non-recording one is current is non-recording too (`inherited_record_memory`).
+      The dream standup uses it so a dream's own reply never becomes a log.
+    - `model` is an authority field: a model tier overriding the agent's
+      configured one for this call only (the dream's FLASH floor). Not inherited.
     """
     agent_id: str
     source: str
@@ -138,6 +151,8 @@ class ExecutionContext:
     stateless: bool = False
     graph_id: Optional[str] = None
     surface: Optional[str] = field(default=None, compare=False)
+    record_memory: bool = True
+    model: Optional[str] = None
     _secret: Any = field(default=None, repr=False, compare=False)
 
     @staticmethod
@@ -187,6 +202,8 @@ class ExecutionContext:
         stateless: bool = False,
         graph_id: Optional[str] = None,
         surface: Optional[str] = None,
+        record_memory: bool = True,
+        model: Optional[str] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
         return cls(
@@ -197,6 +214,8 @@ class ExecutionContext:
             stateless=stateless,
             graph_id=graph_id,
             surface=surface,
+            record_memory=record_memory,
+            model=model,
             _secret=_CONTEXT_SECRET,
         )
 
@@ -212,10 +231,13 @@ class ExecutionContext:
         return replace(self, graph_id=graph_id)
 
     def with_agent(self, agent_id: str) -> "ExecutionContext":
-        """Derives a child context for a different agent, keeping graph."""
+        """Derives a child context for a different agent, keeping graph.
+
+        A model override belongs to the agent it was set for, so it is dropped.
+        """
         if agent_id == self.agent_id:
             return self
-        return replace(self, agent_id=agent_id)
+        return replace(self, agent_id=agent_id, model=None)
 
     def with_surface(self, surface: Optional[str]) -> "ExecutionContext":
         """Derives a context tagged with `surface`, keeping the same session identity."""

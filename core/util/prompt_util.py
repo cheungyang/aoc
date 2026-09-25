@@ -1,7 +1,6 @@
 import os
 from typing import Optional
 
-from core.util.config import Config
 from core.util.time_util import format_timezone_label, get_local_now
 
 
@@ -87,37 +86,38 @@ def get_knowledge_prompt() -> str:
     return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"
 
 
-def _load_prompt_from_file(file_inputs, tag, group_desc=None) -> str:
-    combined_content = []
-    for file_path, desc in file_inputs:
-        if os.path.exists(file_path):
-            file_name = os.path.basename(file_path)
-            with open(file_path, "r") as f:
-                content = f.read()
-            
-            # Strip filename row (e.g. # CONTEXT.md) and subsequent empty rows
-            lines = content.splitlines()
-            if lines and lines[0].strip() == f"# {file_name}":
-                lines = lines[1:]
-                while lines and not lines[0].strip():
-                    lines = lines[1:]
-                content = "\n".join(lines)
+def _read_prompt_file(file_path: str) -> str:
+    if not os.path.exists(file_path):
+        return ""
+    file_name = os.path.basename(file_path)
+    with open(file_path, "r") as f:
+        content = f.read()
+    # Strip filename row (e.g. # USER.md) and subsequent empty rows
+    lines = content.splitlines()
+    if lines and lines[0].strip() == f"# {file_name}":
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+        content = "\n".join(lines)
+    return content
 
-            combined_content.append(content)
-    
-    if combined_content:
-        content = "\n\n".join(combined_content)
-        if group_desc:
-            return f"<{tag}>\n<description>{group_desc}</description>\n<content>{content}</content>\n</{tag}>"
-        else:
-            return f"<{tag}>\n<content>{content}</content>\n</{tag}>"
-    return ""
+
+def _block(tag: str, content: str, group_desc: Optional[str] = None) -> str:
+    if not content or not content.strip():
+        return ""
+    if group_desc:
+        return f"<{tag}>\n<description>{group_desc}</description>\n<content>{content}</content>\n</{tag}>"
+    return f"<{tag}>\n<content>{content}</content>\n</{tag}>"
+
+
+def _load_prompt_from_file(file_inputs, tag, group_desc=None) -> str:
+    combined_content = [c for c in (_read_prompt_file(path) for path, _ in file_inputs) if c]
+    return _block(tag, "\n\n".join(combined_content), group_desc)
 
 
 def _agent_prompt_files(agent_id: str) -> dict:
     agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
     agent_path = os.path.join(agents_dir, agent_id)
-    pkm_dir = os.path.join(Config().pkm_dir, "agents", agent_id)
 
     return {
         "AGENT": (os.path.join(agent_path, "AGENTS.md"), "Your specialization and workflow:"),
@@ -125,9 +125,6 @@ def _agent_prompt_files(agent_id: str) -> dict:
         "IDENTITY": (os.path.join(agent_path, "IDENTITY.md"), "Short description of who you are:"),
         "SOUL": (os.path.join(agent_path, "SOUL.md"), "Your personality, behavior and guiding success in your tasks:"),
         "USER": (os.path.join(agent_path, "USER.md"), "Information about your human:"),
-        "MEMORY": (os.path.join(pkm_dir, "MEMORY.md"), "Long term memory on key decisions and learnings to make your tasks successful:"),
-        "CONTEXT": (os.path.join(pkm_dir, "CONTEXT.md"), "Context about your human to improve personalization:"),
-        "FEEDBACK": (os.path.join(pkm_dir, "FEEDBACK.md"), "Feedbacks from human to adhere to, avoid repeating the same mistake:")
     }
 
 
@@ -145,19 +142,34 @@ def get_agent_static_prompt(agent_id: str) -> str:
     return "\n\n".join(prompt_parts)
 
 
-def get_agent_memory_prompt(agent_id: str) -> str:
-    """The agent's mutable PKM memory: human context, memory and feedback.
+def get_agent_memory_prompt(agent_id: str, config: Optional[dict] = None) -> str:
+    """The agent's mutable memory (Memory v2), most stable first.
 
-    pkm/agents/<id>/{CONTEXT,MEMORY,FEEDBACK}.md are rewritten by the memory
-    and dream skills at runtime. Any write changes this text, so it must sit
-    at the END of the system prompt, after every stable block -- otherwise a
-    memory write invalidates the implicit prompt cache for everything behind
-    it. HUMAN_CONTEXT is kept whole (USER.md + CONTEXT.md) in one block.
+    HUMAN_CONTEXT is USER.md plus the shared Profile; SHARED_MEMORY holds the
+    topics the agent subscribes to (`memory_topics`); then its private memory
+    and feedback. The dream rewrites these files, so this text must sit at the
+    END of the system prompt, after every stable block -- otherwise a memory
+    write invalidates the implicit prompt cache for everything behind it.
+    Stateless agents get no shared memory: they keep nothing between runs and
+    write no memory logs.
     """
+    from core.knowledge.memory import inject
+
+    if config is None:
+        from core.loaders.agents_loader import AgentsLoader
+        config = AgentsLoader().get_agent_config(agent_id) or {}
     files = _agent_prompt_files(agent_id)
+    shared = not config.get("stateless")
+
+    user = _read_prompt_file(files["USER"][0])
+    profile = inject.render_profile() if shared else ""
+    human = "\n\n".join(part for part in (user, profile) if part)
+    topics = inject.render_topics(inject.memory_topics(config, agent_id=agent_id)) if shared else ""
+
     prompt_parts = [
-        _load_prompt_from_file([files["USER"], files["CONTEXT"]], "HUMAN_CONTEXT", "Information about your human"),
-        _load_prompt_from_file([files["MEMORY"]], "MEMORY_AND_PRECEDENTS", "Long term memory on key decisions and learnings to make your tasks successful."),
-        _load_prompt_from_file([files["FEEDBACK"]], "FEEDBACK_TO_ADHERE_TO", "Feedbacks from human that you MUST adhere.")
+        _block("HUMAN_CONTEXT", human, "Information about your human"),
+        _block("SHARED_MEMORY", topics, "Facts about your human that agents have learned, by topic."),
+        _block("MEMORY_AND_PRECEDENTS", inject.render_memory(agent_id), "Long term memory on key decisions and learnings to make your tasks successful."),
+        _block("FEEDBACK_TO_ADHERE_TO", inject.render_feedback(agent_id), "Feedbacks from human that you MUST adhere."),
     ]
-    return "\n\n".join(prompt_parts)
+    return "\n\n".join(part for part in prompt_parts if part)

@@ -120,6 +120,24 @@ def tiers_for(provider: Optional[str]) -> dict:
     return PROVIDER_TIERS.get(provider or "google", GOOGLE_TIERS)
 
 
+# Capability order of the agent tiers, weakest first.
+TIER_ORDER = ("FLASH_LITE", "FLASH", "PRO")
+
+
+def tier_floor(value: Optional[str], floor: str) -> str:
+    """The stronger of a configured tier and `floor`.
+
+    A literal model id can't be ranked, so it is returned unchanged: pinning a
+    specific model is a deliberate choice this shouldn't second-guess. An unset
+    value means the default agent tier.
+    """
+    key = (str(value).strip().upper().replace("-", "_") if value and str(value).strip()
+           else DEFAULT_AGENT_TIER)
+    if key not in TIER_ORDER:
+        return value
+    return key if TIER_ORDER.index(key) >= TIER_ORDER.index(floor) else floor
+
+
 def resolve_model(value: Optional[str], provider: str = "google") -> str:
     """Turns a configured `model` value into a concrete model id for `provider`.
 

@@ -44,7 +44,11 @@ class Agent(BaseAgent):
 
     async def _get_graph(self, ctx: ExecutionContext):
         """Returns the compiled graph for this agent under `ctx`'s graph binding, building it once."""
+        # A per-call model override (the dream's floor) is a different model, so a
+        # different compiled graph.
         cache_key = ctx.graph_id or ""
+        if ctx.model:
+            cache_key += f"|{ctx.model}"
         if cache_key not in self._graphs:
             from core.runtime.graph_builder import GraphBuilder
             self._graphs[cache_key] = await GraphBuilder().build_graph(ctx, self.config)
@@ -130,7 +134,14 @@ class Agent(BaseAgent):
         else:
             JobManager().update_job(job_id, "completed")
 
-    def _parse_final_response(self, raw_reply: Any) -> AgentResponse:
+    def _records_memory(self, session: Optional[ExecutionContext]) -> bool:
+        """Stateless agents keep nothing between runs, so their logs would never
+        be consumed; a non-recording call (a dream) must not log about itself."""
+        if self.config.get("stateless"):
+            return False
+        return session is None or session.record_memory
+
+    def _parse_final_response(self, raw_reply: Any, session: Optional[ExecutionContext] = None) -> AgentResponse:
         """Normalizes list content, parses XML AgentResponse, and persists in-band memory logs."""
         if isinstance(raw_reply, list):
             texts = []
@@ -145,7 +156,7 @@ class Agent(BaseAgent):
             raw_reply = str(raw_reply) if raw_reply is not None else ""
 
         response = AgentResponse.from_string(raw_reply)
-        if response.system_memory_log:
+        if response.system_memory_log and self._records_memory(session):
             save_agent_memory_log(self.agent_id, response.system_memory_log)
 
         return response
@@ -251,7 +262,7 @@ class Agent(BaseAgent):
                 return await self._handle_execution_error(session, e)
 
         reply_message = result["messages"][-1]
-        response = self._parse_final_response(reply_message.content)
+        response = self._parse_final_response(reply_message.content, session)
         await self._dispatch_discord_output(session, response)
         return response.text
 
@@ -321,7 +332,7 @@ class Agent(BaseAgent):
                 graph=graph,
                 config=config,
                 accumulated_tokens=accumulated_tokens,
-                parse_fn=self._parse_final_response
+                parse_fn=lambda raw: self._parse_final_response(raw, session)
             )
 
         yield {

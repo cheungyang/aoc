@@ -9,6 +9,7 @@ from core.knowledge.vector.sync import (
     scan_knowledge_markdown_files,
     sync_knowledge,
     get_pkm_dir,
+    wiki_scope,
 )
 from core.knowledge.vector.db import init_knowledge_db, get_db_connection, count_chunks
 
@@ -54,7 +55,9 @@ class TestKnowledgeSync(unittest.TestCase):
         asset_file = os.path.join(self.pkm_dir, "vault", "assets", "image_note.md")
         backup_file = os.path.join(self.pkm_dir, "backup", "backup_note.md")
 
-        for p in [vault_note, vault_proj, wiki_note, ticktick_note, inbox_note, agent_mem, hidden_file, asset_file, backup_file]:
+        wiki_index = os.path.join(self.pkm_dir, "wiki", "concepts", "index.md")
+
+        for p in [vault_note, vault_proj, wiki_note, wiki_index, ticktick_note, inbox_note, agent_mem, hidden_file, asset_file, backup_file]:
             with open(p, "w") as f:
                 f.write("# Content")
 
@@ -76,6 +79,56 @@ class TestKnowledgeSync(unittest.TestCase):
         self.assertNotIn("vault/.hidden.md", rel_paths)
         self.assertNotIn("vault/assets/image_note.md", rel_paths)
         self.assertNotIn("backup/backup_note.md", rel_paths)
+
+    def _write(self, *parts):
+        path = os.path.join(self.pkm_dir, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("# Content")
+
+    def test_wiki_folder_without_index_is_skipped(self):
+        self._write("wiki", "concepts", "index.md")
+        self._write("wiki", "concepts", "ai.md")
+        self._write("wiki", "software", "spec.md")
+        self._write("wiki", "memory", "PROFILE.md")
+        self._write("wiki", "loose.md")
+
+        rel_paths = {s[1] for s in scan_knowledge_markdown_files(self.pkm_dir)}
+
+        self.assertIn("wiki/concepts/ai.md", rel_paths)
+        self.assertNotIn("wiki/software/spec.md", rel_paths)
+        self.assertNotIn("wiki/memory/PROFILE.md", rel_paths)
+        self.assertNotIn("wiki/loose.md", rel_paths)
+
+    def test_wiki_subfolder_inherits_marker(self):
+        self._write("wiki", "topics", "index.md")
+        self._write("wiki", "topics", "pending", "idea.md")
+
+        rel_paths = {s[1] for s in scan_knowledge_markdown_files(self.pkm_dir)}
+
+        self.assertIn("wiki/topics/pending/idea.md", rel_paths)
+
+    def test_vault_needs_no_marker(self):
+        self._write("vault", "journals", "day.md")
+
+        rel_paths = {s[1] for s in scan_knowledge_markdown_files(self.pkm_dir)}
+
+        self.assertIn("vault/journals/day.md", rel_paths)
+
+    def test_wiki_scope_reports_topmost_unindexed_folders(self):
+        self._write("wiki", "concepts", "index.md")
+        self._write("wiki", "concepts", "deep", "x.md")
+        self._write("wiki", "software", "v1", "spec.md")
+        self._write("wiki", ".obsidian", "x.md")
+
+        wiki_root = os.path.join(self.pkm_dir, "wiki")
+        in_scope, unindexed = wiki_scope(wiki_root)
+
+        self.assertEqual(in_scope, {os.path.join(wiki_root, "concepts"), os.path.join(wiki_root, "concepts", "deep")})
+        self.assertEqual(unindexed, ["software"])
+
+    def test_wiki_scope_missing_root(self):
+        self.assertEqual(wiki_scope(os.path.join(self.pkm_dir, "nope")), (set(), []))
 
     def test_sync_knowledge_missing_pkm_dir(self):
         with self.assertRaises(FileNotFoundError):
@@ -105,28 +158,30 @@ class TestKnowledgeSync(unittest.TestCase):
         self.assertEqual(count_chunks(table), 0)
 
     def test_sync_knowledge_incremental_and_pruning(self):
-        # 1. Initial sync with 1 vault note and 1 wiki note
+        # 1. Initial sync with 1 vault note and 1 wiki note (+ its folder's index.md)
         file1 = os.path.join(self.pkm_dir, "vault", "file1.md")
-        file2 = os.path.join(self.pkm_dir, "wiki", "file2.md")
+        file2 = os.path.join(self.pkm_dir, "wiki", "concepts", "file2.md")
+        with open(os.path.join(self.pkm_dir, "wiki", "concepts", "index.md"), "w") as f:
+            f.write("# Concepts Index")
         with open(file1, "w") as f:
             f.write("# File 1\nPersonal core note.")
         with open(file2, "w") as f:
             f.write("# File 2\nAgent wiki knowledge.")
 
         res1 = sync_knowledge(pkm_dir=self.pkm_dir, db_path=self.db_path)
-        self.assertEqual(res1["scanned_files"], 2)
+        self.assertEqual(res1["scanned_files"], 3)
         self.assertEqual(res1["vault_files"], 1)
-        self.assertEqual(res1["wiki_files"], 1)
-        self.assertEqual(res1["inserted"], 2)
+        self.assertEqual(res1["wiki_files"], 2)
+        self.assertEqual(res1["inserted"], 3)
         self.assertEqual(res1["unchanged"], 0)
         self.assertEqual(res1["pruned"], 0)
 
         # 2. Second sync without modifications -> all unchanged
         res2 = sync_knowledge(pkm_dir=self.pkm_dir, db_path=self.db_path)
-        self.assertEqual(res2["scanned_files"], 2)
+        self.assertEqual(res2["scanned_files"], 3)
         self.assertEqual(res2["inserted"], 0)
         self.assertEqual(res2["updated"], 0)
-        self.assertEqual(res2["unchanged"], 2)
+        self.assertEqual(res2["unchanged"], 3)
         self.assertEqual(res2["chunks_to_embed"], 0)
 
         # 3. Modify file1, delete file2, add file3
@@ -138,7 +193,7 @@ class TestKnowledgeSync(unittest.TestCase):
             f.write("# File 3\nNew personal note.")
 
         res3 = sync_knowledge(pkm_dir=self.pkm_dir, db_path=self.db_path)
-        self.assertEqual(res3["scanned_files"], 2)
+        self.assertEqual(res3["scanned_files"], 3)
         self.assertEqual(res3["inserted"], 1)  # file3
         self.assertEqual(res3["updated"], 1)   # file1
         self.assertEqual(res3["pruned"], 1)    # file2 pruned

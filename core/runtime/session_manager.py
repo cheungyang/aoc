@@ -1,6 +1,6 @@
 from typing import Optional, Any, Union
 from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-from core.runtime.execution_context import ExecutionContext, inherited_surface
+from core.runtime.execution_context import ExecutionContext, inherited_record_memory, inherited_surface
 
 
 class SessionManager:
@@ -21,6 +21,8 @@ class SessionManager:
         stateless: bool = False,
         graph_id: Optional[str] = None,
         surface: Optional[str] = None,
+        record_memory: bool = True,
+        model: Optional[str] = None,
     ) -> ExecutionContext:
         """
         Creates an ExecutionContext instance.
@@ -32,9 +34,14 @@ class SessionManager:
         scheduled / tool / job) for token accounting. It does not affect the session id.
         When omitted it is inherited (`inherited_surface`: the current context's explicit
         surface, then a `surface_scope`), and failing that derived from `source`.
+
+        `record_memory=False` stops the runtime saving this turn's memory log. It can
+        only be turned off, never back on: a context minted inside a non-recording one
+        is non-recording too. `model` overrides the agent's model tier for this call.
         """
         if surface is None:
             surface = inherited_surface()
+        record_memory = bool(record_memory) and inherited_record_memory()
         return ExecutionContext._create(
             agent_id=str(agent_id or ""),
             source=source,
@@ -43,6 +50,8 @@ class SessionManager:
             stateless=stateless,
             graph_id=graph_id,
             surface=surface,
+            record_memory=record_memory,
+            model=model,
         )
 
     def clear_session(self, session: ExecutionContext) -> str:

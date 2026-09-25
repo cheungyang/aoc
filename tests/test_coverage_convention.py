@@ -32,6 +32,7 @@ COVERED_MODULES = [
     "scripts/coding_admin.py",
     "scripts/coding_bot_setup.py",
     "scripts/coding_tick.py",
+    "scripts/wiki_scanner.py",
 ]
 
 # Test files live flat under here regardless of the module's subpackage.

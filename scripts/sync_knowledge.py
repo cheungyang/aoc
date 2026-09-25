@@ -20,7 +20,8 @@ from core.knowledge.vector.db import get_knowledge_db_path
 
 
 def has_work(ctx):
-    """Scheduler gate: the index covers markdown under ~/pkm/vault and ~/pkm/wiki.
+    """Scheduler gate: the index covers markdown under ~/pkm/vault and ~/pkm/wiki
+    (wiki folders marked with an index.md only).
 
     Only `.md` files count, so the scanner's `pending_lint.json` (written into
     wiki/ every night) does not force a re-index on its own.

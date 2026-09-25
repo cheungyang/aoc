@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 from core.util.config import Config
 from core.knowledge.vector.db import (
@@ -23,12 +23,47 @@ def get_pkm_dir() -> str:
     return Config().pkm_dir
 
 
+# A wiki folder holds curated knowledge when it has one of these. Folders without
+# it (specs, raw captures, agent working areas, shared memory) are neither
+# indexed nor linted, so a new kind of folder needs no code change.
+WIKI_FOLDER_MARKER = "index.md"
+
+EXCLUDED_DIRS = ("backup", "assets", "node_modules", ".trash", "templates")
+
+
+def _walkable(dirs: List[str]) -> List[str]:
+    return [d for d in dirs if not d.startswith(".") and d not in EXCLUDED_DIRS]
+
+
+def wiki_scope(wiki_root: str) -> Tuple[Set[str], List[str]]:
+    """Which wiki folders are in scope for indexing and linting.
+
+    A folder is in scope if it has an `index.md`, or its parent is in scope.
+    Returns (in-scope folders as absolute paths, the topmost out-of-scope
+    folders relative to `wiki_root`). The second list is what gets reported as
+    "not indexed", without repeating every subfolder of e.g. `software/`.
+    """
+    in_scope: Set[str] = set()
+    unindexed: List[str] = []
+    if not os.path.isdir(wiki_root):
+        return in_scope, unindexed
+    for root, dirs, files in os.walk(wiki_root):
+        dirs[:] = sorted(_walkable(dirs))
+        parent = os.path.dirname(root)
+        if WIKI_FOLDER_MARKER in files or (root != wiki_root and parent in in_scope):
+            in_scope.add(root)
+        elif root != wiki_root and (parent == wiki_root or parent in in_scope):
+            unindexed.append(os.path.relpath(root, wiki_root))
+    return in_scope, unindexed
+
+
 def scan_knowledge_markdown_files(pkm_dir: str) -> List[Tuple[str, str, str]]:
     """
     Finds all indexable markdown files in the PKM vault.
     Scans:
       - ~/pkm/vault -> category: 'vault' (core personal notes)
-      - ~/pkm/wiki  -> category: 'wiki' (agent-synthesized wiki)
+      - ~/pkm/wiki  -> category: 'wiki' (agent-synthesized wiki), only
+        folders marked with an `index.md` (see `wiki_scope`)
 
     Explicitly excludes:
       - ~/pkm/ticktick (untidied tasks, handled by tasks.db SQLite)
@@ -43,23 +78,24 @@ def scan_knowledge_markdown_files(pkm_dir: str) -> List[Tuple[str, str, str]]:
     if not os.path.isdir(pkm_dir):
         return []
 
-    # Scoped target subdirectories and their category tags
+    # Scoped target subdirectories, their category tags, and whether a folder
+    # needs an index.md marker to be included.
     target_scopes = [
-        ("vault", "vault"),
-        ("wiki", "wiki"),
+        ("vault", "vault", False),
+        ("wiki", "wiki", True),
     ]
 
-    for sub_dir, category in target_scopes:
+    for sub_dir, category, needs_marker in target_scopes:
         scope_root = os.path.join(pkm_dir, sub_dir)
         if not os.path.isdir(scope_root):
             continue
+        marked = wiki_scope(scope_root)[0] if needs_marker else None
 
         for root, dirs, files in os.walk(scope_root):
             # Exclude hidden, backup, asset directories
-            dirs[:] = [
-                d for d in dirs
-                if not d.startswith(".") and d not in ("backup", "assets", "node_modules", ".trash", "templates")
-            ]
+            dirs[:] = _walkable(dirs)
+            if marked is not None and root not in marked:
+                continue
 
             for file in files:
                 if file.endswith(".md") and not file.startswith("."):

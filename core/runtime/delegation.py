@@ -117,11 +117,18 @@ async def stream_delegate(
     channel: str,
     caller: Optional[str] = None,
     run_async: bool = False,
+    record_memory: bool = True,
+    model: Optional[str] = None,
 ) -> DelegationResult:
     """Runs `agent_id` on `prompt` and streams its reply into the caller's stream.
 
     Returns a `DelegationResult` rather than raising: both callers need to report
     failure as text in the channel, not as a traceback.
+
+    `record_memory` and `model` are for Python callers only -- the `agent_call`
+    tool models see doesn't expose them. `record_memory=False` keeps the callee's
+    `<system_memory_log>` from being saved (and is inherited by anything it
+    delegates to); `model` overrides the callee's model tier for this call.
     """
     from core.runtime.execution_context import try_context
     from core.runtime.session_manager import SessionManager
@@ -168,6 +175,8 @@ async def stream_delegate(
         channel=discord_channel or channel,
         stateless=is_stateless,
         graph_id=active_sess.graph_id if active_sess else None,
+        record_memory=record_memory,
+        model=model,
     )
 
     # The reaction is dispatched from here, not from the callers, so the concierge

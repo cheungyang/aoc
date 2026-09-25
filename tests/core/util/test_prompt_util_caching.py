@@ -3,7 +3,7 @@ files or the channel change.
 
 Gemini implicit caching hits only on an identical request prefix, so these
 tests pin the block order produced by GraphBuilder._get_prompt_template and
-check that rewriting MEMORY/CONTEXT/FEEDBACK (or switching channel) only
+check that rewriting Profile/MEMORY/FEEDBACK (or switching channel) only
 changes the tail of the system content.
 """
 import os
@@ -17,6 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.util import prompt_util
+from core.util.config import Config
 from core.util.prompt_util import (
     get_agent_memory_prompt,
     get_agent_static_prompt,
@@ -25,7 +26,7 @@ from tests.helpers import make_context
 
 
 class _AgentFiles:
-    """A throwaway agents/<id> + pkm/agents/<id> pair on disk."""
+    """A throwaway agents/<id> checkout plus a vault holding its Memory v2 files."""
 
     NAMES = {
         "AGENT": "AGENTS.md",
@@ -33,10 +34,11 @@ class _AgentFiles:
         "IDENTITY": "IDENTITY.md",
         "SOUL": "SOUL.md",
         "USER": "USER.md",
-        "MEMORY": "MEMORY.md",
-        "CONTEXT": "CONTEXT.md",
-        "FEEDBACK": "FEEDBACK.md",
+        "PROFILE": "pkm/wiki/memory/PROFILE.md",
+        "MEMORY": "pkm/agents/test-agent/MEMORY.md",
+        "FEEDBACK": "pkm/agents/test-agent/FEEDBACK.md",
     }
+    ENTRY_FILES = {"PROFILE": "profile", "MEMORY": "private", "FEEDBACK": "feedback"}
 
     def __init__(self, root):
         self.root = root
@@ -45,7 +47,7 @@ class _AgentFiles:
         self.write("IDENTITY", "identity body")
         self.write("SOUL", "soul body")
         self.write("USER", "user body")
-        self.write("CONTEXT", "context v1")
+        self.write("PROFILE", "profile v1")
         self.write("MEMORY", "memory v1")
         self.write("FEEDBACK", "feedback v1")
 
@@ -53,12 +55,19 @@ class _AgentFiles:
         return os.path.join(self.root, self.NAMES[key])
 
     def write(self, key, text):
+        if key in self.ENTRY_FILES:
+            text = f"- [{self.ENTRY_FILES[key]}] {text} (src: test-agent · first 2026-09-01 · seen 2026-09-01 · x1)\n"
+        os.makedirs(os.path.dirname(self.path(key)), exist_ok=True)
         with open(self.path(key), "w") as f:
             f.write(text)
 
     def files(self, agent_id):
         real = _REAL_AGENT_PROMPT_FILES(agent_id)
         return {k: (self.path(k), desc) for k, (_, desc) in real.items()}
+
+    @property
+    def pkm(self):
+        return os.path.join(self.root, "pkm")
 
 
 # Captured before any patching, so descriptions stay authoritative.
@@ -69,6 +78,8 @@ class TestPromptCacheLayout(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.agent = _AgentFiles(self.tmp.name)
+        Config().pkm_dir = self.agent.pkm
+        self.addCleanup(setattr, Config(), "pkm_dir", None)
         patchers = [
             patch.object(prompt_util, "_agent_prompt_files", side_effect=self.agent.files),
             patch("core.runtime.graph_builder.SkillsLoader"),
@@ -110,7 +121,7 @@ class TestPromptCacheLayout(unittest.TestCase):
     def test_static_half_ignores_pkm_files(self):
         before = get_agent_static_prompt("test-agent")
         self.agent.write("MEMORY", "memory v2")
-        self.agent.write("CONTEXT", "context v2")
+        self.agent.write("PROFILE", "profile v2")
         self.agent.write("FEEDBACK", "feedback v2")
         self.assertEqual(before, get_agent_static_prompt("test-agent"))
 
@@ -131,7 +142,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         before = self._system_blocks()
         self.agent.write("MEMORY", "memory v2 -- a new precedent")
         self.agent.write("FEEDBACK", "feedback v2")
-        self.agent.write("CONTEXT", "context v2")
+        self.agent.write("PROFILE", "profile v2")
         after = self._system_blocks()
 
         # Everything up to and including the daily knowledge block is identical.
@@ -148,7 +159,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertEqual(after[6], "CHANNEL other")
 
     def test_missing_pkm_files_add_no_blank_system_block(self):
-        for key in ("USER", "CONTEXT", "MEMORY", "FEEDBACK"):
+        for key in ("USER", "PROFILE", "MEMORY", "FEEDBACK"):
             os.remove(self.agent.path(key))
         self.mock_channel.return_value = ""
         blocks = self._system_blocks()

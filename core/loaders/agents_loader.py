@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from core.knowledge.memory.inject import report_unknown_topics
 from core.loaders.hot_reloader import HotReloader
 
 class AgentsLoader:
@@ -61,6 +62,7 @@ class AgentsLoader:
                         elif "agent_id" in config and "id" not in config:
                             config["id"] = config["agent_id"]
                         self._agent_configs[config["id"]] = config
+                        report_unknown_topics(config)
                         HotReloader().watch(config_path, self._on_agent_changed)
                     except Exception as e:
                         print(f"Error loading config for {agent_name}: {e}")

@@ -142,7 +142,7 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
             pkm_dir = os.path.join(tmpdir, "pkm")
             db_path = os.path.join(tmpdir, "pkm", ".lancedb")
             vault_dir = os.path.join(pkm_dir, "vault")
-            wiki_dir = os.path.join(pkm_dir, "wiki")
+            wiki_dir = os.path.join(pkm_dir, "wiki", "concepts")
             os.makedirs(vault_dir, exist_ok=True)
             os.makedirs(wiki_dir, exist_ok=True)
 
@@ -150,7 +150,9 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
             with open(os.path.join(vault_dir, "personal_goal.md"), "w") as f:
                 f.write("---\ntitle: Personal Goals\ntags: [life, roadmap]\n---\n# Life Goals\nFocus on AI pair programming and LanceDB vector databases.\n")
 
-            # Create sample wiki note
+            # Create sample wiki note; only folders with an index.md are indexed
+            with open(os.path.join(wiki_dir, "index.md"), "w") as f:
+                f.write("# Concepts Index\n")
             with open(os.path.join(wiki_dir, "lancedb_architecture.md"), "w") as f:
                 f.write("---\ntitle: LanceDB Architecture\ntags: [tech, vectors]\n---\n# LanceDB Architecture\nLanceDB provides hybrid search with Tantivy BM25 full-text indexing.\n")
 
@@ -162,9 +164,9 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
                 skip_embedding=True
             )
             self.assertTrue(dry_results["dry_run"])
-            self.assertEqual(dry_results["scanned_files"], 2)
+            self.assertEqual(dry_results["scanned_files"], 3)
             self.assertEqual(dry_results["vault_files"], 1)
-            self.assertEqual(dry_results["wiki_files"], 1)
+            self.assertEqual(dry_results["wiki_files"], 2)
             self.assertTrue(dry_results["total_chunks"] >= 2)
 
             # Run full regeneration with skip_embedding (offline deterministic)
@@ -177,7 +179,7 @@ class TestRegenerateLanceDBScript(unittest.TestCase):
                 test_query="LanceDB"
             )
             self.assertFalse(results["dry_run"])
-            self.assertEqual(results["scanned_files"], 2)
+            self.assertEqual(results["scanned_files"], 3)
             self.assertEqual(results["rows_in_db"], results["total_chunks"])
             self.assertTrue(results["verified"])
             self.assertTrue(os.path.exists(db_path))

@@ -82,7 +82,7 @@ class GraphBuilder:
         agent_path = os.path.join(agents_dir, agent_id)
 
         provider = config.get("provider", "google")
-        model_name = resolve_model(config.get("model"), provider=provider)
+        model_name = resolve_model(ctx.model or config.get("model"), provider=provider)
         
         loader = ToolsLoader()
         allowed_tools = loader.get_tools(ctx)
