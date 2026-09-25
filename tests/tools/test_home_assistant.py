@@ -158,6 +158,15 @@ class TestEnvelope(unittest.TestCase):
         self.assertIn("requires 'entity_id'", out)   # first failed
         self.assertIn("no errors", out)              # second still ran
 
+    def test_error_log_is_condensed(self):
+        """A noisy log must not be returned raw: one was measured at 150 MB."""
+        entry = ("2026-09-21 21:21:08.584 ERROR (MainThread) [x] poll failed\n"
+                 "Traceback (most recent call last):\n  boom\nConnectionError: refused\n")
+        rest = FakeRest({"/api/error_log": entry * 20000})
+        out = run([{"action": "error_log"}], rest=rest)
+        self.assertLess(len(out), 25000)
+        self.assertIn("[x20000,", out)
+
 
 class TestWritesDisabled(unittest.TestCase):
     """With HA_WRITE_ENABLED off, no mutating action may get through."""

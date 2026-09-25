@@ -603,6 +603,27 @@ class Config:
         self._context_pruning_timeout = int(value) if value is not None else None
 
     @property
+    def tool_output_max_chars(self) -> int:
+        """Ceiling on one tool result, in characters, before it enters history.
+
+        The pruner cannot shrink a result in the turn being answered -- it keeps
+        the latest turn whole -- so an unbounded tool output lands in the
+        checkpoint verbatim and is re-sent every turn after. A Home Assistant
+        error log measured at 150 MB (~37M tokens) did exactly that.
+
+        200k chars (~50k tokens) is well above any legitimate text result;
+        tools with larger data should page it. Inline images are exempt (see
+        `cap_tool_output`). `TOOL_OUTPUT_MAX_CHARS`, 0 disables.
+        """
+        env_val = os.getenv("TOOL_OUTPUT_MAX_CHARS")
+        if env_val:
+            try:
+                return max(0, int(env_val))
+            except ValueError:
+                pass
+        return 200000
+
+    @property
     def max_concurrency(self) -> int:
         """The one cap on concurrent model-driven executions across the system
         (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1."""

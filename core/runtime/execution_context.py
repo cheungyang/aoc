@@ -18,15 +18,6 @@ _CONTEXT_SECRET = object()
 # context's explicit surface, and `with_graph`/`with_agent` carry it across.
 SURFACES = frozenset({"voice", "text", "scheduled", "tool", "job"})
 
-# Default surface for contexts that were not tagged explicitly. Any source not
-# listed here (e.g. 'discord') is an interactive text surface.
-_SOURCE_SURFACES = {
-    "voice": "voice",
-    "scheduled": "scheduled",
-    "job": "job",
-    "tool": "tool",
-}
-
 # A surface declared for a block of work that has no context of its own yet.
 # A scheduled script wraps its entry point in `surface_scope("scheduled")`, so
 # the contexts it mints (the coding tick's worker, the dream standup's
@@ -246,10 +237,12 @@ class ExecutionContext:
         return replace(self, surface=surface)
 
     def get_surface(self) -> str:
-        """The explicit surface if set, otherwise the one implied by `source`."""
+        """The explicit surface if set, otherwise the one implied by `source`:
+        a source that names a surface (e.g. 'voice') is that surface; any other
+        (e.g. 'discord') is an interactive text surface."""
         if self.surface:
             return self.surface
-        return _SOURCE_SURFACES.get(self.source, "text")
+        return self.source if self.source in SURFACES else "text"
 
     @property
     def channel_name(self) -> str:

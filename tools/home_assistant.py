@@ -22,6 +22,7 @@ import json
 
 from langchain_core.tools import tool
 
+from core.integrations.homeassistant import error_log as error_log_mod
 from core.integrations.homeassistant import guards
 from core.integrations.homeassistant import inventory as inventory_mod
 from core.integrations.homeassistant import live_context as live_context_mod
@@ -189,8 +190,9 @@ def home_assistant(instructions: list[dict]) -> str:
           State changes over a window.
       {"action": "logbook", "hours": 6}
           Human-readable event log.
-      {"action": "error_log"}
-          Home Assistant's error log, useful after a change.
+      {"action": "error_log", "limit": 30, "max_chars": 20000}
+          Home Assistant's error log, useful after a change. Repeated entries
+          are collapsed with a count; newest first. Both fields optional.
       {"action": "check_config"}
           Validates the running configuration.
       {"action": "list_automations"} / {"action": "get_automation", "id": "<id>"}
@@ -546,7 +548,13 @@ def _dispatch(action, instruction, rest, cache):
         return rest.get(f"/api/logbook/{_since(instruction)}")
 
     if action == "error_log":
-        return rest.get("/api/error_log")
+        # Never returned raw: the endpoint serves the whole log file, which one
+        # noisy integration can grow to hundreds of MB. See error_log.py.
+        return error_log_mod.condense(
+            rest.get("/api/error_log"),
+            limit=instruction.get("limit"),
+            max_chars=instruction.get("max_chars"),
+        )
 
     if action == "check_config":
         return rest.post("/api/config/core/check_config")

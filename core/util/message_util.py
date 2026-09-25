@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, List, Sequence
 from langchain_core.messages import (
     BaseMessage,
@@ -115,3 +116,39 @@ def find_safe_boundary(messages: Sequence[BaseMessage], window_messages: int = 1
 
     # 4. If no other HumanMessage exists, we cannot safely split without violating turn invariants
     return 0
+
+
+_INLINE_IMAGE = re.compile(
+    r'data:image/[a-zA-Z+]+;base64,[A-Za-z0-9+/=\r\n]+'
+    r'|(?<=<instruction_result action="read_image" path=")[^"]*">[A-Za-z0-9+/=\r\n]+'
+)
+
+
+def cap_tool_output(text: Any, max_chars: int) -> Any:
+    """Bounds a tool's string result, keeping its head and tail.
+
+    Inline image base64 is not counted: a `read_image` result is large by
+    nature, is needed intact for the model to see it, and is evicted from the
+    checkpoint once processed. Everything else over `max_chars` is cut in the
+    middle -- the head usually says what the output is, and the tail holds the
+    closing envelope (`</payload><errors>...`) and the most recent log lines.
+
+    Non-strings (content-and-artifact tuples, ToolMessages, Commands) pass
+    through untouched.
+    """
+    if not isinstance(text, str) or max_chars <= 0 or len(text) <= max_chars:
+        return text
+
+    if "data:image/" in text or 'action="read_image"' in text:
+        image_chars = sum(len(m.group(0)) for m in _INLINE_IMAGE.finditer(text))
+        if len(text) - image_chars <= max_chars:
+            return text
+
+    head = int(max_chars * 0.7)
+    tail = max_chars - head
+    omitted = len(text) - head - tail
+    marker = (
+        f"\n\n... [tool output truncated: {omitted} of {len(text)} chars omitted "
+        f"(~{omitted // 4} tokens). Narrow the request to see the missing part.] ...\n\n"
+    )
+    return text[:head] + marker + text[-tail:]

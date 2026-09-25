@@ -3,6 +3,7 @@
 Compacts and optimizes sessions/memory.db:
 1. Recompresses all existing checkpoint and write blobs with zlib.
 2. Recursively strips/downscales redundant oversized inline image base64 strings in all checkpoints, writes, and task payloads.
+   Oversized ToolMessage text is shrunk to the runtime cap (HA error_log sections condensed first).
 3. Prunes old intermediate step checkpoints (keeping the latest 10 per context).
 4. Executes VACUUM to reclaim disk space.
 """
@@ -17,10 +18,45 @@ import base64
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.util import compress_image_bytes
+from core.util.config import Config
+from core.util.message_util import cap_tool_output
+from core.integrations.homeassistant import error_log as ha_error_log
+from langchain_core.messages import ToolMessage
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sessions", "memory.db"))
 
+_ERROR_LOG_OPEN = '<instruction_result action="error_log">'
+_RESULT_CLOSE = '</instruction_result>'
+
+
+def shrink_tool_text(text: str, max_chars: int) -> str:
+    """Applies today's runtime limits to a tool result stored before they existed.
+
+    HA error_log sections are condensed first (keeps every distinct problem),
+    then the whole result is capped as `cap_tool_output` would have.
+    """
+    if not isinstance(text, str) or len(text) <= max_chars:
+        return text
+    start = text.find(_ERROR_LOG_OPEN)
+    while start != -1:
+        body_start = start + len(_ERROR_LOG_OPEN)
+        end = text.find(_RESULT_CLOSE, body_start)
+        if end == -1:
+            break
+        body = ha_error_log.condense(text[body_start:end])
+        text = text[:body_start] + body + text[end:]
+        start = text.find(_ERROR_LOG_OPEN, body_start + len(body))
+    return cap_tool_output(text, max_chars)
+
+
 def clean_element(obj):
+    if isinstance(obj, ToolMessage):
+        if isinstance(obj.content, str):
+            new = shrink_tool_text(obj.content, Config().tool_output_max_chars or 200000)
+            if new is not obj.content and new != obj.content:
+                print(f"  Shrunk ToolMessage '{obj.name}' {len(obj.content)} -> {len(new)} chars")
+                obj.content = new
+        return
     if isinstance(obj, dict):
         if obj.get("type") == "image_url" and isinstance(obj.get("image_url"), dict):
             url = obj["image_url"].get("url", "")
@@ -51,7 +87,7 @@ def clean_element(obj):
             except Exception:
                 pass
 
-def compact_db(db_path=DB_PATH):
+def compact_db(db_path=DB_PATH, thread_id=None):
     if not os.path.exists(db_path):
         print(f"Database not found at {db_path}")
         return
@@ -61,10 +97,15 @@ def compact_db(db_path=DB_PATH):
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")  # coexist with a running bot
     cursor = conn.cursor()
 
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")
-    tables = [r["name"] for r in cursor.fetchall()]
+    if thread_id:
+        from core.knowledge.memory.sqlite_checkpointer import sanitize_table_name
+        tables = [sanitize_table_name(thread_id)]
+    else:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")
+        tables = [r["name"] for r in cursor.fetchall()]
 
     for tname in tables:
         # 1. Prune intermediate checkpoints, keep last 10
@@ -124,4 +165,9 @@ def compact_db(db_path=DB_PATH):
     print(f"Final DB Size: {final_size:.2f} MB ({reduction:.1f}% reduction)")
 
 if __name__ == "__main__":
-    compact_db()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--thread", help="Only compact this session/thread id (e.g. 'home-steward:tool:home-automation').")
+    parser.add_argument("--db", default=DB_PATH)
+    args = parser.parse_args()
+    compact_db(args.db, thread_id=args.thread)

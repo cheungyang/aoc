@@ -10,6 +10,7 @@ from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, Config, resolve_model
 from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt
+from core.util.message_util import cap_tool_output
 from langgraph.types import interrupt
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import try_context
@@ -111,10 +112,19 @@ class GraphBuilder:
                         JobManager().update_job(job_id, "killed")
                         interrupt("Job was killed")
 
+            # Every result passes through here before it becomes a ToolMessage,
+            # so this is the one place a runaway output can be stopped for all
+            # tools at once. See Config.tool_output_max_chars.
+            def _cap(result):
+                capped = cap_tool_output(result, Config().tool_output_max_chars)
+                if capped is not result:
+                    print(f"[GraphBuilder] Truncated '{t.name}' output from {len(result)} to ~{len(capped)} chars.")
+                return capped
+
             @functools.wraps(original_run)
             def wrapper(*args, **kwargs):
                 _abort_if_killed()
-                return original_run(*args, **kwargs)
+                return _cap(original_run(*args, **kwargs))
             
             t._run = wrapper
             
@@ -122,7 +132,7 @@ class GraphBuilder:
                 @functools.wraps(original_arun)
                 async def awrapper(*args, **kwargs):
                     _abort_if_killed()
-                    return await original_arun(*args, **kwargs)
+                    return _cap(await original_arun(*args, **kwargs))
                 t._arun = awrapper
                 
             return t
