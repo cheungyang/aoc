@@ -661,5 +661,31 @@ class TestFilesystemTool(unittest.TestCase):
         self.assertTrue(tools_loader.check_permission(planner_ctx, "filesystem", "read", root_file))
         self.assertFalse(tools_loader.check_permission(planner_ctx, "filesystem", "write", root_file))
 
+    def test_permission_resolves_symlinks(self):
+        """Grants behind a symlink (aoc/pkm -> ~/pkm) must match every spelling of the path."""
+        import tempfile
+        from core.loaders.tools_loader import ToolsLoader
+        tools_loader = ToolsLoader()
+        ctx = make_context(agent_id="symlink-agent")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            real_root = os.path.join(tmp, "real_pkm")
+            os.makedirs(os.path.join(real_root, "vault", "journals"))
+            os.makedirs(os.path.join(real_root, "secret"))
+            link_root = os.path.join(tmp, "link_pkm")
+            os.symlink(real_root, link_root)
+            # A symlink inside the granted dir pointing outside it must not widen the grant.
+            os.symlink(os.path.join(real_root, "secret"),
+                       os.path.join(real_root, "vault", "journals", "escape"))
+
+            grants = {"filesystem": {os.path.join(link_root, "vault", "journals"): ["write"]}}
+            with patch.object(tools_loader, "_merge_tool_permissions", return_value=grants):
+                via_link = os.path.join(link_root, "vault", "journals", "a.md")
+                via_real = os.path.join(real_root, "vault", "journals", "a.md")
+                escaped = os.path.join(real_root, "vault", "journals", "escape", "x.md")
+                self.assertTrue(tools_loader.check_permission(ctx, "filesystem", "write", via_link))
+                self.assertTrue(tools_loader.check_permission(ctx, "filesystem", "write", via_real))
+                self.assertFalse(tools_loader.check_permission(ctx, "filesystem", "write", escaped))
+
 if __name__ == '__main__':
     unittest.main()

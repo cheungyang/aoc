@@ -9,7 +9,7 @@ This skill handles the creation and updating of the user's daily fleeting journa
 
 ### Step 1: Check & Initialize Daily Note
 Determine if today's note already exists.
-- **Target Path**: `vault/journals/fleeting/YYYY-MM-DD.md` (Replace YYYY-MM-DD with today's date).
+- **Target Path**: `pkm/vault/journals/fleeting/YYYY-MM-DD.md` (Replace YYYY-MM-DD with today's date). Always pass this exact relative path to the `filesystem` tool.
 - Use the `filesystem` tool (`read` action) to check if the file exists.
 - **If the file does NOT exist:**
   1. Use the `filesystem` tool (`read` action) to load the template located at `pkm/templates/"Fleeting Pages".md`.
@@ -33,7 +33,7 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
   <triggering_agent>[Agent ID or 'User']</triggering_agent>
   <payload>
     <intention_set>[The actual synthesized intention appended to the journal]</intention_set>
-    <file_path>[The path of the file that was updated (e.g., vault/journals/fleeting/YYYY-MM-DD.md)]</file_path>
+    <file_path>[The path of the file that was updated (e.g., pkm/vault/journals/fleeting/YYYY-MM-DD.md)]</file_path>
   </payload>
   <errors>[Any template resolution errors, sync conflicts, or 'None']</errors>
   <learnings>[Observations on the user's current project priorities or mood based on the agreed intentions]</learnings>

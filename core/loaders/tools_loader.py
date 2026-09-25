@@ -176,15 +176,19 @@ class ToolsLoader:
                         return True
                 return False
 
-            workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-            target_abs_path = os.path.abspath(target_path_to_check)
+            # realpath (not abspath) on both sides: grants such as "pkm/vault" live
+            # behind a symlink (aoc/pkm -> ~/pkm), so the same file can be named
+            # several ways. Resolving symlinks makes every spelling compare equal,
+            # and also stops a symlink inside a granted dir from escaping it.
+            workspace_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            target_abs_path = os.path.realpath(os.path.expanduser(target_path_to_check))
             
             for base_path, actions in permissions.items():
-                resolved_base_path = base_path.replace("<agent_id>", agent_id)
+                resolved_base_path = os.path.expanduser(base_path.replace("<agent_id>", agent_id))
                 if os.path.isabs(resolved_base_path):
-                    base_abs_path = os.path.abspath(resolved_base_path)
+                    base_abs_path = os.path.realpath(resolved_base_path)
                 else:
-                    base_abs_path = os.path.abspath(os.path.join(workspace_root, resolved_base_path))
+                    base_abs_path = os.path.realpath(os.path.join(workspace_root, resolved_base_path))
 
                 if target_abs_path == base_abs_path or target_abs_path.startswith(base_abs_path.rstrip(os.sep) + os.sep):
                     if action_name in actions:
