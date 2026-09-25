@@ -31,8 +31,35 @@ class DiscordStreamBuffer:
         self._lock = asyncio.Lock()
         self._disabled = (channel is None)
 
-    @staticmethod
-    def filter_xml_for_stream(text: str) -> str:
+    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log")
+
+    @classmethod
+    def _strip_partial_trailing_tag(cls, text: str) -> str:
+        """
+        Strips a trailing, not-yet-closed tag opener (e.g. "<", "<po",
+        "<poll allow_multiple=") only if it could become one of the known
+        XML tags. Plain-text "<" (e.g. "(<1 yr)") is preserved.
+        """
+        idx = text.rfind("<")
+        if idx == -1:
+            return text
+        tail = text[idx + 1:]
+        if ">" in tail:
+            return text
+        m = re.match(r'/?([A-Za-z_]*)', tail)
+        name = m.group(1).lower()
+        rest = tail[m.end():]
+        if not rest:
+            # Tail is only a (possibly empty) tag-name fragment.
+            if any(t.startswith(name) for t in cls._STREAM_TAGS):
+                return text[:idx]
+        elif name in cls._STREAM_TAGS and rest[0].isspace():
+            # Known tag with attributes still streaming in.
+            return text[:idx]
+        return text
+
+    @classmethod
+    def filter_xml_for_stream(cls, text: str) -> str:
         """
         Suppresses completed and in-flight XML blocks (<poll>, <images>,
         <videos>, <system_memory_log>) during live streaming so Discord users
@@ -41,33 +68,23 @@ class DiscordStreamBuffer:
         if not text:
             return ""
 
-        # Remove completed XML tags and their contents
+        tags = "|".join(cls._STREAM_TAGS)
+
+        # Remove completed XML blocks (attributes allowed, e.g.
+        # <poll allow_multiple="false">) and their contents
         filtered = re.sub(
-            r'<poll>.*?</poll>', '', text, flags=re.DOTALL | re.IGNORECASE
-        )
-        filtered = re.sub(
-            r'<images>.*?</images>', '', filtered,
+            rf'<({tags})\b[^>]*>.*?</\1\s*>', '', text,
             flags=re.DOTALL | re.IGNORECASE
-        )
-        filtered = re.sub(
-            r'<videos>.*?</videos>', '', filtered,
-            flags=re.DOTALL | re.IGNORECASE
-        )
-        filtered = re.sub(
-            r'<system_memory_log>.*?</system_memory_log>', '',
-            filtered, flags=re.DOTALL | re.IGNORECASE
         )
 
         # Remove unclosed in-flight XML blocks
         filtered = re.sub(
-            r'<(?:poll|images|videos|system_memory_log)[^>]*>.*$',
+            rf'<(?:{tags})\b[^>]*>.*$',
             '', filtered, flags=re.DOTALL | re.IGNORECASE
         )
-        filtered = re.sub(
-            r'<(?:poll|images|videos|system_memory_log)[^>]*$',
-            '', filtered, flags=re.IGNORECASE
-        )
-        filtered = re.sub(r'<[^>]*$', '', filtered)
+
+        # Remove a trailing partial tag opener, but only for known tags
+        filtered = cls._strip_partial_trailing_tag(filtered)
 
         return filtered.rstrip()
 

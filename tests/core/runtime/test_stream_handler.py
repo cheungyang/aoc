@@ -24,6 +24,33 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
         filtered = DiscordStreamBuffer.filter_xml_for_stream(text)
         self.assertEqual(filtered, "Finished task.")
 
+    def test_filter_xml_for_stream_keeps_literal_less_than(self):
+        text = (
+            "Free for Infants (<1 yr).\nWebsite: [CDM](https://cdm.org)\nMore.\n"
+            '<poll allow_multiple="false"><question>Q?</question></poll>'
+        )
+        filtered = DiscordStreamBuffer.filter_xml_for_stream(text)
+        self.assertEqual(
+            filtered,
+            "Free for Infants (<1 yr).\nWebsite: [CDM](https://cdm.org)\nMore."
+        )
+
+    def test_filter_xml_for_stream_hides_poll_with_attributes_midtext(self):
+        text = 'A <poll allow_multiple="true"><question>Q</question></poll> B'
+        filtered = DiscordStreamBuffer.filter_xml_for_stream(text)
+        self.assertEqual(filtered, "A  B")
+
+    def test_filter_xml_for_stream_hides_partial_known_tag_opener(self):
+        for tail in ["<", "<po", '<poll allow_multiple="fa', "<system_mem"]:
+            filtered = DiscordStreamBuffer.filter_xml_for_stream("Hi " + tail)
+            self.assertEqual(filtered, "Hi", tail)
+
+    def test_filter_xml_for_stream_keeps_non_tag_trailing_less_than(self):
+        for text in ["x <1 yr", "a < b", "price <$20"]:
+            self.assertEqual(
+                DiscordStreamBuffer.filter_xml_for_stream(text), text
+            )
+
     async def test_streaming_buffer_sends_and_throttles(self):
         mock_channel = AsyncMock()
         mock_msg = AsyncMock()
