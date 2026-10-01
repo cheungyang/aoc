@@ -42,7 +42,7 @@ from core.scheduler.spec import (
 )
 from core.scheduler.state import ScheduleState
 from core.util import split_message
-from core.util.config import Config
+from core.channel.discord.ownership import PROD, Ownership
 from core.util.time_util import get_local_now
 
 TICK_SECONDS = 30
@@ -232,8 +232,14 @@ class ScheduleRunner:
 
     async def run_schedule(self, spec: ScheduleSpec) -> bool:
         """Gate, queue, dispatch, record. Returns True if the run succeeded."""
-        if not Config().is_channel_allowed(spec.channel):
-            print(f"ScheduleRunner: Skipping schedule for {spec.agent_id} on channel '{spec.channel}' (debug mode active, restricted to '{Config().debug_channel}')")
+        ownership = Ownership()
+        if not await ownership.wait_ready() and ownership.role == PROD:
+            # Discord unreachable: prod keeps running its schedules rather than
+            # silently dropping them; a dev holding the agent is the rare case.
+            print(f"ScheduleRunner: claims unknown (control thread not read); running {spec.describe()} on prod.")
+        elif not ownership.is_mine(spec.agent_id):
+            holder = ownership.holder(spec.agent_id) or "prod"
+            print(f"ScheduleRunner: Skipping {spec.describe()} on {ownership.label()}; {spec.agent_id} is held by {holder}.")
             return False
 
         started = time.time()
@@ -372,7 +378,10 @@ class ScheduleRunner:
         """Posts pending rejection alerts to each rejected schedule's own channel."""
         for key, pending in list(self._pending_alerts.items()):
             rejection, attempts = pending
-            if not Config().is_channel_allowed(rejection.channel):
+            ownership = Ownership()
+            if not ownership.is_ready():
+                continue  # retry on the next flush, once claims are known
+            if not ownership.is_mine(rejection.agent_id):
                 del self._pending_alerts[key]
                 self._alerted.add(key)
                 continue

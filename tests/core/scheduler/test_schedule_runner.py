@@ -256,11 +256,11 @@ class TestPromptDispatch(RunnerCase):
         self.assertTrue(await runner.run_schedule(self.prompt_spec(gate=ValueError("broken"))))
         self.agent.execute.assert_awaited_once()
 
-    async def test_debug_mode_skips_unallowed_channels(self):
+    async def test_skips_schedules_of_agents_held_by_dev(self):
+        from core.channel.discord.ownership import Event, Ownership
         runner = self.make_runner()
-        with patch.object(runner_mod, "Config") as config:
-            config.return_value.is_channel_allowed.return_value = False
-            self.assertFalse(await runner.run_schedule(self.prompt_spec()))
+        Ownership()._reduce(Ownership().holds, Event("claim", "agent1", "laptop"), None)
+        self.assertFalse(await runner.run_schedule(self.prompt_spec()))
         self.agent.execute.assert_not_called()
 
     async def test_thread_is_resolved(self):

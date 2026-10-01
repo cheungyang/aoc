@@ -97,3 +97,16 @@ def _isolate_production_state(tmp_path, monkeypatch):
     _job_manager_mod.JobManager._instance = None
     yield
     _job_manager_mod.JobManager._instance = None
+
+
+@pytest.fixture(autouse=True)
+def _ownership_prod_ready():
+    """Per-test: a fresh Ownership singleton acting as prod with no claims, as
+    if the control thread had already been read. Tests of ownership itself
+    reset it again and configure their own role."""
+    from core.channel.discord.ownership import Ownership
+
+    Ownership.reset()
+    Ownership().mark_ready()
+    yield
+    Ownership.reset()

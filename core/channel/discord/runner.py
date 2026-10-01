@@ -12,7 +12,7 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler
-from core.util.config import Config
+from core.channel.discord.ownership import Ownership
 from core.util import format_error_message
 from core.voice.voice_manager import VoiceManager
 
@@ -25,6 +25,7 @@ class BotRunner:
         self.bot = None
         self._init_bot()
         self.voice_manager = VoiceManager(self)
+        Ownership().add_listener(self._on_ownership_change)
 
     def _init_bot(self):
         intents = discord.Intents.default()
@@ -85,6 +86,8 @@ class BotRunner:
         """Auto-follows human users when they join any voice channel matching the agent's channel_hosts."""
         if member.bot:
             return
+        if not Ownership().is_mine(self.agent_id):
+            return
         loader = AgentsLoader()
         agent = loader.get_agent(self.agent_id)
         if not agent:
@@ -107,8 +110,23 @@ class BotRunner:
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
         self._touch_heartbeat()
         await self.bot.change_presence(status=discord.Status.online, activity=discord.Game(name="with LangGraph"))
-        
-        # Auto-join voice channel if configured
+
+        # Learn who holds which agent before answering anything; see ownership.py.
+        ownership = Ownership()
+        await ownership.rebuild(self.bot)
+        if self.agent_id in ownership.initial_agents:
+            try:
+                await ownership.claim(self.bot, self.agent_id)
+            except Exception as e:
+                print(f"[BotRunner:{self.agent_id}] ⚠️ could not claim agent: {e}")
+
+        await self._maybe_auto_join()
+
+    async def _maybe_auto_join(self):
+        """Joins the configured voice channel if voice auto_join is on and this
+        instance owns the agent."""
+        if not Ownership().is_mine(self.agent_id):
+            return
         loader = AgentsLoader()
         agent = loader.get_agent(self.agent_id)
         if agent:
@@ -141,6 +159,53 @@ class BotRunner:
                     await self.voice_manager.join_voice_channel(target_to_join)
                 asyncio.create_task(_auto_join())
 
+    def _on_ownership_change(self, agent_id):
+        """Hands voice over when this agent moves between prod and dev."""
+        if agent_id != self.agent_id or not self.bot or not self.bot.is_ready():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if Ownership().is_mine(self.agent_id):
+            loop.create_task(self._maybe_auto_join())
+        elif self.voice_manager.voice_client:
+            loop.create_task(self.voice_manager.leave_voice_channel())
+
+    async def _handle_control_message(self, message):
+        """Control-thread messages: claims, releases and user commands.
+
+        Every bot in this process sees the same message; `apply` is idempotent
+        and only one bot reacts or replies."""
+        ownership = Ownership()
+        event = ownership.apply(message)
+        if event is None or getattr(message.author, "bot", False):
+            return
+        from core.channel.discord.loader import BotsLoader
+        agent_ids = sorted(BotsLoader()._bots)
+        is_elected = bool(agent_ids) and agent_ids[0] == self.agent_id
+
+        if event.kind == "cmd_claim":
+            if event.agent == self.agent_id:
+                try:
+                    await ownership.claim(self.bot, self.agent_id)
+                    await self._react(message, "✅")
+                except Exception as e:
+                    print(f"[BotRunner:{self.agent_id}] ⚠️ could not claim agent: {e}")
+                    await self._react(message, "⚠️")
+            elif is_elected and event.agent not in agent_ids:
+                await self._react(message, "❓")
+        elif event.kind == "cmd_release" and is_elected:
+            await self._react(message, "✅")
+        elif event.kind == "cmd_status" and is_elected:
+            await message.channel.send(ownership.describe(agent_ids))
+
+    @staticmethod
+    async def _react(message, emoji):
+        try:
+            await message.add_reaction(emoji)
+        except Exception as e:
+            print(f"Could not add reaction {emoji}: {e}")
 
     async def on_message(self, message):
         # Deduplicate incoming Discord messages by message ID.
@@ -157,13 +222,17 @@ class BotRunner:
             if len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
+        ownership = Ownership()
+        if ownership.is_control_channel(message.channel):
+            await self._handle_control_message(message)
+            return
+
         # Ignore messages from other bots
         if message.author.bot and message.author != self.bot.user:
             return
 
-        # In debug mode, ignore messages outside debug_channel
-        if not Config().is_channel_allowed(message.channel):
-            return
+        # Prod and dev both receive this message; only the owner answers.
+        mine = ownership.is_mine(self.agent_id, message)
 
         content = message.content
         # If it is from this bot, check if it is a vote message
@@ -179,7 +248,8 @@ class BotRunner:
 
         # Skip commands (if any)
         if content.startswith("!"):
-            await self.bot.process_commands(message)
+            if mine:
+                await self.bot.process_commands(message)
             return
 
         # Read channel_hosts from agent.json        
@@ -212,6 +282,11 @@ class BotRunner:
                 # Ignore if not tagged
                 return
             # Respond if tagged
+
+        if not mine:
+            holder = ownership.holder(self.agent_id) or "prod"
+            print(f"[Ownership:{ownership.label()}] {self.agent_id}: not answering message {msg_id}, held by {holder}.")
+            return
 
         agent = loader.get_agent(self.agent_id)
         reaction_handler = ReactionCallbackHandler(message)

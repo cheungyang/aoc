@@ -8,6 +8,7 @@ from core.util.config import Config
 from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.scheduler.schedule_runner import ScheduleRunner
+from core.channel.discord.ownership import DEV, PROD, Ownership
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
 faulthandler.enable()
@@ -33,27 +34,40 @@ if config.langsmith_tracing:
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Run Discord Bots with LangGraph")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode (restrict bots to debug_channel)")
-    parser.add_argument("--debug-channel", dest="debug_channel", type=str, default=None, help="Specify debug channel name or ID")
+    parser.add_argument(
+        "--dev", action="store_true",
+        help="Run as a dev instance: connect every bot, but answer only for agents this "
+             "host has claimed in the control thread (see core/channel/discord/ownership.py)",
+    )
+    parser.add_argument(
+        "--agents", type=str, default="",
+        help="With --dev: comma-separated agent ids to claim at startup, e.g. day-planner,main",
+    )
     return parser.parse_args(args)
 
-async def run_bots(is_debug: bool = None, debug_channel: str = None):
-    config = Config()
-    if is_debug is not None:
-        config.is_debug = is_debug
-    if debug_channel is not None:
-        config.debug_channel = debug_channel
+def _split_agents(value: str) -> list:
+    return [a.strip() for a in (value or "").split(",") if a.strip()]
 
-    if config.is_debug:
-        print("=== DEBUG MODE ENABLED ===")
-        print(f"Discord bots will ONLY listen and respond to channel: '{config.debug_channel}'")
-        print("===========================")
-
+async def run_bots(dev: bool = False, agents: list = None):
     agents_loader = AgentsLoader()
     bots_loader = BotsLoader()
-    
     agent_ids = agents_loader.list_agent_ids()
-    
+
+    agents = list(agents or [])
+    if agents and not dev:
+        raise SystemExit("--agents requires --dev")
+    unknown = sorted(set(agents) - set(agent_ids))
+    if unknown:
+        raise SystemExit(f"Unknown agent(s) for --agents: {', '.join(unknown)}. Known: {', '.join(sorted(agent_ids))}")
+
+    ownership = Ownership()
+    ownership.configure(role=DEV if dev else PROD, agents=agents)
+    if dev:
+        print("=== DEV INSTANCE ===")
+        print(f"Host '{ownership.host}' claims: {', '.join(agents) or 'nothing yet'}")
+        print("Other agents stay on prod. Use [claim <agent>] / [release] / [status] in the control thread.")
+        print("====================")
+
     tasks = []
     for agent_id in agent_ids:
         bot = bots_loader.get_bot(agent_id)
@@ -68,17 +82,20 @@ async def run_bots(is_debug: bool = None, debug_channel: str = None):
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             print("\nShutting down bots and runners...")
+        finally:
+            # Hand claimed agents back to prod on a clean exit (Ctrl+C).
+            tokens = {a: b.discord_token for a, b in bots_loader._bots.items() if b}
+            try:
+                await asyncio.wait_for(ownership.release_all_mine(tokens), timeout=15)
+            except Exception as e:
+                print(f"Could not release claims: {e}. Post [release] in the control thread.")
     else:
         print("No Discord bots to start.")
 
 if __name__ == "__main__":
     cli_args = parse_args()
-    if cli_args.debug:
-        Config().is_debug = True
-    if cli_args.debug_channel is not None:
-        Config().debug_channel = cli_args.debug_channel
 
     try:
-        asyncio.run(run_bots())
+        asyncio.run(run_bots(dev=cli_args.dev, agents=_split_agents(cli_args.agents)))
     except KeyboardInterrupt:
         print("\nProgram interrupted by user. Exiting.")

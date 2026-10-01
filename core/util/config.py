@@ -21,8 +21,6 @@ class Config:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(Config, cls).__new__(cls)
-            cls._instance._is_debug = None
-            cls._instance._debug_channel = None
             cls._instance._langsmith_tracing = None
             cls._instance._langsmith_project = None
             cls._instance._langsmith_endpoint = None
@@ -62,8 +60,6 @@ class Config:
 
     def load_from_env(self):
         """Resets local overrides so properties dynamically read from updated os.environ."""
-        self._is_debug = None
-        self._debug_channel = None
         self._langsmith_tracing = None
         self._langsmith_project = None
         self._langsmith_endpoint = None
@@ -104,33 +100,14 @@ class Config:
         return os.getenv(key, default)
 
     # -------------------------------------------------------------------------
-    # Debug settings
+    # Prod/dev coordination
     # -------------------------------------------------------------------------
     @property
-    def is_debug(self) -> bool:
-        if self._is_debug is not None:
-            return self._is_debug
-        env_debug = os.getenv("IS_DEBUG", os.getenv("DEBUG", "false")).lower()
-        return env_debug in ("true", "1", "yes", "t")
-
-    @is_debug.setter
-    def is_debug(self, value):
-        if isinstance(value, str):
-            self._is_debug = value.lower() in ("true", "1", "yes", "t")
-        elif value is not None:
-            self._is_debug = bool(value)
-        else:
-            self._is_debug = None
-
-    @property
-    def debug_channel(self) -> str:
-        if self._debug_channel is not None:
-            return self._debug_channel
-        return os.getenv("DEBUG_CHANNEL", "")
-
-    @debug_channel.setter
-    def debug_channel(self, value):
-        self._debug_channel = str(value) if value is not None else None
+    def control_thread_id(self) -> str:
+        """Discord thread where dev instances claim agents from prod; see
+        core/channel/discord/ownership.py. `CONTROL_THREAD_ID` overrides the
+        "control" thread under #general."""
+        return (os.getenv("CONTROL_THREAD_ID") or "1555004109415915540").strip()
 
     # -------------------------------------------------------------------------
     # LangSmith / Observability settings
@@ -660,55 +637,8 @@ class Config:
     def max_concurrency(self, value):
         self._max_concurrency = max(1, int(value)) if value is not None else None
 
-    # -------------------------------------------------------------------------
-    # Channel Filtering Logic
-    # -------------------------------------------------------------------------
-    def is_channel_allowed(self, channel) -> bool:
-        """
-        Determines whether a given Discord channel or thread is allowed to be listened/responded to.
-        - If is_debug is True: returns True ONLY if the channel or thread parent matches debug_channel.
-        - If is_debug is False: returns True for all channels EXCEPT debug_channel (which is ignored).
-        """
-        debug_ch = self.debug_channel
-        target = debug_ch.lstrip("#").strip() if debug_ch else ""
-
-        def _is_debug_channel_match(ch) -> bool:
-            if not target or ch is None:
-                return False
-
-            if isinstance(ch, str):
-                return ch.lstrip("#").strip() == target
-
-            channel_name = getattr(ch, "name", "")
-            channel_id = str(getattr(ch, "id", ""))
-
-            if channel_name == target or channel_id == target:
-                return True
-
-            parent = getattr(ch, "parent", None)
-            if parent:
-                parent_name = getattr(parent, "name", "")
-                parent_id = str(getattr(parent, "id", ""))
-                if parent_name == target or parent_id == target:
-                    return True
-
-            return False
-
-        is_match = _is_debug_channel_match(channel)
-
-        if self.is_debug:
-            # When debug is ON: only debug_channel is allowed
-            return is_match
-        else:
-            # When debug is OFF: all channels are allowed EXCEPT debug_channel
-            if target and is_match:
-                return False
-            return True
-
     def reset(self):
         """Helper to reset state back to default/env values."""
-        self._is_debug = None
-        self._debug_channel = None
         self._langsmith_tracing = None
         self._langsmith_project = None
         self._langsmith_endpoint = None

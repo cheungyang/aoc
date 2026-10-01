@@ -96,35 +96,38 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
 
     def test_parse_args_default(self):
         args = main.parse_args([])
-        self.assertFalse(args.debug)
-        self.assertIsNone(args.debug_channel)
+        self.assertFalse(args.dev)
+        self.assertEqual(main._split_agents(args.agents), [])
 
-    def test_parse_args_debug_flag(self):
-        args = main.parse_args(["--debug"])
-        self.assertTrue(args.debug)
-        self.assertIsNone(args.debug_channel)
-
-    def test_parse_args_debug_channel(self):
-        args = main.parse_args(["--debug", "--debug-channel", "test-chan"])
-        self.assertTrue(args.debug)
-        self.assertEqual(args.debug_channel, "test-chan")
+    def test_parse_args_dev_agents(self):
+        args = main.parse_args(["--dev", "--agents", "day-planner, main,"])
+        self.assertTrue(args.dev)
+        self.assertEqual(main._split_agents(args.agents), ["day-planner", "main"])
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')
     @patch('main.BotsLoader')
-    async def test_run_bots_with_debug_param(self, mock_bots_loader, mock_agents_loader, mock_schedule_runner_class):
+    async def test_run_bots_dev_configures_ownership(self, mock_bots_loader, mock_agents_loader, mock_schedule_runner_class):
+        from core.channel.discord.ownership import DEV, Ownership
         mock_schedule_runner = MagicMock()
         mock_schedule_runner.start = AsyncMock()
         mock_schedule_runner_class.return_value = mock_schedule_runner
-        
-        mock_loader_instance = MagicMock()
-        mock_agents_loader.return_value = mock_loader_instance
-        mock_loader_instance.list_agent_ids.return_value = []
+        mock_agents_loader.return_value.list_agent_ids.return_value = ["day-planner"]
+        mock_bots_loader.return_value.get_bot.return_value = None
+        mock_bots_loader.return_value._bots = {}
 
-        await main.run_bots(is_debug=True, debug_channel="debug-room")
-        self.assertTrue(Config().is_debug)
-        self.assertEqual(Config().debug_channel, "debug-room")
+        await main.run_bots(dev=True, agents=["day-planner"])
+        self.assertEqual(Ownership().role, DEV)
+        self.assertEqual(Ownership().initial_agents, ["day-planner"])
 
+    @patch('main.AgentsLoader')
+    @patch('main.BotsLoader')
+    async def test_run_bots_rejects_unknown_or_non_dev_agents(self, mock_bots_loader, mock_agents_loader):
+        mock_agents_loader.return_value.list_agent_ids.return_value = ["day-planner"]
+        with self.assertRaises(SystemExit):
+            await main.run_bots(dev=True, agents=["nope"])
+        with self.assertRaises(SystemExit):
+            await main.run_bots(dev=False, agents=["day-planner"])
 
 if __name__ == '__main__':
     unittest.main()

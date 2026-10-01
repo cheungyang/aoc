@@ -356,9 +356,27 @@ docker compose down
 # Open an interactive bash shell inside the container
 docker compose exec app bash
 
-# Run debug mode or tests inside the container
-docker compose exec app python main.py --debug
+# Run tests inside the container
+docker compose exec app python -m pytest
 ```
+
+### 5. Running a Dev Instance Alongside Prod
+
+Prod and a dev instance (e.g. on a laptop, for local LLMs or heavier work) can
+run at the same time without both replying. Dev connects every agent bot but
+only answers for agents it has claimed in the Discord control thread (the
+"control" thread under #general; override with `CONTROL_THREAD_ID`):
+
+```bash
+python main.py --dev --agents day-planner   # dev takes day-planner; prod keeps the rest
+```
+
+- **Ctrl+C** posts a release and prod takes the agent back immediately.
+- In the control thread: `[claim <agent>]` hands another agent to the running
+  dev instance, `[release]` gives every agent back to prod (use this if dev
+  crashed), and `[status]` makes each instance report who holds what.
+- While dev holds an agent it also runs that agent's schedules and voice.
+- All agent bots need permission to read and post in the control thread.
 
 ---
 
