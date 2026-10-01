@@ -27,6 +27,7 @@ from croniter import croniter
 from core.channel.discord.loader import BotsLoader
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
 from core.loaders.agents_loader import AgentsLoader
+from core.runtime.channel_context import record_channel_post
 from core.runtime.job_manager import JobManager
 from core.runtime.session_manager import SessionManager
 from core.scheduler.limiter import ScheduleLimiter
@@ -353,8 +354,14 @@ class ScheduleRunner:
                 print(f"ScheduleRunner: could not reset {session.session_id} for a stateless run: {e}")
 
         agent = self.loader.get_agent(spec.agent_id)
-        await agent.execute(spec.build_prompt(ctx), session=session, role="user")
-        return self._job_succeeded(getattr(session, "job_id", None))
+        reply = await agent.execute(spec.build_prompt(ctx), session=session, role="user")
+        ok = self._job_succeeded(getattr(session, "job_id", None))
+        # Only a successful run's reply was posted as the schedule's output (a
+        # failure posts an error message instead), and only if there was a
+        # channel to post it to.
+        if ok and channel is not None and isinstance(reply, str):
+            record_channel_post(channel, reply, origin=spec.schedule_id, loader=self.loader)
+        return ok
 
     async def _run_script(self, spec: ScriptSchedule, ctx: ScheduleContext, steps) -> bool:
         results = []
@@ -368,6 +375,7 @@ class ScheduleRunner:
             if channel is not None:
                 for chunk in split_message(output):
                     await channel.send(chunk)
+                record_channel_post(channel, output, origin=spec.schedule_id, loader=self.loader)
             else:
                 print(f"[{spec.agent_id}] {output}")
         return all(r.ok for r in results)

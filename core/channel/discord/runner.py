@@ -16,6 +16,36 @@ from core.channel.discord.ownership import Ownership
 from core.util import format_error_message
 from core.voice.voice_manager import VoiceManager
 
+# How much of a replied-to message is quoted back to the agent. Enough to know
+# which post is meant; the full text is usually already in some session.
+REPLY_EXCERPT_CHARS = 1500
+
+
+def format_reply_context(author: str, posted_at, content: str) -> str:
+    """The block telling the agent which message the user is replying to."""
+    excerpt = (content or "").strip()
+    if len(excerpt) > REPLY_EXCERPT_CHARS:
+        excerpt = excerpt[:REPLY_EXCERPT_CHARS].rstrip() + " [...]"
+    stamp = ""
+    if posted_at is not None:
+        try:
+            from core.util.time_util import get_local_timezone
+            stamp = posted_at.astimezone(get_local_timezone()).strftime("%Y-%m-%d %H:%M %Z")
+        except Exception:
+            stamp = str(posted_at)
+    attrs = f'author="{author}"' + (f' posted="{stamp}"' if stamp else "")
+    return f"<replying_to {attrs}>\n{excerpt}\n</replying_to>"
+
+
+def append_reply_context(payload, reply_context: str):
+    """Adds the block *after* the user's text: the router matches concierge
+    prefixes (`[main]`, `kill`) at the start of the message, so the user's own
+    words must stay first."""
+    if isinstance(payload, list):
+        return list(payload) + [{"type": "text", "text": f"\n\n{reply_context}"}]
+    return f"{payload}\n\n{reply_context}" if payload else reply_context
+
+
 class BotRunner:
     def __init__(self, discord_token, agent_id):
         self.discord_token = discord_token
@@ -207,6 +237,28 @@ class BotRunner:
         except Exception as e:
             print(f"Could not add reaction {emoji}: {e}")
 
+    async def _reply_context(self, message):
+        """A `<replying_to>` block if `message` is a Discord reply, else None.
+
+        Without it the agent sees only the reply text and assumes it continues
+        whatever the session last discussed -- wrong when the user is answering
+        an older or out-of-band post such as a scheduled report."""
+        ref = getattr(message, "reference", None)
+        if not isinstance(ref, discord.MessageReference) or not ref.message_id:
+            return None
+        try:
+            target = ref.cached_message or ref.resolved
+            if not isinstance(target, discord.Message):
+                target = await message.channel.fetch_message(ref.message_id)
+        except Exception as e:
+            print(f"[BotRunner:{self.agent_id}] Could not resolve replied-to message {ref.message_id}: {e}")
+            return None
+        content = getattr(target, "content", None)
+        if not isinstance(content, str) or not content.strip():
+            return None
+        author = getattr(getattr(target, "author", None), "display_name", None) or "unknown"
+        return format_reply_context(author, getattr(target, "created_at", None), content)
+
     async def on_message(self, message):
         # Deduplicate incoming Discord messages by message ID.
         # Discord gateway socket reconnections or rapid client double-clicks can deliver the exact same
@@ -344,6 +396,10 @@ class BotRunner:
                             content_payload = [{"type": "text", "text": f"[Thread starter message from {starter_author}: \"{starter_text}\"]\n\n"}] + content_payload
             except Exception as e:
                 print(f"[BotRunner:{self.agent_id}] Note: could not seed thread starter context: {e}")
+
+        reply_context = await self._reply_context(message)
+        if reply_context:
+            content_payload = append_reply_context(content_payload, reply_context)
 
         try:
             async with message.channel.typing():

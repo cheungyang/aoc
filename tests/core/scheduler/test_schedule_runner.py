@@ -83,10 +83,12 @@ class RunnerCase(unittest.IsolatedAsyncioTestCase):
             patch.object(runner_mod, "BotsLoader", return_value=self.bots),
             patch.object(runner_mod.SessionManager, "get_session", return_value=self.session),
             patch.object(runner_mod, "reset_conversation", return_value=0),
+            patch.object(runner_mod, "record_channel_post", return_value=[]),
         ]
         self.mocks = [p.start() for p in patches]
         self.get_session = self.mocks[2]
         self.reset = self.mocks[3]
+        self.record_post = self.mocks[4]
         for p in patches:
             self.addCleanup(p.stop)
 
@@ -288,6 +290,26 @@ class TestPromptDispatch(RunnerCase):
         self.assertEqual(limiter.peak, 1)
         self.assertEqual(self.agent.execute.await_count, 3)
 
+    async def test_successful_reply_is_recorded_for_the_channel(self):
+        runner = self.make_runner()
+        await runner.run_schedule(self.prompt_spec())
+        self.record_post.assert_called_once_with(self.channel, "ok", origin="agent1:p", loader=self.loader)
+
+    async def test_failed_run_is_not_recorded(self):
+        runner = self.make_runner()
+        self.session.job_id = "job-1"
+        with patch.object(runner_mod, "JobManager") as jm:
+            jm.return_value.get_job.return_value = MagicMock(status="error")
+            await runner.run_schedule(self.prompt_spec())
+        self.record_post.assert_not_called()
+
+    async def test_nothing_recorded_when_channel_unresolved(self):
+        self.bots.get_channel.return_value = None
+        runner = self.make_runner()
+        await runner.run_schedule(self.prompt_spec())
+        self.agent.execute.assert_awaited_once()
+        self.record_post.assert_not_called()
+
 
 class TestScriptDispatch(RunnerCase):
     def script_spec(self, steps):
@@ -311,6 +333,7 @@ class TestScriptDispatch(RunnerCase):
         run.assert_awaited_once()
         self.assertEqual(run.call_args[0][0], b)
         self.channel.send.assert_awaited_once_with("did b")
+        self.record_post.assert_called_once_with(self.channel, "did b", origin="script-executor:s", loader=self.loader)
         self.agent.execute.assert_not_called()
         self.get_session.assert_not_called()
 
@@ -321,6 +344,7 @@ class TestScriptDispatch(RunnerCase):
              patch.object(runner_mod, "run_step", AsyncMock(return_value=ScriptResult("a.py", True, ""))):
             self.assertTrue(await runner.run_schedule(spec))
         self.channel.send.assert_not_called()
+        self.record_post.assert_not_called()
 
     async def test_failed_step_fails_the_run(self):
         spec = self.script_spec([ScriptStep("a.py")])
