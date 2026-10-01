@@ -624,6 +624,21 @@ class Config:
         return 200000
 
     @property
+    def llm_max_retries(self) -> int:
+        """Attempts (including the first) per Gemini call. Passed as
+        `ChatGoogleGenerativeAI.max_retries`, so it bounds both the SDK's own
+        retries (408/429/500/502/504) and the 503 retry loop in
+        `core.runtime.llm_retry`. 6 is langchain-google-genai's default, ~31s
+        of backoff. `LLM_MAX_RETRIES`, min 1 (1 = no retries)."""
+        env_val = os.getenv("LLM_MAX_RETRIES")
+        if env_val:
+            try:
+                return max(1, int(env_val))
+            except ValueError:
+                pass
+        return 6
+
+    @property
     def max_concurrency(self) -> int:
         """The one cap on concurrent model-driven executions across the system
         (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1."""

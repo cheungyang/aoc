@@ -76,6 +76,13 @@ def filesystem(instructions: list[dict]) -> str:
             error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Both \'action\' and \'path\' are required in each instruction.</instruction_error>')
             continue
 
+        # Expand `~` once so the path that is permission-checked is exactly the
+        # path that gets executed (check_permission also expands `~`).
+        path = os.path.expanduser(path)
+        inst = {**inst, "path": path}
+        if inst.get("destination"):
+            inst["destination"] = os.path.expanduser(inst["destination"])
+
         # Path Permission check for primary path
         if not tools_loader.check_permission(ctx, "filesystem", action, path):
             error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Agent {ctx.agent_id} does not have permission to perform \'{action}\' on path {path}</instruction_error>')

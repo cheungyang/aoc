@@ -27,6 +27,10 @@ SUBAGENT_STREAM_FINAL = "subagent_stream_final"
 # delegation path itself makes the signal independent of who decided to delegate.
 ROUTE_REACTION = "route_reaction"
 
+# Emitted by `core.runtime.llm_retry` each time a Gemini 503 is retried, so the
+# channel can show that a retry happened even though the error itself is hidden.
+LLM_RETRY_REACTION = "llm_retry"
+
 
 class StreamHandler:
     """
@@ -116,7 +120,7 @@ class StreamHandler:
                             "response": data.get("response"),
                             "text": data.get("text", "")
                         }
-                    elif event_name == ROUTE_REACTION:
+                    elif event_name in (ROUTE_REACTION, LLM_RETRY_REACTION):
                         # Deliberately does not set `has_subagent_streamed`: this
                         # announces *that* a delegation happened, before any of the
                         # callee's text exists, and must not suppress the owner's

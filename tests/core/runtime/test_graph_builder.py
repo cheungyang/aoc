@@ -35,7 +35,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('langchain_google_genai.ChatGoogleGenerativeAI')
+     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -73,7 +73,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('langchain_google_genai.ChatGoogleGenerativeAI')
+     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -105,7 +105,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('langchain_google_genai.ChatGoogleGenerativeAI')
+     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      @patch('core.runtime.graph_builder.try_context')
      @patch('core.runtime.graph_builder.JobManager')

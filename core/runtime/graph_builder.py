@@ -170,8 +170,10 @@ class GraphBuilder:
                 stream_usage=True,
             )
         else:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            llm = ChatGoogleGenerativeAI(model=model_name)
+            # 503s are retried (and resumed mid-stream) by the subclass; the SDK
+            # keeps the other retriable codes. See core/runtime/llm_retry.py.
+            from core.runtime.llm_retry import RetryingChatGoogleGenerativeAI
+            llm = RetryingChatGoogleGenerativeAI(model=model_name, max_retries=Config().llm_max_retries)
         checkpointer = SqliteCheckpointer()
 
         prompt = self._get_prompt_template(ctx)
