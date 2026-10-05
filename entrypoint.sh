@@ -15,7 +15,7 @@ fi
 # names are held out of the blanket `a+rX` sweep and locked to 600 afterwards.
 # Mirrors the ignore lists in .gitignore / .dockerignore. .env.example is
 # tracked sample config, not a secret, so it is excluded from the match.
-AOC_SECRET_NAMES=( '*bot_token*' 'client_secret_*' '.env' '.env.*' )
+AOC_SECRET_NAMES=( '*bot_token*' 'client_secret_*' '.env' '.env.*' 'google_health_credentials.json' )
 
 secret_match=()
 for pattern in "${AOC_SECRET_NAMES[@]}"; do

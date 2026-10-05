@@ -40,6 +40,14 @@ if [ -n "$GOG_KEYRING_PASSWORD" ]; then
     GOG_OPT="$GOG_OPT -e GOG_KEYRING_PASSWORD=${GOG_KEYRING_PASSWORD}"
 fi
 
+# Google Health credentials arrive through the /app bind mount; entrypoint.sh
+# locks them to 600. Missing only disables the google_health tool.
+if [ ! -f "$(pwd)/google_health_credentials.json" ]; then
+    echo "Warning: google_health_credentials.json not found; the google_health tool will be unavailable."
+    echo "         Create it once with: python scripts/google_health_auth.py"
+    echo "         (or inside the container: python scripts/google_health_auth.py --no-browser)"
+fi
+
 # Check for PKM directory (defaults to ../pkm on host machine)
 PKM_HOST_DIR="${PKM_HOST_DIR:-$(cd "$(pwd)/../pkm" 2>/dev/null && pwd || echo "$(pwd)/../pkm")}"
 if [ -d "$PKM_HOST_DIR" ]; then
