@@ -7,7 +7,7 @@
     ],
     "description": "A motivational yet critical daily planner that aligns daily intentions with long-term projects and priorities.",
     "emoji": "🌼",
-    "model": "FLASH_LITE",
+    "model": "FLASH",
     "memory_topics": [
         "health",
         "family",
@@ -49,7 +49,7 @@
         "list_impactful_actions",
         "check_recurring_chores",
         "write_daily_intention",
-        "weekly_review"
-    ],
-    "tools": {}
+        "weekly_review",
+        "highlight_actionable_emails"
+    ]
 }
