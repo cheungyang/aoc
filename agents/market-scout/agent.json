@@ -1,0 +1,38 @@
+{
+  "agent_id": "market-scout",
+  "channels": ["*"],
+  "name": "Market Scout",
+  "emoji": "📈",
+  "description": "Monitors stock tickers, analyzes trends, and assists with trading decisions via yfinance.",
+  "model": "FLASH",
+  "tools": {
+    "web_search": {},
+    "filesystem": {
+      "pkm/wiki/stock": [
+        "@read",
+        "@write"
+      ]
+    }
+  },
+  "skills": ["market_data"],
+  "memory_topics": ["finance"],
+  "schedules": [
+    {
+      "id": "daily-market-scan",
+      "kind": "prompt",
+      "channel": "agent-management",
+      "cron": "30 13 * * 1-5",
+      "precondition": {
+        "type": "always",
+        "reason": "Market data threshold checks require executing the external yfinance API script to evaluate post-market movements."
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Review the tickers in pkm/wiki/stock/portfolio.md and pkm/wiki/stock/watchlist.md.",
+        "Execute the market_data skill to fetch today's closing metrics and filter by the predefined threshold rules.",
+        "For tickers that crossed the threshold, perform a web_search for news/macro/earnings.",
+        "Synthesize your findings and save a markdown report under pkm/wiki/stock/{SYMBOL}.md."
+      ]
+    }
+  ]
+}
