@@ -250,6 +250,7 @@ class TestLiveRoutingTable(unittest.TestCase):
         "general": None,
         "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
+        "market-scout": "market-scout",
         "meal-planning": "meal-planner",
         "pkm-wiki": "wiki-gardener",
         "project-planning": "goal-setter",

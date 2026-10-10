@@ -1,7 +1,10 @@
 {
   "agent_id": "market-scout",
-  "channels": ["*"],
-  "name": "Market Scout",
+  "channels": [
+    "market-scout",
+    "general"
+  ],
+  "name": "Marvin",
   "emoji": "📈",
   "description": "Monitors stock tickers, analyzes trends, and assists with trading decisions via yfinance.",
   "model": "FLASH",
@@ -21,7 +24,7 @@
     {
       "id": "daily-market-scan",
       "kind": "prompt",
-      "channel": "agent-management",
+      "channel": "market-scout",
       "cron": "30 13 * * 1-5",
       "precondition": {
         "type": "always",
