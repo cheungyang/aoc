@@ -18,7 +18,8 @@
     "weekly-planning",
     "real-estate",
     "home-automation",
-    "aoc-debug"
+    "aoc-debug",
+    "market-scout"
   ],
   "concierge_prefixes": [
     "[main]",

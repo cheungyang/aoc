@@ -74,7 +74,8 @@
         "move",
         "delete",
         "rmdir"
-      ]
+      ],
+      "tests/": ["@manage"]
     },
     "project_query": {},
     "task_query": {}
