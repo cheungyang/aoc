@@ -199,5 +199,45 @@ class TestResetConfirmation(CodingAdminTestCase):
         self.assertEqual(self.read()["queue"][0]["status"], "awaiting_review")
 
 
+class TestHostSwitchCommands(CodingAdminTestCase):
+    """handoff/resume move every project at once, so they never ask which one."""
+
+    def test_handoff_covers_every_project_and_exits_zero_when_complete(self):
+        with patch("graphs.coding.utils.dag.discover_manifests", return_value=["/a", "/b"]), \
+             patch("graphs.coding.utils.control.handoff",
+                   AsyncMock(return_value=(True, "✅ Handoff complete."))) as mock_handoff:
+            code = coding_admin.main(["handoff"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(mock_handoff.await_args.args[0], ["/a", "/b"])
+        self.assertIn("Handoff complete", self.out())
+
+    def test_an_unfinished_handoff_exits_three_so_a_script_can_retry(self):
+        with patch("graphs.coding.utils.dag.discover_manifests", return_value=["/a"]), \
+             patch("graphs.coding.utils.control.handoff",
+                   AsyncMock(return_value=(False, "⏳ A tick is still running here"))):
+            code = coding_admin.main(["handoff"])
+
+        self.assertEqual(code, 3)
+        self.assertIn("still running", self.out())
+
+    def test_resume_passes_force_and_discovers_after_the_pull(self):
+        with patch("graphs.coding.utils.control.resume",
+                   return_value=(True, "▶️ Ticking resumed")) as mock_resume:
+            code = coding_admin.main(["resume", "--force"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(mock_resume.call_args.kwargs["force"])
+        # A callable, not a list: the project set is only known after the pull.
+        self.assertTrue(callable(mock_resume.call_args.args[0]))
+
+    def test_a_crash_is_exit_one_with_the_reason(self):
+        with patch("graphs.coding.utils.control.resume", side_effect=OSError("disk gone")):
+            code = coding_admin.main(["resume"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("disk gone", self.err())
+
+
 if __name__ == "__main__":
     unittest.main()

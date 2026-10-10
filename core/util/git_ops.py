@@ -180,20 +180,57 @@ async def provision_worktree(
         os.makedirs(os.path.dirname(abs_ws), exist_ok=True)
 
         # 6. Run git worktree add.
-        #    No fallback to HEAD on failure: branching from whatever happens to be
-        #    checked out silently builds the work on the wrong commit (F3). A
+        #    A branch that was already pushed carries the task's work, which
+        #    from the pushed stage on is the source of truth — the local
+        #    worktree is disposable. Re-creating it from the base instead would
+        #    silently discard that work (and the next push would be rejected as
+        #    non-fast-forward), so the remote branch wins whenever it exists.
+        #    No fallback to HEAD on failure: branching from whatever happens to
+        #    be checked out silently builds the work on the wrong commit (F3). A
         #    missing base ref is a real problem and is reported as one.
+        remote_ref = f"origin/{branch_name}"
+        code, _, _ = await run_cmd_async(
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote_ref}"],
+            cwd=abs_repo, timeout=5.0
+        )
+        start_point = remote_ref if code == 0 else target_base
         code, out, err = await run_cmd_async(
-            ["git", "worktree", "add", "-b", branch_name, abs_ws, target_base],
+            ["git", "worktree", "add", "-B", branch_name, abs_ws, start_point],
             cwd=abs_repo,
             timeout=30.0
         )
 
     if code == 0 and os.path.exists(abs_ws):
-        return True, f"Successfully provisioned worktree at {abs_ws} (branch: {branch_name})"
+        origin = "the pushed branch" if start_point == remote_ref else f"`{start_point}`"
+        return True, f"Successfully provisioned worktree at {abs_ws} (branch: {branch_name}, from {origin})"
     return False, (
-        f"Failed to provision worktree at {abs_ws} from base ref `{target_base}`: {err or out}"
+        f"Failed to provision worktree at {abs_ws} from `{start_point}`: {err or out}"
     )
+
+
+async def rev_parse(workspace_path: str, ref: str = "HEAD") -> str:
+    """The commit `ref` points at in `workspace_path`, or "" if it cannot be resolved."""
+    if not workspace_path or not os.path.exists(workspace_path):
+        return ""
+    code, out, _ = await run_cmd_async(["git", "rev-parse", ref], cwd=workspace_path, timeout=10.0)
+    return out.strip() if code == 0 else ""
+
+
+async def get_branch_diff(workspace_path: str, base_ref: str) -> str:
+    """The task's committed change: `base...HEAD`, i.e. everything since the branch point.
+
+    Once work is committed `git diff HEAD` is empty, so anything reviewing a
+    pushed task must diff against the base instead. Falls back to the
+    uncommitted diff when the base cannot be resolved.
+    """
+    if not workspace_path or not os.path.exists(workspace_path):
+        return ""
+    code, out, _ = await run_cmd_async(
+        ["git", "diff", f"{base_ref}...HEAD"], cwd=workspace_path, timeout=15.0
+    )
+    if code == 0 and out.strip():
+        return out
+    return await get_git_diff(workspace_path)
 
 
 
@@ -217,19 +254,50 @@ async def get_git_diff(workspace_path: str) -> str:
     return out or ""
 
 
+PUSHABLE_BRANCH_PREFIX = "feat/"
+_PROTECTED_BRANCHES = ("main", "master")
+
+
+def push_refusal(branch_name: str, default_branch: Optional[str] = None) -> str:
+    """Why `branch_name` must not be pushed to, or "" if it may.
+
+    Every attempt the coding graph makes is pushed, including ones that fail
+    their tests. That is only acceptable because each lands on a per-task
+    `feat/...` branch; the default branch changes solely through a reviewed
+    squash-merge. So this is a hard refusal, not a warning.
+    """
+    name = (branch_name or "").strip()
+    protected = set(_PROTECTED_BRANCHES)
+    if default_branch:
+        protected.add(default_branch.replace("origin/", ""))
+    if not name:
+        return "no branch name given"
+    if name in protected:
+        return f"`{name}` is a protected branch"
+    if not name.startswith(PUSHABLE_BRANCH_PREFIX):
+        return f"`{name}` is not a `{PUSHABLE_BRANCH_PREFIX}` task branch"
+    return ""
+
+
 async def commit_and_push(
     workspace_path: str,
     branch_name: str,
     commit_msg: str,
     author: Optional[str] = "Graph Worker <worker@egm.internal>",
-    push_identity: Optional[PushIdentity] = None
+    push_identity: Optional[PushIdentity] = None,
+    default_branch: Optional[str] = None
 ) -> Tuple[bool, str]:
     """Stages all modified files, commits with author attribution, and pushes branch to origin.
 
     When `push_identity` is supplied the commit is attributed to that machine user
     and the push authenticates with its token, so the PR is authored by the bot and
     the human reviewer can use GitHub's native Approve.
+
+    Refuses outright to push anything but a `feat/` task branch (`push_refusal`).
     """
+    refusal = push_refusal(branch_name, default_branch)
+    if refusal:
+        return False, f"Refusing to push: {refusal}."
     if not os.path.exists(workspace_path):
         return False, f"Workspace path does not exist: {workspace_path}"
 

@@ -23,6 +23,7 @@ class TestImplementNode(ManifestFixture):
 
         mock_agent.ainvoke.assert_not_called()
         self.assertEqual(result["stage"], "implemented")
+        self.assertEqual(result["route"], "push")
 
     async def test_stale_digest_reruns_the_llm(self):
         task = _task(stage="implemented", impl_digest="abc")
@@ -80,3 +81,31 @@ class TestImplementNode(ManifestFixture):
             result = await implement_node(self.base_state(task))
 
         self.assertEqual(result["modified_files"], ["real.py"])
+
+    async def test_new_code_goes_to_push_before_anything_tests_it(self):
+        task = _task()
+        self.write_manifest([task])
+
+        with patch("graphs.coding.nodes.implement._modified_files", AsyncMock(return_value=["a.py"])), \
+             patch("graphs.coding.nodes.implement.compute_worktree_digest", AsyncMock(return_value="d")), \
+             patch("tools.agent_call.agent_call") as mock_agent:
+            mock_agent.ainvoke = AsyncMock(return_value="<worker_handoff></worker_handoff>")
+            result = await implement_node(self.base_state(task))
+
+        self.assertEqual(result["route"], "push")
+
+    async def test_review_feedback_from_the_manifest_reaches_the_worker_once(self):
+        """Feedback that crossed a scheduler hand-off lives only in the manifest."""
+        task = _task(stage="provisioned", review_feedback=["@alice: rename it"])
+        self.write_manifest([task])
+
+        with patch("graphs.coding.nodes.implement._modified_files", AsyncMock(return_value=["a.py"])), \
+             patch("graphs.coding.nodes.implement.compute_worktree_digest", AsyncMock(return_value="d")), \
+             patch("graphs.coding.nodes.implement.build_coder_prompt", return_value="p") as mock_prompt, \
+             patch("tools.agent_call.agent_call") as mock_agent:
+            mock_agent.ainvoke = AsyncMock(return_value="<worker_handoff></worker_handoff>")
+            await implement_node(self.base_state(task))
+
+        self.assertIn("rename it", mock_prompt.call_args.kwargs["human_feedback"])
+        # Consumed: the next attempt must not be re-prompted with it.
+        self.assertIsNone(self.stored()["review_feedback"])

@@ -16,7 +16,9 @@ assets/sounds/
 client_secret_*
 debug_log.log
 github_bot_token
+e2b_api_key
 home_assistant_token
+google_health_credentials.json
 pkm
 pkm-oc
 scratch

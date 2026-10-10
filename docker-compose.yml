@@ -49,6 +49,12 @@ services:
       - HA_TOKEN_FILE=${HA_TOKEN_FILE:-/app/home_assistant_token}
       - HA_WRITE_ENABLED=${HA_WRITE_ENABLED:-false}
       - HA_REQUEST_TIMEOUT=${HA_REQUEST_TIMEOUT:-20}
+      # Google Health. Same pattern: a path, not the token. The file is created
+      # once per Google account by scripts/google_health_auth.py and locked to
+      # 600 by entrypoint.sh. Writes (log_workout) stay off unless set in .env.
+      - GOOGLE_HEALTH_CREDENTIALS_FILE=${GOOGLE_HEALTH_CREDENTIALS_FILE:-/app/google_health_credentials.json}
+      - GOOGLE_HEALTH_WRITE_ENABLED=${GOOGLE_HEALTH_WRITE_ENABLED:-false}
+      - GOOGLE_HEALTH_REQUEST_TIMEOUT=${GOOGLE_HEALTH_REQUEST_TIMEOUT:-20}
       # Resource and stability tuning for NAS and multi-core hosts
       - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
       - AOC_STT_THREADS=${AOC_STT_THREADS:-2}

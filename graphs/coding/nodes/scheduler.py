@@ -20,13 +20,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import get_runnable_tasks, resolve_manifest_path
+from graphs.coding.utils.host import new_lease_owner
 from graphs.coding.utils.preflight import preflight_tick
 from graphs.coding.utils.repo import ensure_repo_available, get_repo_descriptor
+from graphs.coding.utils.sandbox import resolve_backend
 from graphs.coding.utils.shell import run_in_worktree
 from core.util import git_ops
 
 # Routes the scheduler can emit. `done` ends the tick.
 ROUTE_IMPLEMENT = "implement"
+ROUTE_PUSH = "push"
+ROUTE_VERIFY = "verify"
 ROUTE_PUBLISH = "publish"
 ROUTE_SYNC = "sync_review"
 ROUTE_DONE = "done"
@@ -71,11 +75,16 @@ def select_task(
     task = runnable[0]
     stage = task.get("stage") or "queued"
     # Resume where the task got to. A task that already published just needs its
-    # review synced; one that verified only needs publishing — no LLM either way.
+    # review synced; one that verified only needs publishing; one that pushed
+    # only needs testing — no LLM in any of those.
     if stage in ("awaiting_review", "published"):
         return task, ROUTE_SYNC
     if stage in ("verified", "audited"):
         return task, ROUTE_PUBLISH
+    if stage == "pushed":
+        return task, ROUTE_VERIFY
+    if stage == "implemented":
+        return task, ROUTE_PUSH
     return task, ROUTE_IMPLEMENT
 
 
@@ -97,7 +106,9 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         }
 
     manifest_path = resolve_manifest_path(state.get("build_request_path"))
-    owner = state.get("lease_owner") or f"tick_{uuid.uuid4().hex[:6]}"
+    # Host-tagged (`nas:tick_ab12cd`), so `status` says where a task is being
+    # worked and a handoff can tell its own in-flight ticks from another host's.
+    owner = state.get("lease_owner") or new_lease_owner()
     handled = list(state.get("tick_handled") or [])
     report = list(state.get("tick_report") or [])
 
@@ -183,8 +194,9 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     workspace_path = os.path.join(repo_root, "workspaces", "runs", run_id)
     stage = task.get("stage") or "queued"
 
-    # 6. Provision. Idempotent, and only for work that still needs a worktree —
-    #    re-creating it under a task waiting on review would throw the code away.
+    # 6. Provision. Idempotent, and only for work that still needs a worktree.
+    #    An existing `origin/<branch>` is checked out rather than re-cut from the
+    #    base, so a task that pushed on another host resumes from its commits.
     if route != ROUTE_SYNC and (
         not manifest_store.stage_at_or_past(task, "provisioned")
         or not os.path.exists(workspace_path)
@@ -209,10 +221,17 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         # one is stale; keeping it would skip an implement that must happen.
         # The same applies to setup: a fresh worktree has no `node_modules`.
         stage = "provisioned" if stage == "queued" else stage
+        extra: Dict[str, Any] = {}
+        if stage == "implemented":
+            # `implemented` means "written but not pushed". The worktree was
+            # missing, so that uncommitted change is gone — write it again.
+            stage, route = "provisioned", ROUTE_IMPLEMENT
+            extra["impl_digest"] = None
+            report.append(f"♻️ `{task_id}`: unpushed work was lost with its worktree; re-implementing.")
         task = manifest_store.persist_task(
             manifest_path, task_id,
             status="active", stage=stage, run_id=run_id, branch_name=branch_name,
-            setup_done=False
+            setup_done=False, **extra
         ) or task
     elif route != ROUTE_SYNC:
         task = manifest_store.persist_task(
@@ -222,8 +241,11 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     # 7. Set the worktree up once: scaffold, install dependencies. This is an
     #    environment concern, so a failure here halts as `environment` and never
     #    touches the implement budget — the code is not what went wrong.
+    #    With a remote verify backend the sandbox runs setup itself, and this
+    #    host never executes the project's install scripts.
     setup_command = task.get("setup_command") or manifest.get("setup_command")
-    if route != ROUTE_SYNC and setup_command and not task.get("setup_done"):
+    runs_setup_here = resolve_backend(task.get("environment") or manifest.get("environment")) == "local"
+    if route != ROUTE_SYNC and setup_command and runs_setup_here and not task.get("setup_done"):
         code, out, err = await run_in_worktree(str(setup_command), cwd=workspace_path)
         if code != 0:
             detail = (err or out or "").strip()[-800:]
@@ -256,6 +278,10 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         "workspace_path": workspace_path,
         "spec_path": task.get("spec_path", ""),
         "pr_url": task.get("pr_url") or "",
+        # Reset per task: a channel left over from the previous task this tick
+        # must not stand in for this one's commit.
+        "head_sha": task.get("head_sha") or "",
+        "verified_sha": task.get("verified_sha") or "",
         "lease_owner": owner,
         "tick_handled": handled,
         "tick_report": report,

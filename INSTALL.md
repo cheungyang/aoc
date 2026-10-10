@@ -328,6 +328,41 @@ AOC integrates directly with Home Assistant to provide safe, agentic smart home 
 
 ---
 
+## Google Health Integration
+
+The `google_health` tool (`tools/google_health.py`) reads active minutes, exercise sessions, sleep and weight from the [Google Health API](https://developers.google.com/health) (the successor to the Fitbit Web API), and can log completed workouts.
+
+### 1. Permissions & Safety Rails
+
+- **Bundles**: `@observe` (all reads) and `@log` (`log_workout`). The permission target is the API data type (`exercise`, `sleep`, `weight`, `active-minutes`):
+  ```json
+  "google_health": { "*": ["@observe"], "exercise": ["@log"] }
+  ```
+- **Write guards**: `GOOGLE_HEALTH_WRITE_ENABLED` kill switch (off by default); blanket `{}` grants refused for writes; known exercise types only; no future, >24 h, or >30-days-ago sessions; refuses sessions overlapping an existing one unless `allow_overlap: true`; creates are never retried.
+- **Least-privilege OAuth scopes**: activity/fitness, sleep and health-metrics read; activity/fitness write. Nothing else is requested.
+
+### 2. Setup & Credentials (once per Google account)
+
+1. **OAuth client**: in Google Cloud Console, enable the Google Health API for your project and create a **Desktop app** OAuth client. Save its JSON as `client_secret_*.json` at the project root. Set the OAuth consent screen to **In production**: in *Testing* status, Google expires refresh tokens after 7 days.
+2. **Authorise** — writes `./google_health_credentials.json` (mode `600`):
+   ```bash
+   # On a machine with a browser
+   python scripts/google_health_auth.py
+
+   # Headless host / inside the container: prints a URL, you paste back the redirect
+   docker exec -it <container> python scripts/google_health_auth.py --no-browser
+   ```
+   - The file reaches the container through the `.:/app` mount. Both `.gitignore` and `.dockerignore` exclude it, and `entrypoint.sh` re-locks it to `600` on every start. The tool refuses to read it if other users can.
+   - To use it on another host, copy the file there (no re-auth needed). Re-run with `--force` only if the token is revoked or scopes change.
+3. **Configure `.env`**:
+   ```bash
+   # GOOGLE_HEALTH_CREDENTIALS_FILE=/app/google_health_credentials.json
+   GOOGLE_HEALTH_WRITE_ENABLED=false
+   GOOGLE_HEALTH_REQUEST_TIMEOUT=20
+   ```
+
+---
+
 ## Running with Docker Compose (Recommended)
 
 ### 1. Build and Start the Service

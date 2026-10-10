@@ -390,5 +390,162 @@ class TestAbort(ControlTestCase):
         self.assertTrue(self.task("A")["last_error"]["message"])
 
 
+class HostSwitchTestCase(ControlTestCase):
+    """`handoff` on the host giving the queue up, `resume` on the one taking it."""
+
+    def setUp(self):
+        super().setUp()
+        from graphs.coding.utils import host
+
+        self.host = host
+        env = patch.dict(os.environ, {
+            host.HOST_NAME_ENV: "nas",
+            host.PAUSE_FILE_ENV: os.path.join(self.tmpdir, "sessions", "coding_tick.paused"),
+            host.TICK_ENABLED_ENV: "1",
+        })
+        env.start()
+        self.addCleanup(env.stop)
+        self.sync = unittest.mock.Mock(return_value=(True, "pkm synced."))
+
+
+class TestHandoff(HostSwitchTestCase):
+    async def test_a_quiet_queue_is_paused_and_synced(self):
+        self.write([_task("A", status="done", stage="done")])
+
+        done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(done)
+        self.assertFalse(self.host.tick_enabled()[0])
+        self.sync.assert_called_once()
+        self.assertIn("resume", report)
+
+    async def test_a_tick_still_running_here_holds_the_sync_back(self):
+        """Its last manifest write must land before the other host reads it."""
+        self.write([_task("A", status="active", lease_owner="nas:tick_1",
+                          lease_expires_at=time.time() + 600)])
+
+        done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertFalse(done)
+        self.sync.assert_not_called()
+        self.assertIn("`A`", report)
+        # Paused anyway, so no new tick starts while it drains.
+        self.assertFalse(self.host.tick_enabled()[0])
+
+    async def test_another_host_s_lease_is_not_waited_on(self):
+        self.write([_task("A", status="active", lease_owner="devbox:tick_1",
+                          lease_expires_at=time.time() + 600)])
+
+        done, _ = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(done)
+
+    async def test_unpushed_work_is_pushed_before_the_sync(self):
+        """`implemented` is the only stage whose work exists only on this disk."""
+        self.write([_task("A", stage="implemented", run_id="run_A", branch_name="feat/proj/a")])
+        order = []
+        self.sync.side_effect = lambda: order.append("sync") or (True, "pkm synced.")
+
+        async def fake_push(state):
+            order.append(("push", state["current_task"]["task_id"], state["branch_name"]))
+            return {"route": "verify", "head_sha": "abc1234def"}
+
+        with patch("graphs.coding.utils.control._worktree_path", return_value=self.tmpdir), \
+             patch("graphs.coding.nodes.push.push_node", AsyncMock(side_effect=fake_push)):
+            done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(done)
+        self.assertEqual(order, [("push", "A", "feat/proj/a"), "sync"])
+        self.assertIn("abc1234", report)
+
+    async def test_unpushed_work_without_a_worktree_is_reported_not_fatal(self):
+        self.write([_task("A", stage="implemented", run_id="run_A", branch_name="feat/proj/a")])
+
+        with patch("graphs.coding.utils.control._worktree_path",
+                   return_value=os.path.join(self.tmpdir, "gone")):
+            done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(done)
+        self.assertIn("re-implemented", report)
+
+    async def test_a_failed_sync_leaves_the_handoff_incomplete(self):
+        self.write([])
+        self.sync.return_value = (False, "pkm sync failed: conflict")
+
+        done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertFalse(done)
+        self.assertIn("conflict", report)
+
+    async def test_handoff_is_idempotent(self):
+        self.write([])
+
+        first, _ = await control.handoff([self.path], sync=self.sync)
+        second, _ = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(first and second)
+
+
+class TestResume(HostSwitchTestCase):
+    def test_resume_pulls_first_then_unpauses(self):
+        self.write([])
+        self.host.pause("handed off")
+
+        done, report = control.resume(lambda: [self.path], sync=self.sync)
+
+        self.assertTrue(done)
+        self.sync.assert_called_once()
+        self.assertTrue(self.host.tick_enabled()[0])
+        self.assertIn("nas", report)
+
+    def test_a_failed_pull_keeps_this_host_paused(self):
+        """Ticking on a stale manifest is the conflict the handoff exists to prevent."""
+        self.write([])
+        self.host.pause("handed off")
+        self.sync.return_value = (False, "pkm sync failed: offline")
+
+        done, _ = control.resume(lambda: [self.path], sync=self.sync)
+
+        self.assertFalse(done)
+        self.assertFalse(self.host.tick_enabled()[0])
+
+    def test_a_live_lease_from_another_host_blocks_resume(self):
+        self.write([_task("A", status="active", lease_owner="devbox:tick_1",
+                          lease_expires_at=time.time() + 600)])
+        self.host.pause("handed off")
+
+        done, report = control.resume(lambda: [self.path], sync=self.sync)
+
+        self.assertFalse(done)
+        self.assertIn("devbox", report)
+        self.assertFalse(self.host.tick_enabled()[0])
+
+    def test_force_resumes_despite_a_foreign_lease(self):
+        self.write([_task("A", status="active", lease_owner="devbox:tick_1",
+                          lease_expires_at=time.time() + 600)])
+
+        done, _ = control.resume(lambda: [self.path], sync=self.sync, force=True)
+
+        self.assertTrue(done)
+
+    def test_the_project_list_is_read_after_the_pull(self):
+        """A project created on the other host only exists once the pull lands."""
+        self.write([])
+        calls = []
+        self.sync.side_effect = lambda: calls.append("sync") or (True, "ok")
+
+        control.resume(lambda: calls.append("discover") or [self.path], sync=self.sync)
+
+        self.assertEqual(calls, ["sync", "discover"])
+
+    def test_the_environment_switch_still_wins_and_is_named(self):
+        self.write([])
+        with patch.dict(os.environ, {self.host.TICK_ENABLED_ENV: "0"}):
+            done, report = control.resume(lambda: [self.path], sync=self.sync)
+
+        self.assertFalse(done)
+        self.assertIn(self.host.TICK_ENABLED_ENV, report)
+
+
 if __name__ == "__main__":
     unittest.main()

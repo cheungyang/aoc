@@ -1,7 +1,7 @@
-"""The gate between an implementation and a push.
+"""The gate between a pushed commit and a PR.
 
-Verification only re-runs when the tree has changed, a failure inside the
-budget goes back to the worker with the digest cleared so it cannot skip, and a
+Verification only re-runs when the pushed commit has changed, a failure inside
+the budget goes back to the worker with the digest cleared so it cannot skip, and a
 missing command is a configuration halt rather than something to retry.
 Retrying a config error spends the entire implement budget on a failure no
 model can fix.
@@ -10,19 +10,77 @@ from unittest.mock import AsyncMock, patch
 
 from graphs.coding.nodes.implement import MAX_IMPLEMENT_ATTEMPTS
 from graphs.coding.nodes.verify import verify_node
-from tests.graphs.coding.fixtures import ManifestFixture, _task
+from graphs.coding.utils.sandbox import RunResult
+from tests.graphs.coding.fixtures import ManifestFixture, _task as _base_task
+
+
+def _task(**overrides):
+    """A task as verify meets it: pushed, with the commit to test."""
+    return _base_task(**{"stage": "pushed", "head_sha": "s1", **overrides})
 
 
 class TestVerifyNode(ManifestFixture):
-    async def test_same_tree_is_not_retested(self):
-        task = _task(stage="verified", verified_digest="d1")
+    async def test_same_commit_is_not_retested(self):
+        task = _task(stage="verified", verified_sha="s1")
         self.write_manifest([task])
 
         with patch("graphs.coding.nodes.verify._run", AsyncMock()) as mock_run:
-            result = await verify_node(self.base_state(task, impl_digest="d1"))
+            result = await verify_node(self.base_state(task))
 
         mock_run.assert_not_called()
         self.assertTrue(result["test_run_passed"])
+
+    async def test_a_new_commit_is_retested_even_at_the_verified_stage(self):
+        task = _task(stage="verified", verified_sha="s0", head_sha="s1")
+        self.write_manifest([task])
+
+        with patch("graphs.coding.nodes.verify._run",
+                   AsyncMock(return_value=RunResult(0, "ok", ""))) as mock_run:
+            await verify_node(self.base_state(task))
+
+        mock_run.assert_called_once()
+        self.assertEqual(self.stored()["verified_sha"], "s1")
+
+    async def test_nothing_pushed_goes_back_through_push(self):
+        """Only a pushed commit can be verified: it is what a sandbox fetches."""
+        task = _task(stage="implemented", head_sha=None)
+        self.write_manifest([task])
+
+        with patch("graphs.coding.nodes.verify._run", AsyncMock()) as mock_run:
+            result = await verify_node(self.base_state(task))
+
+        mock_run.assert_not_called()
+        self.assertEqual(result["route"], "done")
+        self.assertEqual(self.stored()["stage"], "implemented")
+        self.assertIsNone(self.stored()["lease_owner"])
+
+    async def test_a_missing_worktree_keeps_the_pushed_stage(self):
+        """The code is on the remote; the next tick re-provisions from it."""
+        import shutil
+
+        shutil.rmtree(self.workspace)
+        task = _task()
+        self.write_manifest([task])
+
+        result = await verify_node(self.base_state(task))
+
+        self.assertEqual(result["route"], "done")
+        self.assertEqual(self.stored()["stage"], "pushed")
+        self.assertEqual(self.stored()["status"], "queued")
+
+    async def test_the_runner_is_told_which_commit_it_is_testing(self):
+        task = _task()
+        self.write_manifest([task])
+
+        with patch("graphs.coding.nodes.verify._run",
+                   AsyncMock(return_value=RunResult(0, "ok", ""))) as mock_run:
+            await verify_node(self.base_state(task))
+
+        meta = mock_run.call_args.kwargs["meta"]
+        self.assertEqual(meta["task_id"], "T1")
+        self.assertEqual(meta["head_sha"], "s1")
+        # A sandbox fetches the commit from here.
+        self.assertEqual(meta["repo"], "org/repo")
 
     async def test_missing_verification_command_is_a_config_halt(self):
         """No amount of LLM retries can add a command to the manifest (B4)."""
@@ -35,22 +93,22 @@ class TestVerifyNode(ManifestFixture):
         self.assertEqual(self.stored()["status"], "halted")
         self.assertEqual(self.stored()["last_error"]["kind"], "config")
 
-    async def test_passing_tests_record_the_digest_they_passed_on(self):
+    async def test_passing_tests_record_the_commit_they_passed_on(self):
         task = _task()
         self.write_manifest([task])
 
-        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=(0, "ok", ""))):
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=RunResult(0, "ok", ""))):
             result = await verify_node(self.base_state(task, impl_digest="d1"))
 
         self.assertTrue(result["test_run_passed"])
-        self.assertEqual(self.stored()["verified_digest"], "d1")
+        self.assertEqual(self.stored()["verified_sha"], "s1")
         self.assertEqual(self.stored()["stage"], "verified")
 
     async def test_failing_tests_go_back_to_implement_within_budget(self):
         task = _task(attempts={"implement": 1})
         self.write_manifest([task])
 
-        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=(1, "", "boom"))):
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=RunResult(1, "", "boom"))):
             result = await verify_node(self.base_state(task, impl_digest="d1"))
 
         self.assertEqual(result["route"], "implement")
@@ -62,7 +120,7 @@ class TestVerifyNode(ManifestFixture):
         task = _task(attempts={"implement": MAX_IMPLEMENT_ATTEMPTS})
         self.write_manifest([task])
 
-        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=(1, "", "boom"))):
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=RunResult(1, "", "boom"))):
             result = await verify_node(self.base_state(task, impl_digest="d1"))
 
         self.assertEqual(result["route"], "done")
@@ -73,7 +131,7 @@ class TestVerifyNode(ManifestFixture):
         task = _task()
         self.write_manifest([task])
 
-        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=(0, "ok", ""))):
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=RunResult(0, "ok", ""))):
             result = await verify_node(self.base_state(task, impl_digest="d1", pr_url=""))
 
         self.assertTrue(result["test_run_passed"])
@@ -89,7 +147,7 @@ class TestVerifyNode(ManifestFixture):
         task = _task(attempts={"implement": 1})
         self.write_manifest([task])
 
-        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=(1, "", "1 test failed"))):
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=RunResult(1, "", "1 test failed"))):
             result = await verify_node(self.base_state(task, impl_digest="d1"))
 
         self.assertEqual(result["route"], "implement")
@@ -112,7 +170,7 @@ class TestFailuresTheWorkerCannotFix(ManifestFixture):
         task = task or _task()
         self.write_manifest([task])
         with patch("graphs.coding.nodes.verify._run",
-                   AsyncMock(return_value=(exit_code, "", stderr))):
+                   AsyncMock(return_value=RunResult(exit_code, "", stderr))):
             return await verify_node(self.base_state(task, impl_digest="d1"))
 
     async def test_a_missing_dependency_halts_instead_of_spending_the_budget(self):
@@ -170,3 +228,125 @@ class TestFailuresTheWorkerCannotFix(ManifestFixture):
 
         self.assertEqual(result["route"], "done")
         self.assertEqual(self.stored()["last_error"]["kind"], "environment")
+
+
+class TestVerifyBackend(ManifestFixture):
+    """`_run` goes through the configured runner, not a hard-wired subprocess."""
+
+    async def test_the_configured_runner_executes_the_verification_command(self):
+        from graphs.coding.utils.sandbox import RunResult
+
+        task = _task()
+        self.write_manifest([task])
+        runner = AsyncMock()
+        runner.run = AsyncMock(return_value=RunResult(0, "ok", "", backend="fake"))
+
+        with patch("graphs.coding.nodes.verify.get_runner", return_value=runner):
+            result = await verify_node(self.base_state(task, impl_digest="d1"))
+
+        self.assertTrue(result["test_run_passed"])
+        steps = runner.run.call_args.args[0]
+        self.assertEqual([s.name for s in steps], ["verify"])
+        self.assertEqual(steps[0].command, task["verification_command"])
+        self.assertEqual(runner.run.call_args.kwargs["workspace_path"], self.workspace)
+
+    async def test_a_misconfigured_backend_halts_as_environment_not_verification(self):
+        """A typo in the backend name must not cost the worker an attempt."""
+        import os
+        from graphs.coding.utils.sandbox import BACKEND_ENV_VAR
+
+        task = _task()
+        self.write_manifest([task])
+
+        with patch.dict(os.environ, {BACKEND_ENV_VAR: "nope"}):
+            result = await verify_node(self.base_state(task, impl_digest="d1"))
+
+        self.assertEqual(result["route"], "done")
+        self.assertEqual(self.stored()["last_error"]["kind"], "environment")
+        self.assertIn("misconfigured", result["error_message"])
+
+    def _runner(self, result, runs_setup):
+        runner = AsyncMock()
+        runner.runs_setup = runs_setup
+        runner.run = AsyncMock(return_value=result)
+        return runner
+
+    async def test_a_remote_runner_runs_the_projects_setup_first(self):
+        """The sandbox starts empty, so it installs before it tests."""
+        task = _task()
+        self.write_manifest([task], setup_command="npm ci", environment={"backend": "e2b"})
+        runner = self._runner(RunResult(0, "ok", "", backend="e2b"), runs_setup=True)
+
+        with patch("graphs.coding.nodes.verify.get_runner", return_value=runner) as factory:
+            await verify_node(self.base_state(task))
+
+        self.assertEqual(factory.call_args.args[0], {"backend": "e2b"})
+        steps = runner.run.call_args.args[0]
+        self.assertEqual([(s.name, s.command) for s in steps],
+                         [("setup", "npm ci"), ("verify", "pytest -q")])
+
+    async def test_the_local_runner_does_not_repeat_setup(self):
+        """Locally the scheduler already ran setup in the worktree."""
+        task = _task()
+        self.write_manifest([task], setup_command="npm ci")
+        runner = self._runner(RunResult(0, "ok", ""), runs_setup=False)
+
+        with patch("graphs.coding.nodes.verify.get_runner", return_value=runner):
+            await verify_node(self.base_state(task))
+
+        self.assertEqual([s.name for s in runner.run.call_args.args[0]], ["verify"])
+
+
+class TestRunnerFailures(ManifestFixture):
+    """A sandbox that did not start says nothing about the code."""
+
+    async def _verify_with(self, result, task=None):
+        task = task or _task()
+        self.write_manifest([task])
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=result)):
+            return await verify_node(self.base_state(task, impl_digest="d1"))
+
+    async def test_an_infra_failure_is_retried_later_without_spending_the_budget(self):
+        result = await self._verify_with(
+            RunResult(1, "", "boom", infra_error="sandbox did not start", backend="e2b"),
+            task=_task(attempts={"implement": 1}),
+        )
+
+        self.assertEqual(result["route"], "done")
+        self.assertEqual(result["error_message"], "")
+        stored = self.stored()
+        self.assertEqual(stored["stage"], "pushed")
+        self.assertEqual(stored["status"], "queued")
+        self.assertIsNone(stored["lease_owner"])
+        self.assertEqual(stored["last_error"]["kind"], "infra")
+        self.assertEqual(stored["attempts"], {"implement": 1, "infra": 1})
+
+    async def test_repeated_infra_failures_halt_for_a_human(self):
+        from graphs.coding.nodes.verify import MAX_INFRA_ATTEMPTS
+
+        result = await self._verify_with(
+            RunResult(1, "", "boom", infra_error="sandbox did not start", backend="e2b"),
+            task=_task(attempts={"infra": MAX_INFRA_ATTEMPTS - 1}),
+        )
+
+        self.assertEqual(self.stored()["status"], "halted")
+        self.assertIn("not tested", result["error_message"])
+
+    async def test_a_pass_clears_the_infra_count(self):
+        await self._verify_with(RunResult(0, "ok", ""),
+                                task=_task(attempts={"implement": 1, "infra": 2}))
+
+        self.assertEqual(self.stored()["attempts"], {"implement": 1})
+
+    async def test_a_failed_setup_halts_as_environment(self):
+        result = await self._verify_with(
+            RunResult(1, "", "npm ERR! peer dep", failed_step="setup", backend="e2b"),
+            task=_task(attempts={"implement": 1}),
+        )
+
+        self.assertEqual(result["route"], "done")
+        stored = self.stored()
+        self.assertEqual(stored["status"], "halted")
+        self.assertEqual(stored["last_error"]["kind"], "environment")
+        self.assertEqual(stored["attempts"], {"implement": 1})
+        self.assertIn("setup_command", result["error_message"])

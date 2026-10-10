@@ -11,6 +11,7 @@ from graphs.coding.schemas import CodingState
 
 from graphs.coding.nodes.scheduler import scheduler_node
 from graphs.coding.nodes.implement import implement_node
+from graphs.coding.nodes.push import push_node
 from graphs.coding.nodes.verify import verify_node
 from graphs.coding.nodes.audit import audit_node
 from graphs.coding.nodes.publish import publish_node
@@ -31,6 +32,7 @@ def create_graph(checkpointer=None, **kwargs):
 
     workflow.add_node("scheduler", scheduler_node)
     workflow.add_node("implement", implement_node)
+    workflow.add_node("push", push_node)
     workflow.add_node("verify", verify_node)
     workflow.add_node("audit", audit_node)
     workflow.add_node("publish", publish_node)
@@ -49,14 +51,21 @@ def create_graph(checkpointer=None, **kwargs):
         return route
 
     workflow.add_conditional_edges(
-        "scheduler", _router({"implement", "publish", "sync_review"}),
-        ["implement", "publish", "sync_review", END]
+        "scheduler", _router({"implement", "push", "verify", "publish", "sync_review"}),
+        ["implement", "push", "verify", "publish", "sync_review", END]
     )
 
     # A worker that produced nothing ends the tick rather than testing an
     # unchanged tree; the next tick retries within the implement budget.
     workflow.add_conditional_edges(
-        "implement", _router({"verify"}), ["verify", END]
+        "implement", _router({"push"}), ["push", END]
+    )
+
+    # Every attempt is pushed before it is tested: verification runs against
+    # the commit on GitHub, not this host's worktree. A failed push ends the
+    # tick and is retried on the next one, within the push budget.
+    workflow.add_conditional_edges(
+        "push", _router({"verify"}), ["verify", END]
     )
 
     workflow.add_conditional_edges(

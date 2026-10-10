@@ -45,6 +45,8 @@ pillow
 GitPython>=3.1.40
 python-dateutil
 requests
+# The coding graph's remote verify backend (graphs/coding/utils/sandbox/e2b_runner.py).
+e2b>=2.51,<3
 # Home Assistant's registries (entities, devices, areas) are only reachable over
 # its WebSocket API. This is the synchronous client: the tools in this repo are
 # plain `def` and LangChain runs them in a worker thread, so the async

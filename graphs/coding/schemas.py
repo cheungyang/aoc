@@ -18,8 +18,9 @@ TaskStatus = Literal[
 TaskStage = Literal[
     "queued",           # nothing done yet
     "provisioned",      # worktree exists on the right branch
-    "implemented",      # code written in the worktree
-    "verified",         # verification_command passed
+    "implemented",      # code written in the worktree (uncommitted, local only)
+    "pushed",           # committed and pushed to the task branch; head_sha recorded
+    "verified",         # verification_command passed on head_sha
     "audited",          # advisory review done
     "published",        # committed, pushed, PR open
     "awaiting_review",  # waiting on a human decision on GitHub
@@ -28,7 +29,7 @@ TaskStage = Literal[
 ]
 
 STAGE_ORDER: List[str] = [
-    "queued", "provisioned", "implemented", "verified", "audited",
+    "queued", "provisioned", "implemented", "pushed", "verified", "audited",
     "published", "awaiting_review", "merged", "done"
 ]
 
@@ -74,14 +75,26 @@ class TaskEnvelope(TypedDict, total=False):
     attempts: Dict[str, int]
     lease_owner: Optional[str]
     lease_expires_at: Optional[float]
-    # Digest of the worktree after `implement`. Unchanged digest means the code
-    # is still there, so implement is skipped and verify can reuse its result.
+    # Digest of the *uncommitted* worktree after `implement`. Only meaningful
+    # between implement and push, on the machine that ran implement: once the
+    # work is committed the diff is empty, so every committed tree would share
+    # one digest. Past `pushed`, identity is the commit SHA instead.
     impl_digest: Optional[str]
-    verified_digest: Optional[str]
+    verified_digest: Optional[str]   # legacy (pre-SHA); read by nothing new
+    # The commit on the task branch that the later stages vouch for. A SHA is
+    # unique per attempt, identical on every host and on GitHub, and is exactly
+    # what a remote runner fetches, so "already verified" means
+    # verified_sha == head_sha, not "the local worktree looks the same".
     head_sha: Optional[str]
+    verified_sha: Optional[str]
+    audited_sha: Optional[str]
     # Highest review comment id already actioned, so a resume does not re-read
     # the whole thread (E5).
     review_cursor: Optional[str]
+    # Reviewer comments harvested but not yet acted on. Durable so feedback
+    # survives a hand-off through the scheduler (e.g. re-provisioning the
+    # worktree on another host); cleared once implement consumes it.
+    review_feedback: Optional[List[str]]
     # While now < poll_until the scheduled tick keeps checking GitHub for this
     # task; otherwise the tick exits without touching the network.
     poll_until: Optional[float]
@@ -146,7 +159,7 @@ class CodingState(TypedDict, total=False):
     # These are channels, not decoration: LangGraph carries only what the schema
     # declares, so an undeclared `route` would be dropped between nodes and every
     # conditional edge would fall through to END.
-    route: str                       # "implement"|"verify"|"audit"|"publish"|"sync_review"|"scheduler"|"done"
+    route: str                       # "implement"|"push"|"verify"|"audit"|"publish"|"sync_review"|"scheduler"|"done"
     stage: TaskStage
     graph_id: str
     required_tools: List[str]        # derived from graph.json's `tools` grant
@@ -158,6 +171,7 @@ class CodingState(TypedDict, total=False):
     lease_owner: str
     impl_digest: Optional[str]
     head_sha: str
+    verified_sha: str
     poll_until: Optional[float]
     # Absolute path of the checkout the tick works against. Under repo mode
     # `self` this is the project root; under `existing`/`create` it is the
