@@ -5,6 +5,7 @@
 .gemini
 .git
 .gogcli/
+.nlm/
 .pytest_cache
 .venv
 .vscode
