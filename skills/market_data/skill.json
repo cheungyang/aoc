@@ -1,0 +1,9 @@
+{
+  "skill_id": "market_data",
+  "name": "Market Data Fetcher",
+  "description": "Pulls threshold financial data for stock tickers using the yfinance.py script.",
+  "emoji": "📈",
+  "tools": {
+    "yfinance": {}
+  }
+}
