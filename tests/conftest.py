@@ -61,6 +61,10 @@ def _redirect(setattr, setenv, sessions_dir: str) -> None:
     setattr(_checkpointer_mod.SqliteCheckpointer.__init__, "__defaults__", (db_path,))
 
     setenv("AOC_TICK_ERROR_CACHE", os.path.join(sessions_dir, "coding_tick_errors.json"))
+    # The coding tick's host switch reads a pause file under the real sessions/;
+    # a host that happens to be paused must not change what the tests see.
+    setenv("CODING_TICK_PAUSE_FILE", os.path.join(sessions_dir, "coding_tick.paused"))
+    setenv("CODING_TICK_ENABLED", "1")
 
 
 def _plain_setenv(name, value):

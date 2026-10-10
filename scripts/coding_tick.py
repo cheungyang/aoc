@@ -7,8 +7,12 @@ visits every one of them. It prints what the ticks did and nothing at all when
 they did nothing — the runner treats empty stdout as "post nothing", which is
 what keeps a channel usable when the queues are idle 287 times out of 288 a day.
 
+A host where ticking is switched off (`CODING_TICK_ENABLED=0`, or paused by
+`coding_admin handoff`) exits 0 without touching any manifest: only one host
+may tick at a time, and saying so every five minutes would be noise.
+
 Exit codes:
-    0  the tick ran (whether or not it had work to do)
+    0  the tick ran (whether or not it had work to do), or ticking is off here
     1  the tick could not run (bad manifest, broken config)
 
 Usage:
@@ -47,6 +51,11 @@ def has_work(ctx) -> bool:
     from graphs.coding.nodes.scheduler import select_task
     from graphs.coding.utils import manifest as manifest_store
     from graphs.coding.utils.dag import SOFTWARE_ROOT, discover_manifests
+    from graphs.coding.utils.host import tick_enabled
+
+    # Another host owns the queue; there is nothing for this one to advance.
+    if not tick_enabled()[0]:
+        return False
 
     now = time.time()
     for manifest_path in discover_manifests(
@@ -305,6 +314,14 @@ def main(argv=None) -> int:
 
     if getattr(args, "clear_cache", False):
         save_error_cache({})
+
+    from graphs.coding.utils.host import tick_enabled
+
+    enabled, reason = tick_enabled()
+    if not enabled and not args.dry_run:
+        if args.verbose:
+            print(f"Coding tick skipped: {reason}", file=sys.stderr)
+        return 0
 
     manifests = [p for p in select_manifests(args) if p and os.path.exists(p)]
     if not manifests:

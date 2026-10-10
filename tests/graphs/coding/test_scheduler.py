@@ -16,7 +16,9 @@ from graphs.coding.nodes.scheduler import (
     ROUTE_DONE,
     ROUTE_IMPLEMENT,
     ROUTE_PUBLISH,
+    ROUTE_PUSH,
     ROUTE_SYNC,
+    ROUTE_VERIFY,
     scheduler_node,
     select_task,
 )
@@ -66,6 +68,16 @@ class TestSelectTask(unittest.TestCase):
         queue = [_task(task_id="T1", stage="published")]
         _, route = select_task(queue, handled=[], now=100.0)
         self.assertEqual(route, ROUTE_SYNC)
+
+    def test_an_implemented_task_resumes_at_push(self):
+        queue = [_task(task_id="T1", stage="implemented")]
+        _, route = select_task(queue, handled=[], now=100.0)
+        self.assertEqual(route, ROUTE_PUSH)
+
+    def test_a_pushed_task_resumes_at_verify_not_at_the_llm(self):
+        queue = [_task(task_id="T1", stage="pushed", head_sha="s1")]
+        _, route = select_task(queue, handled=[], now=100.0)
+        self.assertEqual(route, ROUTE_VERIFY)
 
     def test_fresh_task_starts_at_implement(self):
         queue = [_task(task_id="T1", stage="queued")]
@@ -150,6 +162,14 @@ class TestSchedulerNode(ManifestFixture):
         self.assertTrue(manifest_store.lease_is_active(stored))
         self.assertEqual(stored["status"], "active")
 
+    async def test_a_lease_says_which_host_took_it(self):
+        """So `status` shows where a task is worked, and a handoff knows its own."""
+        self.write_manifest([_task()])
+        with patch.dict(os.environ, {"CODING_HOST_NAME": "nas"}):
+            await scheduler_node(self.tick_state())
+
+        self.assertRegex(self.stored()["lease_owner"], r"^nas:tick_[0-9a-f]{6}$")
+
     async def test_a_task_claimed_elsewhere_is_skipped(self):
         self.write_manifest([_task(lease_owner="other", lease_expires_at=time.time() + 600)])
         # A live lease also hides the task from the runnable set, so the tick is a no-op.
@@ -182,10 +202,11 @@ class TestSchedulerNode(ManifestFixture):
     async def test_a_verified_task_is_not_reprovisioned_into_a_clean_tree(self):
         task = _task(stage="verified", run_id="run_X", branch_name="feat/demo/t1")
         self.write_manifest([task])
-        os.makedirs(os.path.join("workspaces", "runs", "run_X"), exist_ok=True)
-        self.addCleanup(lambda: os.rmdir(os.path.join("workspaces", "runs", "run_X")))
+        os.makedirs(os.path.join(self.tmp.name, "workspaces", "runs", "run_X"), exist_ok=True)
 
-        result = await scheduler_node(self.tick_state())
+        with patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                   AsyncMock(return_value=(self.tmp.name, ""))):
+            result = await scheduler_node(self.tick_state())
 
         self.assertEqual(result["route"], ROUTE_PUBLISH)
         self.mock_provision.assert_not_called()
@@ -388,6 +409,73 @@ class TestSetupCommand(TestSchedulerNode):
         self.mock_run.assert_not_awaited()
         self.assertEqual(result["route"], ROUTE_IMPLEMENT)
 
+    async def test_a_remote_verify_backend_keeps_installs_off_this_host(self):
+        """The sandbox runs setup itself; the NAS never executes install scripts."""
+        self.write_manifest([_task()], setup_command="npm install",
+                            environment={"backend": "e2b"})
+
+        result = await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_not_awaited()
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResumingFromTheRemoteBranch(TestSchedulerNode):
+    """Past `pushed`, the remote branch holds the work and the worktree is disposable.
+
+    That is what lets a task move between hosts: a tick that finds no worktree
+    re-creates it from `origin/<branch>` and carries on. Only `implemented` —
+    written but never pushed — loses anything with its worktree.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.repo = patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                          AsyncMock(return_value=(self.tmp.name, "")))
+        self.repo.start()
+        self.addCleanup(self.repo.stop)
+
+    async def test_a_pushed_task_with_no_worktree_is_reprovisioned_and_verified(self):
+        self.write_manifest([_task(stage="pushed", head_sha="s1", status="queued",
+                                   run_id="run_P", branch_name="feat/demo/t1")])
+
+        result = await scheduler_node(self.tick_state())
+
+        self.mock_provision.assert_awaited_once()
+        self.assertEqual(self.mock_provision.await_args.kwargs["branch_name"], "feat/demo/t1")
+        self.assertEqual(result["route"], ROUTE_VERIFY)
+        self.assertEqual(self.stored()["stage"], "pushed")
+        self.assertEqual(result["head_sha"], "s1")
+
+    async def test_unpushed_work_lost_with_its_worktree_is_re_implemented(self):
+        self.write_manifest([_task(stage="implemented", impl_digest="d1", status="queued",
+                                   run_id="run_I", branch_name="feat/demo/t1")])
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+        self.assertEqual(self.stored()["stage"], "provisioned")
+        self.assertIsNone(self.stored()["impl_digest"])
+
+    async def test_an_implemented_task_with_its_worktree_goes_to_push(self):
+        os.makedirs(os.path.join(self.tmp.name, "workspaces", "runs", "run_I"), exist_ok=True)
+        self.write_manifest([_task(stage="implemented", impl_digest="d1", status="queued",
+                                   run_id="run_I", branch_name="feat/demo/t1")])
+
+        result = await scheduler_node(self.tick_state())
+
+        self.mock_provision.assert_not_called()
+        self.assertEqual(result["route"], ROUTE_PUSH)
+
+    async def test_the_sha_channels_are_reset_for_each_task(self):
+        """A tick can work two tasks; the second must not inherit the first's commit."""
+        self.write_manifest([_task(stage="queued")])
+
+        result = await scheduler_node(self.tick_state(head_sha="old", verified_sha="old"))
+
+        self.assertEqual(result["head_sha"], "")
+        self.assertEqual(result["verified_sha"], "")

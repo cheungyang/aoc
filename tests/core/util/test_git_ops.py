@@ -319,5 +319,107 @@ class TestProvisionHasNoHeadFallback(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adds), 1, "a second attempt means the HEAD fallback is back")
 
 
+
+class TestProvisionFromTheRemoteBranch(unittest.IsolatedAsyncioTestCase):
+    """Against real git: once a task has pushed, `origin/<branch>` is the truth.
+
+    Re-creating a lost worktree from the base would silently drop every pushed
+    attempt, and the next push would be rejected as non-fast-forward. This is
+    what lets a task resume on another host.
+    """
+
+    def _git(self, cwd, *args):
+        import subprocess
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                       env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = self.tmp.name
+        self.origin = os.path.join(root, "origin.git")
+        self.repo = os.path.join(root, "repo")
+        self._git(root, "init", "--bare", "-b", "main", self.origin)
+        self._git(root, "clone", self.origin, self.repo)
+        with open(os.path.join(self.repo, "README.md"), "w") as f:
+            f.write("base\n")
+        self._git(self.repo, "add", ".")
+        self._git(self.repo, "commit", "-m", "base")
+        self._git(self.repo, "push", "origin", "HEAD:main")
+
+    def _push_task_branch_from_elsewhere(self, branch):
+        """Another host's attempt: a commit on the task branch, pushed to origin."""
+        other = os.path.join(self.tmp.name, "other")
+        self._git(self.tmp.name, "clone", self.origin, other)
+        self._git(other, "checkout", "-b", branch)
+        with open(os.path.join(other, "feature.py"), "w") as f:
+            f.write("x = 1\n")
+        self._git(other, "add", ".")
+        self._git(other, "commit", "-m", "attempt 1")
+        self._git(other, "push", "origin", branch)
+
+    async def test_an_existing_remote_branch_is_checked_out_with_its_commits(self):
+        self._push_task_branch_from_elsewhere("feat/demo/t1")
+        ws = os.path.join(self.repo, "workspaces", "runs", "run_A")
+
+        ok, message = await git_ops.provision_worktree(
+            self.repo, ws, "feat/demo/t1", base_ref="origin/main"
+        )
+
+        self.assertTrue(ok, message)
+        self.assertTrue(os.path.exists(os.path.join(ws, "feature.py")))
+        self.assertIn("pushed branch", message)
+
+    async def test_a_new_branch_starts_from_the_base(self):
+        ws = os.path.join(self.repo, "workspaces", "runs", "run_B")
+
+        ok, message = await git_ops.provision_worktree(
+            self.repo, ws, "feat/demo/t2", base_ref="origin/main"
+        )
+
+        self.assertTrue(ok, message)
+        self.assertTrue(os.path.exists(os.path.join(ws, "README.md")))
+        self.assertFalse(os.path.exists(os.path.join(ws, "feature.py")))
+
+    async def test_rev_parse_and_the_branch_diff_see_the_committed_change(self):
+        self._push_task_branch_from_elsewhere("feat/demo/t1")
+        ws = os.path.join(self.repo, "workspaces", "runs", "run_C")
+        await git_ops.provision_worktree(self.repo, ws, "feat/demo/t1", base_ref="origin/main")
+
+        sha = await git_ops.rev_parse(ws)
+        diff = await git_ops.get_branch_diff(ws, "origin/main")
+
+        self.assertRegex(sha, r"^[0-9a-f]{40}$")
+        # Committed work: `git diff HEAD` would be empty, the branch diff is not.
+        self.assertIn("feature.py", diff)
+
+    async def test_rev_parse_of_a_missing_workspace_is_empty(self):
+        self.assertEqual(await git_ops.rev_parse(os.path.join(self.tmp.name, "nope")), "")
+
+
+class TestOnlyTaskBranchesArePushed(unittest.IsolatedAsyncioTestCase):
+    """Failing attempts are pushed too; that is only safe on a `feat/` branch."""
+
+    def test_a_task_branch_may_be_pushed(self):
+        self.assertEqual(git_ops.push_refusal("feat/demo/t1_run_A", "main"), "")
+
+    def test_protected_and_non_task_branches_are_refused(self):
+        for branch, default in (("main", None), ("master", None), ("develop", "develop"),
+                                ("develop", "origin/develop"), ("fix/thing", "main"), ("", "main")):
+            with self.subTest(branch=branch, default=default):
+                self.assertTrue(git_ops.push_refusal(branch, default))
+
+    async def test_commit_and_push_refuses_before_running_any_git(self):
+        with patch("core.util.git_ops.run_cmd_async", new=AsyncMock()) as mock_run:
+            ok, message = await commit_and_push(
+                workspace_path=tempfile.mkdtemp(), branch_name="main", commit_msg="m"
+            )
+
+        self.assertFalse(ok)
+        self.assertIn("Refusing to push", message)
+        mock_run.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

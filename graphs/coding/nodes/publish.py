@@ -1,4 +1,9 @@
-"""publish — commit, push, PR upsert, and the review comments.
+"""publish — PR upsert and the review comments.
+
+The branch is already on GitHub by the time a task gets here: `push` sent it
+straight after implement, and verify tested that exact commit. So publish only
+opens (or adopts) the PR, and it refuses to open one for a commit that verify
+did not pass.
 
 Everything here is deterministic and idempotent, and nothing here calls the LLM.
 That is what makes retrying safe: if `gh` is down, the next tick re-enters this
@@ -8,7 +13,7 @@ Two rules from §6.3 hold throughout:
 
 - **A URL is only reported if `gh` confirmed it.** Fabricated links (D2) are
   gone, so a link in Discord is proof the PR exists.
-- **A push that succeeded is never thrown away.** If the PR call fails, the task
+- **A pushed branch is never thrown away.** If the PR call fails, the task
   halts with a compare URL you can click, and the next tick adopts the PR you
   open from it.
 """
@@ -38,8 +43,23 @@ async def publish_node(state: CodingState) -> Dict[str, Any]:
 
     if not task_id:
         return {"error_message": "publish: current_task has no task_id.", "route": "done"}
-    if not workspace_path or not branch_name:
-        message = f"`{task_id}`: nothing to publish (no worktree or branch)."
+    if not branch_name:
+        message = f"`{task_id}`: nothing to publish (no branch)."
+        report.append(f"⚠️ {message}")
+        return {"route": "done", "tick_report": report, "error_message": message}
+
+    head_sha = current_task.get("head_sha") or ""
+    if not head_sha:
+        message = f"`{task_id}`: nothing pushed yet; sending it back through push."
+        manifest_store.yield_task(manifest_path, task_id, stage="implemented")
+        report.append(f"⚠️ {message}")
+        return {"route": "done", "tick_report": report, "error_message": message}
+
+    if current_task.get("verified_sha") != head_sha:
+        # The PR would show code that never passed verification. Back to the
+        # `pushed` stage, so the next tick tests this commit first.
+        message = f"`{task_id}`: `{head_sha[:7]}` has not been verified; re-verifying before the PR."
+        manifest_store.yield_task(manifest_path, task_id, stage="pushed")
         report.append(f"⚠️ {message}")
         return {"route": "done", "tick_report": report, "error_message": message}
 
@@ -48,39 +68,13 @@ async def publish_node(state: CodingState) -> Dict[str, Any]:
         repo_descriptor.get("slug")
         or state.get("target_repo")
         or current_task.get("target_repo")
-        or await git_ops.discover_target_repo(workspace_path, ".")
+        or (await git_ops.discover_target_repo(workspace_path, ".") if workspace_path else None)
     )
     push_identity = get_push_identity(state)
     default_branch = repo_descriptor.get("default_branch") or "main"
     base_branch = (state.get("base_branch") or default_branch).replace("origin/", "")
 
-    # 1. Commit + push. Idempotent: "nothing to commit" is fine, and pushing an
-    #    already-pushed branch is a no-op.
-    commit_msg = (
-        f"feat({state.get('project_name') or 'coding'}): implement {task_id} "
-        f"({state.get('run_id') or 'run'})"
-    )
-    push_ok, push_log = await git_ops.commit_and_push(
-        workspace_path=workspace_path,
-        branch_name=branch_name,
-        commit_msg=commit_msg,
-        author=push_identity.author if push_identity else None,
-        push_identity=push_identity
-    )
-
-    if not push_ok:
-        return _retry_or_halt(
-            manifest_path, task_id, report,
-            kind="git", stage_label="push",
-            message=(
-                f"Push failed for `{task_id}`: {push_log} "
-                f"Work is preserved on branch `{branch_name}` at `{workspace_path}`."
-            )
-        )
-
-    head_sha = await _head_sha(workspace_path)
-
-    # 2. PR upsert. Always look before creating, so a PR you opened by hand from
+    # 1. PR upsert. Always look before creating, so a PR you opened by hand from
     #    the compare URL is adopted instead of duplicated.
     pr_url, pr_number, pr_error = await _upsert_pull_request(
         workspace_path=workspace_path,
@@ -103,11 +97,10 @@ async def publish_node(state: CodingState) -> Dict[str, Any]:
         )
         return _retry_or_halt(
             manifest_path, task_id, report,
-            kind="github", stage_label="publish", message=message,
-            extra={"head_sha": head_sha}
+            kind="github", stage_label="publish", message=message
         )
 
-    # 3. Post what the reviewer needs to see next to the code.
+    # 2. Post what the reviewer needs to see next to the code.
     await _post_review_context(
         state=state, workspace_path=workspace_path, pr_url=pr_url,
         target_repo=target_repo, push_identity=push_identity
@@ -235,13 +228,6 @@ async def _find_open_pr(
     if not entries:
         return "", None
     return entries[0].get("url", ""), entries[0].get("number")
-
-
-async def _head_sha(workspace_path: str) -> str:
-    code, out, _ = await git_ops.run_cmd_async(
-        ["git", "rev-parse", "HEAD"], cwd=workspace_path, timeout=10.0
-    )
-    return out.strip() if code == 0 else ""
 
 
 def _compare_url(target_repo: Optional[str], branch_name: str) -> str:

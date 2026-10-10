@@ -7,6 +7,8 @@
     scripts/coding_admin.py [--project NAME] skip TASK_ID
     scripts/coding_admin.py [--project NAME] unblock TASK_ID
     scripts/coding_admin.py [--project NAME] abort TASK_ID [--reason TEXT]
+    scripts/coding_admin.py handoff
+    scripts/coding_admin.py resume [--force]
 
 Each project has its own queue at
 `pkm/wiki/software/<project>/build_request.json`. `--project` (or `--manifest`)
@@ -15,6 +17,13 @@ says which one; with exactly one project queued it can be omitted.
 None of these run the pipeline. They write the manifest, and the next tick acts
 on what they wrote — so there is exactly one execution path, and inspecting the
 manifest tells you the whole truth about what will happen next.
+
+`handoff` and `resume` move the whole queue (every project) between hosts, e.g.
+from the NAS to a dev box: run `handoff` on the host giving it up, then `resume`
+on the one taking over. Only one host may tick at a time.
+
+Exit codes: 0 done, 1 failed, 2 operator error, 3 handoff/resume not complete
+yet (re-run it; every step is idempotent).
 """
 import argparse
 import asyncio
@@ -97,6 +106,19 @@ def parse_args(argv=None):
     p_abort.add_argument("task_id")
     p_abort.add_argument("--reason", default="")
 
+    sub.add_parser(
+        "handoff",
+        help="Give the queue up: pause ticking here, push unpushed work, sync pkm."
+    )
+    p_resume = sub.add_parser(
+        "resume",
+        help="Take the queue over: pull pkm, then let this host tick."
+    )
+    p_resume.add_argument(
+        "--force", action="store_true",
+        help="Resume even though another host still holds a live lease."
+    )
+
     return parser.parse_args(argv)
 
 
@@ -110,9 +132,24 @@ def _confirm(prompt: str) -> bool:
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    manifest_path = resolve_target_manifest(args.manifest, args.project)
 
     from graphs.coding.utils import control
+
+    # Host switches act on every project at once: the queue moves as a whole.
+    if args.command in ("handoff", "resume"):
+        from graphs.coding.utils.dag import discover_manifests
+        try:
+            if args.command == "handoff":
+                done, report = asyncio.run(control.handoff(discover_manifests()))
+            else:
+                done, report = control.resume(discover_manifests, force=args.force)
+        except Exception as e:
+            print(f"🛑 {args.command} failed: {e}", file=sys.stderr)
+            return 1
+        print(report)
+        return 0 if done else 3
+
+    manifest_path = resolve_target_manifest(args.manifest, args.project)
 
     if not os.path.exists(manifest_path):
         print(f"No manifest at {manifest_path}.", file=sys.stderr)

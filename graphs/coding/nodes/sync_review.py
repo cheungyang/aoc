@@ -17,6 +17,7 @@ Signals, first match wins:
 Rejections are symmetric: CHANGES_REQUESTED, `/reject` (back to implement) and
 `/abort` (fail the task and tear down).
 """
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -223,13 +224,26 @@ async def sync_review_node(state: CodingState) -> Dict[str, Any]:
     )
 
     if decision == "changes_requested" or comments:
+        summary = evidence or f"{len(comments)} new review comment(s)."
+        if not os.path.isdir(state.get("workspace_path") or ""):
+            # Review syncs never provision, so the worktree may be missing — on
+            # another host it never existed. Hand the task back: the scheduler
+            # re-creates it from `origin/<branch>`, which holds every pushed attempt.
+            # The comments travel in the manifest (`review_feedback`).
+            manifest_store.yield_task(
+                manifest_path, task_id,
+                stage="provisioned", impl_digest=None,
+                review_cursor=new_cursor, review_feedback=comments,
+                poll_until=None, last_error=None
+            )
+            report.append(f"🔁 `{task_id}`: {summary} Re-provisioning the worktree before handing it back to the worker.")
+            return {"route": "scheduler", "tick_report": report, "error_message": ""}
         manifest_store.persist_task(
             manifest_path, task_id,
             status="active", stage="provisioned",
-            impl_digest=None, review_cursor=new_cursor,
+            impl_digest=None, review_cursor=new_cursor, review_feedback=comments,
             poll_until=None, last_error=None
         )
-        summary = evidence or f"{len(comments)} new review comment(s)."
         report.append(f"🔁 `{task_id}`: {summary} Sending it back to the worker.")
         return {
             "stage": "provisioned",

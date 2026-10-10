@@ -1,10 +1,10 @@
 """implement — the only node that calls the LLM to write code.
 
 It touches nothing outside the worktree: no git, no network, no manifest beyond
-its own bookkeeping. That separation is the point. When a push or a PR call
-fails, the next tick resumes at `publish` and this node is skipped entirely,
-because its output — the code in the worktree — is still there and its digest
-still matches.
+its own bookkeeping. That separation is the point. When a push fails, the next
+tick resumes at `push` and this node is skipped entirely, because its output —
+the code in the worktree — is still there and its digest still matches. Once
+pushed, progress is tracked by commit SHA and this node is not consulted again.
 """
 import os
 import time
@@ -53,7 +53,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
     if manifest_store.stage_at_or_past(current_task, "implemented"):
         if await digest_matches(workspace_path, current_task.get("impl_digest")):
             report.append(f"⏩ `{task_id}` already implemented (digest unchanged); skipping the LLM.")
-            return {"stage": "implemented", "route": "verify", "tick_report": report, "error_message": ""}
+            return {"stage": "implemented", "route": "push", "tick_report": report, "error_message": ""}
 
     attempts = int((current_task.get("attempts") or {}).get("implement", 0))
     if attempts >= MAX_IMPLEMENT_ATTEMPTS:
@@ -83,7 +83,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         spec_content=spec_content,
         test_stderr=_clean(state.get("test_stderr")),
         critic_feedback=state.get("audit_feedback"),
-        human_feedback=_review_feedback(state)
+        human_feedback=_review_feedback(state, current_task)
     )
 
     # The count has to travel in state, not just to disk. `current_task` is the
@@ -172,6 +172,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         manifest_path, task_id,
         stage="implemented",
         impl_digest=digest,
+        review_feedback=None,
         last_error=None
     )
     report.append(f"🧠 `{task_id}`: implemented ({len(modified_files)} file(s) changed).")
@@ -179,7 +180,8 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
     return {
         "current_task": stored or current_task,
         "stage": "implemented",
-        "route": "verify",
+        # push commits this attempt to the task branch; verify tests that commit.
+        "route": "push",
         "impl_digest": digest,
         "modified_files": modified_files,
         "implementation_summary": summary or f"Modified {len(modified_files)} file(s).",
@@ -207,8 +209,12 @@ def _clean(stderr: Any) -> Any:
     return sanitize_traceback(stderr) if stderr else None
 
 
-def _review_feedback(state: CodingState) -> Any:
-    comments: List[str] = state.get("github_pr_comments") or []
+def _review_feedback(state: CodingState, current_task: Dict[str, Any]) -> Any:
+    # The manifest copy covers a hand-off through the scheduler, where the
+    # in-memory comments from sync_review did not survive.
+    comments: List[str] = (
+        state.get("github_pr_comments") or current_task.get("review_feedback") or []
+    )
     if comments:
         return "GitHub PR review comments:\n" + "\n".join(comments)
     return state.get("latest_human_feedback")

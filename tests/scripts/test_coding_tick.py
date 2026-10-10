@@ -464,5 +464,67 @@ class TestHasWork(TickScriptTestCase):
         self.assertEqual(os.getcwd(), cwd)
 
 
+class TestOnlyTheActiveHostTicks(TickScriptTestCase):
+    """A paused (handed-off) or disabled host must not touch any manifest.
+
+    Two hosts ticking write two copies of the same manifest, and the pkm sync
+    keeps one. Silence is right here: saying "paused" every five minutes would
+    be noise in the channel.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.write([{
+            "task_id": "T1", "status": "pending", "stage": "queued",
+            "dependencies": [], "verification_command": "pytest -q"
+        }])
+
+    def test_a_paused_host_runs_no_tick_and_says_nothing(self):
+        from graphs.coding.utils import host
+
+        host.pause("handed off")
+        with patch.object(self.module, "run_tick", AsyncMock()) as mock_tick, \
+             patch("builtins.print") as mock_print:
+            code = self.run_main()
+
+        self.assertEqual(code, 0)
+        mock_tick.assert_not_called()
+        mock_print.assert_not_called()
+
+    def test_the_environment_switch_stops_it_too(self):
+        with patch.dict(os.environ, {"CODING_TICK_ENABLED": "0"}), \
+             patch.object(self.module, "run_tick", AsyncMock()) as mock_tick:
+            self.assertEqual(self.run_main(), 0)
+
+        mock_tick.assert_not_called()
+
+    def test_verbose_says_why_on_stderr(self):
+        from graphs.coding.utils import host
+
+        host.pause("handed off")
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            self.run_main("--verbose")
+
+        self.assertIn("paused", stderr.getvalue())
+
+    def test_a_dry_run_still_works_while_paused(self):
+        """Looking at what would happen is how you check a handoff."""
+        from graphs.coding.utils import host
+
+        host.pause("handed off")
+        with patch("builtins.print") as mock_print:
+            self.run_main("--dry-run")
+
+        self.assertIn("T1", mock_print.call_args.args[0])
+
+    def test_a_paused_host_reports_no_work_to_the_scheduler(self):
+        from graphs.coding.utils import host
+
+        host.pause("handed off")
+        with patch("graphs.coding.utils.dag.discover_manifests", return_value=[self.manifest_path]):
+            self.assertFalse(self.module.has_work(None))
+
+
 if __name__ == "__main__":
     unittest.main()

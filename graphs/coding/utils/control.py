@@ -35,7 +35,10 @@ RESET_FIELDS: Dict[str, Any] = {
     "impl_digest": None,
     "verified_digest": None,
     "head_sha": None,
+    "verified_sha": None,
+    "audited_sha": None,
     "review_cursor": None,
+    "review_feedback": None,
     "pr_url": None,
     "pr_number": None,
     "commit_url": None,
@@ -163,6 +166,8 @@ def retry(manifest_path: str, task_id: str, from_stage: Optional[str] = None) ->
         fields["stage"] = from_stage
         fields["impl_digest"] = None
         fields["verified_digest"] = None
+        fields["verified_sha"] = None
+        fields["audited_sha"] = None
 
     # The attempt counters are what halted it; leaving them would halt it again
     # on the very next tick.
@@ -292,3 +297,135 @@ def unblock(manifest_path: str, task_id: str) -> str:
 
     manifest_store.yield_task(manifest_path, task_id)
     return f"`{task_id}` is queued again."
+
+
+# --- Host switch -------------------------------------------------------------
+
+def _worktree_path(manifest: Dict[str, Any], task: Dict[str, Any]) -> str:
+    run_id = task.get("run_id") or ""
+    if not run_id:
+        return ""
+    repo_root = resolve_repo_root(get_repo_descriptor(manifest)) or project_root()
+    return os.path.join(repo_root, "workspaces", "runs", run_id)
+
+
+async def _push_unpushed(manifest_path: str, manifest: Dict[str, Any], task: Dict[str, Any]) -> str:
+    """Pushes an `implemented` task's worktree, so the other host does not redo it.
+
+    `implemented` is the one stage whose work exists only on this disk. Going
+    through the push node keeps one code path — and its default-branch guard.
+    """
+    from graphs.coding.nodes.push import push_node
+
+    workspace_path = _worktree_path(manifest, task)
+    if not workspace_path or not os.path.exists(workspace_path):
+        return f"`{task['task_id']}`: unpushed work has no worktree here; it will be re-implemented."
+    result = await push_node({
+        "build_request_path": manifest_path,
+        "current_task": task,
+        "workspace_path": workspace_path,
+        "branch_name": task.get("branch_name") or "",
+        "project_name": manifest.get("project_name") or "",
+        "repo": get_repo_descriptor(manifest),
+        "tick_report": [],
+    })
+    if result.get("route") == "verify":
+        return f"`{task['task_id']}`: pushed `{(result.get('head_sha') or '')[:7]}`."
+    return f"`{task['task_id']}`: could not push ({result.get('error_message')}); it will be re-implemented."
+
+
+async def handoff(manifest_paths: List[str], sync=None) -> Tuple[bool, str]:
+    """Hands the queue to another host. Returns (complete, report).
+
+    1. Pause this host, so no new tick starts here.
+    2. Wait for ticks already running here — their writes must land before the
+       manifest is synced. If any are, stop and say so; re-running is safe.
+    3. Push work that only exists on this disk (stage `implemented`).
+    4. Sync the pkm repo now, so the other host reads the final manifest.
+
+    Every step is idempotent, so a handoff that stopped half-way is finished by
+    running it again.
+    """
+    from graphs.coding.utils import host
+
+    sync = sync or host.sync_pkm
+    host.pause("handed off")
+    lines = [f"⏸️ Ticking paused on `{host.host_name()}`."]
+
+    now = time.time()
+    in_flight: List[str] = []
+    for manifest_path in manifest_paths:
+        manifest = manifest_store.load_manifest(manifest_path)
+        for task in manifest.get("queue") or []:
+            if manifest_store.lease_is_active(task, now) and host.is_this_host(task.get("lease_owner")):
+                until = time.strftime("%H:%M", time.localtime(float(task.get("lease_expires_at") or now)))
+                in_flight.append(f"`{task['task_id']}` (`{task.get('lease_owner')}`, lease until {until})")
+
+    if in_flight:
+        lines.append(
+            "⏳ A tick is still running here: " + ", ".join(in_flight) + ". "
+            "Re-run `coding_admin handoff` once it finishes; nothing has been synced yet."
+        )
+        return False, "\n".join(lines)
+
+    for manifest_path in manifest_paths:
+        manifest = manifest_store.load_manifest(manifest_path)
+        for task in manifest.get("queue") or []:
+            if task.get("stage") == "implemented" and task.get("status") not in ("done", "failed"):
+                lines.append("📤 " + await _push_unpushed(manifest_path, manifest, task))
+
+    ok, message = sync()
+    if not ok:
+        lines.append(f"⚠️ {message} Re-run `coding_admin handoff` once it is fixed.")
+        return False, "\n".join(lines)
+
+    lines.append(f"🔄 {message}")
+    lines.append(
+        "✅ Handoff complete. Next: move the `script-executor` agent in the Discord "
+        "control thread (`[claim script-executor]` from the dev box, `[release]` to "
+        "give it back to prod), then run `scripts/coding_admin.py resume` on that host."
+    )
+    return True, "\n".join(lines)
+
+
+def resume(manifest_paths_after_sync, sync=None, force: bool = False) -> Tuple[bool, str]:
+    """Takes the queue over on this host. Returns (resumed, report).
+
+    Pulls the pkm repo first — ticking on a stale manifest is exactly the
+    conflict the handoff exists to prevent — then refuses while another host
+    still holds a live lease, unless forced.
+
+    `manifest_paths_after_sync` is a callable: which projects exist is only
+    known once the pull has landed.
+    """
+    from graphs.coding.utils import host
+
+    sync = sync or host.sync_pkm
+    ok, message = sync()
+    if not ok:
+        return False, f"⚠️ {message} Not resuming: this host would tick on a stale manifest."
+    lines = [f"🔄 {message}"]
+
+    now = time.time()
+    foreign: List[str] = []
+    for manifest_path in manifest_paths_after_sync():
+        for task in manifest_store.load_manifest(manifest_path).get("queue") or []:
+            owner = task.get("lease_owner")
+            if manifest_store.lease_is_active(task, now) and host.owner_host(owner) not in (None, host.host_name()):
+                foreign.append(f"`{task['task_id']}` (`{owner}`)")
+
+    if foreign and not force:
+        lines.append(
+            "⚠️ Another host still holds a live lease: " + ", ".join(foreign) + ". "
+            "Finish `coding_admin handoff` there first, or pass `--force`."
+        )
+        return False, "\n".join(lines)
+
+    host.unpause()
+    enabled, reason = host.tick_enabled()
+    if not enabled:
+        lines.append(f"⚠️ Unpaused, but this host still will not tick: {reason}")
+        return False, "\n".join(lines)
+    lines.append(f"▶️ Ticking resumed on `{host.host_name()}`.")
+    return True, "\n".join(lines)
+

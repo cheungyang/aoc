@@ -263,6 +263,33 @@ class TestSyncReviewNode(ManifestFixture):
         self.assertEqual(stored["stage"], "provisioned")
         self.assertEqual(stored["review_cursor"], "4")
         self.assertIsNone(stored["impl_digest"])
+        self.assertEqual(stored["review_feedback"], ["@alice: rename it"])
+
+    async def test_feedback_without_a_worktree_goes_through_the_scheduler(self):
+        """On another host the worktree never existed; the scheduler re-creates
+        it from `origin/<branch>`, and the feedback waits in the manifest."""
+        import shutil
+
+        shutil.rmtree(self.workspace)
+        task = _task(status="awaiting_review", stage="awaiting_review",
+                     pr_url="https://github.com/org/repo/pull/7")
+        self.write_manifest([task])
+        status = {
+            "state": "OPEN",
+            "comments": [{"author": {"login": "alice"}, "body": "rename it", "databaseId": 4}],
+        }
+
+        with patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value=status)):
+            result = await sync_review_node(self.review_state(task))
+
+        self.assertEqual(result["route"], "scheduler")
+        stored = self.stored()
+        self.assertEqual(stored["stage"], "provisioned")
+        self.assertEqual(stored["status"], "queued")
+        self.assertIsNone(stored["lease_owner"])
+        self.assertEqual(stored["review_cursor"], "4")
+        self.assertEqual(stored["review_feedback"], ["@alice: rename it"])
 
     async def test_an_inline_only_review_is_still_acted_on(self):
         """Comments on the line itself are not in `comments`; they used to be missed."""

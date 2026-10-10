@@ -17,6 +17,7 @@ from graphs.coding.prompts.critic_prompt import build_critic_prompt
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
+from graphs.coding.utils.repo import get_repo_descriptor
 from graphs.coding.utils.token_opt import sanitize_diff
 from graphs.coding.utils.worker import call_worker
 from graphs.coding.utils.xml_parsers import parse_critic_verdict_xml
@@ -33,11 +34,21 @@ async def audit_node(state: CodingState) -> Dict[str, Any]:
     if not task_id:
         return {"error_message": "audit: current_task has no task_id.", "route": "done"}
 
-    # Guard: the audit already ran for this tree.
-    if manifest_store.stage_at_or_past(current_task, "audited"):
+    head_sha = current_task.get("head_sha") or ""
+
+    # Guard: the audit already ran for this commit.
+    if (
+        manifest_store.stage_at_or_past(current_task, "audited")
+        and current_task.get("audited_sha") == head_sha
+    ):
         return {"stage": "audited", "route": "publish", "tick_report": report, "error_message": ""}
 
-    diff = sanitize_diff(await git_ops.get_git_diff(workspace_path)) if workspace_path else ""
+    # The change is committed by now, so `git diff HEAD` is empty: review the
+    # whole branch against the default branch it was cut from.
+    default_branch = get_repo_descriptor(state).get("default_branch") or "main"
+    diff = sanitize_diff(
+        await git_ops.get_branch_diff(workspace_path, f"origin/{default_branch}")
+    ) if workspace_path and os.path.exists(workspace_path) else ""
     spec_content = _spec_text(state, current_task)
 
     verdict = await _run_audit(
@@ -49,7 +60,7 @@ async def audit_node(state: CodingState) -> Dict[str, Any]:
     passed = verdict["passed"]
     feedback = verdict["feedback"]
 
-    manifest_store.persist_task(manifest_path, task_id, stage="audited")
+    manifest_store.persist_task(manifest_path, task_id, stage="audited", audited_sha=head_sha)
 
     if passed:
         report.append(f"🔎 `{task_id}`: audit found nothing.")
