@@ -7,6 +7,7 @@
   "model": "FLASH",
   "tools": {
     "web_search": {},
+    "yfinance": {},
     "filesystem": {
       "pkm/wiki/stock": [
         "@read",
@@ -24,14 +25,14 @@
       "cron": "30 13 * * 1-5",
       "precondition": {
         "type": "always",
-        "reason": "Market data threshold checks require executing the external yfinance API script to evaluate post-market movements."
+        "reason": "Threshold checks need fresh post-market data from the yfinance tool, so the scan always runs."
       },
       "session_policy": "stateless",
       "prompt": [
         "Review the tickers in pkm/wiki/stock/portfolio.md and pkm/wiki/stock/watchlist.md.",
-        "Execute the market_data skill to fetch today's closing metrics and filter by the predefined threshold rules.",
-        "For tickers that crossed the threshold, perform a web_search for news/macro/earnings.",
-        "Synthesize your findings and save a markdown report under pkm/wiki/stock/{SYMBOL}.md."
+        "Load the market_data skill and call the yfinance tool once (action=quote) with all tickers, then apply the skill's Threshold Rule.",
+        "For Triggered tickers only, optionally drill down with yfinance history/earnings, then perform a web_search for news/macro/earnings.",
+        "Save a markdown report for each Triggered ticker under pkm/wiki/stock/{SYMBOL}.md and reply with the skill's triage table."
       ]
     }
   ]

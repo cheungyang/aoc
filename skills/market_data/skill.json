@@ -1,7 +1,7 @@
 {
   "skill_id": "market_data",
   "name": "Market Data Fetcher",
-  "description": "Pulls threshold financial data for stock tickers using the yfinance.py script.",
+  "description": "Screens stock tickers with the yfinance tool and applies the Threshold Rule (price move, upcoming earnings, volume spike) to decide which need deep research.",
   "emoji": "📈",
   "tools": {
     "yfinance": {}

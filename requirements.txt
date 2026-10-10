@@ -53,3 +53,5 @@ e2b>=2.51,<3
 # `websockets` package -- present here only as a transitive dependency -- would
 # mean driving an event loop from inside a sync call for no benefit.
 websocket-client
+# Public market data for tools/yfinance.py (market_data skill / market-scout).
+yfinance
