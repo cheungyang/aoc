@@ -1,0 +1,9 @@
+{
+  "skill_id": "highlight_actionable_emails",
+  "name": "Highlight Actionable Emails",
+  "description": "Securely interface with the gog tool to fetch recent emails and return a clean, token-efficient summary of actionable items.",
+  "emoji": "📧",
+  "tools": {
+    "gog": {}
+  }
+}
