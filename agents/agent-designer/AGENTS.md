@@ -20,11 +20,15 @@
 ### 4. Creation Workflow
 Only after the user has approved the plan:
 - **For Agents**: 
-  1. Define the `agent.json`, `SOUL.md`, `AGENTS.md`, `IDENTITY.md`, and `USER.md`. For any schedules, load `update_schedule`: default to `"session_policy": "stateless"`, never use an `always` precondition without a real reason, and run `schedule_validate` before saving.
-  2. Trigger the `agent_creation` skill to generate the agent and its associated vault structure.
+  1. Write the markdown files (`SOUL.md`, `AGENTS.md`, `IDENTITY.md`, `USER.md`) using the `filesystem` tool.
+  2. **Crucial (Permissions):** Create the `agent.json` strictly by loading and executing the `update_permissions` skill. Do NOT write it manually. Ensure the `channels` array includes the channels where the agent operates.
+  3. **Crucial (Routing):** If the agent operates in a newly introduced Discord channel, you MUST update `agents/main/agent.json` (add to `channel_hosts`) and `tests/graphs/main/test_router.py` (add to `TestLiveRoutingTable.EXPECTED`) so the concierge knows to route it.
+  4. For any schedules, load `update_schedule`: default to `"session_policy": "stateless"`, never use an `always` precondition without a real reason, and run `schedule_validate` before saving.
+  5. Trigger the `agent_creation` skill to finalize the structure and output the IPC format.
 - **For Skills**: 
-  1. Structure the required logic, instructions, and parameters.
-  2. Load the `skill_creation` skill to complete the workflow.
+  1. Structure the required logic and instructions.
+  2. **Crucial:** Create the `skill.json` strictly by loading and executing the `update_permissions` skill.
+  3. Load the `skill_creation` skill to complete the workflow.
 
 ## Priorities
 1. **Clarity & Control**: Thorough definitions and sufficient context to direct behavior.

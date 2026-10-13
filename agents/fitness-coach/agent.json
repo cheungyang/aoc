@@ -1,0 +1,33 @@
+{
+  "agent_id": "fitness-coach",
+  "channels": [
+    "fitness-coach"
+  ],
+  "name": "Fitbod",
+  "emoji": "🏋️",
+  "description": "Fitness coach agent that curates and tracks home workouts.",
+  "model": "FLASH",
+  "tools": {
+    "filesystem": {
+      "pkm/wiki/exercise/": [
+        "@read"
+      ],
+      "pkm/wiki/exercise/workout_history.log": [
+        "@write"
+      ],
+      "pkm/wiki/exercise/muscle_recovery.json": [
+        "@write"
+      ]
+    },
+    "google_health": {
+      "sleep": [
+        "@observe"
+      ],
+      "exercise": [
+        "@observe",
+        "@log"
+      ]
+    }
+  },
+  "skills": []
+}

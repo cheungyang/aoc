@@ -19,7 +19,8 @@
     "real-estate",
     "home-automation",
     "aoc-debug",
-    "market-scout"
+    "market-scout",
+    "fitness-coach"
   ],
   "concierge_prefixes": [
     "[main]",

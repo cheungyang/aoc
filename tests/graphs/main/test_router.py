@@ -247,6 +247,7 @@ class TestLiveRoutingTable(unittest.TestCase):
         "aoc-debug": None,
         "content-creation": None,
         "day-planning": "day-planner",
+        "fitness-coach": "fitness-coach",
         "general": None,
         "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
