@@ -9,13 +9,13 @@
   "model": "FLASH",
   "tools": {
     "filesystem": {
-      "pkm/wiki/exercise/": [
+      "pkm/wallet/exercise/": [
         "@read"
       ],
-      "pkm/wiki/exercise/workout_history.log": [
+      "pkm/wallet/exercise/workout_history.log": [
         "@write"
       ],
-      "pkm/wiki/exercise/muscle_recovery.json": [
+      "pkm/wallet/exercise/muscle_recovery.json": [
         "@write"
       ]
     },
