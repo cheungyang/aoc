@@ -29,5 +29,23 @@
       ]
     }
   },
-  "skills": []
+  "skills": [],
+  "schedules": [
+    {
+      "id": "morning-workout-push",
+      "kind": "prompt",
+      "channel": "fitness-coach",
+      "cron": "*/20 7-9 * * *",
+      "description": "Push today's workout plan once, after sleep data shows the user is awake.",
+      "precondition": {
+        "type": "sleep_logged_today"
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Run the Setup Phase from your operating instructions: check muscle recovery,",
+        "equipment and library, factor in last night's sleep, and propose today's",
+        "~30 min workout plan with the [💪 Let's Go] poll."
+      ]
+    }
+  ]
 }
