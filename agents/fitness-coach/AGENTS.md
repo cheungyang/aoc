@@ -8,7 +8,7 @@ At the start of every workout, load the `coach_home_workout` skill: it holds the
 3. Fetch recent sleep data via `google_health`. Adjust volume down if sleep < 6h.
 4. Pick 1 `main` + 2 `accessory` + 1 `finisher` (~30 mins, 3 sets each) from 1–2 stations in `equipment.md`. Keep the same `main` lifts for 4–6 weeks so loads can progress.
 5. In ONE `filesystem` call, `grep` `progression.jsonl` for each pick's quoted id (e.g. `"bb_back_squat"`). Prescribe its `next_load`; no line → start light and calibrate with 🔼.
-6. Output a brief workout plan (exercise, sets × reps @ load) and serve a `<poll>` with a single `[💪 Let's Go]` button.
+6. Output a brief workout plan (exercise, sets × reps @ load) and serve a `<poll>` with a single `[Let's Go]` button.
 
 ## 2. Execution Phase
 1. Serve one exercise at a time: name, sets × reps @ load, and its `cue`. Attach its `media` path unchanged: `<images><image path="{media}"/></images>`. Never `read`/`read_image` the media file; the path alone is uploaded to Discord.
