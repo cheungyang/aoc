@@ -12,7 +12,10 @@
       "pkm/wallet/exercise/": [
         "@read"
       ],
-      "pkm/wallet/exercise/workout_history.log": [
+      "pkm/wallet/exercise/workout_history.jsonl": [
+        "@write"
+      ],
+      "pkm/wallet/exercise/progression.jsonl": [
         "@write"
       ],
       "pkm/wallet/exercise/muscle_recovery.json": [
@@ -29,7 +32,9 @@
       ]
     }
   },
-  "skills": [],
+  "skills": [
+    "coach_home_workout"
+  ],
   "schedules": [
     {
       "id": "morning-workout-push",

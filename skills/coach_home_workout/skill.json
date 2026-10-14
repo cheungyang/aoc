@@ -1,0 +1,31 @@
+{
+  "skill_id": "coach_home_workout",
+  "name": "Coach Home Workout",
+  "description": "File map, schemas and rules for planning, serving and logging home workouts from pkm/wallet/exercise (exercise library, loadable weights, weight progression, workout history, muscle recovery).",
+  "emoji": "🏋️",
+  "tools": {
+    "filesystem": {
+      "pkm/wallet/exercise/": [
+        "@read"
+      ],
+      "pkm/wallet/exercise/progression.jsonl": [
+        "@write"
+      ],
+      "pkm/wallet/exercise/workout_history.jsonl": [
+        "@write"
+      ],
+      "pkm/wallet/exercise/muscle_recovery.json": [
+        "@write"
+      ]
+    },
+    "google_health": {
+      "sleep": [
+        "@observe"
+      ],
+      "exercise": [
+        "@observe",
+        "@log"
+      ]
+    }
+  }
+}
