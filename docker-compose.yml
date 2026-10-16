@@ -55,9 +55,6 @@ services:
       - GOOGLE_HEALTH_CREDENTIALS_FILE=${GOOGLE_HEALTH_CREDENTIALS_FILE:-/app/google_health_credentials.json}
       - GOOGLE_HEALTH_WRITE_ENABLED=${GOOGLE_HEALTH_WRITE_ENABLED:-false}
       - GOOGLE_HEALTH_REQUEST_TIMEOUT=${GOOGLE_HEALTH_REQUEST_TIMEOUT:-20}
-      # Cloud Text-to-Speech (Chirp 3: HD). Same pattern: the path to a
-      # service-account key, locked to 600 by entrypoint.sh.
-      - GOOGLE_TTS_CREDENTIALS_FILE=${GOOGLE_TTS_CREDENTIALS_FILE:-/app/google_tts_credentials.json}
       # Resource and stability tuning for NAS and multi-core hosts
       - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
       - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
