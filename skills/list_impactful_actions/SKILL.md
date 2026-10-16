@@ -1,6 +1,6 @@
 ---
 name: list_impactful_actions
-description: Navigates the personal databases and vault to identify impactful tasks, outputting an IPC XML plan.
+description: Navigates the personal databases and vault to identify the most impactful tasks.
 ---
 ## Overview
 Find the most impactful things to do for the day, week, or quarter from `tasks.db`, `projects.db`, and the weekly journal.
@@ -16,5 +16,3 @@ Find the most impactful things to do for the day, week, or quarter from `tasks.d
 2. `task_query` (`action="search"`, `status="todo"`) for those projects' aliases. Optionally run `git` `log-p` on a project's file to gauge recent momentum.
 3. Pick the top 3 tasks that most need attention to move active projects forward, judged by their due or scheduled dates and priority icons. If a pick lacks the context to act on, do not guess: read its project file.
 4. Return the picks grouped by Work, Personal, Family, Others, each with why it was chosen (priority, momentum, this week's focus), and the sources you read. Note workload balance, stalled projects, or new PKM patterns in your `<system_memory_log>`.
-
-When another agent asked for this list, reply in the strict IPC format instead: `<list_impactful_actions_response>` holding `<original_request>`, `<triggering_agent>` (agent id or 'User'), `<payload>` with `<recommended_actions>` (the grouped list and reasons) and `<sources_analyzed>` (files read), `<errors>` (missing files, DB failures, or 'None'), and `<learnings>`.

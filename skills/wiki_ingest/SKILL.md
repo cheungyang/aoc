@@ -1,6 +1,6 @@
 ---
 name: wiki_ingest
-description: Systematically processes a reading backlog, extracts/discusses entities and concepts, and compiles a dense, markdown-linked LLM Wiki graph. Outputs agent-friendly XML.
+description: Systematically processes a reading backlog, extracts/discusses entities and concepts, and compiles a dense, markdown-linked LLM Wiki graph.
 ---
 
 ## Overview
@@ -123,25 +123,9 @@ If the user approved a cluster during the discussion phase:
 - Inject a new `## YYYY-MM-DD` section below the Definition with newly linked entities/concepts and insights.
 - `overwrite` the file.
 
-### 5. Agent-Friendly Output & Iteration
-Generate a strictly formatted XML response detailing the ingestion process. This is critical for inter-agent orchestration and providing a rich payload of the synthesized data.
-- **Output Format Structure:**
-  ```xml
-  <wiki_ingest_response>
-    <original_request>[The initial request or trigger for ingestion]</original_request>
-    <triggering_agent>[Agent ID or 'User']</triggering_agent>
-    <payload>
-      <article_ingested>[Title of the article]</article_ingested>
-      <article_summary>[The comprehensive TLDR & Key Concepts summary]</article_summary>
-      <entities_connected>[List of entities extracted, updated, and how they connect to the article]</entities_connected>
-      <concepts_connected>[List of concepts extracted, updated, and how they connect to the article]</concepts_connected>
-      <clusters_updated>[List of clusters created or updated, if any]</clusters_updated>
-    </payload>
-    <errors>[Any issues reading the file, parsing text, etc., or 'None']</errors>
-    <learnings>[Execution insights, user preference learnings gathered during discussion, edge-cases]</learnings>
-  </wiki_ingest_response>
-  ```
-- **Memory Trigger:** Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
+### 5. Recap & Iteration
+- Reply in plain Markdown, never XML (your reply is shown in Discord): the article ingested and its TLDR, the entities and concepts extracted or updated and how they connect to it, any clusters created or updated, and any errors reading or parsing the file.
+- **Memory Trigger:** End with a `<system_memory_log>` block recording execution insights, the user's preferences from the discussion, and edge cases.
 - Ask the user: *"Ingestion complete. Would you like to process another article from your backlog?"* Repeat Step 1 if yes.
 
 ## Required Tools

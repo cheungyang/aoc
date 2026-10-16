@@ -53,7 +53,7 @@
             "preload": "full"
         },
         "write_daily_intention": {
-            "preload": "core"
+            "preload": "full"
         },
         "weekly_review": {},
         "highlight_actionable_emails": {

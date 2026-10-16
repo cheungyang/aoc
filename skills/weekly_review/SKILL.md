@@ -34,22 +34,9 @@ This skill guides the agent to synthesize the past 7 days of daily journals and 
 4. Append the finalized "Wins" and "Next week's focus" to the resolved template text.
 5. Use the `filesystem` tool to `write` the fully resolved text to `pkm/vault/journals/weekly/YYYY-Www.md`.
 
-### Phase 5: Agent-Friendly Output & Memory (IPC Format)
-Finalize the execution by outputting the strict XML structure below to ensure perfect readability.
-```xml
-<weekly_review_response>
-  <original_request>[The trigger or request to run the weekly review]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <wins>[Final list of wins]</wins>
-    <next_week_focus>[Final 3-point focus]</next_week_focus>
-    <file_path>[vault/journals/weekly/YYYY-Www.md]</file_path>
-  </payload>
-  <errors>[Any errors or 'None']</errors>
-  <learnings>[Observations about weekly productivity trends and the user's feedback during the hold points]</learnings>
-</weekly_review_response>
-```
-**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
+### Phase 5: Recap & Memory
+Reply in plain Markdown, never XML (your reply is shown in Discord): the final wins, next week's 3-point focus, the journal's path (`vault/journals/weekly/YYYY-Www.md`), and any errors.
+**Memory Trigger**: End with a `<system_memory_log>` block recording weekly productivity trends and the user's feedback at the hold points.
 
 ## Required Tools
 - `git`: Required to `log` the `pkm` repository to review commit history.

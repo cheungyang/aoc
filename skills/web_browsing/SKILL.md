@@ -1,14 +1,14 @@
 ---
 name: web_browsing
-description: Skill for utilizing visual AI navigation to achieve specific web goals, outputting IPC XML.
+description: Skill for utilizing visual AI navigation to achieve specific web goals, ending with a Markdown report.
 ---
 ## Overview
-This skill empowers the agent to automate repetitive visual web interactions that require user sessions (like logged-in states or anti-bot bypass) using the user's active Chrome instance. It concludes by outputting a standard IPC XML block.
+This skill empowers the agent to automate repetitive visual web interactions that require user sessions (like logged-in states or anti-bot bypass) using the user's active Chrome instance. It ends with a short Markdown report for the user.
 
 ## Boundaries & Guardrails
 - **The "Final Click" Rule**: You MUST NEVER execute destructive actions or finalize financial transactions (e.g., clicking "Pay Now", "Delete Account", "Confirm Booking"). You must stage the action up to the final confirmation page and notify the user to take manual control.
 - **Session Disruption**: Do NOT close the user's active tabs or disrupt their primary workspace unless explicitly requested by the user.
-- **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
+- **Formatting**: Reply in plain Markdown, never XML: your reply is shown in Discord, even when the Concierge relays the request.
 
 ## Prerequisite: Remote Debugging Setup
 Before executing this skill, generic isolated Chrome listeners must be allocated explicitly into active host memory:
@@ -33,25 +33,13 @@ Before executing this skill, generic isolated Chrome listeners must be allocated
 - Pass the formulated visual goal string as the `goal` parameter.
 - Pass `9222` as the `port` parameter (this is the hardcoded default unless the user specifies otherwise).
 
-### Step 3: Agent-Friendly Output & Memory (IPC Format)
-Read the output of the `browser` tool and finalize the execution using the strict XML structure below. This format ensures perfect readability for routing agents and clearly logs the boundary hand-offs.
-```xml
-<web_browsing_response>
-  <original_request>[The specific navigation or extraction goal]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <final_url>[The URL the browser ended up on]</final_url>
-    <extracted_data>[Any specific information requested to be extracted from the DOM]</extracted_data>
-    <actions_taken>[Brief summary of the automation path taken]</actions_taken>
-    <handoff_required>[True/False based on the "Final Click" Rule]</handoff_required>
-  </payload>
-  <errors>[Any DOM resolution errors, timeout issues, captcha blocks, or 'None']</errors>
-  <learnings>[Insights into site structure (e.g., 'Site X requires scrolling before button Y appears') to optimize future navigations]</learnings>
-</web_browsing_response>
-```
-**User Notification & Memory Trigger**: 
-- If `handoff_required` is True, explicitly notify the user to take manual control.
-- Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this browsing session.
+### Step 3: Report & Memory
+Read the output of the `browser` tool and reply in plain Markdown:
+- If the "Final Click" Rule stopped you, say so first and tell the user to take manual control.
+- The URL the browser ended on, any data you were asked to extract, and a brief summary of the path taken.
+- Any errors: DOM resolution failures, timeouts, captcha blocks.
+
+**Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about the site's structure (e.g., "Site X requires scrolling before button Y appears"), to speed up future navigations.
 
 ## Required Tools
 - `browser`: Required to connect to and control the user's active Chrome session via port 9222.

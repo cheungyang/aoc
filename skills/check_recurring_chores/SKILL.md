@@ -24,4 +24,4 @@ For each pending task:
    - **Silent Trigger**: today is *before* the window: ignore the task (do not remind the user yet).
 
 ### Phase 3: Output
-List each flagged chore as `- [Task Name] (Due: YYYY-MM-DD) - Context: You usually complete this by [Date/Window].` (or `None`), plus how many chores stayed silent because it is too early. When another agent asked for this check, wrap it in the strict IPC format: `<recurring_chores_response><flagged_chores>...</flagged_chores><silent_chores_count>N</silent_chores_count></recurring_chores_response>`.
+List each flagged chore as `- [Task Name] (Due: YYYY-MM-DD) - Context: You usually complete this by [Date/Window].` (or `None`), plus how many chores stayed silent because it is too early.

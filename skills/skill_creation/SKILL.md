@@ -1,13 +1,13 @@
 ---
 name: skill_creation
-description: Skill for creating new skills with required guidelines and structure, outputting standardized IPC XML.
+description: Skill for creating new skills with required guidelines and structure, ending with a Markdown report.
 ---
 ## Overview
-This skill guides agents on how to create a new skill in the system, including the required `SKILL.md` (instructions) and `skill.json` (metadata and permissions) files. It concludes by outputting a standardized Inter-Process Communication (IPC) XML block.
+This skill guides agents on how to create a new skill in the system, including the required `SKILL.md` (instructions) and `skill.json` (metadata and permissions) files. It ends with a short Markdown report for the user.
 
 ## Boundaries & Guardrails
 - **Strict Approval**: NEVER use the filesystem tool to create or overwrite skill files without first presenting a detailed plan (covering the proposed instructions, the exact tool JSON mapping, and how each agent will load it: preload mode and the characters it adds) and waiting for explicit user approval.
-- **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
+- **Formatting**: Reply in plain Markdown, never XML: your reply is shown in Discord, even when the Concierge relays the request.
 
 ## Workflow
 
@@ -68,25 +68,9 @@ Create the `skill.json` file to explicitly declare the metadata and tool permiss
 *Critical Constraint:* The tools listed in the Required Tools section of `SKILL.md` MUST perfectly align with the tools and permission payloads defined in the `tools` object of `skill.json`.
 *Grants:* Use `@` bundles (`filesystem`: `@read`, `@write`, `@manage`), adding bare actions only to grant less than a bundle, e.g. `["@read", "append"]`. The `update_permissions` skill has the bundle rules.
 
-#### 4. Agent-Friendly Output & Memory (IPC Format)
-Once the files are successfully written, finalize the execution by outputting the strict XML structure below. This format is required to ensure perfect readability for routing agents.
-```xml
-<skill_creation_response>
-  <original_request>[The user's request for the new skill]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <skill_name>[Name of the generated skill]</skill_name>
-    <files_created>
-      - skills/<skill_name>/SKILL.md
-      - skills/<skill_name>/skill.json
-    </files_created>
-    <tools_assigned>[List of tools mapped in the JSON]</tools_assigned>
-  </payload>
-  <errors>[Any filesystem errors encountered, or 'None']</errors>
-  <learnings>[Execution insights on prompt architecture, behavioral boundary definitions, or user preferences for skill design]</learnings>
-</skill_creation_response>
-```
-**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
+#### 4. Final Report & Memory
+Once the files are written, reply in plain Markdown: the skill's name and purpose, the files created (`skills/<skill_name>/SKILL.md` and `skill.json`), the tools it grants, and any filesystem errors.
+**Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about prompt architecture, behavioral boundaries, or the user's preferences for skill design.
 
 ### How to Make a Good Skill
 - **Concise Description**: The description must clearly state the skill's purpose so the agent can quickly determine relevance.
@@ -96,6 +80,7 @@ Once the files are successfully written, finalize the execution by outputting th
 - **Examples of Success**: Include clear example inputs and expected outputs (e.g., "If user asks X, do Y") to guide the AI. In a Core/Reference skill, put them in Reference.
 - **Focus on Modularity**: Create separate, specialized skill files rather than one large, complex file.
 - **One Owner per Rule**: The tool's docstring owns tool usage (never copy it into the skill), the skill owns its workflow rules, and the agent's `AGENTS.md` owns how the agent moves between workflows.
+- **Markdown Replies**: A skill's reply is shown in Discord, so its output format is Markdown, never an XML block. XML is only for machine readers: graph worker hand-offs and files another agent parses.
 
 ## Required Tools
 - `filesystem`: Required to read, write, and overwrite `SKILL.md` and `skill.json` files within the `skills/` directory.

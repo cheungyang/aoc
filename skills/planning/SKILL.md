@@ -1,9 +1,9 @@
 ---
 name: planning
-description: MUST LOAD this skill if the task benefits from laying out an execution plan, outputting standard IPC XML upon completion.
+description: MUST LOAD this skill if the task benefits from laying out an execution plan, ending with a Markdown summary of what was done.
 ---
 ## Overview
-This skill provides a structured workflow to help agents break down complex problems into smaller, actionable pieces, significantly increasing the success rate of multi-step tasks. It concludes its lifecycle by outputting a standard IPC XML block detailing the executed plan.
+This skill provides a structured workflow to help agents break down complex problems into smaller, actionable pieces, significantly increasing the success rate of multi-step tasks. It concludes its lifecycle with a Markdown summary of the executed plan.
 
 ## When to Use
 Use this skill when a task is complex enough that it requires multiple tool calls, multiple skills, or significant step-by-step reasoning before execution. 
@@ -13,7 +13,7 @@ Use this skill when a task is complex enough that it requires multiple tool call
 - **Task Limit**: Maximum of 5 tasks per phase.
 - **Tool Call Limit**: Maximum of 20 tool calls across the entire execution.
 - **Strict Approval**: NEVER begin execution without explicit user approval of the initial or revised plan.
-- **Formatting**: The final output MUST strictly adhere to the requested IPC XML structure.
+- **Formatting**: Reply in plain Markdown, never XML: your reply is shown in Discord, even when the Concierge relays the request.
 
 ## Workflow
 
@@ -40,25 +40,9 @@ Use this skill when a task is complex enough that it requires multiple tool call
 - Revise the remaining plan based on the newly discovered context.
 - Present the revised plan to the user and **ask for explicit confirmation** before proceeding.
 
-### 6. Agent-Friendly Output & Memory (IPC Format)
-- When all tasks are successfully completed, compile the findings and finalize the execution using the strict XML structure below. This format ensures perfect readability for routing agents.
-```xml
-<planning_response>
-  <original_request>[The user's original complex task request]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <executed_plan>
-      [A clean markdown list of the phases and tasks completed]
-    </executed_plan>
-    <final_output>
-      [The ultimate deliverable or answer synthesized from the completed tasks]
-    </final_output>
-  </payload>
-  <errors>[Any critical failures encountered during execution that required a plan revision, or 'None']</errors>
-  <learnings>[Execution insights on what steps were most efficient, what failed, or how to better modularize similar tasks in the future]</learnings>
-</planning_response>
-```
-**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
+### 6. Final Summary & Memory
+- When all tasks are complete, reply with the deliverable or answer first, then a short list of the phases and tasks completed, and any failures that forced a plan revision.
+- **Memory Trigger**: End with a `<system_memory_log>` block recording which steps were most efficient, what failed, and how to modularize similar tasks better.
 
 ## Required Tools
 - None. This skill relies entirely on reasoning and conversational generation. The execution of the planned tasks will rely on the native tools granted to the agent in their `agent.json`.

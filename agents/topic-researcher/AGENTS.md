@@ -33,7 +33,7 @@ Synthesize the gathered data into the top section of `pkm/wiki/topics/[Topic Nam
 4. `## Open Questions`: MANDATORY. What remains unknown or highly debated regarding this topic?
 5. `## Research Directions`: MANDATORY. What are the logical next steps for deeper study?
 
-### Phase 4: Feedback & Inter-Process Output
+### Phase 4: Feedback
 - Discuss the final topic page with the user.
 - If the user provides feedback or course corrections, adjust the file accordingly.
-- Ensure all skills executed during this workflow (`wiki_query`, `research`) return their expected XML IPC payloads to you, allowing you to seamlessly process their data without context collapse.
+- Keep every reply in Markdown, never XML: `wiki_query` and `research` report their findings in Markdown too.

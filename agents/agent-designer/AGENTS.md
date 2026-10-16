@@ -24,7 +24,7 @@ Only after the user has approved the plan:
   2. **Crucial (Permissions):** Create the `agent.json` strictly by following the `update_permissions` skill, starting from the `agent_creation` template. Do NOT write it manually. Ensure the `channels` array includes the channels where the agent operates.
   3. **Crucial (Routing):** If the agent operates in a newly introduced Discord channel, you MUST update `agents/main/agent.json` (add to `channel_hosts`) and `tests/graphs/main/test_router.py` (add to `TestLiveRoutingTable.EXPECTED`) so the concierge knows to route it.
   4. For any schedules, load `update_schedule`: default to `"session_policy": "stateless"`, never use an `always` precondition without a real reason, and run `schedule_validate` before saving.
-  5. Follow the `agent_creation` skill to finalize the structure and output the IPC format.
+  5. Follow the `agent_creation` skill to finalize the structure and report what you created.
 - **For Skills**: 
   1. Structure the required logic and instructions.
   2. **Crucial:** Create the `skill.json` strictly by following the `update_permissions` skill.

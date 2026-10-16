@@ -1,6 +1,6 @@
 ---
 name: agent_creation
-description: Skill for creating new agents with required files and vault structures, outputting standardized IPC XML.
+description: Skill for creating new agents with required files and vault structures, ending with a Markdown report.
 ---
 ## Core
 
@@ -16,7 +16,7 @@ Use this skill only when the user explicitly requests the creation of a new agen
 2. Build `agent.json` from the Reference template and write it by following the `update_permissions` skill.
 3. Write `SOUL.md` (persona, tone, boundaries), `AGENTS.md` (operating instructions, rules, priorities), `USER.md` (the human, and how to address them) and `IDENTITY.md` (Agent ID, Name, Emoji, Description).
 4. Create `pkm/agents/<agent_id>/memory_logs`, `pkm/agents/<agent_id>/MEMORY.md` and `pkm/agents/<agent_id>/FEEDBACK.md`.
-5. Output the IPC XML from the Reference.
+5. Report to the user in Markdown, as the Reference's Final Report describes.
 
 ### Prompt Budget
 These files are in the system prompt on every turn, forever:
@@ -37,12 +37,12 @@ Keep authored persona under 3500 characters. Preloaded skill text (full bodies p
 - `thinking`: usually omitted. Defaults are voice `low`, text `medium`, scheduled `high`; override a surface only when its work needs a different depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat.
 - `voice`: a user-facing agent whose name suggests a voice gets a Chirp 3 HD voice matching its gender and personality; neutral names (Concierge, Rio) omit it.
 
-Call `load_skill("agent_creation")` before writing `agent.json` or the final XML, for the template, its constraints and the output format.
+Call `load_skill("agent_creation")` before writing `agent.json` or the final report, for the template, its constraints and the report format.
 
 ## Reference
 
 ### Overview
-This skill guides agents on how to create a new agent in the system, including workspace files and Obsidian vault folders. It concludes by outputting a standardized Inter-Process Communication (IPC) XML block.
+This skill guides agents on how to create a new agent in the system, including workspace files and Obsidian vault folders. It ends with a short Markdown report for the user.
 
 ### agent.json Template
 You MUST use this exact JSON structure:
@@ -124,30 +124,13 @@ A paragraph written once is paid for thousands of times. Total authored persona 
 - Fewer tools is also a prompt saving: each bound tool schema costs 130–550
   tokens on every turn.
 
-### IPC Output Format
-Once the files and directories are successfully written, finalize the execution by outputting the strict XML structure below. This format is required to ensure perfect readability for routing agents.
-```xml
-<agent_creation_response>
-  <original_request>[The user's vision or request for the new agent]</original_request>
-  <triggering_agent>[Agent ID or 'User']</triggering_agent>
-  <payload>
-    <agent_id>[The ID of the generated agent]</agent_id>
-    <files_created>
-      - agents/<agent_id>/agent.json
-      - agents/<agent_id>/SOUL.md
-      - agents/<agent_id>/AGENTS.md
-      - agents/<agent_id>/USER.md
-      - agents/<agent_id>/IDENTITY.md
-      - pkm/agents/<agent_id>/MEMORY.md
-      - pkm/agents/<agent_id>/FEEDBACK.md
-    </files_created>
-    <capabilities>[Brief summary of the agent's specialization and assigned tools/skills]</capabilities>
-  </payload>
-  <errors>[Any filesystem errors encountered, or 'None']</errors>
-  <learnings>[Execution insights on agent persona design, context window optimization, or user preferences]</learnings>
-</agent_creation_response>
-```
-**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
+### Final Report
+Once the files and directories are written, reply in plain Markdown, never XML (your reply is shown in Discord):
+- The new agent's id and what it specializes in, with its tools and skills.
+- The files created: `agents/<agent_id>/agent.json`, `SOUL.md`, `AGENTS.md`, `USER.md` and `IDENTITY.md`, plus `pkm/agents/<agent_id>/MEMORY.md` and `FEEDBACK.md`.
+- Any filesystem errors.
+
+**Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about persona design, context size or the user's preferences.
 
 ### Required Tools
 - `filesystem`: Required to read reference files and write/overwrite configuration files in both `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
