@@ -256,8 +256,9 @@ class TestFilesystemTool(unittest.TestCase):
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists')
     @patch('os.path.isfile')
+    @patch('os.makedirs')
     @patch('builtins.open', new_callable=mock_open)
-    def test_append_allowed(self, mock_file, mock_isfile, mock_exists, mock_tools_loader):
+    def test_append_allowed(self, mock_file, mock_makedirs, mock_isfile, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
         mock_loader.check_permission.return_value = True
@@ -663,8 +664,9 @@ class TestFilesystemTool(unittest.TestCase):
     @patch('core.loaders.tools_loader.ToolsLoader')
     @patch('os.path.exists', return_value=True)
     @patch('os.path.isfile', return_value=True)
+    @patch('os.makedirs')
     @patch('builtins.open', new_callable=mock_open, read_data="data")
-    def test_multi_instruction_chain(self, mock_file, mock_isfile, mock_exists, mock_tools_loader):
+    def test_multi_instruction_chain(self, mock_file, mock_makedirs, mock_isfile, mock_exists, mock_tools_loader):
         mock_loader = MagicMock()
         mock_tools_loader.return_value = mock_loader
         mock_loader.check_permission.return_value = True
