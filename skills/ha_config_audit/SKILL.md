@@ -20,11 +20,10 @@ A structured, read-only health check of Home Assistant, on demand or as the dail
 - **Action Items**: concrete steps the user or Butler can take to resolve anomalies.
 - No issues: one line, *"Home Assistant audit clean: config is valid, all devices healthy, no recent error logs."*
 
-Call `load_skill("ha_config_audit")` for how to dig into a finding: an automation's references, when an entity went offline, or a fallback if the template fails.
+Call `load_skill("ha_config_audit")` for how to dig into a finding: an automation's references, or when an entity went offline.
 
 ## Reference
 
 ### Digging into findings
 - **Automation references**: `get_automation` with the numeric `id` from `list_automations`, then look the referenced entity ids up with `search_registry` or `get_state` to catch typos or deleted devices.
 - **When an entity went offline**: `history` on the entity, or `logbook` for the surrounding events.
-- **If the template fails**: fetch `live_context` and scan it for `unavailable` or `unknown` states (it covers exposed entities only).

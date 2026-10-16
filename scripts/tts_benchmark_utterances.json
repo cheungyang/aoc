@@ -96,8 +96,8 @@
       "id": "names-agents",
       "agent": "main",
       "category": "names",
-      "text": "Daisy has your morning briefing, Fitbod has today's workout, and Ramsay is planning dinner.",
-      "terms": ["Daisy", "Fitbod", "Ramsay"]
+      "text": "Daisy has your morning briefing, Frankie has today's workout, and Ramsay is planning dinner.",
+      "terms": ["Daisy", "Frankie", "Ramsay"]
     },
     {
       "id": "names-dishes-sichuan",
@@ -205,7 +205,6 @@
     "kung pao chicken": ["gong bao chicken"],
     "xiaolongbao": ["xiao long bao", "xiao long bow"],
     "char siu": ["cha siu"],
-    "Fitbod": ["Fit Bod"],
     "Ramsay": ["Ramsey"],
     "Ecobee": ["Eco bee"],
     "Hue": ["Hugh"],
@@ -216,7 +215,7 @@
     "agent-designer": "Aki here. Tell me what the new agent should do, and I'll draft its config, skills, and schedule.",
     "day-planner": "Good morning, it's Daisy. You have three meetings today, and your top priority is the tax estimate.",
     "excursion-planner": "Eric here. The weekend of the twenty-fourth is open, and there's a lantern festival two hours north.",
-    "fitness-coach": "Fitbod here. Today is lower body: goblet squats, Romanian deadlifts, and walking lunges.",
+    "fitness-coach": "Frankie here. Today is lower body: goblet squats, Romanian deadlifts, and walking lunges.",
     "goal-setter": "It's Grace. Let's look at your Kubernetes goal and pick one milestone for this month.",
     "home-steward": "Butler at your service. The porch light is on, and the house is at twenty-one degrees.",
     "market-scout": "Marvin here. Two tickers triggered today, and the rest of your watchlist is quiet.",
@@ -224,7 +223,7 @@
     "property-scout": "Rio here. One listing passed your criteria this week, and I'd tour it on Saturday.",
     "receipt-processor": "Receipt logged: forty-two dollars and eighteen cents at Trader Joe's, filed under groceries.",
     "reward-travel": "Miles here. Your dining credit expires in five days, and there's award space to Tokyo in April.",
-    "software-planner": "Elephant here. The spec is ready, and I've split it into four build tasks for your review.",
+    "software-planner": "Sophie here. The spec is ready, and I've split it into four build tasks for your review.",
     "topic-researcher": "Ted here. I found twelve sources on solid-state batteries and flagged three as primary research.",
     "wiki-gardener": "Good morning, it's William. Two raw notes are waiting in the inbox, and three duplicates are in the lint queue."
   }

@@ -5,7 +5,7 @@ from core.voice.room_switch import build_room_aliases, match_room, parse_room_re
 
 ROOMS = build_room_aliases([
     ("day-planning-voice", ["Daisy", "day-planner"]),
-    ("fitness-coach-voice", ["Fitbod", "fitness-coach"]),
+    ("fitness-coach-voice", ["Frankie", "fitness-coach"]),
     ("meal-planning-voice", ["Ramsay", "meal-planner"]),
     ("home-automation-voice", ["Butler", "home-steward"]),
 ])
@@ -21,7 +21,7 @@ class TestMatching(unittest.TestCase):
             "Hey concierge, switch to meal planning please": "meal-planning-voice",
             "Can you take me to Butler?": "home-automation-voice",
             "I want to talk to Ramsay": "meal-planning-voice",
-            "Okay, go to Fitbod.": "fitness-coach-voice",
+            "Okay, go to Frankie.": "fitness-coach-voice",
             "move me into home automation": "home-automation-voice",
             "switch over to the day planner": "day-planning-voice",
         }

@@ -35,7 +35,7 @@ Keep authored persona under 3500 characters. Preloaded skill text (full bodies p
 - `model`: a tier, never a version string: `FLASH_LITE` for narrow, high-volume work, `FLASH` for everyday reasoning, `PRO` only when the agent genuinely needs the strongest model.
 - `skills`: an object; the list form is rejected. `{"preload": "full"}` for a small skill used on nearly every run, `{"preload": "core"}` for a larger one used often, `{}` for rare ones.
 - `thinking`: usually omitted. Defaults are voice `low`, text `medium`, scheduled `high`; override a surface only when its work needs a different depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat.
-- `voice`: a user-facing agent whose name suggests a voice gets a Chirp 3 HD voice matching its gender and personality; neutral names (Concierge, Fitbod) omit it.
+- `voice`: a user-facing agent whose name suggests a voice gets a Chirp 3 HD voice matching its gender and personality; neutral names (Concierge, Rio) omit it.
 
 Call `load_skill("agent_creation")` before writing `agent.json` or the final XML, for the template, its constraints and the output format.
 
@@ -86,7 +86,7 @@ You MUST use this exact JSON structure:
   answer the same tier names, moving an agent on-device is adding this one key and nothing
   else — its `model` line is untouched.
 - `thinking` (optional, rare) overrides the code defaults (voice `low`, text `medium`, scheduled `high`) for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. Use it only when the agent's typed or scheduled work needs a different depth than the default, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
-- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Give one to user-facing agents whose name suggests a voice, matching gender and personality. Agents with neutral names (e.g. Concierge, Fitbod) omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
+- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Give one to user-facing agents whose name suggests a voice, matching gender and personality. Agents with neutral names (e.g. Concierge, Rio) omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
 
 *Before setting `"provider": "local"`, know two things:*
 - **The server handles one request at a time.** Local agents queue behind each other, so keep

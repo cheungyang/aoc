@@ -36,6 +36,9 @@
     "project_query": {},
     "task_query": {}
   },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Enceladus"
+  },
   "voice_config": {
     "enabled": true,
     "auto_join": true,

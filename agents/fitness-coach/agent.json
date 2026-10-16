@@ -3,7 +3,7 @@
   "channels": [
     "fitness-coach"
   ],
-  "name": "Fitbod",
+  "name": "Frankie",
   "emoji": "🏋️",
   "description": "Fitness coach agent that curates and tracks home workouts.",
   "model": "FLASH",
@@ -35,6 +35,7 @@
   "skills": {
     "coach_home_workout": { "preload": "full" }
   },
+  "voice": { "name": "en-US-Chirp3-HD-Pulcherrima" },
   "schedules": [
     {
       "id": "morning-workout-push",

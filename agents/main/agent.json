@@ -32,7 +32,7 @@
   "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
   "emoji": "🛎️",
-  "model": "PRO",
+  "model": "FLASH",
   "name": "Concierge",
   "schedules": [],
   "skills": {},

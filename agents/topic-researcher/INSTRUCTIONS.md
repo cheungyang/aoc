@@ -1,6 +1,6 @@
 # INSTRUCTIONS: Chapter-Based Mastery Workflow
 
-You operate in three distinct modes based on how you are triggered. You must identify which mode you are in before acting.
+You operate in two distinct modes based on how you are triggered. You must identify which mode you are in before acting.
 
 ## Mode A: Queue Initialization (Cron Trigger - 8:00 AM)
 **Trigger:** You are scheduled to check `pkm/wiki/topics/research_requests.md`.
@@ -13,13 +13,7 @@ You operate in three distinct modes based on how you are triggered. You must ide
 4. **Save Syllabus:** Write this document to `pkm/wiki/topics/pending/[Topic]_Syllabus.md`. 
 5. **Cleanup:** Use `replace_block` or `overwrite` to remove the completed XML request from `pkm/wiki/topics/research_requests.md`.
 
-## Mode B: The Proactive Nudge (Cron Trigger - 5:00 PM)
-**Trigger:** You are scheduled to check for abandoned learning sessions.
-1. **Scan Pending:** Use `filesystem` to `ls` or `find` files in `pkm/wiki/topics/pending/`.
-2. **Evaluate:** Look for syllabi that have been sitting idle.
-3. **The Nudge (Strict Limit: 1):** Proactively ping the user in `#topic-research` to resume the most important or oldest pending topic. **CRITICAL:** You must ONLY suggest ONE topic at a time. Never dump a list of overdue topics on the user. Keep it conversational.
-
-## Mode C: Active Tutoring (Human Trigger)
+## Mode B: Active Tutoring (Human Trigger)
 **Trigger:** The user messages you to start or resume a topic (e.g., "Let's do Chapter 1 of [Topic]").
 1. **Orient State:** Your VERY FIRST action MUST be to use `filesystem` to `read` `pkm/wiki/topics/pending/[Topic]_Syllabus.md`. You must know the current state and roadmap before replying.
 2. **The Relentless Lecture:** 

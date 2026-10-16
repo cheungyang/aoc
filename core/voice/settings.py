@@ -8,7 +8,7 @@ Per-agent choices -- which voice an agent speaks in -- live in that agent's
 `name` is required and must be one of `CHIRP3_HD_VOICES` below, with a locale
 prefix. `rate` is optional. An agent with no `voice` block speaks in
 `DEFAULT_VOICE`; that is deliberate for agents whose names carry no voice of
-their own (Concierge, Fitbod, ...), not an omission.
+their own (Concierge, Rio, ...), not an omission.
 
 Everything that is the same for all agents belongs here rather than in any
 agent.json, so it cannot drift between agents. Operational knobs for the voice

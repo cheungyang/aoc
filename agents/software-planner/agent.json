@@ -10,13 +10,20 @@
   "model": "PRO",
   "tools": {
     "filesystem": {
-      "pkm/wiki/software": ["@write"],
-      ".": ["@read"]
+      "pkm/wiki/software": [
+        "@write"
+      ],
+      ".": [
+        "@read"
+      ]
     },
     "spec_validator": {},
     "graph_call": {},
     "graph_status": {}
   },
   "skills": {},
+  "voice": {
+    "name": "en-US-Chirp3-HD-Vindemiatrix"
+  },
   "schedules": []
 }
