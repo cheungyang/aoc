@@ -19,6 +19,7 @@ github_bot_token
 e2b_api_key
 home_assistant_token
 google_health_credentials.json
+google_tts_credentials.json
 pkm
 pkm-oc
 scratch

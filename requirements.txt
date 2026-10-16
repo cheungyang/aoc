@@ -55,3 +55,9 @@ e2b>=2.51,<3
 websocket-client
 # Public market data for tools/yfinance.py (market_data skill / market-scout).
 yfinance
+# Chirp 3: HD voices on Cloud Text-to-Speech: scripts/tts_benchmark.py now, the
+# streaming TTS provider of the voice-first plan later. Bidirectional streaming
+# exists only over gRPC, so this brings grpcio -- a native wheel, with the
+# SIGILL risk described above. Before relying on it on the NAS, run
+#   python -c "import grpc; from google.cloud import texttospeech"
+google-cloud-texttospeech>=2.38,<3

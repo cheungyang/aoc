@@ -15,6 +15,7 @@ client_secret_*
 debug_log.log
 home_assistant_token
 google_health_credentials.json
+google_tts_credentials.json
 pkm
 scratch/
 sessions/
