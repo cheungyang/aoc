@@ -1,3 +1,5 @@
+import asyncio
+import time
 import pytest
 import os
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
@@ -300,7 +302,7 @@ async def test_voice_manager_ignores_bot_speech(mock_bot_runner):
     await vm.on_speech_finished(human_user, b"fake_bytes")
     assert vm._current_task is not None
     await vm._current_task
-    vm._process_speech_turn.assert_awaited_once_with(human_user, b"fake_bytes", 1)
+    vm._process_speech_turn.assert_awaited_once_with(human_user, b"fake_bytes", 1, ANY)
 
 @pytest.mark.asyncio
 async def test_voice_manager_interruption_turn_invalidation(mock_bot_runner, tmp_path):
@@ -576,3 +578,282 @@ def test_voice_manager_verbalizer_is_on_by_default(mock_bot_runner):
 
         vm = VoiceManager(mock_bot_runner)
         assert vm.verbalizer.enabled is True
+
+
+# ---------------------------------------------------------------------------
+# Latency work: lanes, the transcript mirror, headers, and the turn trace
+# ---------------------------------------------------------------------------
+
+def _streaming_fixture(mock_bot_runner, tmp_path, events):
+    """A voice turn whose agent yields `events`; returns (vm, agent, text_channel)."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+
+    async def fake_stream(*_args, **_kwargs):
+        for event in events:
+            yield event
+
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    return vm, agent, text_channel
+
+
+async def _run_turn(vm, agent):
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        if vm._current_task:
+            await vm._current_task
+
+
+@pytest.mark.asyncio
+async def test_delegation_header_is_shown_but_not_spoken(mock_bot_runner, tmp_path):
+    """B14: the '🌼 Daisy: ' attribution was read aloud before every delegated answer."""
+    vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "token", "content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True},
+        {"type": "token", "content": "You have two meetings today.", "agent_id": "day-planner"},
+        {"type": "final_response", "text": "You have two meetings today.", "response": None},
+    ])
+    await _run_turn(vm, agent)
+
+    spoken = " ".join(c.args[0] for c in vm.tts_engine.synthesize_to_file.call_args_list)
+    assert "Daisy" not in spoken
+    assert "You have two meetings today." in spoken
+    message = text_channel.send.return_value
+    shown = [c.args[0] for c in text_channel.send.call_args_list if c.args]
+    shown += [c.kwargs.get("content", "") for c in message.edit.call_args_list]
+    assert any(s.startswith("🌼 Daisy: You have two meetings today.") for s in shown), shown
+
+
+@pytest.mark.asyncio
+async def test_transcript_mirror_does_not_delay_the_agent(mock_bot_runner, tmp_path):
+    """The mirror used to be awaited before the agent started; now only the text lane waits."""
+    vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "token", "content": "Done, the lights are off."},
+        {"type": "final_response", "text": "Done, the lights are off.", "response": None},
+    ])
+    release = asyncio.Event()
+    sent = []
+    reply_message = MagicMock(edit=AsyncMock(), delete=AsyncMock())
+
+    async def slow_send(content=None, **_kwargs):
+        if content and content.startswith("🎤"):
+            await release.wait()
+        sent.append(content)
+        return reply_message
+
+    text_channel.send = AsyncMock(side_effect=slow_send)
+
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        for _ in range(50):
+            if vm.tts_engine.synthesize_to_file.await_count:
+                break
+            await asyncio.sleep(0.01)
+        # The agent ran and speech was synthesized while the transcript post was stuck...
+        agent.execute_stream.assert_called_once()
+        vm.tts_engine.synthesize_to_file.assert_awaited()
+        assert sent == []
+        release.set()
+        await vm._current_task
+
+    # ...and the channel still shows the transcript above the reply.
+    assert sent[0].startswith("🎤 **Alva (Voice):**")
+    assert "Done, the lights are off." in sent[1]
+
+
+@pytest.mark.asyncio
+async def test_slow_discord_edits_do_not_hold_up_speech(mock_bot_runner, tmp_path):
+    """Text and speech run as separate lanes: a stuck channel write can't delay synthesis."""
+    vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "token", "content": "First sentence is here. "},
+        {"type": "token", "content": "Second sentence follows now."},
+        {"type": "final_response", "text": "First sentence is here. Second sentence follows now.", "response": None},
+    ])
+    vm.config["post_transcript_to_chat"] = False
+    release = asyncio.Event()
+
+    async def stuck_send(*_args, **_kwargs):
+        await release.wait()
+        return MagicMock(edit=AsyncMock(), delete=AsyncMock())
+
+    text_channel.send = AsyncMock(side_effect=stuck_send)
+
+    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav")
+        for _ in range(50):
+            if vm.tts_engine.synthesize_to_file.await_count >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert vm.tts_engine.synthesize_to_file.await_count >= 2, "speech waited on the text channel"
+        release.set()
+        await vm._current_task
+
+
+@pytest.mark.asyncio
+async def test_turn_trace_records_stages_and_first_audio(mock_bot_runner, tmp_path):
+    vm, agent, _channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "tool_start", "tool_name": "home_assistant", "tool_args": {}},
+        {"type": "tool_end", "tool_name": "home_assistant", "output": "ok"},
+        {"type": "token", "content": "The kitchen lights are off now."},
+        {"type": "final_response", "text": "The kitchen lights are off now.", "response": None},
+    ])
+    vm.bridge_manager.get_or_create_bridge_audio = AsyncMock(return_value=None)
+    traces = []
+
+    async def play_now(path, priority=False, auto_delete=True, on_start=None):
+        if on_start:
+            on_start()
+
+    vm.audio_queue.put = AsyncMock(side_effect=play_now)
+    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+               side_effect=lambda self, session_id=None, surface="voice": traces.append((self, session_id))):
+        with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+             patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+            mock_loader.return_value.get_agent.return_value = agent
+            await vm.on_speech_finished(MagicMock(display_name="Alva", bot=False), b"wav",
+                                        speech_end_at=time.monotonic() - 0.9)
+            await vm._current_task
+
+    assert len(traces) == 1
+    trace, session_id = traces[0]
+    assert session_id == "main:discord:general"
+    for stage in ("speech_end", "vad_final", "stt_done", "agent_start", "first_token",
+                  "first_chunk", "tts_first_byte", "audio_start", "turn_end"):
+        assert stage in trace.marks, stage
+    # Anchored at the last voiced frame: the VAD's silence wait is inside the trace.
+    assert trace.marks["vad_final"] >= 850
+    assert [e["kind"] for e in trace.events if e["kind"].startswith("tool")] == ["tool_start", "tool_end"]
+
+
+@pytest.mark.asyncio
+async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runner, tmp_path):
+    """A short reply is fully queued before playback starts; TTFA must still be captured."""
+    vm, agent, _channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "token", "content": "Logged it."},
+        {"type": "final_response", "text": "Logged it.", "response": None},
+    ])
+    starts = []
+    vm.audio_queue.put = AsyncMock(side_effect=lambda path, priority=False, auto_delete=True, on_start=None: starts.append(on_start))
+    traces = []
+    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+               side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
+        await _run_turn(vm, agent)
+        assert traces == [], "recorded before the answer was heard"
+        starts[0]()  # playback begins
+    assert len(traces) == 1 and "audio_start" in traces[0].marks
+    assert traces[0].marks["audio_start"] >= traces[0].marks["turn_end"]
+
+
+# ---------------------------------------------------------------------------
+# Room switching by voice
+# ---------------------------------------------------------------------------
+
+def _room_fixture(mock_bot_runner, tmp_path, transcript):
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    vm.stt_engine.transcribe = AsyncMock(return_value=transcript)
+
+    general = MagicMock(id=1)
+    general.name = "general-voice"
+    day = MagicMock(id=2)
+    day.name = "day-planning-voice"
+    guild = vm.voice_client.channel.guild
+    guild.voice_channels = [general, day]
+    general.guild = guild
+    day.guild = guild
+    vm.voice_client.channel = general
+    mock_bot_runner.get_hosted_voice_channels = MagicMock(return_value=["general-voice", "day-planning-voice"])
+
+    loader = MagicMock()
+    loader.get_agent.return_value = agent
+    loader.eligible_agents_for_channel.side_effect = lambda ch, exclude_agent_id=None: {"day-planning": ["day-planner"]}.get(ch, [])
+    loader.get_agent_config.side_effect = lambda agent_id: {"day-planner": {"name": "Daisy"}}.get(agent_id)
+    loader.sole_eligible_agent.side_effect = lambda ch, exclude_agent_id=None: {"day-planning": "day-planner"}.get(ch)
+
+    user = MagicMock(display_name="Alva", bot=False)
+    return vm, agent, user, loader, day
+
+
+@pytest.mark.asyncio
+async def test_room_switch_moves_the_user_and_greets_without_a_model_call(mock_bot_runner, tmp_path):
+    vm, agent, user, loader, day = _room_fixture(mock_bot_runner, tmp_path, "Take me to day planning.")
+
+    async def move_to(room):
+        vm.voice_client.channel = room  # the runner's voice-state handler follows the user
+
+    user.move_to = AsyncMock(side_effect=move_to)
+    vm.join_voice_channel = AsyncMock()
+    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        await vm.on_speech_finished(user, b"wav")
+        await vm._current_task
+
+    user.move_to.assert_awaited_once_with(day)
+    agent.execute_stream.assert_not_called()
+    vm.join_voice_channel.assert_not_awaited()
+    vm.tts_engine.synthesize_to_file.assert_awaited_once_with("Daisy here.")
+
+
+@pytest.mark.asyncio
+async def test_room_switch_by_agent_name_joins_directly_if_the_bot_does_not_follow(mock_bot_runner, tmp_path):
+    vm, agent, user, loader, day = _room_fixture(mock_bot_runner, tmp_path, "Let me talk to Daisy")
+    user.move_to = AsyncMock()
+    vm.join_voice_channel = AsyncMock()
+    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
+         patch("core.voice.voice_manager.ROOM_FOLLOW_TIMEOUT_S", 0.05), \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        await vm.on_speech_finished(user, b"wav")
+        await vm._current_task
+
+    user.move_to.assert_awaited_once_with(day)
+    vm.join_voice_channel.assert_awaited_once_with("2")
+    agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_request_that_mentions_a_room_is_still_a_normal_turn(mock_bot_runner, tmp_path):
+    vm, agent, user, loader, _day = _room_fixture(mock_bot_runner, tmp_path, "Go to day planning and add a dentist task")
+    user.move_to = AsyncMock()
+
+    async def fake_stream(*_args, **_kwargs):
+        yield {"type": "final_response", "text": "Added.", "response": None}
+
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        await vm.on_speech_finished(user, b"wav")
+        await vm._current_task
+
+    user.move_to.assert_not_awaited()
+    agent.execute_stream.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_room_switch_without_move_permission_says_so(mock_bot_runner, tmp_path):
+    vm, agent, user, loader, _day = _room_fixture(mock_bot_runner, tmp_path, "Switch to day planning")
+    user.move_to = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "Missing Permissions"))
+    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
+         patch("core.voice.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        await vm.on_speech_finished(user, b"wav")
+        await vm._current_task
+
+    spoken = vm.tts_engine.synthesize_to_file.call_args.args[0]
+    assert "Move Members" in spoken
+    agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_joining_without_a_text_channel_clears_a_stale_join_link(mock_bot_runner):
+    """B20: a `!join` link survived room moves, so a new room kept talking into the old channel."""
+    vm = VoiceManager(mock_bot_runner)
+    vm.linked_text_channel = MagicMock(name="old-link")
+    mock_bot_runner.bot.guilds = []  # the target won't be found; the link must be gone regardless
+    await vm.join_voice_channel("day-planning-voice")
+    assert vm.linked_text_channel is None
+
+    explicit = MagicMock(name="explicit")
+    await vm.join_voice_channel("day-planning-voice", text_channel=explicit)
+    assert vm.linked_text_channel is explicit

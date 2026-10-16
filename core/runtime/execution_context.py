@@ -134,6 +134,9 @@ class ExecutionContext:
       The dream standup uses it so a dream's own reply never becomes a log.
     - `model` is an authority field: a model tier overriding the agent's
       configured one for this call only (the dream's FLASH floor). Not inherited.
+    - `thinking_level` is an authority field: the reasoning depth for this
+      call's model requests, overriding the agent's per-surface level (a
+      schedule entry's `thinking_level`). Not inherited, like `model`.
     """
     agent_id: str
     source: str
@@ -144,6 +147,7 @@ class ExecutionContext:
     surface: Optional[str] = field(default=None, compare=False)
     record_memory: bool = True
     model: Optional[str] = None
+    thinking_level: Optional[str] = None
     _secret: Any = field(default=None, repr=False, compare=False)
 
     @staticmethod
@@ -169,6 +173,12 @@ class ExecutionContext:
             raise ValueError(
                 f"Unknown surface '{self.surface}'; expected one of {sorted(SURFACES)}."
             )
+        if self.thinking_level is not None:
+            from core.util.models import THINKING_LEVELS
+            if self.thinking_level not in THINKING_LEVELS:
+                raise ValueError(
+                    f"Unknown thinking_level '{self.thinking_level}'; expected one of {list(THINKING_LEVELS)}."
+                )
 
         # Auto-generate job_id if not explicitly passed
         if not self.job_id:
@@ -195,6 +205,7 @@ class ExecutionContext:
         surface: Optional[str] = None,
         record_memory: bool = True,
         model: Optional[str] = None,
+        thinking_level: Optional[str] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
         return cls(
@@ -207,6 +218,7 @@ class ExecutionContext:
             surface=surface,
             record_memory=record_memory,
             model=model,
+            thinking_level=thinking_level,
             _secret=_CONTEXT_SECRET,
         )
 
@@ -224,11 +236,12 @@ class ExecutionContext:
     def with_agent(self, agent_id: str) -> "ExecutionContext":
         """Derives a child context for a different agent, keeping graph.
 
-        A model override belongs to the agent it was set for, so it is dropped.
+        Model and thinking overrides belong to the agent they were set for, so
+        they are dropped.
         """
         if agent_id == self.agent_id:
             return self
-        return replace(self, agent_id=agent_id, model=None)
+        return replace(self, agent_id=agent_id, model=None, thinking_level=None)
 
     def with_surface(self, surface: Optional[str]) -> "ExecutionContext":
         """Derives a context tagged with `surface`, keeping the same session identity."""

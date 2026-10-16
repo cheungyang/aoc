@@ -40,6 +40,12 @@ PRO = "gemini-3.1-pro-preview"
 # Multimodal image generation. Not interchangeable with the tiers above.
 IMAGE = "gemini-3.1-flash-image-preview"
 
+# Speech. Not agent tiers: text-to-speech candidates for the voice pipeline
+# (benchmarked against Chirp 3: HD and edge-tts in scripts/tts_benchmark.py),
+# and the transcription model the benchmark's pronunciation check listens with.
+TTS_FLASH_LITE = "gemini-3.8-flash-lite-tts"
+TRANSCRIBE = "gemini-3.5-transcribe"
+
 # --- On-device -----------------------------------------------------------
 # Served by a local OpenAI-compatible server (LiteRT-LM). The id is a build
 # artifact, date-stamped and specific to one machine's weights, which is
@@ -96,6 +102,46 @@ TIERS = GOOGLE_TIERS
 
 # Used when an agent's config omits `model` and names no provider.
 DEFAULT_AGENT_MODEL = GOOGLE_TIERS[DEFAULT_AGENT_TIER]
+
+# --- Thinking ------------------------------------------------------------
+# How much a Gemini model reasons before its first visible token. Thinking
+# tokens are generated before anything can be streamed, so on a voice turn
+# every level is heard as silence; on a scheduled run nobody is waiting.
+THINKING_LEVELS = ("minimal", "low", "medium", "high")
+
+# The level for each surface when nothing more specific applies. These live
+# here rather than per agent because they are a property of the surface, not
+# of the agent: an agent.json `thinking` block overrides them only where an
+# agent's work genuinely differs. Surfaces not listed ("tool", "job") keep the
+# model's own default, as do stateless internal workers.
+THINKING_BY_SURFACE = {"voice": "low", "text": "medium", "scheduled": "high"}
+
+# Levels each tier accepts. PRO has no `minimal`; a request for it is raised
+# to the nearest level the model does take rather than sent and rejected.
+TIER_THINKING_LEVELS = {
+    "FLASH_LITE": THINKING_LEVELS,
+    "FLASH": THINKING_LEVELS,
+    "PRO": ("low", "medium", "high"),
+}
+
+
+def clamp_thinking_level(level: Optional[str], model_id: str) -> Optional[str]:
+    """`level`, moved to the nearest one `model_id` supports.
+
+    Ties go upward: a model that cannot think at the requested depth should
+    think a little more rather than less. A model id that isn't one of the
+    Google tiers (a pinned literal version) passes `level` through untouched,
+    since there is no table to check it against.
+    """
+    if level is None:
+        return None
+    model_id = (model_id or "").removeprefix("models/")
+    tier = next((name for name, model in GOOGLE_TIERS.items() if model == model_id), None)
+    supported = TIER_THINKING_LEVELS.get(tier)
+    if not supported or level in supported:
+        return level
+    wanted = THINKING_LEVELS.index(level)
+    return min(supported, key=lambda s: (abs(THINKING_LEVELS.index(s) - wanted), -THINKING_LEVELS.index(s)))
 
 
 def _looks_like_a_tier(value: str) -> bool:

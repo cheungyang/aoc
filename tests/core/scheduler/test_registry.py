@@ -102,6 +102,12 @@ class TestPromptEntries(RegistryCase):
     def test_script_key_not_allowed_on_prompt(self):
         self.assertRejected(prompt_entry(script="ok.py"), "unknown key(s)")
 
+    def test_thinking_level(self):
+        self.assertIsNone(build_spec("a", prompt_entry(), self.scripts).thinking_level)
+        spec = build_spec("a", prompt_entry(thinking_level="low"), self.scripts)
+        self.assertEqual(spec.thinking_level, "low")
+        self.assertRejected(prompt_entry(thinking_level="max"), "unknown thinking_level 'max'")
+
 
 class TestCommonRules(RegistryCase):
     def test_kind_required(self):
@@ -152,6 +158,9 @@ class TestScriptEntries(RegistryCase):
 
     def test_session_policy_rejected_with_hint(self):
         self.assertRejected(self.script_entry(session_policy="stateless"), "prompt schedules only")
+
+    def test_thinking_level_rejected_with_hint(self):
+        self.assertRejected(self.script_entry(thinking_level="low"), "thinking_level applies to prompt schedules only")
 
     def test_prompt_key_rejected(self):
         self.assertRejected(self.script_entry(prompt=["script ok.py"]), "unknown key(s)")

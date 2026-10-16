@@ -97,9 +97,10 @@ def schedule_validate(
 
     Checks: valid cron, a known `kind` (prompt|script), no unknown keys, a
     `precondition` from the library on prompt schedules (`always` needs a
-    `reason`), `session_policy` (stateless|persistent) on prompt schedules only,
-    and for script schedules that each script exists in scripts/, defines
-    has_work(ctx) and keeps side effects under `if __name__ == "__main__":`.
+    `reason`), `session_policy` (stateless|persistent) and `thinking_level`
+    (minimal|low|medium|high) on prompt schedules only, and for script
+    schedules that each script exists in scripts/, defines has_work(ctx) and
+    keeps side effects under `if __name__ == "__main__":`.
 
     Args:
         agent_id: The agent whose schedules these are (e.g. 'wiki-gardener').

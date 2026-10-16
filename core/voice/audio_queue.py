@@ -1,7 +1,7 @@
 import os
 import asyncio
 import discord
-from typing import Optional
+from typing import Callable, Optional
 
 # Ensure FFmpeg executable is located
 try:
@@ -11,9 +11,12 @@ except Exception:
     FFMPEG_EXE = "ffmpeg"
 
 class AudioItem:
-    def __init__(self, file_path: str, auto_delete: bool = True):
+    def __init__(self, file_path: str, auto_delete: bool = True, on_start: Optional[Callable[[], None]] = None):
         self.file_path = file_path
         self.auto_delete = auto_delete
+        # Called when playback of this item begins: how a turn learns when the
+        # listener actually started hearing it (its TurnTrace `audio_start`).
+        self.on_start = on_start
 
 class AudioStreamQueue:
     """
@@ -73,10 +76,12 @@ class AudioStreamQueue:
             except Exception as e:
                 print(f"[AudioStreamQueue] Error creating playback task: {e}")
 
-    async def put(self, file_path: str, priority: bool = False, auto_delete: bool = True):
+    async def put(self, file_path: str, priority: bool = False, auto_delete: bool = True,
+                  on_start: Optional[Callable[[], None]] = None):
         """
         Enqueues an audio file for playback.
         If priority is True, clears existing queue items and plays immediately.
+        `on_start` is called when this item starts playing.
         """
         if not file_path or not os.path.exists(file_path):
             return
@@ -85,18 +90,19 @@ class AudioStreamQueue:
             self.clear()
 
         self._ensure_queue()
-        item = AudioItem(file_path=file_path, auto_delete=auto_delete)
+        item = AudioItem(file_path=file_path, auto_delete=auto_delete, on_start=on_start)
         await self._queue.put(item)
         self.start()
 
-    def put_nowait(self, file_path: str, priority: bool = False, auto_delete: bool = True):
+    def put_nowait(self, file_path: str, priority: bool = False, auto_delete: bool = True,
+                   on_start: Optional[Callable[[], None]] = None):
         """Non-blocking enqueue for sync contexts."""
         if not file_path or not os.path.exists(file_path):
             return
         if priority:
             self.clear()
         self._ensure_queue()
-        item = AudioItem(file_path=file_path, auto_delete=auto_delete)
+        item = AudioItem(file_path=file_path, auto_delete=auto_delete, on_start=on_start)
         self._queue.put_nowait(item)
         self.start()
 
@@ -199,6 +205,11 @@ class AudioStreamQueue:
 
                     source = discord.FFmpegPCMAudio(item.file_path, executable=FFMPEG_EXE)
                     vc.play(source, after=_after)
+                    if item.on_start is not None:
+                        try:
+                            item.on_start()
+                        except Exception as e:
+                            print(f"[AudioStreamQueue] on_start callback failed: {e}")
                     await self._current_done_event.wait()
                 except Exception as e:
                     print(f"[AudioStreamQueue] Error playing audio item: {e}")

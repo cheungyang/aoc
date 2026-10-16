@@ -23,6 +23,9 @@ class UserVADState:
         self.silence_chunks = 0
         self.speech_chunks = 0
         self.last_packet_time = time.time()
+        # time.monotonic() of the last chunk heard as speech: when the user
+        # actually stopped talking, before the end-of-speech silence wait.
+        self.last_voiced_at = None
 
     def reset_speech(self):
         self.audio_buffer.clear()
@@ -30,6 +33,7 @@ class UserVADState:
         self.is_speaking = False
         self.silence_chunks = 0
         self.speech_chunks = 0
+        self.last_voiced_at = None
 
 class VADSink(voice_recv.AudioSink):
     """
@@ -93,7 +97,7 @@ class VADSink(voice_recv.AudioSink):
             wav_bytes = self._pcm_to_wav(state.audio_buffer, sample_rate=16000)
             if self.loop and self.loop.is_running():
                 asyncio.run_coroutine_threadsafe(
-                    self.voice_manager.on_speech_finished(user, wav_bytes), self.loop
+                    self.voice_manager.on_speech_finished(user, wav_bytes, speech_end_at=state.last_voiced_at), self.loop
                 )
         state.reset_speech()
 
@@ -191,6 +195,7 @@ class VADSink(voice_recv.AudioSink):
             if is_speech:
                 state.speech_chunks += 1
                 state.silence_chunks = 0
+                state.last_voiced_at = time.monotonic()
                 
                 # Speech confirmed after sustained onset (default ~180ms)
                 if not state.is_speaking and (state.speech_chunks * 36 >= self.onset_ms):

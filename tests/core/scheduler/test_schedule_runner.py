@@ -225,8 +225,15 @@ class TestPromptDispatch(RunnerCase):
         spec = self.prompt_spec()
         self.assertTrue(await runner.run_schedule(spec))
         self.agent.execute.assert_awaited_once_with("do it", session=self.session, role="user")
-        self.get_session.assert_called_once_with(agent_id="agent1", source="scheduled", channel=self.channel)
+        self.get_session.assert_called_once_with(
+            agent_id="agent1", source="scheduled", channel=self.channel, thinking_level=None
+        )
         self.assertIsNotNone(self.state.get_last_success(spec.schedule_id))
+
+    async def test_schedule_thinking_level_reaches_the_session(self):
+        runner = self.make_runner()
+        self.assertTrue(await runner.run_schedule(self.prompt_spec(thinking_level="low")))
+        self.assertEqual(self.get_session.call_args[1]["thinking_level"], "low")
 
     async def test_failed_job_does_not_record_success(self):
         runner = self.make_runner()

@@ -174,6 +174,26 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             ),
         }
 
+    def _with_thinking(self, kwargs: dict) -> dict:
+        """Adds the thinking level this call runs at (see core.runtime.thinking).
+
+        A level the caller passed explicitly wins. Whatever the level, it is
+        recorded on the voice turn's trace when there is one, so each model
+        call's depth sits next to the latency it cost.
+        """
+        if "thinking_level" in kwargs or "reasoning_effort" in kwargs:
+            level = kwargs.get("thinking_level", kwargs.get("reasoning_effort"))
+        else:
+            from core.runtime.thinking import resolve_thinking_level
+            level = resolve_thinking_level(self.model)
+            if level:
+                kwargs = {**kwargs, "thinking_level": level}
+        from core.runtime.turn_trace import current_turn_trace
+        trace = current_turn_trace()
+        if trace is not None:
+            trace.model_call(_agent_id(), self.model, level)
+        return kwargs
+
     def _retry_delay(self, error: Exception, attempt: int, phase: str, chars: int) -> Optional[float]:
         """Logs the failure; returns the delay before the next attempt, or None
         if the error must propagate."""
@@ -193,7 +213,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             print(f"[LLMRetry] recovered agent={_agent_id()} model={self.model} attempts={attempt} extra_wait={waited:.1f}s")
 
     def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
-        kwargs = self._without_sdk_503_retry(kwargs)
+        kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
         attempt, waited = 1, 0.0
         while True:
             try:
@@ -210,7 +230,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             return result
 
     async def _agenerate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
-        kwargs = self._without_sdk_503_retry(kwargs)
+        kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
         attempt, waited = 1, 0.0
         while True:
             try:
@@ -228,7 +248,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             return result
 
     async def _astream(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
-        kwargs = self._without_sdk_503_retry(kwargs)
+        kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
         attempt, waited = 1, 0.0
         partial = ""        # text already yielded, across attempts
         resumable = True    # False once a non-text chunk has been yielded

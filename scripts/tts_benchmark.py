@@ -53,9 +53,9 @@ What each metric means here (targets are the plan's, verbatim):
   1M characters a month are free; Gemini TTS is billed per text and audio token,
   so its estimate uses the audio seconds and tokens per character measured here.
 
-Credentials: Chirp reads a service-account key from the file named by
-GOOGLE_TTS_CREDENTIALS_FILE (see .env.example); without it both Chirp candidates
-are skipped with a message, not failed. Gemini uses GEMINI_API_KEY from .env.
+Credentials: Chirp uses GOOGLE_TTS_API_KEY from .env, an API key restricted to the
+Cloud Text-to-Speech API (see .env.example); without it both Chirp candidates are
+skipped with a message, not failed. Gemini uses GEMINI_API_KEY from .env.
 
 Sources (checked 2026-10-15):
 - Chirp 3: HD voices, speaking_rate 0.25-2.0, [pause] markup, custom pronunciations:
@@ -125,8 +125,7 @@ DEFAULT_OUT_ROOT = os.path.join(PROJECT_ROOT, "scratch", "tts_benchmark")
 CANDIDATES = ("edge", "chirp-unary", "chirp-stream", "gemini")
 BASELINE = "edge"
 
-CREDENTIALS_ENV_VAR = "GOOGLE_TTS_CREDENTIALS_FILE"
-CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+API_KEY_ENV_VAR = "GOOGLE_TTS_API_KEY"
 
 from core.util.models import TRANSCRIBE as TRANSCRIBE_MODEL  # noqa: E402
 from core.util.models import TTS_FLASH_LITE as GEMINI_TTS_MODEL  # noqa: E402
@@ -784,12 +783,12 @@ class Options:
     reliability: int = 100
     pronunciation: bool = True
     chirp_endpoint: Optional[str] = None
-    credentials_file: Optional[str] = None
+    tts_api_key: str = field(default="", repr=False)
     gemini_api_key: str = field(default="", repr=False)
     chirp_client: Any = field(default=None, repr=False)
 
     def public(self) -> Dict[str, Any]:
-        """The settings worth recording with results -- never the API key."""
+        """The settings worth recording with results -- never the API keys."""
         keys = ("candidates", "runs", "voice", "edge_voice", "gemini_model", "transcribe_model", "rate",
                 "chunk_interval_s", "prebuffer_s", "timeout", "reliability", "pronunciation", "chirp_endpoint")
         return {k: getattr(self, k) for k in keys}
@@ -902,33 +901,24 @@ class EdgeProvider(SentenceProvider):
 def make_chirp_client(opts: Options):
     """(TextToSpeechClient, texttospeech module), shared by both Chirp candidates.
 
-    Raises ProviderUnavailable with the fix in the message: no key file is the
-    expected state until the service account exists.
+    Raises ProviderUnavailable with the fix in the message: no key is the
+    expected state on a host that has not been given one.
     """
     if opts.chirp_client is not None:
         return opts.chirp_client
-    path = opts.credentials_file
-    if not path:
+    if not opts.tts_api_key:
         raise ProviderUnavailable(
-            f"{CREDENTIALS_ENV_VAR} is not set. Create a service-account key for the GCP project "
-            f"with the Text-to-Speech API enabled and point {CREDENTIALS_ENV_VAR} at it (see .env.example)."
+            f"{API_KEY_ENV_VAR} is not set. Put an API key restricted to the Cloud Text-to-Speech API "
+            f"in .env (see .env.example)."
         )
-    path = os.path.abspath(os.path.expanduser(path))
-    if not os.path.isfile(path):
-        raise ProviderUnavailable(f"{CREDENTIALS_ENV_VAR} points at {path}, which does not exist.")
-    if os.stat(path).st_mode & 0o077:
-        print(f"warning: {path} is readable by other users; chmod 600 it.", file=sys.stderr)
     try:
         from google.cloud import texttospeech
-        from google.oauth2 import service_account
     except ImportError as exc:
         raise ProviderUnavailable("google-cloud-texttospeech is not installed (pip install -r requirements.txt)") from exc
-    try:
-        credentials = service_account.Credentials.from_service_account_file(path, scopes=[CLOUD_PLATFORM_SCOPE])
-    except (ValueError, KeyError) as exc:
-        raise ProviderUnavailable(f"{path} is not a usable service-account key: {exc}") from exc
-    client_options = {"api_endpoint": opts.chirp_endpoint} if opts.chirp_endpoint else None
-    client = texttospeech.TextToSpeechClient(credentials=credentials, client_options=client_options)
+    client_options = {"api_key": opts.tts_api_key}
+    if opts.chirp_endpoint:
+        client_options["api_endpoint"] = opts.chirp_endpoint
+    client = texttospeech.TextToSpeechClient(client_options=client_options)
     opts.chirp_client = (client, texttospeech)
     return opts.chirp_client
 
@@ -1992,7 +1982,7 @@ def options_from_args(args: argparse.Namespace) -> Options:
         reliability=max(0, args.reliability),
         pronunciation=not args.no_pronunciation,
         chirp_endpoint=args.chirp_endpoint,
-        credentials_file=(config.get(CREDENTIALS_ENV_VAR) or "").strip() or None,
+        tts_api_key=(config.get(API_KEY_ENV_VAR) or "").strip(),
         gemini_api_key=config.gemini_api_key,
     )
 

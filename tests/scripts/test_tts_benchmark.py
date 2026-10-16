@@ -529,18 +529,32 @@ def test_every_audition_line_belongs_to_a_real_agent():
     assert set(lines) <= agents
 
 
-def test_chirp_is_unavailable_without_credentials(tmp_path):
-    with pytest.raises(tb.ProviderUnavailable, match=tb.CREDENTIALS_ENV_VAR):
-        tb.make_chirp_client(tb.Options(credentials_file=None))
-    missing = tmp_path / "nope.json"
-    with pytest.raises(tb.ProviderUnavailable, match="does not exist"):
-        tb.make_chirp_client(tb.Options(credentials_file=str(missing)))
+def test_chirp_is_unavailable_without_an_api_key():
+    with pytest.raises(tb.ProviderUnavailable, match=tb.API_KEY_ENV_VAR):
+        tb.make_chirp_client(tb.Options(tts_api_key=""))
 
 
-def test_options_never_expose_the_api_key():
-    opts = tb.Options(gemini_api_key="secret-key")
-    assert "secret-key" not in json.dumps(opts.public())
-    assert "secret-key" not in repr(opts)
+def test_chirp_client_authenticates_with_the_api_key(monkeypatch):
+    texttospeech = pytest.importorskip("google.cloud.texttospeech")
+    built = {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            built.update(kwargs)
+
+    monkeypatch.setattr(texttospeech, "TextToSpeechClient", Client)
+    opts = tb.Options(tts_api_key="tts-key", chirp_endpoint="eu-texttospeech.googleapis.com")
+    client, module = tb.make_chirp_client(opts)
+    assert isinstance(client, Client) and module is texttospeech
+    assert built == {"client_options": {"api_key": "tts-key", "api_endpoint": "eu-texttospeech.googleapis.com"}}
+    assert tb.make_chirp_client(opts)[0] is client  # built once, shared by both candidates
+
+
+def test_options_never_expose_the_api_keys():
+    opts = tb.Options(gemini_api_key="secret-key", tts_api_key="tts-secret")
+    for secret in ("secret-key", "tts-secret"):
+        assert secret not in json.dumps(opts.public())
+        assert secret not in repr(opts)
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +656,7 @@ class UnavailableProvider(tb.Provider):
     name = "chirp-stream"
 
     async def open(self):
-        raise tb.ProviderUnavailable("GOOGLE_TTS_CREDENTIALS_FILE is not set")
+        raise tb.ProviderUnavailable("GOOGLE_TTS_API_KEY is not set")
 
 
 @pytest.fixture
@@ -673,7 +687,7 @@ async def test_run_benchmark_end_to_end(tmp_path, fake_engines):
     results = await tb.run_benchmark(opts, test_set, utterances, str(tmp_path), ab_pairs=True, pairs_seed=5)
 
     assert results["ran"] == ["edge", "gemini"]
-    assert "GOOGLE_TTS_CREDENTIALS_FILE" in results["skipped"]["chirp-stream"]
+    assert "GOOGLE_TTS_API_KEY" in results["skipped"]["chirp-stream"]
     assert results["cold_start_ms"]["gemini"] is None  # its warm-up was the failure
     for name in ("edge", "gemini"):
         agg = results["aggregates"][name]

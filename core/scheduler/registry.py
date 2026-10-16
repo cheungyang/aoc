@@ -14,6 +14,10 @@ Accepted entry shapes:
     {"cron": "*/5 * * * *", "kind": "script", "channel": "software-dev",
      "script": "coding_tick.py"}
 
+Prompt schedules may also set `thinking_level` (minimal | low | medium | high)
+for that run's model calls; without it the agent's scheduled level applies
+(see core.runtime.thinking).
+
 The same validator backs the `schedule_validate` tool, so an agent editing
 `agent.json` can check an entry before it saves it.
 """
@@ -32,11 +36,12 @@ from core.scheduler.spec import (
     ScriptSchedule,
     SessionPolicy,
 )
+from core.util.models import THINKING_LEVELS
 
 KINDS = (KIND_PROMPT, KIND_SCRIPT)
 
 COMMON_KEYS = {"id", "cron", "kind", "enabled", "channel", "thread", "description", "precondition"}
-PROMPT_KEYS = COMMON_KEYS | {"prompt", "session_policy"}
+PROMPT_KEYS = COMMON_KEYS | {"prompt", "session_policy", "thinking_level"}
 SCRIPT_KEYS = COMMON_KEYS | {"script"}
 
 
@@ -179,8 +184,9 @@ def build_spec(
     unknown = sorted(set(entry) - allowed)
     if unknown:
         hint = ""
-        if kind == KIND_SCRIPT and "session_policy" in unknown:
-            hint = " (session_policy applies to prompt schedules only)"
+        prompt_only = [key for key in ("session_policy", "thinking_level") if key in unknown]
+        if kind == KIND_SCRIPT and prompt_only:
+            hint = f" ({', '.join(prompt_only)} applies to prompt schedules only)"
         errors.append(f"unknown key(s) for a {kind} schedule: {', '.join(unknown)}{hint}")
 
     precondition = None
@@ -217,9 +223,14 @@ def build_spec(
         except ValueError as e:
             errors.append(str(e))
             policy = SessionPolicy.STATELESS
+        thinking_level = entry.get("thinking_level")
+        if thinking_level is not None and thinking_level not in THINKING_LEVELS:
+            errors.append(
+                f"unknown thinking_level {thinking_level!r} (allowed: {', '.join(THINKING_LEVELS)})"
+            )
         if errors:
             raise ScheduleValidationError(errors)
-        return PromptSchedule(prompt=prompt, session_policy=policy, **common)
+        return PromptSchedule(prompt=prompt, session_policy=policy, thinking_level=thinking_level, **common)
 
     raw_steps = _script_entries(entry.get("script"))
     steps = []

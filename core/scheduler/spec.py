@@ -148,7 +148,11 @@ class ScheduleSpec(ABC):
 
 
 class PromptSchedule(ScheduleSpec):
-    """An LLM turn for an agent."""
+    """An LLM turn for an agent.
+
+    `thinking_level`, when set, is the reasoning depth for this run's model
+    calls; None leaves the agent's scheduled level in charge.
+    """
 
     kind = KIND_PROMPT
 
@@ -157,11 +161,13 @@ class PromptSchedule(ScheduleSpec):
         *,
         prompt: str,
         session_policy: SessionPolicy = SessionPolicy.STATELESS,
+        thinking_level: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.prompt = prompt
         self.session_policy = SessionPolicy.parse(session_policy)
+        self.thinking_level = thinking_level
 
     def has_work(self, ctx: ScheduleContext) -> WorkDecision:
         return self._check_precondition(ctx)
