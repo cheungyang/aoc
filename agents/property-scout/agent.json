@@ -10,18 +10,12 @@
   "tools": {
     "zillow_query": {},
     "filesystem": {
-      "pkm/wallet/real-estate/": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls"
-      ]
+      "pkm/wallet/real-estate/": ["@write"]
     }
   },
-  "skills": [
-    "real_estate_scout"
-  ],
+  "skills": {
+    "real_estate_scout": { "preload": "full" }
+  },
   "schedules": [
     {
       "id": "weekly-scout",
@@ -34,8 +28,8 @@
       },
       "session_policy": "stateless",
       "prompt": [
-        "Ask property-scout to load real_estate_scout skill, read criteria, pull listings",
-        "via zillow_query, and run Cap Rate/Price math. Discard failing properties.",
+        "Following your real_estate_scout skill, read criteria, pull listings via zillow_query,",
+        "and evaluate them with the tool's price per sqft and cap rate. Discard failing properties.",
         "Output top 3 passes and save full reports, or terminate silently if none pass."
       ]
     }

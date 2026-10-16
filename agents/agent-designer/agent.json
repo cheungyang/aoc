@@ -12,70 +12,26 @@
   "emoji": "🧠",
   "model": "PRO",
   "name": "Aki",
-  "skills": [
-    "agent_creation",
-    "skill_creation",
-    "update_permissions",
-    "update_schedule"
-  ],
+  "skills": {
+    "agent_creation": {
+      "preload": "core"
+    },
+    "skill_creation": {},
+    "update_permissions": {
+      "preload": "core"
+    },
+    "update_schedule": {}
+  },
   "tools": {
     "web_search": {},
     "filesystem": {
-      "pkm": [
-        "read",
-        "find",
-        "grep",
-        "write",
-        "overwrite",
-        "append",
-        "delete",
-        "ls",
-        "move",
-        "rmdir"
-      ],
-      "agents/": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep",
-        "move",
-        "delete",
-        "rmdir"
-      ],
-      "skills/": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep",
-        "move",
-        "delete",
-        "rmdir"
-      ],
-      "graphs/": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep",
-        "move",
-        "delete",
-        "rmdir"
-      ],
-      "tests/": ["@manage"]
+      "pkm": ["@manage"],
+      "agents/": ["@manage"],
+      "skills/": ["@manage"],
+      "graphs/": ["@manage"],
+      "tests/": [
+        "@manage"
+      ]
     },
     "project_query": {},
     "task_query": {}

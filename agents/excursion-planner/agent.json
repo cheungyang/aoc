@@ -29,7 +29,8 @@
     "tools": {
         "gog": {}
     },
-    "skills": [
-        "research"
-    ]
+    "skills": {
+        "research": { "preload": "core" }
+    },
+    "voice": { "name": "en-US-Chirp3-HD-Puck" }
 }

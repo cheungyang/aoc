@@ -10,13 +10,8 @@
   "model": "FLASH_LITE",
   "tools": {
     "filesystem": {
-      "pkm/wallet/finance": [
-        "read",
-        "write",
-        "append",
-        "overwrite"
-      ]
+      "pkm/wallet/finance": ["@write"]
     }
   },
-  "skills": []
+  "skills": {}
 }

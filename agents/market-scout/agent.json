@@ -12,13 +12,13 @@
     "web_search": {},
     "yfinance": {},
     "filesystem": {
-      "pkm/wallet/stock": [
-        "@read",
-        "@write"
-      ]
+      "pkm/wallet/stock": ["@write"]
     }
   },
-  "skills": ["market_data"],
+  "skills": {
+    "market_data": { "preload": "full" }
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Charon" },
   "memory_topics": ["finance"],
   "schedules": [
     {
@@ -33,7 +33,7 @@
       "session_policy": "stateless",
       "prompt": [
         "Review the tickers in pkm/wallet/stock/portfolio.md and pkm/wallet/stock/watchlist.md.",
-        "Load the market_data skill and call the yfinance tool once (action=quote) with all tickers, then apply the skill's Threshold Rule.",
+        "Following your market_data skill, call the yfinance tool once (action=quote) with all tickers, then apply the skill's Threshold Rule.",
         "For Triggered tickers only, optionally drill down with yfinance history/earnings, then perform a web_search for news/macro/earnings.",
         "Save a markdown report for each Triggered ticker under pkm/wallet/stock/{SYMBOL}.md and reply with the skill's triage table."
       ]

@@ -10,10 +10,11 @@
     "general"
   ],
   "tools": {},
-  "skills": [
-    "manage_kitchen_inventory",
-    "recommend_meals"
-  ],
+  "skills": {
+    "manage_kitchen_inventory": { "preload": "full" },
+    "recommend_meals": { "preload": "full" }
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Sadachbia" },
   "schedules": [
     {
       "id": "dinner-checkin",

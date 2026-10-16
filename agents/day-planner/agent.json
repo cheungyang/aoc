@@ -45,11 +45,22 @@
             ]
         }
     ],
-    "skills": [
-        "list_impactful_actions",
-        "check_recurring_chores",
-        "write_daily_intention",
-        "weekly_review",
-        "highlight_actionable_emails"
-    ]
+    "skills": {
+        "list_impactful_actions": {
+            "preload": "full"
+        },
+        "check_recurring_chores": {
+            "preload": "full"
+        },
+        "write_daily_intention": {
+            "preload": "core"
+        },
+        "weekly_review": {},
+        "highlight_actionable_emails": {
+            "preload": "full"
+        }
+    },
+    "voice": {
+        "name": "en-US-Chirp3-HD-Zephyr"
+    }
 }

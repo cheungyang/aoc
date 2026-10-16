@@ -35,7 +35,7 @@
   "model": "PRO",
   "name": "Concierge",
   "schedules": [],
-  "skills": [],
+  "skills": {},
   "tools": {
     "agent_call": {},
     "agent_list": {},

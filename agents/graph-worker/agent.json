@@ -9,5 +9,5 @@
   "description": "Stateless, system-aware backend execution node for LangGraph orchestrations.",
   "stateless": true,
   "tools": {},
-  "skills": []
+  "skills": {}
 }

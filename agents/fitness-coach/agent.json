@@ -32,9 +32,9 @@
       ]
     }
   },
-  "skills": [
-    "coach_home_workout"
-  ],
+  "skills": {
+    "coach_home_workout": { "preload": "full" }
+  },
   "schedules": [
     {
       "id": "morning-workout-push",
@@ -47,7 +47,7 @@
       },
       "session_policy": "stateless",
       "prompt": [
-        "Run the Setup Phase from your operating instructions: check muscle recovery,",
+        "Run the Setup Phase from your coach_home_workout skill: check muscle recovery,",
         "equipment and library, factor in last night's sleep, and propose today's",
         "~30 min workout plan with the [💪 Let's Go] poll."
       ]

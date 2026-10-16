@@ -10,12 +10,13 @@
   "model": "FLASH",
   "memory_topics": ["learning"],
   "tools": {},
-  "skills": [
-    "wiki_lint",
-    "wiki_ingest",
-    "wiki_query",
-    "triage_tasks"
-  ],
+  "skills": {
+    "wiki_lint": {},
+    "wiki_ingest": {},
+    "wiki_query": { "preload": "core" },
+    "triage_tasks": {}
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Umbriel" },
   "schedules": [
     {
       "id": "workflow-a-inbox",

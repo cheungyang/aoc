@@ -10,24 +10,13 @@
   "model": "PRO",
   "tools": {
     "filesystem": {
-      "pkm/wiki/software": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls"
-      ],
-      ".": [
-        "read",
-        "find",
-        "grep",
-        "ls"
-      ]
+      "pkm/wiki/software": ["@write"],
+      ".": ["@read"]
     },
     "spec_validator": {},
     "graph_call": {},
     "graph_status": {}
   },
-  "skills": [],
+  "skills": {},
   "schedules": []
 }

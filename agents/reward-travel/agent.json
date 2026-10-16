@@ -13,25 +13,14 @@
     "web_search": {},
     "seats_aero": {},
     "filesystem": {
-      "pkm/wallet/credit-card/": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls"
-      ],
-      "pkm/wallet/travel/": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls"
-      ]
+      "pkm/wallet/credit-card/": ["@write"],
+      "pkm/wallet/travel/": ["@write"]
     }
   },
-  "skills": [
-    "flight_search"
-  ],
+  "skills": {
+    "flight_search": { "preload": "core" }
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Algieba" },
   "schedules": [
     {
       "id": "award-search",
@@ -44,7 +33,7 @@
       },
       "session_policy": "stateless",
       "prompt": [
-        "Ask reward-travel to load flight_search skill, read travel preferences,",
+        "Following your flight_search skill, read travel preferences,",
         "and use seats_aero to run searches for business class award availability.",
         "Evaluate CPP value. Send curated alert if >2.0 CPP, else terminate silently."
       ]

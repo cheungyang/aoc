@@ -13,24 +13,17 @@
     "nlm": {},
     "vault_search": {},
     "filesystem": {
-      "pkm/wiki": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls",
-        "find",
-        "replace_block"
-      ],
+      "pkm/wiki": ["@write"],
       "pkm/inbox": [
         "write"
       ]
     }
   },
-  "skills": [
-    "wiki_query",
-    "research"
-  ],
+  "skills": {
+    "wiki_query": { "preload": "core" },
+    "research": { "preload": "core" }
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Sadaltager" },
   "schedules": [
     {
       "id": "mode-a-queue",

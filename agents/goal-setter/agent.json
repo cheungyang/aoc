@@ -22,23 +22,19 @@
             "session_policy": "persistent",
             "prompt": [
                 "Ask goal-setter to view active executing projects using project_query tool,",
-                "pick the one needing most attention, run coach_project skill to update strategy,",
+                "pick the one needing most attention, follow your coach_project skill to update strategy,",
                 "and proactively start a coaching session message for it."
             ]
         }
     ],
     "tools": {
         "filesystem": {
-            "pkm/vault/projects": [
-                "append",
-                "read",
-                "overwrite",
-                "replace_block"
-            ]
+            "pkm/vault/projects": ["@write"]
         }
     },
-    "skills": [
-        "coach_project",
-        "wiki_query"
-    ]
+    "skills": {
+        "coach_project": { "preload": "full" },
+        "wiki_query": { "preload": "core" }
+    },
+    "voice": { "name": "en-US-Chirp3-HD-Laomedeia" }
 }
