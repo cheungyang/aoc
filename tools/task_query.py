@@ -47,7 +47,11 @@ def task_query(
     - 'stats': Returns summary statistics on tasks (overdue count, scheduled today, priority breakdown).
     - 'sql': Executes a custom read-only SELECT SQL query against tasks.db.
         Requires: 'sql' (e.g., "SELECT title, due_date FROM tasks WHERE status='todo' AND due_date IS NOT NULL").
+        Returns at most 'limit' rows whatever the query's own LIMIT, so pass a 'limit' that covers it.
     - 'sync': Triggers an immediate synchronization from Obsidian markdown files into tasks.db.
+
+    'search' and 'sql' return {"count", "tasks" or "rows"}; when more rows match than 'limit',
+    a "note" says how many were not shown.
 
     Args:
         action: The action to perform ('search', 'get', 'stats', 'sql', 'sync'). Defaults to 'search'.
@@ -62,7 +66,7 @@ def task_query(
         source: Filter by file or folder path substring (e.g., 'projects' or 'Inbox.md').
         task_id: Task ID to fetch (required when action='get').
         sql: Custom read-only SELECT query (required when action='sql').
-        limit: Maximum number of records to return (defaults to 50).
+        limit: Maximum rows to return for 'search' and 'sql' (defaults to 10).
     """
     ctx = try_context()
     if ctx is None:
@@ -105,12 +109,19 @@ def task_query(
             elif action == "sql":
                 if not sql:
                     return format_tool_response("task_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
-                results, err = execute_read_sql(conn, sql, limit=limit)
+                limit = max(1, limit)
+                # One row past the cap is enough to tell whether anything was cut.
+                results, err = execute_read_sql(conn, sql, limit=limit + 1)
                 if err:
                     return format_tool_response("task_query", payload="", errors=err)
-                return format_tool_response("task_query", payload=json.dumps(results, indent=2))
+                hidden = 0
+                if len(results) > limit:
+                    total = _count_rows(conn, sql)
+                    hidden = max(1, total - limit) if total is not None else None
+                return format_tool_response("task_query", payload=_capped_payload("rows", results[:limit], hidden))
 
             elif action == "search":
+                limit = max(1, limit)
                 results = query_tasks_db(
                     conn=conn,
                     status=status,
@@ -122,14 +133,13 @@ def task_query(
                     scheduled_date=scheduled_date,
                     source=source,
                     search_term=query,
-                    limit=limit,
+                    # Every match, so the overflow can be counted: SQLite reads a
+                    # negative LIMIT as no limit. The table is a few thousand rows.
+                    limit=-1,
                     compact=compact
                 )
-                payload = {
-                    "count": len(results),
-                    "tasks": results
-                }
-                return format_tool_response("task_query", payload=json.dumps(payload, indent=2))
+                shown = results[:limit]
+                return format_tool_response("task_query", payload=_capped_payload("tasks", shown, len(results) - len(shown)))
 
             else:
                 return format_tool_response("task_query", payload="", errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'.")
@@ -138,3 +148,29 @@ def task_query(
 
     except Exception as e:
         return format_tool_response("task_query", payload="", errors=f"Error in task_query: {e}")
+
+
+def _capped_payload(key: str, shown: list, hidden: Optional[int]) -> str:
+    """JSON for a result cut to `limit` rows; `hidden` is how many were left out (None: unknown).
+
+    The note goes before the rows so it is read first: a silently capped result
+    reads as the whole answer, and an agent reasons from it as if it were.
+    """
+    payload = {"count": len(shown)}
+    if hidden != 0:
+        more = f"{hidden} more row{'' if hidden == 1 else 's'}" if hidden is not None else "More rows"
+        payload["note"] = f"{more} not shown; raise 'limit' or narrow the query."
+    payload[key] = shown
+    return json.dumps(payload, indent=2)
+
+
+def _count_rows(conn: sqlite3.Connection, sql: str) -> Optional[int]:
+    """How many rows `sql` returns in total, or None when it cannot be counted.
+
+    SQLite does the counting, so the rows past the cap are never fetched into
+    Python. The newlines keep a trailing `--` comment in the agent's query from
+    swallowing the closing parenthesis.
+    """
+    inner = sql.strip().rstrip(";").strip()
+    rows, err = execute_read_sql(conn, f"SELECT COUNT(*) AS n FROM (\n{inner}\n)", limit=1)
+    return None if err or not rows else rows[0]["n"]

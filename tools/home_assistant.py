@@ -12,10 +12,11 @@ One tool, many actions, rather than one tool per capability. Two reasons:
 
 Which transport serves an action is decided by `routing.py`, never by the model.
 
-Reads apply immediately. Mutating actions run the guard chain in `guards.py`
-first, and config writes are snapshotted and verified by `writes.py` so a bad
-change can be undone. `upsert_helper` is declared and guarded but not yet
-dispatched; it is served by the WebSocket API.
+Reads apply immediately. Mutating actions are shape-checked here, then run the
+guard chain in `guards.py`, and config writes are snapshotted and verified by
+`writes.py` so a bad change can be undone. `upsert_helper` is declared but not
+yet dispatched (it is served by the WebSocket API), so it is refused at the
+shape check, before a confirmation could be issued for it.
 """
 import fnmatch
 import json
@@ -56,8 +57,8 @@ IMPLEMENTED = frozenset({
 })
 
 # The same distinction on the write side. `upsert_helper` is declared in the
-# routing table and passes the guards, but is served by the WebSocket API with a
-# different schema per helper domain, so it is not dispatched yet.
+# routing table, but is served by the WebSocket API with a different schema per
+# helper domain, so it is not dispatched yet and is refused by `_validate_write`.
 WRITE_IMPLEMENTED = frozenset({
     "call_service",
     "upsert_automation",
@@ -68,6 +69,31 @@ WRITE_IMPLEMENTED = frozenset({
     "delete_scene",
     "reload",
 })
+
+# The keys each dispatched write accepts besides "action" and "confirm_token".
+# Anything else is refused before a confirmation is issued. A misnamed key used
+# to cost an approval: an automation sent under "automation" instead of "config"
+# was shown to the user, approved, and only then failed for want of "config".
+_WRITE_KEYS = {
+    "call_service": frozenset({"domain", "service", "entity_id", "target", "service_data", "data"}),
+    "upsert_automation": frozenset({"config", "id"}),
+    "upsert_script": frozenset({"config", "id"}),
+    "upsert_scene": frozenset({"config", "id"}),
+    "delete_automation": frozenset({"id"}),
+    "delete_script": frozenset({"id"}),
+    "delete_scene": frozenset({"id"}),
+    "reload": frozenset({"domain"}),
+}
+
+# Top-level config keys Home Assistant will not store a config without. Each
+# entry lists the accepted spellings: HA 2024.10 renamed trigger/action to
+# triggers/actions and reads both. Everything deeper is left to HA, which
+# validates the config when it is applied.
+_REQUIRED_CONFIG_KEYS = {
+    "upsert_automation": (("triggers", "trigger"), ("actions", "action")),
+    "upsert_script": (("sequence",),),
+    "upsert_scene": (("entities",),),
+}
 
 # Named action bundles for `agent.json` grants, e.g. {"light.*": ["@control"]}.
 # Declared here, beside the action vocabulary, so adding an action and deciding
@@ -152,6 +178,111 @@ def _target_of(instruction: dict) -> str:
     return "*"
 
 
+def _service_entity(instruction: dict):
+    """The one entity a call_service instruction names, or None.
+
+    Read from `entity_id`, or from Home Assistant's own service-call shape,
+    `target: {"entity_id": ...}`, which is what a model writes after reading
+    automations. `_validate_write` has already refused lists of several.
+    """
+    entity_id = instruction.get("entity_id")
+    if not entity_id and isinstance(instruction.get("target"), dict):
+        entity_id = instruction["target"].get("entity_id")
+    if isinstance(entity_id, list):
+        entity_id = entity_id[0] if entity_id else None
+    return str(entity_id) if entity_id else None
+
+
+def _validate_write(action: str, instruction: dict):
+    """Checks a write's shape. Returns a message for the agent, or None if well formed.
+
+    Runs before the permission check and the guards, so a malformed write fails
+    while the agent can still fix it -- never after the user has approved it.
+    Only structure is checked here; Home Assistant validates a config's content
+    when it is applied.
+    """
+    if action not in WRITE_IMPLEMENTED:
+        return (
+            f"'{action}' is not dispatched yet (it is served by the WebSocket API and "
+            f"lands with helper support)."
+        )
+
+    accepted = _WRITE_KEYS[action]
+    unexpected = sorted(set(instruction) - accepted - {"action", "confirm_token"})
+    if unexpected:
+        hint = " Put the body of the object under 'config'." if "config" in accepted else ""
+        return (
+            f"{action} does not accept {', '.join(repr(k) for k in unexpected)}; "
+            f"it takes {', '.join(repr(k) for k in sorted(accepted))}.{hint}"
+        )
+
+    if action == "call_service":
+        return _validate_call_service(instruction)
+
+    has_id = bool(str(instruction.get("id") or "").strip())
+    if action in _REQUIRED_CONFIG_KEYS:
+        config = instruction.get("config")
+        if not isinstance(config, dict) or not config:
+            return f"{action} requires a non-empty 'config' object."
+        missing = [
+            repr(names[0]) + (f" (or {names[1]!r})" if len(names) > 1 else "")
+            for names in _REQUIRED_CONFIG_KEYS[action]
+            if not any(name in config for name in names)
+        ]
+        if missing:
+            return f"{action} 'config' is missing {' and '.join(missing)}."
+        if action == "upsert_script" and not has_id:
+            return (
+                "upsert_script requires 'id': it becomes the entity id (script.<id>), so "
+                "it must be chosen rather than generated."
+            )
+    elif action.startswith("delete_") and not has_id:
+        return f"{action} requires 'id' -- the object to delete."
+    return None
+
+
+def _validate_call_service(instruction: dict):
+    """call_service's half of `_validate_write`: one entity, named consistently."""
+    if not instruction.get("service"):
+        return "call_service requires 'service' (e.g. 'turn_on')."
+
+    target = instruction.get("target")
+    if target is not None:
+        # Area, device and label targets would act on entities that no permission
+        # check or guard ever saw, so only an explicit entity is accepted.
+        if not isinstance(target, dict) or set(target) != {"entity_id"}:
+            return (
+                "call_service accepts only target.entity_id; area, device and label "
+                "targets are not supported. Find the entity ids with search_registry."
+            )
+        if instruction.get("entity_id"):
+            return "Name the entity once: 'entity_id' or target.entity_id, not both."
+
+    raw = instruction.get("entity_id") or (target or {}).get("entity_id")
+    if isinstance(instruction.get("entity_id"), list) or (isinstance(raw, list) and len(raw) > 1):
+        return (
+            "call_service takes one entity per instruction. Send one instruction per "
+            "entity; they can all go in the same call."
+        )
+
+    entity_id = _service_entity(instruction)
+    domain = instruction.get("domain")
+    if not entity_id and not domain:
+        return (
+            "call_service requires 'entity_id', or 'domain' for a service that "
+            "targets no entity."
+        )
+    # Permissions and guards judge the entity, but the request goes to `domain`.
+    # Letting them differ would let an allowed light carry `script.<name>` past
+    # both, without the confirmation a script needs.
+    if entity_id and domain and guards.domain_of(entity_id) != domain:
+        return (
+            f"'domain' {domain!r} does not match the entity {entity_id!r}. Omit "
+            f"'domain' (it is read from the entity) or call the entity's own domain."
+        )
+    return None
+
+
 @tool
 def home_assistant(instructions: list[dict]) -> str:
     """Read and control Home Assistant: entities, areas, devices, automations, state.
@@ -201,12 +332,15 @@ def home_assistant(instructions: list[dict]) -> str:
     Writing:
       {"action": "call_service", "entity_id": "light.porch", "service": "turn_on",
        "service_data": {"brightness": 180}}
-          Calls a service. Reversible domains (light, switch, fan, media_player,
-          climate in band, ...) apply immediately. Pass "domain" instead of
-          "entity_id" for services that target no entity.
+          Calls a service on one entity; send one instruction per entity. Home
+          Assistant's {"target": {"entity_id": ...}} form is accepted too.
+          Reversible domains (light, switch, fan, media_player, scene, climate
+          setpoints within 12-28 °C, ...) apply immediately. Pass "domain"
+          instead of "entity_id" for services that target no entity.
       {"action": "upsert_automation", "config": {...}, "id": "<optional>"}
           Creates an automation, or replaces it when "id" matches an existing one.
-          Omit "id" to create; one is generated and returned.
+          Omit "id" to create; one is generated and returned. "config" is the
+          automation itself: alias, description, triggers, conditions, actions, mode.
       {"action": "upsert_script", "id": "goodnight", "config": {...}}
           "id" is required here: it becomes the entity id (script.goodnight).
       {"action": "upsert_scene", "config": {...}, "id": "<optional>"}
@@ -222,8 +356,9 @@ def home_assistant(instructions: list[dict]) -> str:
 
     Every config write snapshots the previous version to disk first and verifies
     the result by reading it back; a write that does not verify is rolled back
-    automatically. Some domains (locks, alarms, covers, valves, water heaters) are
-    refused outright and cannot be granted.
+    automatically. The lock, alarm_control_panel, cover, garage_door, valve and
+    water_heater domains are refused outright, whether called directly or named
+    inside a config, and cannot be granted.
 
     Args:
         instructions: List of action dicts, executed in order.
@@ -263,6 +398,14 @@ def home_assistant(instructions: list[dict]) -> str:
         target = _target_of(instruction)
 
         if action in WRITE_ACTIONS:
+            # Shape first: a malformed write must fail before a confirmation token
+            # is issued, so the user is never asked to approve a change that then
+            # cannot be applied.
+            problem = _validate_write(action, instruction)
+            if problem:
+                error_elements.append(f'<instruction_error action="{action}">{problem}</instruction_error>')
+                continue
+
             if ctx is not None and not tools_loader.check_permission(ctx, "home_assistant", action, target):
                 error_elements.append(
                     f'<instruction_error action="{action}">Agent {ctx.agent_id} lacks '
@@ -370,13 +513,6 @@ def _guard_write(instruction, action, target, ctx, tools_loader) -> str:
     except guards.GuardRejection as rejection:
         return f'<instruction_error action="{action}">{rejection}</instruction_error>'
 
-    if action not in WRITE_IMPLEMENTED:
-        return (
-            f'<instruction_error action="{action}">Guards passed, but \'{action}\' is not '
-            f'dispatched yet (it is served by the WebSocket API and lands with helper '
-            f'support).</instruction_error>'
-        )
-
     try:
         result = _dispatch_write(action, instruction, payload, ctx)
     except HomeAssistantError as exc:
@@ -405,7 +541,7 @@ def _dispatch_write(action, instruction, payload, ctx):
     if action == "call_service":
         domain = instruction.get("domain")
         service = instruction.get("service")
-        entity_id = instruction.get("entity_id")
+        entity_id = _service_entity(instruction)
 
         # A bare entity_id carries the domain, so accept either form rather than
         # making the agent repeat itself.

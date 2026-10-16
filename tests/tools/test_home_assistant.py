@@ -21,11 +21,28 @@ STATES = [
      "attributes": {"friendly_name": "Dusk", "id": "1740941848966"}},
 ]
 
+AUTOMATION = {
+    "alias": "Porch Light Sunset",
+    "trigger": [{"platform": "sun", "event": "sunset"}],
+    "action": [{"service": "light.turn_on", "target": {"entity_id": "light.porch"}}],
+}
+
+# One well-formed instruction per kind of write, for tests about the layers
+# after the shape check (kill switch, envelope). A malformed one would be refused
+# by `_validate_write` first and prove nothing about those layers.
+WELL_FORMED_WRITES = [
+    {"action": "call_service", "entity_id": "light.porch", "service": "turn_on"},
+    {"action": "upsert_automation", "config": AUTOMATION},
+    {"action": "delete_automation", "id": "a1"},
+    {"action": "reload", "domain": "automation"},
+]
+
 
 class FakeRest:
     def __init__(self, overrides=None):
         self.overrides = overrides or {}
         self.calls = []
+        self.bodies = []
 
     def get(self, path, params=None):
         self.calls.append(("GET", path))
@@ -51,6 +68,7 @@ class FakeRest:
 
     def post(self, path, json=None, retry=True):
         self.calls.append(("POST", path))
+        self.bodies.append((path, json))
         if path == "/api/template":
             return "2"
         if path.startswith("/api/services/"):
@@ -180,14 +198,17 @@ class TestWritesDisabled(unittest.TestCase):
         replaced an earlier "arrives later" note), and matching prose makes this
         fail for a rewording rather than for a real regression.
         """
-        for action in ["call_service", "upsert_automation", "delete_automation", "reload"]:
-            out = run([{"action": action}])
+        for instruction in WELL_FORMED_WRITES:
+            action = instruction["action"]
+            # Well formed, so the refusal below comes from the switch, not the shape check.
+            self.assertIsNone(ha_tool._validate_write(action, instruction), action)
+            out = run([instruction])
             self.assertIn(f'<instruction_error action="{action}"', out, action)
             self.assertIn("<payload></payload>", out, action)
 
     def test_write_actions_never_reach_the_client(self):
         rest = FakeRest()
-        run([{"action": "call_service", "domain": "light"}], rest=rest)
+        run(WELL_FORMED_WRITES, rest=rest)
         self.assertEqual(rest.calls, [])
 
     def test_unknown_action_lists_the_available_ones(self):
@@ -276,7 +297,7 @@ class TestWriteEnvelope(unittest.TestCase):
         self.assertEqual(self._errors(out).strip(), "None")
 
     def test_a_confirmation_request_is_not_an_error(self):
-        out = run([{"action": "upsert_automation", "id": "a1", "config": {"alias": "X"}}])
+        out = run([{"action": "upsert_automation", "id": "a1", "config": AUTOMATION}])
 
         self.assertIn("<confirmation_required", self._payload(out))
         self.assertEqual(self._errors(out).strip(), "None")
@@ -298,6 +319,147 @@ class TestWriteEnvelope(unittest.TestCase):
         self.assertIn('<instruction_result action="call_service"', payload)
         self.assertIn('<instruction_result action="get_config"', payload)
         self.assertEqual(self._errors(out).strip(), "None")
+
+
+class _WritesEnabled(unittest.TestCase):
+    def setUp(self):
+        from core.integrations.homeassistant import guards
+
+        patcher = patch.object(guards, "write_enabled", lambda: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        guards.reset_pending()
+        self.addCleanup(guards.reset_pending)
+        self.guards = guards
+
+    def assert_refused_before_a_token(self, instruction, *fragments):
+        """Refused as an error, with no token minted and nothing sent to HA."""
+        rest = FakeRest()
+        out = run([instruction], rest=rest)
+        self.assertIn(f'<instruction_error action="{instruction["action"]}"', out)
+        self.assertNotIn("<confirm_token>", out)
+        self.assertEqual(self.guards._pending, {}, "a confirmation token was issued")
+        self.assertEqual(rest.calls, [])
+        for fragment in fragments:
+            self.assertIn(fragment, out)
+        return out
+
+
+class TestWriteShape(_WritesEnabled):
+    """A malformed write fails before any confirmation is issued.
+
+    Regression: home-steward sent an automation under "automation" rather than
+    "config". The guards minted a token, the user approved the diff, and only the
+    apply step noticed "config" was missing -- an approval spent on a change that
+    could never land. The shape check now runs before the guards.
+    """
+
+    def test_every_dispatched_write_has_a_key_list(self):
+        self.assertEqual(set(ha_tool._WRITE_KEYS), set(ha_tool.WRITE_IMPLEMENTED))
+
+    def test_automation_under_the_wrong_key_is_refused_before_a_token(self):
+        self.assert_refused_before_a_token(
+            {"action": "upsert_automation", "automation": AUTOMATION}, "'automation'", "'config'"
+        )
+
+    def test_config_without_triggers_or_actions_is_refused(self):
+        self.assert_refused_before_a_token(
+            {"action": "upsert_automation", "config": {"alias": "X"}}, "'triggers'", "'actions'"
+        )
+
+    def test_old_and_new_spellings_of_triggers_and_actions_are_accepted(self):
+        renamed = {"alias": "X", "triggers": [{"trigger": "sun", "event": "sunset"}], "actions": []}
+        for config in (AUTOMATION, renamed):
+            out = run([{"action": "upsert_automation", "config": config}])
+            self.assertIn("<confirmation_required", out)
+
+    def test_script_without_an_id_is_refused_before_a_token(self):
+        self.assert_refused_before_a_token(
+            {"action": "upsert_script", "config": {"sequence": []}}, "requires 'id'"
+        )
+
+    def test_delete_without_an_id_is_refused_before_a_token(self):
+        self.assert_refused_before_a_token({"action": "delete_automation"}, "requires 'id'")
+
+    def test_an_undispatched_write_is_refused_before_a_token(self):
+        self.assert_refused_before_a_token(
+            {"action": "upsert_helper", "config": {"name": "Guest mode"}}, "not dispatched"
+        )
+
+
+class TestServiceTarget(_WritesEnabled):
+    """call_service honours Home Assistant's `target.entity_id` shape.
+
+    Regression: the tool read only a top-level `entity_id`, so a call written the
+    way automations write it -- `target: {"entity_id": ...}` -- reached Home
+    Assistant with no entity at all, while the guards had judged the entity.
+    """
+
+    def test_target_entity_id_is_sent_to_home_assistant(self):
+        for entity in ("light.porch", ["light.porch"]):
+            rest = FakeRest()
+            out = run([{"action": "call_service", "service": "turn_on",
+                        "target": {"entity_id": entity}}], rest=rest)
+            self.assertIn('<instruction_result action="call_service"', out)
+            self.assertEqual(rest.bodies, [("/api/services/light/turn_on", {"entity_id": "light.porch"})])
+
+    def test_a_blocked_domain_in_target_is_still_refused(self):
+        rest = FakeRest()
+        out = run([{"action": "call_service", "service": "unlock",
+                    "target": {"entity_id": "lock.front"}}], rest=rest)
+        self.assertIn('<instruction_error action="call_service"', out)
+        self.assertEqual(rest.calls, [])
+
+    def test_several_entities_in_one_instruction_are_refused(self):
+        for instruction in (
+            {"action": "call_service", "service": "turn_on",
+             "target": {"entity_id": ["light.porch", "light.hall"]}},
+            {"action": "call_service", "service": "turn_on", "entity_id": ["light.porch", "light.hall"]},
+        ):
+            self.assert_refused_before_a_token(instruction, "one entity per instruction")
+
+    def test_area_targets_are_refused(self):
+        self.assert_refused_before_a_token(
+            {"action": "call_service", "domain": "light", "service": "turn_off",
+             "target": {"area_id": "kitchen"}},
+            "search_registry",
+        )
+
+    def test_the_entity_is_named_once(self):
+        self.assert_refused_before_a_token(
+            {"action": "call_service", "service": "turn_on", "entity_id": "light.porch",
+             "target": {"entity_id": "light.hall"}},
+            "not both",
+        )
+
+    def test_domain_must_match_the_entity(self):
+        """An allowed light must not carry a script past the guards unconfirmed."""
+        self.assert_refused_before_a_token(
+            {"action": "call_service", "domain": "script", "service": "goodnight",
+             "entity_id": "light.porch"},
+            "does not match",
+        )
+
+    def test_permissions_judge_the_target_entity(self):
+        seen = {}
+
+        class Ctx:
+            agent_id = "test-agent"
+
+        def capture(self, ctx, tool_id, action=None, path=None, **kw):
+            seen["path"] = path
+            return True
+
+        with patch.object(ha_tool, "HomeAssistantClient", lambda *a, **k: FakeRest()), \
+             patch.object(ha_tool, "try_context", lambda: Ctx()), \
+             patch.object(ha_tool.ToolsLoader, "check_permission", capture), \
+             patch.object(ha_tool.ToolsLoader, "get_tool_permissions",
+                          lambda *a, **k: {"light.*": ["call_service"]}):
+            ha_tool.home_assistant.invoke({"instructions": [
+                {"action": "call_service", "service": "turn_on", "target": {"entity_id": "light.porch"}},
+            ]})
+
+        self.assertEqual(seen["path"], "light.porch")
 
 
 class TestActions(unittest.TestCase):

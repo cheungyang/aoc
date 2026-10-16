@@ -1,3 +1,4 @@
+import asyncio
 import json
 from langchain_core.tools import tool
 import requests
@@ -31,9 +32,12 @@ async def web_search(query: str) -> str:
     }
 
     try:
-        # Using requests synchronously as it's a simple call.
-        # If async is strictly required, we could use httpx or aiohttp.
-        response = requests.get(url, params=params, headers=headers)
+        # requests blocks, so it runs on a worker thread to keep the event
+        # loop free. Not httpx: a shared AsyncClient binds to one event loop,
+        # and this app runs more than one.
+        response = await asyncio.to_thread(
+            requests.get, url, params=params, headers=headers, timeout=15
+        )
         response.raise_for_status()
         raw_text = response.text
         if len(raw_text) > 15000:

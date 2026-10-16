@@ -105,8 +105,43 @@ class TestFilesystemTool(unittest.TestCase):
             result = self._run(instructions)
             
             self.assertIn("--- [TRUNCATED: File has 500 lines", result)
-            self.assertIn("Use 'start_line' and 'end_line' parameters to inspect specific sections.", result)
+            self.assertIn("Use 'start_line' and 'end_line' parameters to inspect specific sections, or 'tail' for the last lines.", result)
             self.assertIn("line 0: some text content here", result)
+
+    def _read_tail(self, content, **options):
+        """Runs one `read` of a fake file with `content`, allowed, plus `options`."""
+        with patch('core.loaders.tools_loader.ToolsLoader') as mock_tools_loader, \
+             patch('os.path.exists', return_value=True), \
+             patch('os.path.isfile', return_value=True), \
+             patch('builtins.open', mock_open(read_data=content)):
+            mock_tools_loader.return_value.check_permission.return_value = True
+            return self._run([{"action": "read", "path": "logs/meals.md", **options}])
+
+    def test_read_tail_returns_the_last_lines_numbered(self):
+        """Logs grow at the bottom; a plain read of a long one shows only its oldest lines."""
+        content = "\n".join(f"entry {i}" for i in range(1, 501))
+        result = self._read_tail(content, tail=3)
+        expected_payload = '<instruction_result action="read" path="logs/meals.md">498: entry 498\n499: entry 499\n500: entry 500</instruction_result>'
+        self.assertEqual(result, format_tool_response("filesystem", payload=expected_payload, errors="None"))
+        self.assertNotIn("TRUNCATED", result)
+
+    def test_read_tail_longer_than_the_file_returns_it_all(self):
+        result = self._read_tail("a\nb\n", tail="10")
+        self.assertIn(">1: a\n2: b</instruction_result>", result)
+
+    def test_read_tail_of_an_empty_file(self):
+        result = self._read_tail("", tail=5)
+        self.assertIn("File logs/meals.md is empty.", result)
+        self.assertIn("<errors>None</errors>", result)
+
+    def test_read_tail_rejects_bad_values(self):
+        for bad in (0, -2, "many"):
+            result = self._read_tail("a\nb\n", tail=bad)
+            self.assertIn("Error: 'tail' must be a positive number of lines", result, bad)
+
+    def test_read_tail_cannot_be_combined_with_a_line_range(self):
+        result = self._read_tail("a\nb\nc\n", tail=2, start_line=1)
+        self.assertIn("Error: 'tail' cannot be combined with 'start_line' or 'end_line'.", result)
 
     # --- Read Image Tests ---
 

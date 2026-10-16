@@ -28,14 +28,15 @@ def filesystem(instructions: list[dict]) -> str:
     
     Supported Actions:
     - 'read': Reads the content of a file. Supports optional 'start_line' and 'end_line' (1-indexed) which prepends line numbers.
-        Requires: 'path'. Optional: 'start_line', 'end_line'.
+        'tail': N returns only the last N lines, numbered the same way: use it for logs and other files that grow at the bottom. Cannot be combined with 'start_line'/'end_line'.
+        Requires: 'path'. Optional: 'start_line', 'end_line', 'tail'.
     - 'read_image': Reads an image file and returns its content as a base64-encoded string (for multimodal comprehension).
         Requires: 'path'.
     - 'write': Writes content to a NEW file. Fails if the file already exists.
         Requires: 'path', 'content'.
     - 'overwrite': Overwrites an existing file or creates a new one with the provided content.
         Requires: 'path', 'content'.
-    - 'append': Appends content strictly to the end of the file.
+    - 'append': Appends content strictly to the end of the file, creating the file (and its folders) if it does not exist.
         Requires: 'path', 'content'.
     - 'replace_block': Replaces a specific block of text in a file with new content. Normalizes whitespace when matching.
         Requires: 'path', 'old_block', 'new_block'.
@@ -117,7 +118,7 @@ def _execute_single_action(inst: dict) -> tuple[str, str]:
 
     try:
         if action == "read":
-            return _read(path, inst.get("start_line"), inst.get("end_line"))
+            return _read(path, inst.get("start_line"), inst.get("end_line"), inst.get("tail"))
         elif action == "read_image":
             return _read_image(path)
         elif action == "write":
@@ -148,7 +149,12 @@ def _execute_single_action(inst: dict) -> tuple[str, str]:
         return "", f"Error performing filesystem action: {e}"
 
 
-def _read(path: str, start_line: int | str | None = None, end_line: int | str | None = None) -> tuple[str, str]:
+def _read(
+    path: str,
+    start_line: int | str | None = None,
+    end_line: int | str | None = None,
+    tail: int | str | None = None,
+) -> tuple[str, str]:
     if not os.path.exists(path):
         return "", f"Error: File not found at {path}"
     if not os.path.isfile(path):
@@ -156,6 +162,22 @@ def _read(path: str, start_line: int | str | None = None, end_line: int | str | 
 
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         file_content = f.read()
+
+    if tail is not None:
+        if start_line is not None or end_line is not None:
+            return "", "Error: 'tail' cannot be combined with 'start_line' or 'end_line'."
+        try:
+            count = int(tail)
+        except (TypeError, ValueError):
+            count = 0
+        if count < 1:
+            return "", f"Error: 'tail' must be a positive number of lines, got {tail!r}."
+        lines = file_content.splitlines()
+        if not lines:
+            return f"File {path} is empty.", "None"
+        # Numbered like a start/end slice, so a follow-up read can page backwards.
+        s = max(1, len(lines) - count + 1)
+        return "\n".join(f"{s + idx}: {line}" for idx, line in enumerate(lines[s - 1:])), "None"
 
     if start_line is not None or end_line is not None:
         lines = file_content.splitlines()
@@ -183,7 +205,7 @@ def _read(path: str, start_line: int | str | None = None, end_line: int | str | 
             preview_text = "\n".join(preview_lines)
             if len(preview_text) > 15000:
                 preview_text = preview_text[:15000]
-            truncation_notice = f"\n\n--- [TRUNCATED: File has {total_lines} lines ({len(file_content)} characters). Showing lines 1-200. Use 'start_line' and 'end_line' parameters to inspect specific sections.] ---"
+            truncation_notice = f"\n\n--- [TRUNCATED: File has {total_lines} lines ({len(file_content)} characters). Showing lines 1-200. Use 'start_line' and 'end_line' parameters to inspect specific sections, or 'tail' for the last lines.] ---"
             return preview_text + truncation_notice, "None"
         return file_content, "None"
 
