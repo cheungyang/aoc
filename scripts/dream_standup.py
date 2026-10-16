@@ -53,7 +53,10 @@ from core.util.models import tier_floor
 from core.util.time_util import get_local_now
 from tools.agent_call import agent_call
 
-DREAM_TRIGGER = "Run your dream skill."
+# The dream's rules are inlined from the skill (see `dream_rules`), so the
+# trigger states the task instead of naming a skill for the agent to load.
+DREAM_TRIGGER = "Dream: consolidate your memory logs into memory entries, following these rules."
+DREAM_SKILL_PATH = os.path.join(project_root, "skills", "dream", "SKILL.md")
 
 # `script-executor` is a shell runner with no model behind it, so it has no
 # memory logs to consolidate. Stateless agents (the graph workers) are skipped
@@ -202,15 +205,36 @@ def snapshot_logs(agent_id, root=None):
     return {name: store.read_text(os.path.join(logs_dir, name)) for name in list_logs(agent_id, root)}
 
 
-def build_prompt(dream_input):
-    """The dream trigger with everything the agent needs inlined.
+def dream_rules(path=None):
+    """The Core section of skills/dream/SKILL.md: the dream's guardrails and decision rules.
 
-    The response format is stated here as well as in the skill: this prompt is
-    the contract the parser enforces, and weaker models follow what is in front
-    of them more reliably than a loaded skill.
+    Read at run time rather than copied here, so the skill stays the one place
+    the rules are written. A skill without a Core section is a broken deploy,
+    and dreaming without rules would write bad memory every agent then reads,
+    so it fails loudly instead.
+    """
+    from core.loaders.skills_loader import core_section
+
+    path = path or DREAM_SKILL_PATH
+    with open(path, "r", encoding="utf-8") as f:
+        rules = core_section(f.read())
+    if not rules:
+        raise RuntimeError(f"{path} has no '## Core' section; the dream prompt inlines it.")
+    return rules
+
+
+def build_prompt(dream_input):
+    """The dream instructions with everything the agent needs inlined.
+
+    The rules come from the dream skill's Core section, so the agent has no
+    skill to load: the prompt says not to use tools, and that now holds.
+    The response format is stated here as well as in the skill: this prompt
+    is the contract the parser enforces, and weaker models follow what is in
+    front of them more reliably than a loaded skill.
     """
     return (
         f"{DREAM_TRIGGER}\n"
+        f"<dream_rules>\n{dream_rules()}\n</dream_rules>\n"
         "Your memory logs and every memory entry you may act on are inlined below. "
         "Do not use any tools: the files are read and written for you. "
         "Do not emit a <system_memory_log>.\n"
