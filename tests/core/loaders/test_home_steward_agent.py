@@ -38,9 +38,13 @@ class TestButlerAgentConfig(unittest.TestCase):
 
     def test_skills_declared_and_valid(self):
         agent = self.agents_loader.get_agent("home-steward")
-        declared_skills = agent.get_config("skills", [])
-        expected_skills = ["ha_inventory", "ha_automation_authoring", "ha_config_audit"]
-        self.assertEqual(declared_skills, expected_skills)
+        declared_skills = agent.get_config("skills", {})
+        self.assertEqual(declared_skills, {
+            "ha_inventory": {"preload": "core"},
+            "ha_automation_authoring": {},
+            "ha_config_audit": {"preload": "core"},
+        })
+        expected_skills = list(declared_skills)
 
         ctx = make_context(agent_id="home-steward")
         for skill_id in expected_skills:

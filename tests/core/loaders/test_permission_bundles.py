@@ -1,16 +1,18 @@
 """Tests for named permission bundles.
 
-Three groups, in increasing order of how much they would cost to get wrong:
+Three groups:
 
   * expansion mechanics -- recursion, de-duplication, termination;
   * the fail-closed property -- an unknown bundle must never widen a grant;
-  * backwards compatibility -- every real agent config must merge to exactly the
-    same permissions it did before bundles existed.
+  * the real configs -- every bundle and action named on disk exists, and a
+    grant names the bundle it would otherwise spell out.
 
-The last group is the one that matters most. Bundles are sugar, and sugar that
-changes the meaning of an existing grant is a security bug.
+Bundles fail closed, so a typo in a real config is never an error: the agent is
+just refused, long after the config was written. The last group is what turns
+that into a build failure.
 """
 import copy
+import glob
 import json
 import os
 import re
@@ -246,12 +248,15 @@ class TestScopeShapes(unittest.TestCase):
         self.assertEqual(permissions["gh"]["repo"], ["@read"])
 
 
-class TestBackwardsCompatibility(unittest.TestCase):
-    """Every real agent config must mean exactly what it meant before.
+CONFIG_GLOBS = ("agents/*/agent.json", "skills/*/skill.json", "graphs/*/graph.json")
+
+
+class TestRealConfigs(unittest.TestCase):
+    """The grants actually on disk, in every agent, skill and graph config.
 
     Synthetic fixtures cannot establish this: the guarantee is about the configs
     that actually exist on disk, including whatever odd shapes have accumulated
-    in them. So these read the real `agents/` directory.
+    in them. So these read the real directories.
     """
 
     @staticmethod
@@ -262,18 +267,64 @@ class TestBackwardsCompatibility(unittest.TestCase):
                 with open(path, encoding="utf-8") as handle:
                     yield name, json.load(handle)
 
+    @staticmethod
+    def grants(tool_id):
+        """(config, selector, actions) for every action list granted for `tool_id`."""
+        for pattern in CONFIG_GLOBS:
+            for path in sorted(glob.glob(os.path.join(REPO_ROOT, pattern))):
+                with open(path, encoding="utf-8") as handle:
+                    scope = (json.load(handle).get("tools") or {}).get(tool_id)
+                where = os.path.relpath(path, REPO_ROOT)
+                if isinstance(scope, dict):
+                    for selector, actions in scope.items():
+                        if isinstance(actions, list):
+                            yield where, selector, actions
+                elif isinstance(scope, list):
+                    yield where, None, scope
+
     def test_there_are_agents_to_check(self):
         """Guards against this whole class silently passing on an empty list."""
         self.assertGreater(len(list(self.agent_configs())), 5)
+        self.assertGreater(len(list(self.grants("filesystem"))), 20)
 
-    def test_no_real_agent_config_is_changed_by_expansion(self):
-        for name, config in self.agent_configs():
-            if name == "home-steward":
-                continue
-            tools = config.get("tools", {})
-            before = copy.deepcopy(tools)
-            pb.expand_permissions(tools)
-            self.assertEqual(tools, before, f"{name}: expansion altered its grants")
+    def test_every_bundle_named_in_a_config_is_defined(self):
+        for tool_id in ("filesystem", "home_assistant"):
+            defined = pb.definitions_for(tool_id)
+            for where, selector, actions in self.grants(tool_id):
+                for token in actions:
+                    if pb.is_bundle(token):
+                        self.assertIn(token, defined, f"{where} {tool_id}[{selector!r}]: unknown bundle")
+
+    def test_every_filesystem_action_named_in_a_config_exists(self):
+        real = filesystem_actions()
+        for where, selector, actions in self.grants("filesystem"):
+            for token in actions:
+                if not pb.is_bundle(token):
+                    self.assertIn(token, real, f"{where} [{selector!r}]: unknown action")
+
+    def test_filesystem_grants_name_the_bundle_they_spell_out(self):
+        """Bare actions are for granting less than a bundle, never for restating one.
+
+        `["@read", "append"]` (an append-only log) and `["write"]` (create-only)
+        are why bare actions exist. A list that holds every action of a bundle
+        is the drift bundles were introduced to stop.
+        """
+        for where, selector, actions in self.grants("filesystem"):
+            granted = set(pb.expand_actions("filesystem", actions))
+            named = set(pb.expand_actions("filesystem", [t for t in actions if pb.is_bundle(t)]))
+            for bundle in pb.definitions_for("filesystem"):
+                members = set(pb.expand_actions("filesystem", [bundle]))
+                if members <= granted and not members <= named:
+                    self.fail(f"{where} [{selector!r}]: {actions} spells out {bundle}; name it instead")
+
+    def test_filesystem_grants_do_not_repeat_a_bundle(self):
+        """`["@read", "@write"]` or `["@write", "read"]` say the same thing twice."""
+        for where, selector, actions in self.grants("filesystem"):
+            for token in actions:
+                others = [t for t in actions if t != token and pb.is_bundle(t)]
+                covered = set(pb.expand_actions("filesystem", others))
+                own = set(pb.expand_actions("filesystem", [token]))
+                self.assertFalse(own <= covered, f"{where} [{selector!r}]: {token} is already in {others}")
 
     def test_home_steward_bundles_expand_correctly(self):
         configs = dict(self.agent_configs())
@@ -385,7 +436,7 @@ class TestThroughTheLoader(unittest.TestCase):
                         self.assertEqual(leftover, [], f"{tool_id}[{selector}]")
 
     def test_bare_action_grants_still_work(self):
-        """The backwards-compatibility guarantee, exercised through the loader."""
+        """Bare actions stay first-class: narrow grants (append-only, create-only) need them."""
         from tests.helpers import make_context
 
         loader = self._loader_for({"home_assistant": {"light.porch": ["call_service"]}})

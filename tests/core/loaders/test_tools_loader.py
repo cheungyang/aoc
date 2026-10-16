@@ -106,7 +106,7 @@ class TestToolsLoader(unittest.TestCase):
         mock_agents_loader.return_value.get_agent.return_value = mock_agent
 
         mock_skills_inst = mock_skills_loader.return_value
-        mock_skills_inst.resolve_allowed_skills.return_value = ["dream"]
+        mock_skills_inst.resolve_allowed_skills.return_value = ["research"]
         mock_skills_inst.get_skill_tools.return_value = {"bash": {}}
 
         loader = ToolsLoader()
@@ -196,7 +196,7 @@ class TestCheckPermission(unittest.TestCase):
                     "pkm/agents/<agent_id>": ["read"]
                 }
             },
-            "skills": []
+            "skills": {}
         }
         mock_get_agent.return_value = mock_agent
 

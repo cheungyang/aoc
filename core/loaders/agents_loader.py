@@ -2,6 +2,7 @@ import os
 import json
 import time
 from core.knowledge.memory.inject import report_unknown_topics
+from core.loaders.agent_schema import known_skill_ids, validate_agent_config
 from core.loaders.hot_reloader import HotReloader
 
 class AgentsLoader:
@@ -47,6 +48,7 @@ class AgentsLoader:
         self._agent_configs = {}
         if not os.path.exists(agents_dir):
             return
+        known_skills = known_skill_ids()
         for agent_name in os.listdir(agents_dir):
             agent_path = os.path.join(agents_dir, agent_name)
             if os.path.isdir(agent_path):
@@ -55,6 +57,14 @@ class AgentsLoader:
                     try:
                         with open(config_path, "r") as f:
                             config = json.load(f)
+
+                        # A config that fails validation is not loaded, like a
+                        # malformed file; it stays watched so a fix reloads it.
+                        errors = validate_agent_config(config, known_skills)
+                        if errors:
+                            print(f"AgentsLoader: rejected {config_path}: {'; '.join(errors)}")
+                            HotReloader().watch(config_path, self._on_agent_changed)
+                            continue
 
                         # Ensure ID is set
                         if "id" not in config and "agent_id" not in config:

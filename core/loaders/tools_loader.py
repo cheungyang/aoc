@@ -118,7 +118,8 @@ class ToolsLoader:
             merged_tools["filesystem"] = {}
         if isinstance(merged_tools["filesystem"], dict):
             agent_workspace_pkm = os.path.join(pkm_dir, "agents", agent_id)
-            default_actions = ["read", "write", "overwrite", "append", "replace_block", "ls", "find", "grep", "delete"]
+            # Bundles are fine here: expand_permissions below resolves them.
+            default_actions = ["@write", "delete"]
             if agent_workspace_pkm not in merged_tools["filesystem"]:
                 merged_tools["filesystem"][agent_workspace_pkm] = default_actions.copy()
 
@@ -207,9 +208,11 @@ class ToolsLoader:
         merged_tools = self._merge_tool_permissions(ctx)
         allowed_tool_names = list(merged_tools.keys())
         
-        # Auto-include load_skill if agent has skills
+        # Auto-include load_skill when the agent has a skill it must fetch: one
+        # on demand, or the Reference of a core preload. Fully preloaded skills
+        # are already in the prompt.
         from core.loaders.skills_loader import SkillsLoader
-        if SkillsLoader().get_allowed_skills(ctx):
+        if SkillsLoader().needs_load_skill(ctx):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
                 
