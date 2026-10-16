@@ -2,31 +2,18 @@
 name: write_daily_intention
 description: Generates the daily journal, resolves templates, appends intentions, and outputs IPC XML.
 ---
-## Overview
-This skill handles the creation and updating of the user's daily fleeting journal. It ensures the PKM vault is synced, initializes the daily note from a template if needed (resolving dynamic syntax), appends the agent's recommended daily plan, and outputs a standard IPC XML block.
+## Core
+Log the agreed plan in today's daily note, `pkm/vault/journals/fleeting/YYYY-MM-DD.md` (always pass this exact relative path to `filesystem`).
+1. `read` today's note. If it does not exist, `read` the template `pkm/templates/Fleeting Pages.md`, replace ALL Obsidian Templater syntax (`<% tp... %>`) with static values (e.g. `<% tp.date.now("w")-1 %>` becomes last week's ISO week number; date and title syntax becomes today's date), and `write` the result to today's path.
+2. `append` to the very bottom of the note: empty lines (so the markdown renders), the header `#### Agent's recommendation`, then the final morning reflection, energy level, intentions, and agreed tasks, keeping any `- [/]` items exactly as the user wrote them.
+3. Confirm the saved path in one line. Log observations on the user's priorities or mood in your `<system_memory_log>`.
 
-## Workflow
+Call `load_skill("write_daily_intention")` for the IPC response format, used only when another agent asked for this.
 
-### Step 1: Check & Initialize Daily Note
-Determine if today's note already exists.
-- **Target Path**: `pkm/vault/journals/fleeting/YYYY-MM-DD.md` (Replace YYYY-MM-DD with today's date). Always pass this exact relative path to the `filesystem` tool.
-- Use the `filesystem` tool (`read` action) to check if the file exists.
-- **If the file does NOT exist:**
-  1. Use the `filesystem` tool (`read` action) to load the template located at `pkm/templates/"Fleeting Pages".md`.
-  2. **Templater Resolution**: You must manually parse the template text and replace ALL Obsidian Templater syntax (`<% tp... %>`) with the correct static values. 
-     - *Example:* Replace `<% tp.date.now("w")-1 %>` with the integer representing last week's ISO week number.
-     - Replace any date/title syntax with today's actual date.
-  3. Use the `filesystem` tool (`write` action) to save the fully resolved text into the target path (`pkm/vault/journals/fleeting/YYYY-MM-DD.md`).
+## Reference
 
-### Step 2: Append Recommendations
-Add the day's plan to the journal.
-- Format the agreed-upon daily intention and the agent's top recommendations cleanly.
-- Prepend your formatted text with the header: `#### Agent's recommendation`. 
-- Ensure you include empty newlines before the header so it renders cleanly in markdown.
-- Use the `filesystem` tool (`append` action) to add this block to the very bottom of the `YYYY-MM-DD.md` file.
-
-### Step 3: Agent-Friendly Output & Memory (IPC Format)
-Finalize the execution by outputting the strict XML structure below to ensure perfect readability for routing agents.
+### IPC response format
+When another agent requested the daily intention, finish with exactly this structure:
 ```xml
 <write_daily_intention_response>
   <original_request>[The user's prompt or the trigger event to write the intention]</original_request>
@@ -39,7 +26,3 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
   <learnings>[Observations on the user's current project priorities or mood based on the agreed intentions]</learnings>
 </write_daily_intention_response>
 ```
-**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
-
-## Required Tools
-- `filesystem`: Required to `read` templates, `write` new daily notes, and `append` recommendations within the `pkm` vault.
