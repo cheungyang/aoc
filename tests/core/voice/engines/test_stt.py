@@ -7,7 +7,7 @@ import pytest
 from core.util.models import TRANSCRIBE_LIVE
 from core.voice import settings
 from core.voice.engines.stt import SpeechRecognizer
-from core.voice.utterance import Utterance
+from core.voice.listening.utterance import Utterance
 
 
 class FakeSession:

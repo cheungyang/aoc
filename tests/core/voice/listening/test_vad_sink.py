@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 
 from core.voice import settings
-from core.voice.utterance import Utterance
-from core.voice.vad_sink import WINDOW_MS, WINDOW_SAMPLES, UserVADState, VADSink
+from core.voice.listening.utterance import Utterance
+from core.voice.listening.vad_sink import WINDOW_MS, WINDOW_SAMPLES, UserVADState, VADSink
 
 WINDOW_BYTES = WINDOW_SAMPLES * 2
 # 20 ms of 48 kHz stereo at a level that passes the energy gate.

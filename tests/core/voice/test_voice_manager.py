@@ -5,7 +5,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import discord
 from core.voice import settings as voice_settings
-from core.voice.utterance import Transcript, Utterance
+from core.voice.listening.utterance import Transcript, Utterance
 from core.voice.voice_manager import VoiceManager
 from tests.helpers import fake_audio_source
 

@@ -324,7 +324,7 @@ def live_hearing(voice: str = LIVE_STT_VOICE):
     from core.loaders.agents_loader import AgentsLoader
     from core.util.config import Config
     from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
-    from core.voice.turn_taking import merge_transcripts
+    from core.voice.listening.turn_taking import merge_transcripts
     from tts_benchmark import API_KEY_ENV_VAR, Options, make_chirp_client
 
     client, tts_module = make_chirp_client(Options(tts_api_key=(Config().get(API_KEY_ENV_VAR) or "").strip()))

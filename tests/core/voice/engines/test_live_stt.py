@@ -23,7 +23,7 @@ from core.voice.engines.live_stt import (
     setup_message,
 )
 from core.voice.engines.live_stt import connect_live as real_connect_live  # before conftest patches it
-from core.voice.utterance import Utterance
+from core.voice.listening.utterance import Utterance
 
 WINDOW = 1152  # one 36 ms VAD window of 16 kHz 16-bit mono
 

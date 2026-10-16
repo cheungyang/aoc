@@ -17,8 +17,8 @@ import time
 from typing import Dict, List, Protocol
 
 from core.voice import settings
-from core.voice.turn_taking import confirms_barge_in, is_backchannel
-from core.voice.utterance import Utterance
+from core.voice.listening.turn_taking import confirms_barge_in, is_backchannel
+from core.voice.listening.utterance import Utterance
 
 
 class Turns(Protocol):

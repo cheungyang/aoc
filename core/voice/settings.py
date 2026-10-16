@@ -45,7 +45,7 @@ WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
 
 # --- Turn taking -----------------------------------------------------------
 # How long a silence ends the turn depends on what was said so far
-# (core/voice/turn_taking.py): a finished sentence ends quickly, a trailing
+# (core/voice/listening/turn_taking.py): a finished sentence ends quickly, a trailing
 # "and" or "um" waits longer, and no words yet keeps the old fixed wait.
 END_OF_TURN_COMPLETE_MS = 500
 END_OF_TURN_DEFAULT_MS = 900

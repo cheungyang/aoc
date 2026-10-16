@@ -170,7 +170,7 @@ _patch_discord_voice_gateway()
 _patch_voice_recv_opus()
 
 from .voice_manager import VoiceManager
-from .vad_sink import VADSink
+from .listening.vad_sink import VADSink
 from .engines.stt import SpeechRecognizer
 from .engines.tts_engine import TTSEngine
 from .speech.blurp_generator import BlurpGenerator

@@ -224,7 +224,7 @@ class BenchFloor:
 
 async def listen(case_audio: Sequence[bytes], gap_ms: int, recognizer) -> List[Heard]:
     """Plays one case into a fresh VADSink in real time; returns what it heard."""
-    from core.voice.vad_sink import VADSink
+    from core.voice.listening.vad_sink import VADSink
 
     floor = BenchFloor(recognizer)
     sink = VADSink(floor, loop=asyncio.get_running_loop())
@@ -432,7 +432,7 @@ async def run(args) -> int:
         for voice in voices:
             parts = [await asyncio.to_thread(synthesize, client, tts, text, voice) for text in case.parts]
             audio[(case.id, voice)] = parts
-            from core.voice.utterance import pcm_to_wav
+            from core.voice.listening.utterance import pcm_to_wav
             with open(os.path.join(out_dir, "audio", f"{case.id}-{voice.rsplit('-', 1)[-1]}.wav"), "wb") as f:
                 silence = bytes(SAMPLE_RATE * 2 * case.gap_ms // 1000)
                 f.write(pcm_to_wav(silence.join(parts)))

@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 
 import stt_benchmark as bench  # noqa: E402
-from core.voice.utterance import Transcript, Utterance  # noqa: E402
+from core.voice.listening.utterance import Transcript, Utterance  # noqa: E402
 
 
 def test_discord_frames_decimate_back_to_the_original_samples():

@@ -13,7 +13,7 @@ from typing import Callable, Iterable, List, Optional
 from core.util.models import TRANSCRIBE_LIVE
 from core.voice import settings
 from core.voice.engines.live_stt import LiveSTTSession
-from core.voice.utterance import Transcript, Utterance
+from core.voice.listening.utterance import Transcript, Utterance
 
 
 def agent_vocabulary(loader) -> List[str]:

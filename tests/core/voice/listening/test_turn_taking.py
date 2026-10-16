@@ -2,7 +2,7 @@
 import pytest
 
 from core.voice import settings
-from core.voice.turn_taking import (
+from core.voice.listening.turn_taking import (
     bare_stop,
     confirms_barge_in,
     end_of_turn_ms,

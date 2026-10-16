@@ -1,12 +1,12 @@
 """One bot's voice: wires the listening side to the speaking side, and runs turns.
 
-    vad_sink.py     each stretch of the user's speech becomes an Utterance (utterance.py)
-    floor.py        what that speech means -- a turn, an interruption or listening
-                    noise -- and which words are still unanswered (turn_taking.py)
-    engines/        speech-to-text and text-to-speech
-    speech/         the agent's answer, to the text channel and the speaker
-    room/           joining rooms, the text channel a room talks into, and
-                    "take me to day planning"
+    listening/  the user's side: the VAD cuts their speech into utterances, and
+                the floor decides what each one means -- a turn, an interruption
+                or listening noise -- and which words are still unanswered
+    engines/    speech-to-text and text-to-speech
+    speech/     the agent's answer, to the text channel and the speaker
+    room/       joining rooms, the text channel a room talks into, and
+                "take me to day planning"
 
 The VAD sink hands each utterance to the floor, and the floor starts and
 stops turns here. A turn answers every unanswered utterance as one request.
@@ -20,14 +20,14 @@ from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.runtime.turn_trace import start_turn_trace
 from .engines.stt import SpeechRecognizer, agent_vocabulary
-from .floor import Floor
+from .listening.floor import Floor
+from .listening.turn_taking import bare_stop, merge_transcripts
+from .listening.utterance import Utterance
+from .listening.vad_sink import VADSink
 from .room.connection import VoiceConnection
 from .room.room_switch import RoomSwitcher
 from .speech.audio_queue import AudioStreamQueue
 from .speech.reply import ReplyStreamer, TurnSpeech
-from .turn_taking import bare_stop, merge_transcripts
-from .utterance import Utterance
-from .vad_sink import VADSink
 
 
 @dataclass

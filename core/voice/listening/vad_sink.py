@@ -10,8 +10,8 @@ import onnxruntime as ort
 from discord.ext import voice_recv
 
 from core.voice.settings import STT_EARLY_END_MS
-from core.voice.turn_taking import end_of_turn_ms
-from core.voice.utterance import Utterance
+from core.voice.listening.turn_taking import end_of_turn_ms
+from core.voice.listening.utterance import Utterance
 
 WINDOW_SAMPLES = 576  # 36 ms at 16 kHz: Silero VAD v6's window
 WINDOW_MS = 36
@@ -51,7 +51,7 @@ class VADSink(voice_recv.AudioSink):
     Discord voice receive AudioSink with built-in pure ONNX Silero VAD.
 
     Each stretch of a user's speech becomes an `Utterance` that is streamed to
-    the floor (core/voice/floor.py) while the user is still talking, so
+    the floor (core/voice/listening/floor.py) while the user is still talking, so
     transcription runs alongside the speech instead of after it:
 
       * `utterance_opened` at speech onset,
@@ -63,7 +63,7 @@ class VADSink(voice_recv.AudioSink):
 
     They are posted to the event loop in order from this thread (Discord's
     packet reader). How long a silence ends the turn is adaptive: it depends on
-    the words transcribed so far (core/voice/turn_taking.py).
+    the words transcribed so far (core/voice/listening/turn_taking.py).
 
     `config` is the agent's voice_config, for its VAD thresholds.
     """
