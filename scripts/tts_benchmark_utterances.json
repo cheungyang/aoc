@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "notes": [
+    "Test set for scripts/tts_benchmark.py (voice-first plan, section 4.3).",
+    "Each utterance has `text`, or `chunks` for replies that arrive clause by clause from the model; `text` is then the chunks joined.",
+    "`terms` are the names and terms whose pronunciation the proxy checks: each must appear in the transcript of the synthesized audio. Spacing and accents are ignored when matching, so 'xiao long bao' counts for 'xiaolongbao'.",
+    "`term_alternates` lists other spellings a correct reading may be transcribed as. Add to it when a miss turns out to be a transcription spelling, not a mispronunciation.",
+    "`audition_lines` are one line per agent, spoken in the voice from that agent's agent.json during --audition."
+  ],
+  "utterances": [
+    {
+      "id": "ack-logged",
+      "agent": "fitness-coach",
+      "category": "ack",
+      "text": "Logged. Next up, goblet squats.",
+      "terms": ["goblet squats"]
+    },
+    {
+      "id": "ack-lights",
+      "agent": "home-steward",
+      "category": "ack",
+      "text": "Done. The kitchen lights are off.",
+      "terms": []
+    },
+    {
+      "id": "ack-room",
+      "agent": "main",
+      "category": "ack",
+      "text": "Okay, moving you to day planning.",
+      "terms": []
+    },
+    {
+      "id": "ack-groceries",
+      "agent": "meal-planner",
+      "category": "ack",
+      "text": "Got it. Bok choy and pork belly are on the fridge list.",
+      "terms": ["bok choy", "pork belly"]
+    },
+    {
+      "id": "num-sets-words",
+      "agent": "fitness-coach",
+      "category": "numbers",
+      "text": "Three sets of ten at thirty-five pounds, then rest for ninety seconds.",
+      "terms": []
+    },
+    {
+      "id": "num-sets-digits",
+      "agent": "fitness-coach",
+      "category": "numbers",
+      "text": "Next is Romanian deadlifts: 3 sets of 12 at 25 lb, with 60 seconds of rest.",
+      "terms": ["Romanian deadlifts"]
+    },
+    {
+      "id": "num-money",
+      "agent": "receipt-processor",
+      "category": "numbers",
+      "text": "Your Costco receipt came to $1,234.56, including $87.20 in tax.",
+      "terms": ["Costco"]
+    },
+    {
+      "id": "num-time",
+      "agent": "day-planner",
+      "category": "numbers",
+      "text": "Your dentist appointment is at 7:45 PM on Thursday, October 22nd.",
+      "terms": []
+    },
+    {
+      "id": "num-temperature",
+      "agent": "home-steward",
+      "category": "numbers",
+      "text": "The living room is at 21.5°C, and the thermostat is set to 23 degrees.",
+      "terms": []
+    },
+    {
+      "id": "num-market",
+      "agent": "market-scout",
+      "category": "numbers",
+      "text": "NVDA is down 6.2% today, on volume 2.3 times its 20-day average.",
+      "terms": ["NVDA"]
+    },
+    {
+      "id": "num-points",
+      "agent": "reward-travel",
+      "category": "numbers",
+      "text": "That redemption is worth 1.8 cents per point, so 60,000 points beats paying $1,080 in cash.",
+      "terms": []
+    },
+    {
+      "id": "num-date",
+      "agent": "reward-travel",
+      "category": "numbers",
+      "text": "Your Sapphire Reserve renews on March 15th, 2027, and the $300 travel credit resets on January 1st.",
+      "terms": ["Sapphire Reserve"]
+    },
+    {
+      "id": "names-agents",
+      "agent": "main",
+      "category": "names",
+      "text": "Daisy has your morning briefing, Fitbod has today's workout, and Ramsay is planning dinner.",
+      "terms": ["Daisy", "Fitbod", "Ramsay"]
+    },
+    {
+      "id": "names-dishes-sichuan",
+      "agent": "meal-planner",
+      "category": "names",
+      "text": "Tonight, try mapo tofu with garlic gai lan, or kung pao chicken if you want something quicker.",
+      "terms": ["mapo tofu", "gai lan", "kung pao chicken"]
+    },
+    {
+      "id": "names-dishes-pork",
+      "agent": "meal-planner",
+      "category": "names",
+      "text": "Your pork belly expires Friday, so make hong shao rou tomorrow and zha jiang mian with the leftover cucumber.",
+      "terms": ["hong shao rou", "zha jiang mian"]
+    },
+    {
+      "id": "names-dishes-weekend",
+      "agent": "meal-planner",
+      "category": "names",
+      "text": "For the weekend, xiaolongbao from the freezer and a quick char siu fried rice.",
+      "terms": ["xiaolongbao", "char siu"]
+    },
+    {
+      "id": "names-travel",
+      "agent": "reward-travel",
+      "category": "names",
+      "text": "Award space is open to Reykjavík, Oaxaca, and Queenstown in March, and Aeroplan has a good routing to Kyoto through Haneda.",
+      "terms": ["Reykjavík", "Oaxaca", "Queenstown", "Aeroplan", "Kyoto", "Haneda"]
+    },
+    {
+      "id": "names-pkm",
+      "agent": "wiki-gardener",
+      "category": "names",
+      "text": "I found two fleeting notes in the Obsidian inbox and three stale stubs in the lint queue. Want me to merge them into the Zettelkasten?",
+      "terms": ["fleeting notes", "Obsidian", "stale stubs", "lint queue", "Zettelkasten"]
+    },
+    {
+      "id": "names-home",
+      "agent": "home-steward",
+      "category": "names",
+      "text": "The Hue bulbs in the den are offline, and the Ecobee reads 38 percent humidity upstairs.",
+      "terms": ["Hue", "Ecobee"]
+    },
+    {
+      "id": "names-goal",
+      "agent": "goal-setter",
+      "category": "names",
+      "text": "Let's set two milestones for the Kubernetes certification: finish the CKA labs by November, then book the exam.",
+      "terms": ["Kubernetes", "CKA"]
+    },
+    {
+      "id": "names-property",
+      "agent": "property-scout",
+      "category": "names",
+      "text": "One listing passed your criteria: a three-bedroom in Sunnyvale near Las Palmas Park, asking $1.65 million.",
+      "terms": ["Sunnyvale", "Las Palmas Park"]
+    },
+    {
+      "id": "names-research",
+      "agent": "topic-researcher",
+      "category": "names",
+      "text": "I've gathered twelve sources on solid-state batteries, including two papers from QuantumScape and one from Toyota.",
+      "terms": ["QuantumScape", "Toyota"]
+    },
+    {
+      "id": "chunked-workout",
+      "agent": "fitness-coach",
+      "category": "chunked",
+      "chunks": [
+        "Nice work today.",
+        " You finished all four exercises,",
+        " and your goblet squats",
+        " went up to forty pounds.",
+        " Tomorrow is a rest day,",
+        " so focus on sleep",
+        " and get some protein in tonight."
+      ],
+      "terms": ["goblet squats"]
+    },
+    {
+      "id": "chunked-briefing",
+      "agent": "day-planner",
+      "category": "chunked",
+      "chunks": [
+        "Good morning.",
+        " You have three meetings today,",
+        " and the first one starts at nine thirty.",
+        " Your top priority is the quarterly tax estimate,",
+        " which is due on Friday."
+      ],
+      "terms": []
+    },
+    {
+      "id": "long-briefing",
+      "agent": "day-planner",
+      "category": "long",
+      "text": "Good morning. Here's your plan for today. You slept seven hours and ten minutes, and your energy looks steady, so this is a good day for deep work. Your urgent item is the quarterly tax estimate, which is due on Friday and should take about forty-five minutes. Your most important project task is reviewing the voice-first proposal, and I'd block nine thirty to eleven for it. In your inbox, three emails need attention: a contractor quote for the bathroom remodel, a reminder from the pediatrician, and a note from Chase about your Sapphire card renewal. For chores, the furnace filter is two weeks overdue, and the recycling goes out tonight. Which of these do you want to commit to today?",
+      "terms": ["pediatrician", "Sapphire"]
+    }
+  ],
+  "term_alternates": {
+    "NVDA": ["Nvidia", "N V D A"],
+    "CKA": ["C K A"],
+    "gai lan": ["kai lan"],
+    "kung pao chicken": ["gong bao chicken"],
+    "xiaolongbao": ["xiao long bao", "xiao long bow"],
+    "char siu": ["cha siu"],
+    "Fitbod": ["Fit Bod"],
+    "Ramsay": ["Ramsey"],
+    "Ecobee": ["Eco bee"],
+    "Hue": ["Hugh"],
+    "Zettelkasten": ["Zettel Kasten"]
+  },
+  "audition_lines": {
+    "main": "Hi, I'm your Concierge. Say take me to day planning, and I'll move you there.",
+    "agent-designer": "Aki here. Tell me what the new agent should do, and I'll draft its config, skills, and schedule.",
+    "day-planner": "Good morning, it's Daisy. You have three meetings today, and your top priority is the tax estimate.",
+    "excursion-planner": "Eric here. The weekend of the twenty-fourth is open, and there's a lantern festival two hours north.",
+    "fitness-coach": "Fitbod here. Today is lower body: goblet squats, Romanian deadlifts, and walking lunges.",
+    "goal-setter": "It's Grace. Let's look at your Kubernetes goal and pick one milestone for this month.",
+    "home-steward": "Butler at your service. The porch light is on, and the house is at twenty-one degrees.",
+    "market-scout": "Marvin here. Two tickers triggered today, and the rest of your watchlist is quiet.",
+    "meal-planner": "Ramsay here. Your bok choy expires tomorrow, so let's do garlic bok choy with mapo tofu tonight.",
+    "property-scout": "Rio here. One listing passed your criteria this week, and I'd tour it on Saturday.",
+    "receipt-processor": "Receipt logged: forty-two dollars and eighteen cents at Trader Joe's, filed under groceries.",
+    "reward-travel": "Miles here. Your dining credit expires in five days, and there's award space to Tokyo in April.",
+    "software-planner": "Elephant here. The spec is ready, and I've split it into four build tasks for your review.",
+    "topic-researcher": "Ted here. I found twelve sources on solid-state batteries and flagged three as primary research.",
+    "wiki-gardener": "Good morning, it's William. Two raw notes are waiting in the inbox, and three duplicates are in the lint queue."
+  }
+}

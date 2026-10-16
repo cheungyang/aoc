@@ -1,0 +1,141 @@
+[
+  {
+    "id": "lights-status",
+    "room": "home-automation",
+    "utterance": "Are any lights on downstairs right now?",
+    "expect": {
+      "agent": "home-steward",
+      "tools_any": ["home_assistant"],
+      "reply_matches": ["light"],
+      "spoken_excludes": ["Butler:"],
+      "max_model_calls": 3
+    }
+  },
+  {
+    "id": "thermostat-status",
+    "room": "home-automation",
+    "utterance": "What's the thermostat set to?",
+    "expect": {
+      "agent": "home-steward",
+      "tools_any": ["home_assistant"],
+      "reply_matches": ["\\d"],
+      "max_model_calls": 3
+    }
+  },
+  {
+    "id": "lights-off",
+    "room": "home-automation",
+    "utterance": "Turn off the kitchen lights.",
+    "mutates": true,
+    "expect": {
+      "agent": "home-steward",
+      "tools_all": ["home_assistant"],
+      "reply_matches": ["off"],
+      "max_model_calls": 3
+    }
+  },
+  {
+    "id": "today-plan",
+    "room": "day-planning",
+    "utterance": "What's on my plate today?",
+    "expect": {
+      "agent": "day-planner",
+      "reply_excludes": ["I can't access", "I don't have access"],
+      "spoken_excludes": ["Daisy:"],
+      "max_model_calls": 6
+    }
+  },
+  {
+    "id": "chores-due",
+    "room": "day-planning",
+    "utterance": "Which recurring chores are due this week?",
+    "expect": {
+      "agent": "day-planner",
+      "tools_any": ["task_query"],
+      "tools_none": ["load_skill"],
+      "max_model_calls": 4
+    }
+  },
+  {
+    "id": "dinner-idea",
+    "room": "meal-planning",
+    "utterance": "What should I cook for dinner tonight?",
+    "expect": {
+      "agent": "meal-planner",
+      "tools_any": ["filesystem"],
+      "tools_none": ["load_skill"],
+      "max_model_calls": 4
+    }
+  },
+  {
+    "id": "expiring-food",
+    "room": "meal-planning",
+    "utterance": "Is anything in the fridge about to expire?",
+    "expect": {
+      "agent": "meal-planner",
+      "tools_any": ["filesystem"],
+      "max_model_calls": 4
+    }
+  },
+  {
+    "id": "workout-today",
+    "room": "fitness-coach",
+    "utterance": "What's my workout today?",
+    "expect": {
+      "agent": "fitness-coach",
+      "tools_any": ["filesystem"],
+      "tools_none": ["load_skill"],
+      "max_model_calls": 6
+    }
+  },
+  {
+    "id": "market-movers",
+    "room": "market-scout",
+    "utterance": "How are my stocks doing today?",
+    "expect": {
+      "agent": "market-scout",
+      "tools_any": ["yfinance"],
+      "tools_none": ["load_skill"],
+      "max_model_calls": 4
+    }
+  },
+  {
+    "id": "weekend-idea",
+    "room": "weekend-planning",
+    "utterance": "Give me one idea for this weekend.",
+    "expect": {
+      "agent": "excursion-planner",
+      "max_model_calls": 8
+    }
+  },
+  {
+    "id": "card-credits",
+    "room": "lifestyle-perk",
+    "utterance": "Which statement credits do I still need to use this month?",
+    "expect": {
+      "agent": "reward-travel",
+      "tools_any": ["filesystem"],
+      "max_model_calls": 5
+    }
+  },
+  {
+    "id": "project-check",
+    "room": "project-planning",
+    "utterance": "Which project needs my attention most this week?",
+    "expect": {
+      "agent": "goal-setter",
+      "tools_any": ["project_query"],
+      "max_model_calls": 6
+    }
+  },
+  {
+    "id": "general-chitchat",
+    "room": "general",
+    "utterance": "Hey, what can you help me with?",
+    "expect": {
+      "reply_excludes": ["error"],
+      "tools_none": ["home_assistant"],
+      "max_model_calls": 3
+    }
+  }
+]

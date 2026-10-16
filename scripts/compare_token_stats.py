@@ -130,11 +130,128 @@ def print_comparison(cutoff_ts=DEFAULT_CUTOFF_TS):
             crate = (cached_w / in_tok * 100) if in_tok > 0 else 0
             print(f"{agent:<25} | {tot:>12,d} | {calls:>8d} | {avg_tok:>16,.0f} | {crate:>9.1f}%")
 
+
+def _percentile(values, pct):
+    """Nearest-rank percentile; None for no values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, -(-len(ordered) * pct // 100))
+    return ordered[int(rank) - 1]
+
+
+def _agent_for_table(table, agent_ids):
+    """The agent a `ctx_<session>` table belongs to (session ids start with the agent id)."""
+    raw = table[4:]
+    for agent_id in sorted(agent_ids, key=len, reverse=True):
+        if raw.startswith(agent_id.replace("-", "_") + "_"):
+            return agent_id
+    return raw.split("_")[0]
+
+
+def get_voice_stats(db_path=DB_PATH, since_ts=0):
+    """Token use of voice turns and the latency of each pipeline stage, since `since_ts`.
+
+    Token rows are tagged `surface='voice'` (including the agents a voice turn
+    delegates to); latency comes from the `turn_trace` rows VoiceManager writes
+    beside them (see core/runtime/turn_trace.py).
+    """
+    import json
+
+    stats = {
+        "calls": 0, "in_tokens": 0, "out_tokens": 0,
+        "agents": defaultdict(lambda: [0, 0, 0]),   # calls, in, out
+        "turns": 0, "outcomes": defaultdict(int), "ttfa": [], "stages": defaultdict(list), "model_calls": [],
+    }
+    if not os.path.exists(db_path):
+        print(f"Database not found at {db_path}")
+        return None
+    conn = sqlite3.connect(db_path)
+    agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
+    agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
+    try:
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
+        for t in tables:
+            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{t}")')}
+            if "surface" not in columns:
+                continue
+            agent = _agent_for_table(t, agent_ids)
+            for in_tok, out_tok in conn.execute(
+                f"""SELECT input_tokens, output_tokens FROM "{t}"
+                    WHERE entry_type = 'token' AND surface = 'voice' AND created_at >= ?""", (since_ts,)
+            ):
+                stats["calls"] += 1
+                stats["in_tokens"] += in_tok or 0
+                stats["out_tokens"] += out_tok or 0
+                row = stats["agents"][agent]
+                row[0] += 1
+                row[1] += in_tok or 0
+                row[2] += out_tok or 0
+            for (message,) in conn.execute(
+                f"""SELECT message FROM "{t}" WHERE entry_type = 'turn_trace' AND created_at >= ?""", (since_ts,)
+            ):
+                try:
+                    trace = json.loads(message)
+                except (TypeError, ValueError):
+                    continue
+                stats["turns"] += 1
+                stats["outcomes"][trace.get("outcome", "answered")] += 1
+                if trace.get("ttfa_ms") is not None:
+                    stats["ttfa"].append(trace["ttfa_ms"])
+                for stage, delta in (trace.get("deltas") or {}).items():
+                    stats["stages"][stage].append(delta)
+                stats["model_calls"].append(sum(1 for e in trace.get("events", []) if e.get("kind") == "model_call"))
+    finally:
+        conn.close()
+    return stats
+
+
+def print_voice_stats(since_ts=0, db_path=DB_PATH):
+    stats = get_voice_stats(db_path=db_path, since_ts=since_ts)
+    if stats is None:
+        return
+
+    def sec(ms):
+        return "-" if ms is None else f"{ms / 1000:.2f}s"
+
+    since = datetime.datetime.fromtimestamp(since_ts).strftime('%Y-%m-%d %H:%M') if since_ts else "the beginning"
+    print("=" * 85)
+    print(f"VOICE BASELINE since {since}")
+    print("=" * 85)
+    avg_in = stats["in_tokens"] / stats["calls"] if stats["calls"] else 0
+    print(f"{'Voice LLM calls':<30} | {stats['calls']:>12,d}")
+    print(f"{'Input / output tokens':<30} | {stats['in_tokens']:>12,d} / {stats['out_tokens']:,d}")
+    print(f"{'Avg input tokens / call':<30} | {avg_in:>12,.0f}")
+    print(f"{'Voice turns traced':<30} | {stats['turns']:>12,d}   {dict(stats['outcomes'])}")
+    if stats["model_calls"]:
+        print(f"{'Model calls / turn p50, p90':<30} | {_percentile(stats['model_calls'], 50):>12} , {_percentile(stats['model_calls'], 90)}")
+    print(f"{'Time to first audio p50, p90':<30} | {sec(_percentile(stats['ttfa'], 50)):>12} , {sec(_percentile(stats['ttfa'], 90))}")
+    if stats["stages"]:
+        print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'n':>5}")
+        print("-" * 60)
+        from core.runtime.turn_trace import STAGES
+        for stage in STAGES:
+            values = stats["stages"].get(stage)
+            if values:
+                print(f"{stage:<30} | {sec(_percentile(values, 50)):>8} | {sec(_percentile(values, 90)):>8} | {len(values):>5}")
+    if stats["agents"]:
+        print(f"\n{'Agent (voice)':<25} | {'Calls':>8} | {'In tokens':>12} | {'Out tokens':>12}")
+        print("-" * 65)
+        for agent, (calls, in_tok, out_tok) in sorted(stats["agents"].items(), key=lambda x: x[1][1], reverse=True):
+            print(f"{agent:<25} | {calls:>8d} | {in_tok:>12,d} | {out_tok:>12,d}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare historical vs current token usage and latency.")
     parser.add_argument("--cutoff", type=int, default=DEFAULT_CUTOFF_TS, help="Unix timestamp dividing historical from current.")
     parser.add_argument("--archive-all", action="store_true", help="Archive all active sessions now so all future runs start in fresh tables.")
+    parser.add_argument("--voice", action="store_true", help="Report the voice baseline: voice token use and per-stage latency from turn traces.")
+    parser.add_argument("--since", type=int, default=0, help="With --voice: only rows after this Unix timestamp.")
     args = parser.parse_args()
+
+    if args.voice:
+        print_voice_stats(since_ts=args.since)
+        sys.exit(0)
 
     if args.archive_all:
         from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
