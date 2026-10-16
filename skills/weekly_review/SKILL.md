@@ -18,7 +18,7 @@ This skill guides the agent to synthesize the past 7 days of daily journals and 
 
 ### Phase 2: Synthesize Wins & HUMAN HOLD POINT
 1. Based on the daily journals and git history, compile a draft list of "Wins of the week".
-2. **STOP INSTRUCTION**: Halt execution. Present the drafted wins to the user using the `<poll>` or text interactio=n. Ask the user: "What other wins should be included?"
+2. **STOP INSTRUCTION**: Halt execution. Present the drafted wins to the user using the `<poll>` or text interaction. Ask the user: "What other wins should be included?"
 3. **DO NOT PROCEED** until the user reviews, provides input, and gives explicit approval for the final list of wins.
 
 ### Phase 3: Project Forward & HUMAN HOLD POINT
@@ -29,7 +29,7 @@ This skill guides the agent to synthesize the past 7 days of daily journals and 
 
 ### Phase 4: Write Weekly Journal (Template Resolution)
 1. Determine the ISO week number for the upcoming week (`YYYY-Www`).
-2. Use the `filesystem` tool to `read` the template at `pkm/templates/"Weekly Review".md` (or equivalent).
+2. Use the `filesystem` tool to `read` the template at `pkm/templates/Weekly Review.md` (or equivalent).
 3. **Template Resolution**: Parse the template and replace ALL Obsidian Templater syntax (`<% tp... %>`) with the correct static text values (dates, titles).
 4. Append the finalized "Wins" and "Next week's focus" to the resolved template text.
 5. Use the `filesystem` tool to `write` the fully resolved text to `pkm/vault/journals/weekly/YYYY-Www.md`.
@@ -49,7 +49,7 @@ Finalize the execution by outputting the strict XML structure below to ensure pe
   <learnings>[Observations about weekly productivity trends and the user's feedback during the hold points]</learnings>
 </weekly_review_response>
 ```
-**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
+**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
 - `git`: Required to `log` the `pkm` repository to review commit history.

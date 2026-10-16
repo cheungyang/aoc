@@ -54,4 +54,5 @@ Always produce this triage table (Triggered first, then Error, then Stable):
 - No technical chart analysis (indicators, patterns, support/resistance).
 - No buy/sell recommendations or trade execution.
 - Use public data only (`yfinance`, `web_search`).
+- Minimize output: only significant anomalies get commentary beyond the triage table.
 - Treat prices as possibly delayed. Mention `as_of_date` when it isn't today.

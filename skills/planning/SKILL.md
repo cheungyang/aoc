@@ -58,7 +58,7 @@ Use this skill when a task is complex enough that it requires multiple tool call
   <learnings>[Execution insights on what steps were most efficient, what failed, or how to better modularize similar tasks in the future]</learnings>
 </planning_response>
 ```
-**Memory Trigger**: Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
+**Memory Trigger**: Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
 
 ## Required Tools
 - None. This skill relies entirely on reasoning and conversational generation. The execution of the planned tasks will rely on the native tools granted to the agent in their `agent.json`.

@@ -20,7 +20,7 @@ task, or setting up a recurring automated action for an agent.
 ### 1. Read Existing Configuration
 - Use the `filesystem` tool to `read` the target agent's `agents/<agent_id>/agent.json`.
 - Locate the `schedules` array. If it doesn't exist, prepare to initialize it.
-- Change only the `schedules` array. Never touch other keys.
+- Change only the `schedules` array. Never touch other keys: copy them (`skills`, `thinking`, `voice`, ...) exactly as read, since an `agent.json` that fails validation is not loaded at all.
 
 ### 2. Choose the Kind
 
@@ -34,6 +34,7 @@ task, or setting up a recurring automated action for an agent.
   "cron": "<standard_cron_pattern>",
   "precondition": { "type": "<see table>", "...": "..." },
   "session_policy": "stateless",
+  "thinking_level": "<optional: minimal | low | medium | high>",
   "prompt": ["<instruction>"]
 }
 ```
@@ -42,6 +43,12 @@ task, or setting up a recurring automated action for an agent.
   or `persistent` (the scheduled session keeps its history, e.g. an ongoing
   coaching thread). Default to `stateless` unless the task genuinely builds on
   the previous run's conversation.
+- `thinking_level` (optional): `minimal` | `low` | `medium` | `high`. Omit it
+  and the run uses the agent's scheduled level (`high`, unless the agent's
+  `thinking` block overrides `scheduled`). Set a lower level for cheap,
+  frequent checks, such as a nudge that only relays what it finds; leave
+  synthesis-heavy runs (weekly reviews, research) at the default. PRO models
+  have no `minimal`; it is raised to `low`.
 - Do **not** write "if empty, terminate silently" in the prompt. That is what
   the precondition is for; by the time the prompt runs, there is work.
 
@@ -63,7 +70,7 @@ task, or setting up a recurring automated action for an agent.
   `if __name__ == "__main__":`. The scheduler checks this by parsing the file
   and rejects scripts that don't comply.
 - The script's stdout is posted to the channel; empty stdout posts nothing.
-- `session_policy` is not allowed on script schedules.
+- `session_policy` and `thinking_level` are not allowed on script schedules.
 
 ### 3. Pick the Precondition (prompt schedules)
 

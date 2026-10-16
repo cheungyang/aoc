@@ -4,7 +4,7 @@ description: Analyzes project metadata and tasks, connects knowledge via wiki_qu
 ---
 
 ## Overview
-This skill acts as the agent's internal preparation pipeline for project coaching. It pulls structured metadata and tasks from the DB, checks the wiki for related concepts, and writes an internal "Coaching Dossier" for the project. This dossier serves as the agent's memory and strategy guide for proactive coaching sessions.
+Your preparation pipeline for project coaching: pull the project's metadata and tasks from the DB, check the wiki for related concepts, and keep an internal "Coaching Dossier" that serves as your memory and strategy guide for proactive coaching sessions.
 
 ## Boundaries & Guardrails
 - **Zero Filesystem Discovery:** You MUST NOT use `filesystem` search to find tasks or project states. Rely purely on the JSON returned by `task_query` and `project_query`.
@@ -20,7 +20,7 @@ This skill acts as the agent's internal preparation pipeline for project coachin
 
 ### Phase 2: Contextualization & Velocity
 4. Analyze the returned metadata and tasks. Identify key Entities and Concepts critical to the project's success.
-5. Trigger the `wiki_query` skill to ask: *"What do we already know about [Entity/Concept] in relation to this project domain?"* to ground your coaching in the user's existing knowledge graph.
+5. Follow the `wiki_query` skill to ask: *"What do we already know about [Entity/Concept] in relation to this project domain?"* to ground your coaching in the user's existing knowledge graph.
 6. Evaluate task velocity by comparing completed vs. uncompleted tasks from your DB pull to identify bottlenecks.
 
 ### Phase 3: The Coaching Dossier

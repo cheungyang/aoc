@@ -51,7 +51,7 @@ Read the output of the `browser` tool and finalize the execution using the stric
 ```
 **User Notification & Memory Trigger**: 
 - If `handoff_required` is True, explicitly notify the user to take manual control.
-- Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this browsing session.
+- Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this browsing session.
 
 ## Required Tools
 - `browser`: Required to connect to and control the user's active Chrome session via port 9222.

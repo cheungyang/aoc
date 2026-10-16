@@ -3,19 +3,20 @@ name: recommend_meals
 description: Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.
 ---
 ## Overview
-This skill generates 3 dinner suggestions by analyzing `pkm/wiki/kitchen/INVENTORY.md`, past suggestions in `pkm/wiki/kitchen/MEAL_LOGS.md`, and the user's learned palate from your memory (the `food` topic and your feedback, already in your system prompt).
+This skill generates 3 dinner suggestions by analyzing `pkm/wallet/kitchen/INVENTORY.md`, past meals and suggestions in `pkm/wallet/kitchen/MEAL_LOGS.md`, and the user's learned palate from your memory (the `food` topic and your feedback, already in your system prompt).
 
 ## Workflow
 
 ### 1. Read State
-- Read `pkm/wiki/kitchen/INVENTORY.md` to see what needs to be used immediately.
-- Read `pkm/wiki/kitchen/MEAL_LOGS.md` to avoid repeating recent meals.
+In one `filesystem` call:
+- Read `pkm/wallet/kitchen/INVENTORY.md` to see what needs to be used immediately.
+- Read the end of `pkm/wallet/kitchen/MEAL_LOGS.md` with `"tail": 100` (about two weeks; newest entries are at the bottom) to avoid repeating recent meals.
 - Apply the taste preferences and time constraints already in your system prompt (Profile, shared topics, feedback); don't re-read memory files.
 
 ### 2. Generate 3 Suggestions
 Develop 3 distinct meal options prioritizing items nearing expiration:
 - **Variety**: Ensure they differ in flavor profile or cooking method.
-- **Flexibility**: If a minor ingredient is missing from inventory, suggest the meal anyway. If a core ingredient is missing, ensure it's a dish that can easily substitute it or relies mostly on what's available.
+- **Flexibility**: If a minor ingredient is missing from inventory, suggest the meal anyway. If a core ingredient is missing, ensure it's a dish that can easily substitute it or relies mostly on what's available. A missing ingredient rules a dish out only when the user says it's a blocker.
 - **Health & Ease**: Focus on healthy, Asian-leaning dishes (unless they request otherwise) that are relatively easy to prepare after a workday.
 
 ### 3. Output Requirements
@@ -24,7 +25,7 @@ Present the 3 options to the user.
 - **Format**: Keep instructions clear and actionable. Do not provide English translations for the recipes, though introductory/transitional text can be in English.
 
 ### 4. Log the Suggestions
-- Write the suggested meals (with date) to `pkm/wiki/kitchen/MEAL_LOGS.md` so the system knows what was proposed today.
+- `append` the suggested meals (with date) to `pkm/wallet/kitchen/MEAL_LOGS.md` so the system knows what was proposed today.
 
 ## Required Tools
-- `filesystem`: Required to read inventory/logs and append suggestions to `pkm/wiki/kitchen/MEAL_LOGS.md`, and read `agents/meal-planner/` for context.
+- `filesystem`: Required to read inventory/logs and append suggestions to `pkm/wallet/kitchen/MEAL_LOGS.md`.

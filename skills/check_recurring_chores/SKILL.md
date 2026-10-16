@@ -3,38 +3,25 @@ name: check_recurring_chores
 description: Analyzes pending recurring chores against historical completion patterns to determine if the user is falling behind their usual behavioral cadence.
 ---
 ## Overview
-This skill queries uncompleted recurring chores and compares them against the user's historical completion dates for those exact tasks. Instead of relying purely on a hard deadline, it establishes a "usual completion window" based on the user's past behavior.
+Flags pending recurring chores by the user's usual completion window, learned from past completions of the same chore, rather than by the hard deadline alone.
 
 ## Workflow
 
-### Phase 1: Fetch Pending Recurring Tasks
-- Use the `task_query` tool (`action="sql"`) to retrieve pending recurring tasks that have a due date:
-  `SELECT raw_title, due_date FROM tasks WHERE status = 'todo' AND raw_title LIKE '%🔁%' AND due_date IS NOT NULL;`
+### Phase 1: Fetch Pending Tasks and History
+Make both `task_query` calls (`action="sql"`) in the same step. Each query's LIMIT matches its `limit` argument; if the tool still reports rows not shown, raise both.
+- Pending recurring tasks that have a due date, with `limit=50`:
+  `SELECT title, raw_title, due_date FROM tasks WHERE status = 'todo' AND raw_title LIKE '%🔁%' AND due_date IS NOT NULL ORDER BY due_date LIMIT 50;`
+- Past completions of recurring tasks, newest first, with `limit=100`:
+  `SELECT title, completed_date, due_date FROM tasks WHERE status = 'completed' AND raw_title LIKE '%🔁%' AND completed_date IS NOT NULL ORDER BY completed_date DESC LIMIT 100;`
 
-### Phase 2: Fetch Historical Data
-- Use the `task_query` tool (`action="sql"`) to fetch past completion records for recurring tasks:
-  `SELECT raw_title, completed_date, due_date FROM tasks WHERE status = 'completed' AND raw_title LIKE '%🔁%' AND completed_date IS NOT NULL;`
+### Phase 2: Behavioral Analysis (Internal Reasoning)
+For each pending task:
+1. Find its matching historical records.
+2. Calculate the "Delta": how many days *before* or *after* the `due_date` the user usually completed it.
+3. Establish the "Usual Completion Window", e.g. completed between 17 and 52 days before the due date.
+4. Compare today's date with that window and the task's `due_date`:
+   - **Signal Trigger**: today is *inside* the window, or *past* it but before the hard deadline: flag it for a reminder.
+   - **Silent Trigger**: today is *before* the window: ignore the task (do not remind the user yet).
 
-### Phase 3: Behavioral Analysis (Internal Reasoning)
-For each pending task identified in Phase 1:
-1. Find the matching historical records from Phase 2.
-2. Calculate the historical "Delta": How many days *before* or *after* the `due_date` did the user usually complete this task?
-3. Establish the "Usual Completion Window". For example, if historically completed between 17 and 52 days before the due date, that is the window.
-4. Compare today's date against that window and the pending task's `due_date`.
-   - **Signal Trigger**: If today's date is *inside* the usual completion window, or *past* the usual completion window (but before the hard deadline), flag it for a reminder. 
-   - **Silent Trigger**: If today's date is *before* the usual completion window, ignore the task (do not remind the user yet).
-
-### Phase 4: Output (IPC Format)
-Output the flagged chores in the strict XML format below. 
-```xml
-<recurring_chores_response>
-  <flagged_chores>
-    - [Task Name] (Due: YYYY-MM-DD) - Context: You usually complete this by [Date/Window].
-  </flagged_chores>
-  <silent_chores_count>[Number of chores ignored because it is too early]</silent_chores_count>
-</recurring_chores_response>
-```
-If no chores are flagged, output `<flagged_chores>None</flagged_chores>`.
-
-## Required Tools
-- `task_query`: Required to execute the SQL queries against the tasks database.
+### Phase 3: Output
+List each flagged chore as `- [Task Name] (Due: YYYY-MM-DD) - Context: You usually complete this by [Date/Window].` (or `None`), plus how many chores stayed silent because it is too early. When another agent asked for this check, wrap it in the strict IPC format: `<recurring_chores_response><flagged_chores>...</flagged_chores><silent_chores_count>N</silent_chores_count></recurring_chores_response>`.

@@ -141,7 +141,7 @@ Generate a strictly formatted XML response detailing the ingestion process. This
     <learnings>[Execution insights, user preference learnings gathered during discussion, edge-cases]</learnings>
   </wiki_ingest_response>
   ```
-- **Memory Trigger:** Immediately after outputting the XML, use the `memory` skill to record the contents of the `<learnings>` tag so the system learns from this execution.
+- **Memory Trigger:** Immediately after outputting the XML, append a `<system_memory_log>` block recording the contents of the `<learnings>` tag so the system learns from this execution.
 - Ask the user: *"Ingestion complete. Would you like to process another article from your backlog?"* Repeat Step 1 if yes.
 
 ## Required Tools

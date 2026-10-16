@@ -41,7 +41,7 @@ Pick the first unresolved item in the `review_queue` and evaluate its `type`:
 - **Hold Point:** Ask the user if they would like to proceed to the next item in the queue, or stop for now. If they choose to continue, repeat Step 2.
 
 ### 4. Logging & Memory
-- If the user decides to stop, or the queue is fully cleared, use the `memory` skill to record the session. 
+- If the user decides to stop, or the queue is fully cleared, append a `<system_memory_log>` block recording the session.
 - *Example Memory:* `[MEMORY] Task: Wiki Lint Session. Status: Success. Decisions: Merged 2 duplicate concepts, deleted 1 stale stub.`
 
 ## Required Tools

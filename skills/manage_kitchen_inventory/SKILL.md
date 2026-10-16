@@ -26,7 +26,7 @@ This skill reads and updates the `INVENTORY.md` and `STAPLES.md` files in `pkm/w
 - **Action**: Smartly deduce the core ingredients used for that dish without making the user list everything out.
 - **Deduction**: Decrease the portions of those deduced ingredients by 1 meal portion (since 1 meal covers the family). 
 - **Removal**: If an item's portion count hits 0 or below, remove it entirely from the table.
-- **Update**: Write the updated table back to `pkm/wallet/kitchen/INVENTORY.md` and log the cooked meal in `pkm/wallet/kitchen/MEAL_LOGS.md`.
+- **Update**: In one `filesystem` call, `overwrite` `pkm/wallet/kitchen/INVENTORY.md` with the updated table and `append` the cooked meal to `pkm/wallet/kitchen/MEAL_LOGS.md` (newest entries go at the bottom).
 
 ## Boundaries
 - All data written to the kitchen files MUST be in Traditional Chinese.
