@@ -23,9 +23,11 @@ from core.util import format_tool_response
 from core.util.config import Config
 from scripts import dream_standup as ds
 from scripts.dream_standup import (
+    DREAM_TRIGGER,
     build_compaction_prompt,
     build_prompt,
     dream,
+    dream_rules,
     quiet_stdout,
     render,
     render_row,
@@ -140,13 +142,31 @@ class TestPrompt(unittest.TestCase):
 
     def test_inlines_the_input_and_the_contract(self):
         prompt = build_prompt(dream_ops.DreamInput(xml="<dream_input>X</dream_input>", ids={}))
-        self.assertTrue(prompt.startswith("Run your dream skill."))
+        self.assertTrue(prompt.startswith(DREAM_TRIGGER))
         self.assertIn("<dream_input>X</dream_input>", prompt)
         self.assertIn("Do not use any tools", prompt)
         self.assertIn("<system_memory_log>", prompt)
         self.assertIn(dream_ops.RESPONSE_FORMAT, prompt)
         self.assertNotIn("pkm/", prompt)
         self.assertNotIn("memory_logs/", prompt)
+
+    def test_inlines_the_skill_rules_instead_of_asking_for_the_skill(self):
+        """The agent used to be told to run its dream skill, which meant a
+        load_skill round trip in a prompt that also said not to use tools."""
+        prompt = build_prompt(dream_ops.DreamInput(xml="<dream_input/>", ids={}))
+        self.assertIn(f"<dream_rules>\n{dream_rules()}\n</dream_rules>", prompt)
+        self.assertIn("Refer to Entries by Id", prompt)
+        self.assertIn("Extract & Decide", prompt)
+        self.assertNotIn("dream skill", prompt)
+        # Core only: the Reference example is not repeated in every dream.
+        self.assertNotIn("Parents visiting until early December", prompt)
+
+    def test_rules_require_a_core_section(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write("---\nname: dream\n---\n## Overview\nNo core here.\n")
+        self.addCleanup(os.unlink, f.name)
+        with self.assertRaises(RuntimeError):
+            dream_rules(f.name)
 
     def test_compaction_prompt(self):
         prompt = build_compaction_prompt(dream_ops.DreamInput(xml="<compaction_input/>", ids={}))
