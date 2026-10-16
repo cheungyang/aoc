@@ -1,13 +1,15 @@
 """Notation that always resolves the same way when text is spoken.
 
 XML blocks, filing hashtags and priority symbols are handled here in code
-rather than asked of the model. A prompt rule only applies on the turns that
-reach the model, and these markers turn up just as often in the prose that does
-not -- so every path (the verbalizer, the simple-structure renderer and the
-stream's prose branch) runs text through these first.
+rather than asked of the model: a prompt rule is followed most of the time, and
+a stray "#a/read" read aloud is "hash a slash read". Everything bound for the
+synthesizer -- the agent's <speech> and the missing-speech fallback -- goes
+through `speakable`.
 """
 import re
-from typing import List, Optional
+from typing import List
+
+from core.voice.engines.tts_engine import TextSanitizer
 
 
 def strip_completed_xml(text: str) -> str:
@@ -24,33 +26,12 @@ def strip_completed_xml(text: str) -> str:
     return cleaned
 
 
-def find_unclosed_xml_start(text: str) -> Optional[int]:
-    """Finds the starting index of the earliest in-flight or unclosed XML tag."""
-    earliest = None
-    tag_matches = list(re.finditer(r"<([a-zA-Z][a-zA-Z0-9_:-]*)(?:\s+[^>]*)?>", text))
-    for tm in tag_matches:
-        tag_name = tm.group(1)
-        close_tag = f"</{tag_name}>"
-        if not re.search(re.escape(close_tag), text[tm.end():], flags=re.IGNORECASE):
-            if earliest is None or tm.start() < earliest:
-                earliest = tm.start()
-                break
-
-    m_partial = re.search(r"<(?=[a-zA-Z/?!]|(?:\s*$))[^>]*$", text)
-    if m_partial:
-        if earliest is None or m_partial.start() < earliest:
-            earliest = m_partial.start()
-
-    return earliest
-
-
 def strip_xml(text: str) -> str:
     """Strips all XML elements and their contents from text before synthesis.
 
     Agent responses can include internal XML blocks (such as `<memory>...</memory>`,
     `<vote>...</vote>`, `<poll>...</poll>`, etc.) meant for state persistence or
-    interactive UI components. These should never be spoken or sent to the
-    speech restructuring model.
+    interactive UI components. These should never be spoken.
     """
     if not text:
         return ""
@@ -95,15 +76,11 @@ def strip_hashtags(text: str) -> str:
     """Removes filing tags such as `#a/read` from text bound for speech.
 
     Tags are notation for the eye. Read aloud, "#a/read" becomes "hash a
-    slash read" in the middle of a sentence, and asking the model to drop
-    them only works on the turns that reach the model -- plain prose takes
-    the fast path. Doing it here covers every path, the way `strip_xml`
-    does.
+    slash read" in the middle of a sentence. Doing it here covers every
+    path, the way `strip_xml` does.
 
-    Line structure is preserved: `has_structure` reads line beginnings, so
-    collapsing newlines here would hide a list from the detector. A line
-    left with no words after its tags are removed is dropped entirely,
-    since a blank line is a block boundary downstream.
+    Line structure is preserved. A line left with no words after its tags
+    are removed is dropped entirely, rather than read as an empty pause.
     """
     if not text:
         return ""
@@ -150,3 +127,8 @@ def speak_priority_symbols(text: str) -> str:
     # The symbol was usually preceded by a space; an inserted comma must not
     # be left floating after it.
     return re.sub(r"[ \t]+,", ",", spoken)
+
+
+def speakable(text: str) -> str:
+    """`text` as the synthesizer should get it: notation in words, markup gone."""
+    return TextSanitizer.sanitize(speak_priority_symbols(strip_hashtags(strip_xml(text))))

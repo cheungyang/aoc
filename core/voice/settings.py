@@ -13,7 +13,7 @@ their own (Concierge, Rio, ...), not an omission.
 Everything that is the same for all agents belongs here rather than in any
 agent.json, so it cannot drift between agents. Operational knobs for the voice
 pipeline live here too: speech-to-text and turn taking below; the TTS provider
-and speech mode join them as those phases land.
+joins them as that phase lands.
 """
 import os
 import re

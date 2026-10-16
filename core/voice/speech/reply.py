@@ -1,30 +1,42 @@
 """Everything the agent says on a voice turn.
 
-The cue that it heard you, the reply -- streamed to the text channel and to
-the speaker as two lanes -- floor-holding bridge phrases while tools run, and
-fixed lines (room switching). Every method that would make a sound takes an
-`is_current` check, so a turn that was interrupted or superseded goes quiet.
+The cue that it heard you, then the reply, streamed as two lanes. The agent
+writes a <speech> block for the ear before its normal reply (`<voice_mode>`);
+the router (speech_router.py) sends the block to the speaker and everything
+else to the text channel. Before a tool call the agent says what it's
+checking the same way, so a tool wait is never silent. A reply without the
+block gets a deterministic fallback and a note under it (missing_speech.py).
+Fixed lines (room switching) go through `say`. Every method that would make a
+sound takes an `is_current` check, so a turn that was interrupted or
+superseded goes quiet.
 """
 import asyncio
 import os
-from typing import Callable
+from typing import Callable, Optional
 
 import discord
 
-from core.util.models import DEFAULT_VERBALIZER_MODEL
 from core.voice.engines.tts_engine import TTSEngine
+from . import missing_speech
 from .audio_queue import FFMPEG_EXE
 from .blurp_generator import BlurpGenerator
-from .bridge_manager import BridgeManager
-from .sentence_chunker import SentenceChunker
-from .verbalizer import Verbalizer
+from .speech_router import SpeechTextRouter
 from .voice_stream import VoiceStream
 
 # How long a finished turn's trace waits for its first audio to start playing
-# before it is recorded anyway (audio can queue behind a bridge phrase).
+# before it is recorded anyway (audio can queue behind earlier speech).
 FIRST_AUDIO_WAIT_S = 15.0
 
+# Said when the agent's run fails: the error itself goes to the channel only.
+ERROR_LINE = "Sorry, something went wrong. The details are in the channel."
+
 IsCurrent = Callable[[], bool]
+
+
+def speech_of(response) -> Optional[str]:
+    """The reply's <speech> text (AgentResponse.speech), or None."""
+    speech = getattr(response, "speech", None)
+    return speech if isinstance(speech, str) and speech.strip() else None
 
 
 class TurnSpeech:
@@ -32,7 +44,6 @@ class TurnSpeech:
 
     def __init__(self, trace):
         self.trace = trace
-        self.emitted = False        # anything spoken (or a bridge played) this turn
         self.queued_audio = False   # answer audio handed to the audio queue
         self.heard = False          # the first answer audio started playing
         self._finish = None
@@ -82,15 +93,6 @@ class ReplyStreamer:
             default_voice=config.get("tts_voice", "en-US-JennyNeural"),
             default_speed=float(config.get("tts_speed", 1.0)),
         )
-        # Rewrites structured agent output for the ear. Disabling it falls the
-        # pipeline back to TextSanitizer, which is still speakable -- just
-        # flatter -- so this is a safe switch to flip if latency matters more
-        # than phrasing on a given agent.
-        self.verbalizer = Verbalizer(
-            model_name=config.get("verbalizer_model", DEFAULT_VERBALIZER_MODEL),
-            enabled=config.get("verbalize", True),
-        )
-        self.bridge_manager = BridgeManager()
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -122,15 +124,17 @@ class ReplyStreamer:
                      is_current: IsCurrent, on_final: Callable[[str], None]) -> bool:
         """Streams the agent and fans its events out to a text lane and a speech lane.
 
-        Speech and text diverge here, deliberately. The synthesiser gets text
-        restructured for the ear; the channel gets what the agent actually
-        wrote, markdown and all. They run as two concurrent lanes so neither
-        waits on the other: a slow Discord edit no longer delays the next
-        sentence's synthesis, and synthesis no longer delays reading the
-        agent's stream. This loop only routes events and never blocks on I/O.
+        Speech and text diverge here, deliberately. The speaker gets the
+        <speech> block, which the agent wrote for the ear; the channel gets
+        everything else -- what the agent wrote for the eye, markdown and all.
+        They run as two concurrent lanes so neither waits on the other: a slow
+        Discord edit doesn't delay the next sentence's synthesis, and
+        synthesis doesn't delay reading the agent's stream. This loop only
+        routes events and never blocks on I/O.
 
         Returns whether the agent answered: False if a newer turn took over
-        first, leaving the words unanswered. `on_final` gets the reply's text.
+        first, leaving the words unanswered. `on_final` gets what the user
+        hears: the reply's speech, or its text when it came without any.
         """
         from core.channel.discord.stream_buffer import DiscordStreamBuffer
 
@@ -139,22 +143,29 @@ class ReplyStreamer:
         # still lands above the reply.
         mirror_task = None
         if self.config.get("post_transcript_to_chat", True) and channel:
-            mirror_task = asyncio.create_task(self._post_transcript(channel, author, transcript))
+            mirror_task = asyncio.create_task(self._post(channel, f"🎤 **{author} (Voice):** {transcript}"))
 
         trace = speech.trace
-        voice_stream = VoiceStream(verbalizer=self.verbalizer, session=session)
+        router = SpeechTextRouter()
         text_buffer = DiscordStreamBuffer(channel, edit_interval=1.5)
         text_lane: asyncio.Queue = asyncio.Queue()
         speech_lane: asyncio.Queue = asyncio.Queue()
 
+        def route(said: str, shown: str):
+            if shown:
+                text_lane.put_nowait(("token", shown))
+            if said:
+                speech_lane.put_nowait(("speech", said))
+
         # Ensure audio queue is started
         self.audio.start()
-        text_task = asyncio.create_task(self._run_text_lane(text_buffer, text_lane, mirror_task))
-        speech_task = asyncio.create_task(self._run_speech_lane(voice_stream, speech_lane, session, speech, is_current))
-        final_text = ""
+        text_task = asyncio.create_task(self._run_text_lane(channel, text_buffer, text_lane, mirror_task))
+        speech_task = asyncio.create_task(self._run_speech_lane(speech_lane, speech, is_current))
+        speaker = self.agent_id  # whose reply is heard: a delegate's, once it streams
+        replied, response, final_text, failed = False, None, "", False
         try:
             trace.mark("agent_start")
-            # Stream agent execution events (tokens, tool bridge phrases, and final audio)
+            # Stream agent execution events (tokens, tool calls, and the final response)
             async for event in agent.execute_stream(transcript, session=session):
                 if not is_current():
                     self._log("Discarding streaming event due to newer voice turn.")
@@ -163,31 +174,45 @@ class ReplyStreamer:
                 event_type = event.get("type")
                 if event_type == "tool_start":
                     trace.event("tool_start", tool=event.get("tool_name", ""))
-                    speech_lane.put_nowait(("bridge", event))
 
                 elif event_type == "tool_end":
                     trace.event("tool_end", tool=event.get("tool_name", ""))
 
                 elif event_type == "token":
-                    token_delta = event.get("content", "")
-                    if not token_delta:
+                    token = event.get("content", "")
+                    if not token:
                         continue
-                    text_lane.put_nowait(("token", token_delta))
-                    # The "🌼 Daisy: " attribution of a delegated reply is for
-                    # the channel; read aloud it is noise before every answer.
-                    if not event.get("is_header"):
-                        trace.mark("first_token")
-                        speech_lane.put_nowait(("token", token_delta))
+                    if event.get("is_header") or event.get("is_error"):
+                        # The "🌼 Daisy: " attribution of a delegated reply, and a
+                        # delegate's error, are for the channel: read aloud, one is
+                        # noise before every answer and the other a stack of jargon.
+                        text_lane.put_nowait(("token", token))
+                        failed = failed or bool(event.get("is_error"))
+                        continue
+                    trace.mark("first_token")
+                    speaker = event.get("agent_id") or speaker
+                    route(*router.feed(token))
 
                 elif event_type == "final_response":
+                    route(*router.flush())
+                    replied = True
+                    response = event.get("response")
                     final_text = event.get("text", "") or ""
-                    on_final(final_text)
+                    on_final(speech_of(response) or final_text)
                     text_lane.put_nowait(("final", event))
 
                 elif event_type == "error":
+                    failed = True
                     self._log(f"Agent stream error: {event.get('content')}")
 
-            speech_lane.put_nowait(("end", final_text))
+            route(*router.flush())
+            # Only a model's reply is held to <speech>: not a failed run, nor a
+            # turn that never reached a model (a system command).
+            closing = ERROR_LINE if failed else ""
+            if replied and not failed and self._missing_speech(speaker, response, trace):
+                closing = missing_speech.fallback_speech(final_text)
+                text_lane.put_nowait(("note", missing_speech.alert(speaker)))
+            speech_lane.put_nowait(("end", closing))
             text_lane.put_nowait(None)
             await asyncio.gather(text_task, speech_task)
             return True
@@ -196,14 +221,24 @@ class ReplyStreamer:
                 if not task.done():
                     task.cancel()
 
-    async def _post_transcript(self, channel, author: str, transcript: str):
-        try:
-            await channel.send(f"🎤 **{author} (Voice):** {transcript}")
-        except Exception as te:
-            self._log(f"Error posting transcript: {te}")
+    def _missing_speech(self, speaker: str, response, trace) -> bool:
+        """Records on the trace whether the reply came with <speech>; True if it didn't."""
+        missing = speech_of(response) is None
+        trace.meta["speech"] = "missing" if missing else "ok"
+        trace.meta["speaker"] = speaker
+        if missing:
+            self._log(f"⚠️ {speaker} replied without a <speech> block; speaking the fallback.")
+        return missing
 
-    async def _run_text_lane(self, buffer, lane: asyncio.Queue, mirror_task):
-        """Writes the agent's reply to the text channel as it streams."""
+    async def _post(self, channel, text: str):
+        """Posts a line of the pipeline's own (the transcript, a note) to the channel."""
+        try:
+            await channel.send(text)
+        except Exception as e:
+            self._log(f"Error posting to the channel: {e}")
+
+    async def _run_text_lane(self, channel, buffer, lane: asyncio.Queue, mirror_task):
+        """Writes the agent's reply to the text channel as it streams, then any note under it."""
         if mirror_task is not None:
             # The transcript goes above the reply; only this lane waits for it.
             try:
@@ -222,38 +257,30 @@ class ReplyStreamer:
                     final_text=payload.get("text", "") or "",
                     response=payload.get("response")
                 )
+            elif kind == "note" and channel:
+                await self._post(channel, payload)
 
-    async def _run_speech_lane(self, voice_stream, lane: asyncio.Queue, session, speech: TurnSpeech,
-                               is_current: IsCurrent):
-        """Turns the agent's tokens into speech, in order, while the text lane runs."""
+    async def _run_speech_lane(self, lane: asyncio.Queue, speech: TurnSpeech, is_current: IsCurrent):
+        """Speaks the <speech> text sentence by sentence, while the text lane runs."""
+        voice_stream = VoiceStream()
         while True:
             kind, payload = await lane.get()
             if not is_current():
                 return
-            if kind == "token":
-                for sentence in await voice_stream.add_token(payload):
+            if kind == "speech":
+                for sentence in voice_stream.add(payload):
                     await self._speak(sentence, speech, is_current)
-            elif kind == "bridge":
-                if not speech.emitted:
-                    await self._play_bridge(payload, speech, is_current)
             elif kind == "end":
-                # Flush remaining text from the voice stream
-                for sentence in await voice_stream.flush():
+                for sentence in voice_stream.flush():
                     await self._speak(sentence, speech, is_current, label="final chunk")
-
-                # Fallback for short direct answers (e.g. "Done.") that never streamed a token
-                final_text = payload
-                if not speech.emitted and final_text:
-                    spoken = await self.verbalizer.verbalize(final_text, session=session)
-                    for sentence in SentenceChunker().split_into_sentences(spoken):
-                        await self._speak(sentence, speech, is_current, label="direct response")
+                if payload:
+                    await self._speak(payload, speech, is_current, label="closing line")
                 return
 
     async def _speak(self, sentence: str, speech: TurnSpeech, is_current: IsCurrent, label: str = "chunk"):
         """Synthesizes one chunk and queues it for playback."""
         if not is_current():
             return
-        speech.emitted = True
         speech.trace.mark("first_chunk")
         self._log(f"🔊 Synthesizing {label}: '{sentence[:60]}...'")
         tts_file = await self.tts_engine.synthesize_to_file(sentence)
@@ -262,15 +289,3 @@ class ReplyStreamer:
         if tts_file and is_current() and self.connection.is_connected():
             speech.queued_audio = True
             await self.audio.put(tts_file, auto_delete=True, on_start=speech.on_audio_start)
-
-    async def _play_bridge(self, event, speech: TurnSpeech, is_current: IsCurrent):
-        """Plays a floor-holding phrase while the first tool runs, if nothing was said yet."""
-        tool_name = event.get("tool_name", "")
-        bridge_audio = await self.bridge_manager.get_or_create_bridge_audio(
-            self.agent_id, tool_name, event.get("tool_args", {}), self.tts_engine,
-            voice=self.config.get("tts_voice"), speed=float(self.config.get("tts_speed", 1.0)),
-        )
-        if bridge_audio and is_current() and self.connection.is_connected():
-            speech.emitted = True
-            self._log(f"🌉 Dual-track bridge: Playing floor-holding audio for '{tool_name}'...")
-            await self.audio.put(bridge_audio, priority=False, auto_delete=False)

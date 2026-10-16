@@ -8,7 +8,7 @@ def get_formatting_prompt() -> str:
     return """<formatting_rules>
 If you want to present options to the user, use the optional <poll> tag after your response, formatted below.
 Option text (<text>) MUST be concise and 80 or fewer characters in length (to meet Discord button limits).
-Do not include any xml response to the user except <poll>, <images>, <videos>, and <system_memory_log> blocks.
+Do not include any xml response to the user except <poll>, <images>, <videos>, and <system_memory_log> blocks, and <speech> when <voice_mode> asks for it.
 <poll allow_multiple="{{true_or_false}}">
     <question>{{question to ask the user}}</question>
     <options>
@@ -65,6 +65,49 @@ def get_channel_prompt(channel_name: Optional[str] = None) -> str:
     if channel_name:
         return f"<current_channel_context>\nYou are currently executing in the Discord channel: #{channel_name}\n</current_channel_context>"
     return ""
+
+
+# On a turn the user will hear, appended after the channel block (see
+# `get_voice_mode_prompt`). The voice pipeline speaks the <speech> block and
+# posts everything after it to the text channel (core/voice/speech/reply.py).
+VOICE_MODE_PROMPT = """<voice_mode>
+This turn arrived by voice. The user is listening; your full reply also appears in the text channel.
+
+Begin each response with a <speech>...</speech> block, then write your normal text reply.
+
+In <speech>:
+- Answer in the first sentence.
+- Condense the wording, never the information: keep every fact, number, name, date, and item
+  from your reply. Drop formatting, repetition, and filler.
+- Speak lists in one compact pass, not as a numbered readout.
+- Leave out only things that aren't spoken information (links, IDs, file paths, code, images),
+  and say they're in the channel.
+- If it's too long to listen to comfortably (more than about 8 items), give the total, read the
+  first items, say how many remain, and ask whether to continue. Never drop items silently.
+- Say numbers, times, and units as a person would.
+- Use only English words: the voice can't pronounce other scripts. Replace anything written in another
+  script with its English name, without the original.
+- If you offer choices, ask them as a short question; the user will answer by voice.
+- Before calling tools, write a one-sentence <speech> block saying what you're checking.
+
+After </speech>, follow your usual formatting rules. The text reply stays complete.
+</voice_mode>"""
+
+
+def get_voice_mode_prompt() -> str:
+    """The <voice_mode> block, on turns the user will hear.
+
+    That is a voice-surface turn of an agent that answers the user: the room's
+    agent, or one it hands the turn to (which inherits the voice surface).
+    Internal workers -- stateless agents such as graph-worker-low -- inherit it
+    too, but what they write goes back to their caller, not to the speaker, so
+    they never get the block.
+    """
+    from core.runtime.execution_context import try_context
+    sess = try_context()
+    if sess is None or sess.is_stateless() or sess.get_surface() != "voice":
+        return ""
+    return VOICE_MODE_PROMPT
 
 
 def get_knowledge_prompt() -> str:

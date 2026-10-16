@@ -193,6 +193,50 @@ class TestAgentResponse(unittest.TestCase):
         self.assertNotIn("<images>", response.text)
         self.assertNotIn("<videos>", response.text)
 
+    # --- <speech>: what a voice turn says aloud ----------------------------
+
+    def test_no_speech_on_an_ordinary_reply(self):
+        response = AgentResponse.from_string("You have two meetings today.")
+        self.assertIsNone(response.speech)
+        self.assertEqual(response.text, "You have two meetings today.")
+
+    def test_speech_is_extracted_and_kept_out_of_the_text(self):
+        reply = (
+            "<speech>You have two meetings: standup at nine and the dentist at three.</speech>\n\n"
+            "**Today**\n- 9:00 Standup\n- 15:00 Dentist"
+        )
+        response = AgentResponse.from_string(reply)
+        self.assertEqual(response.speech, "You have two meetings: standup at nine and the dentist at three.")
+        self.assertEqual(response.text, "**Today**\n- 9:00 Standup\n- 15:00 Dentist")
+
+    def test_every_speech_block_is_kept_in_order(self):
+        # Tokens accumulated across steps: the preamble before a tool call, then the answer.
+        reply = "<speech>Checking your calendar.</speech><speech>You're free after four.</speech>You're free after 16:00."
+        response = AgentResponse.from_string(reply)
+        self.assertEqual(response.speech, "Checking your calendar. You're free after four.")
+        self.assertEqual(response.text, "You're free after 16:00.")
+
+    def test_an_unclosed_block_is_speech_and_stays_in_the_text(self):
+        response = AgentResponse.from_string("<speech>The kitchen light is on.")
+        self.assertEqual(response.speech, "The kitchen light is on.")
+        self.assertEqual(response.text, "The kitchen light is on.")
+
+    def test_a_reply_that_is_only_speech_has_empty_text(self):
+        response = AgentResponse.from_string("<speech>Done, the lights are off.</speech>")
+        self.assertEqual(response.speech, "Done, the lights are off.")
+        self.assertEqual(response.text, "")
+
+    def test_speech_beside_other_blocks(self):
+        reply = (
+            "<SPEECH>Want me to book the earlier slot?</SPEECH>Two slots are open.\n"
+            '<poll allow_multiple="false"><question>Which slot?</question><options><option>'
+            "<text>9:00</text><emoji>🌅</emoji><response>Book 9:00</response></option></options></poll>"
+        )
+        response = AgentResponse.from_string(reply)
+        self.assertEqual(response.speech, "Want me to book the earlier slot?")
+        self.assertEqual(response.text, "Two slots are open.")
+        self.assertEqual(response.poll_data["question"], "Which slot?")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -107,13 +107,15 @@ class StreamHandler:
                         if content_delta:
                             has_subagent_streamed = True
                             # `is_header` marks the "🌼 Daisy: " attribution the
-                            # delegation path prefixes to a callee's reply. The
-                            # channel shows it; speech must not read it out.
+                            # delegation path prefixes to a callee's reply, and
+                            # `is_error` a callee's failure. The channel shows
+                            # both; speech must not read them out.
                             yield {
                                 "type": EVENT_TOKEN,
                                 "content": content_delta,
                                 "agent_id": data.get("agent_id"),
                                 "is_header": bool(data.get("is_header")),
+                                "is_error": bool(data.get("is_error")),
                             }
                     elif event_name == SUBAGENT_STREAM_FINAL:
                         data = event.get("data", {})

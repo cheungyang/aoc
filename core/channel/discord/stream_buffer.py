@@ -33,7 +33,10 @@ class DiscordStreamBuffer:
         self._lock = asyncio.Lock()
         self._disabled = (channel is None)
 
-    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log")
+    # Hidden from the channel while streaming. `speech` is what a voice turn
+    # says aloud: the voice pipeline routes it away before this buffer, so it
+    # is listed as the backstop for any path that doesn't.
+    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech")
 
     @classmethod
     def _strip_partial_trailing_tag(cls, text: str) -> str:
@@ -64,8 +67,8 @@ class DiscordStreamBuffer:
     def filter_xml_for_stream(cls, text: str) -> str:
         """
         Suppresses completed and in-flight XML blocks (<poll>, <images>,
-        <videos>, <system_memory_log>) during live streaming so Discord users
-        only see natural text deltas.
+        <videos>, <system_memory_log>, <speech>) during live streaming so
+        Discord users only see natural text deltas.
         """
         if not text:
             return ""
@@ -171,6 +174,10 @@ class DiscordStreamBuffer:
             clean_text = self.filter_xml_for_stream(self.accumulated_text)
             if not clean_text and response and response.text:
                 clean_text = response.text
+            if not clean_text and response and response.speech:
+                # A voice reply that was only its <speech> block still
+                # belongs in the channel.
+                clean_text = response.speech
             if not clean_text:
                 clean_text = "Done."
 

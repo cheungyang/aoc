@@ -4,8 +4,11 @@ import pytest
 import os
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import discord
+from core.channel.response_parser import AgentResponse
 from core.voice import settings as voice_settings
 from core.voice.listening.utterance import Transcript, Utterance
+from core.voice.speech.missing_speech import alert
+from core.voice.speech.reply import ERROR_LINE
 from core.voice.voice_manager import VoiceManager
 from tests.helpers import fake_audio_source
 
@@ -50,6 +53,17 @@ async def _until(condition, timeout=2.0):
     while not condition():
         assert time.monotonic() < deadline, "timed out waiting"
         await asyncio.sleep(0.005)
+
+
+def _final(raw):
+    """The final_response event for a reply the agent wrote as `raw`, parsed as production parses it."""
+    response = AgentResponse.from_string(raw)
+    return {"type": "final_response", "text": response.text, "response": response}
+
+
+def _spoken_reply(text):
+    """A reply that follows <voice_mode>: the speech, then the text."""
+    return f"<speech>{text}</speech>{text}"
 
 
 def test_voice_manager_init(mock_bot_runner):
@@ -168,10 +182,12 @@ async def test_a_finished_utterance_runs_the_pipeline(mock_bot_runner, tmp_path)
     mock_vc.channel.guild = mock_guild
     vm.connection.voice_client = mock_vc
     
-    # Mock Agent execution
+    # Mock Agent execution: speech for the ear, then the text reply
+    raw = "<speech>You have two tasks scheduled.</speech>You have 2 tasks scheduled."
+
     async def fake_stream(*args, **kwargs):
-        yield {"type": "token", "content": "You have 2 tasks scheduled."}
-        yield {"type": "final_response", "text": "You have 2 tasks scheduled.", "response": None}
+        yield {"type": "token", "content": raw}
+        yield _final(raw)
 
     mock_agent = MagicMock()
     mock_agent.execute_stream = MagicMock(side_effect=fake_stream)
@@ -203,8 +219,9 @@ async def test_a_finished_utterance_runs_the_pipeline(mock_bot_runner, tmp_path)
         assert called_session.agent_id == "main"
         assert called_session.source == "discord"
         
-        # 3. Verify TTS synthesized and queued
-        vm.reply.tts_engine.synthesize_to_file.assert_awaited_once_with("You have 2 tasks scheduled.")
+        # 3. Verify the speech was synthesized and the text posted, each in its own lane
+        vm.reply.tts_engine.synthesize_to_file.assert_awaited_once_with("You have two tasks scheduled.")
+        mock_text_channel.send.assert_any_call("You have 2 tasks scheduled.")
 
         # 4. Answered: nothing is carried into the next turn
         assert vm.floor.unanswered() == []
@@ -312,12 +329,14 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     vm.connection.voice_client = mock_vc
     
     async def fake_stream_1(*args, **kwargs):
-        yield {"type": "token", "content": "Alva, I tried to reach Daisy..."}
-        yield {"type": "final_response", "text": "Alva, I tried to reach Daisy...", "response": None}
+        raw = _spoken_reply("Alva, I tried to reach Daisy...")
+        yield {"type": "token", "content": raw}
+        yield _final(raw)
 
     async def fake_stream_2(*args, **kwargs):
-        yield {"type": "token", "content": "Here are the available agents: Daisy, Rick, Concierge."}
-        yield {"type": "final_response", "text": "Here are the available agents: Daisy, Rick, Concierge.", "response": None}
+        raw = _spoken_reply("Here are the available agents: Daisy, Rick, Concierge.")
+        yield {"type": "token", "content": raw}
+        yield _final(raw)
 
     mock_agent = MagicMock()
     mock_agent.execute_stream = MagicMock(side_effect=[fake_stream_1(), fake_stream_2()])
@@ -365,22 +384,26 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
 
 
 # ---------------------------------------------------------------------------
-# Text and speech diverge on a voice turn
+# Dual track: the speaker gets the <speech> block, the channel gets the text
 # ---------------------------------------------------------------------------
 
+SPEECH = ("Two ideas: Point Reyes is two hours away and free, and Mount Tam is "
+          "forty-five minutes with eight dollar parking.")
 STRUCTURED_REPLY = (
     "Here is what I found for you.\n"
     "\n"
     "- **Point Reyes** - 2 hours, $0 entry\n"
     "- **Mount Tam** - 45 minutes, $8 parking\n"
 )
+SPOKEN_STRUCTURED_REPLY = f"<speech>{SPEECH}</speech>\n{STRUCTURED_REPLY}"
 
 
 QUESTION = "Where should we go this weekend?"
 
 
 def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
-    """Wires a VoiceManager up to a mocked guild, agent, and audio queue."""
+    """Wires a VoiceManager up to a mocked guild, agent, and audio queue.
+    The agent writes `reply`, streamed as one token."""
     vm = VoiceManager(mock_bot_runner)
 
     mock_vc = MagicMock()
@@ -403,7 +426,7 @@ def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
 
     async def fake_stream(*_args, **_kwargs):
         yield {"type": "token", "content": reply}
-        yield {"type": "final_response", "text": reply, "response": None}
+        yield _final(reply)
 
     agent = MagicMock()
     agent.execute_stream = MagicMock(side_effect=fake_stream)
@@ -420,99 +443,158 @@ def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
     return vm, agent, text_channel
 
 
+def _posted(text_channel):
+    """Everything the text channel showed: its sends and its edits."""
+    message = text_channel.send.return_value
+    shown = [c.args[0] for c in text_channel.send.call_args_list if c.args]
+    shown += [c.kwargs.get("content", "") for c in message.edit.call_args_list]
+    return "\n".join(shown)
+
+
+def _synthesized(vm):
+    return [c.args[0] for c in vm.reply.tts_engine.synthesize_to_file.call_args_list]
+
+
+def _sent(text_channel):
+    """The messages the text channel was sent, in order (edits not included)."""
+    return [c.args[0] for c in text_channel.send.call_args_list if c.args]
+
+
+def _notes(text_channel):
+    return [m for m in _sent(text_channel) if m.startswith("⚠️")]
+
+
+def _play_at_once(vm):
+    """Queued audio starts playing at once, so the trace records at the turn's end."""
+    async def play_now(path, priority=False, auto_delete=True, on_start=None):
+        if on_start:
+            on_start()
+
+    vm.audio_queue.put = AsyncMock(side_effect=play_now)
+
+
 @pytest.mark.asyncio
 async def test_voice_turn_keeps_markdown_intact_in_the_text_channel(mock_bot_runner, tmp_path):
     """
     A voice turn previously produced audio and nothing else: the reply existed
     only as sound, so anything with a link, a price, or a name in it was
     unrecoverable once spoken. The channel now gets what the agent wrote,
-    markdown and all, while only the synthesiser gets the rewritten version.
+    markdown and all, and never its <speech> block.
     """
-    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, STRUCTURED_REPLY)
-    vm.reply.verbalizer.verbalize = AsyncMock(
-        return_value="Point Reyes is two hours away and free. Mount Tam is forty five minutes with eight dollar parking."
-    )
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, SPOKEN_STRUCTURED_REPLY)
+    await _run_turn(vm, agent)
 
-    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
-         patch("discord.FFmpegPCMAudio"):
-        mock_loader.return_value.get_agent.return_value = agent
-        _say(vm, QUESTION)
-        await vm._current_task
-
-    posted = "\n".join(
-        call.args[0] for call in text_channel.send.call_args_list if call.args
-    )
+    posted = _posted(text_channel)
     assert "- **Point Reyes**" in posted, "markdown was flattened in the text channel"
     assert "$8 parking" in posted
+    assert "speech>" not in posted and "forty-five" not in posted
 
 
 @pytest.mark.asyncio
-async def test_voice_turn_speaks_verbalized_text_not_markdown(mock_bot_runner, tmp_path):
-    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, STRUCTURED_REPLY)
-    vm.reply.verbalizer.verbalize = AsyncMock(
-        return_value="Point Reyes is two hours away and free. Mount Tam is forty five minutes with eight dollar parking."
-    )
+async def test_voice_turn_speaks_the_speech_block_not_the_markdown(mock_bot_runner, tmp_path):
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, SPOKEN_STRUCTURED_REPLY)
+    await _run_turn(vm, agent)
 
-    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
-         patch("discord.FFmpegPCMAudio"):
-        mock_loader.return_value.get_agent.return_value = agent
-        _say(vm, QUESTION)
-        await vm._current_task
-
-    # The list block reached the verbalizer...
-    verbalized_inputs = "\n".join(c.args[0] for c in vm.reply.verbalizer.verbalize.call_args_list)
-    assert "- **Point Reyes**" in verbalized_inputs
-
-    # ...and nothing with a bullet or asterisk reached the synthesiser.
-    spoken = [c.args[0] for c in vm.reply.tts_engine.synthesize_to_file.call_args_list]
-    assert spoken, "nothing was synthesized"
-    for line in spoken:
-        assert "*" not in line, f"markdown leaked into speech: {line!r}"
-        assert not line.lstrip().startswith("-"), f"bullet leaked into speech: {line!r}"
-    assert "Point Reyes" in " ".join(spoken)
+    assert _synthesized(vm) == [SPEECH]
+    # What was heard decides whether a lone "yes" next is an answer.
+    assert vm.floor._reply == SPEECH
 
 
 @pytest.mark.asyncio
-async def test_voice_turn_prose_reply_skips_the_verbalizer(mock_bot_runner, tmp_path):
-    # The common case must not pay a model round-trip before the first word.
-    vm, agent, _channel = _voice_turn_fixture(
-        mock_bot_runner, tmp_path, "I booked the table for seven under your name."
-    )
-    vm.reply.verbalizer.verbalize = AsyncMock()
+async def test_the_preamble_is_spoken_while_the_tool_runs(mock_bot_runner, tmp_path):
+    """Bridge phrases are gone: the agent says what it's checking in the same
+    response as the tool call, so the wait isn't silent."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    synthesize = vm.reply.tts_engine.synthesize_to_file
+    answer = "<speech>You're free after four.</speech>You're free after 16:00."
 
-    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
-         patch("discord.FFmpegPCMAudio"):
-        mock_loader.return_value.get_agent.return_value = agent
-        _say(vm, QUESTION)
-        await vm._current_task
+    async def stream(*_args, **_kwargs):
+        yield {"type": "token", "content": "<speech>Checking your calendar.</speech>"}
+        yield {"type": "tool_start", "tool_name": "gog", "tool_args": {}}
+        await _until(lambda: synthesize.await_count == 1)  # heard while the tool runs
+        yield {"type": "tool_end", "tool_name": "gog", "output": "free"}
+        yield {"type": "token", "content": answer}
+        yield _final(answer)  # the final message is the answer's
 
-    vm.reply.verbalizer.verbalize.assert_not_awaited()
-    spoken = [c.args[0] for c in vm.reply.tts_engine.synthesize_to_file.call_args_list]
-    assert "I booked the table for seven under your name." in " ".join(spoken)
+    agent.execute_stream = MagicMock(side_effect=stream)
+    await _run_turn(vm, agent)
 
-
-def test_voice_manager_verbalizer_can_be_disabled_per_agent(mock_bot_runner):
-    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
-        agent = MagicMock()
-        agent.config = {"voice_config": {"verbalize": False, "verbalizer_model": "custom-model"}}
-        mock_loader.return_value.get_agent.return_value = agent
-
-        vm = VoiceManager(mock_bot_runner)
-        assert vm.reply.verbalizer.enabled is False
-        assert vm.reply.verbalizer.model_name == "custom-model"
+    assert _synthesized(vm) == ["Checking your calendar.", "You're free after four."]
+    posted = _posted(text_channel)
+    assert "You're free after 16:00." in posted and "Checking" not in posted
 
 
-def test_voice_manager_verbalizer_is_on_by_default(mock_bot_runner):
-    with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
-        agent = MagicMock()
-        agent.config = {"voice_config": {}}
-        mock_loader.return_value.get_agent.return_value = agent
+@pytest.mark.asyncio
+async def test_a_reply_without_speech_speaks_the_fallback_and_notes_it_under_the_reply(mock_bot_runner, tmp_path):
+    reply = "You have two meetings today. Standup is at nine. The dentist is at three."
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, reply)
+    _play_at_once(vm)
+    traces = []
+    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+               side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
+        await _run_turn(vm, agent)
 
-        vm = VoiceManager(mock_bot_runner)
-        assert vm.reply.verbalizer.enabled is True
+    assert _synthesized(vm) == ["You have two meetings today. The rest is in the channel."]
+    assert (traces[0].meta["speech"], traces[0].meta["speaker"]) == ("missing", "main")
+    assert reply in _posted(text_channel)
+    assert _sent(text_channel)[-1] == alert("main"), "the note goes under the reply, in the same channel"
+
+
+@pytest.mark.asyncio
+async def test_every_miss_is_noted_against_the_agent_that_replied(mock_bot_runner, tmp_path):
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+
+    async def stream(*_args, **_kwargs):
+        yield {"type": "token", "content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True}
+        yield {"type": "token", "content": "You have two meetings today.", "agent_id": "day-planner"}
+        yield _final("You have two meetings today.")
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+    await _run_turn(vm, agent)
+    await _run_turn(vm, agent)
+
+    assert _notes(text_channel) == [alert("day-planner")] * 2
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_reply_gets_no_note(mock_bot_runner, tmp_path):
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, _spoken_reply("Logged your run."))
+    for _ in range(3):
+        await _run_turn(vm, agent)
+    assert _notes(text_channel) == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_without_a_model_reply_is_not_held_to_speech(mock_bot_runner, tmp_path):
+    """A system command ("[new]") ends the stream before any model runs."""
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+
+    async def handled_by_a_command(*_args, **_kwargs):
+        return
+        yield  # an async generator that yields nothing
+
+    agent.execute_stream = MagicMock(side_effect=handled_by_a_command)
+    await _run_turn(vm, agent)
+    assert _notes(_channel) == []
+    assert _synthesized(vm) == []
+
+
+@pytest.mark.asyncio
+async def test_a_delegates_error_is_shown_and_never_read_out(mock_bot_runner, tmp_path):
+    """The replay caught a mid-stream failure landing inside an open <speech>
+    block: the error would have been read aloud. It goes to the channel; the
+    speaker says one plain line, and a failed run isn't held to <speech>."""
+    vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
+        {"type": "token", "content": "🛎️ Butler: ", "agent_id": "home-steward", "is_header": True},
+        {"type": "token", "content": "<speech>Checking the thermostat.", "agent_id": "home-steward"},
+        {"type": "token", "content": "\n[Error: 503 UNAVAILABLE]", "agent_id": "home-steward", "is_error": True},
+        _final("Checking the thermostat."),
+    ])
+    await _run_turn(vm, agent)
+
+    assert _synthesized(vm) == ["Checking the thermostat.", ERROR_LINE]
+    assert "[Error: 503 UNAVAILABLE]" in _posted(text_channel)
+    assert _notes(text_channel) == []
 
 
 # ---------------------------------------------------------------------------
@@ -544,8 +626,8 @@ async def test_delegation_header_is_shown_but_not_spoken(mock_bot_runner, tmp_pa
     """B14: the '🌼 Daisy: ' attribution was read aloud before every delegated answer."""
     vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
         {"type": "token", "content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True},
-        {"type": "token", "content": "You have two meetings today.", "agent_id": "day-planner"},
-        {"type": "final_response", "text": "You have two meetings today.", "response": None},
+        {"type": "token", "content": _spoken_reply("You have two meetings today."), "agent_id": "day-planner"},
+        _final(_spoken_reply("You have two meetings today.")),
     ])
     await _run_turn(vm, agent)
 
@@ -562,8 +644,8 @@ async def test_delegation_header_is_shown_but_not_spoken(mock_bot_runner, tmp_pa
 async def test_transcript_mirror_does_not_delay_the_agent(mock_bot_runner, tmp_path):
     """The mirror used to be awaited before the agent started; now only the text lane waits."""
     vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
-        {"type": "token", "content": "Done, the lights are off."},
-        {"type": "final_response", "text": "Done, the lights are off.", "response": None},
+        {"type": "token", "content": _spoken_reply("Done, the lights are off.")},
+        _final(_spoken_reply("Done, the lights are off.")),
     ])
     release = asyncio.Event()
     sent = []
@@ -601,9 +683,10 @@ async def test_transcript_mirror_does_not_delay_the_agent(mock_bot_runner, tmp_p
 async def test_slow_discord_edits_do_not_hold_up_speech(mock_bot_runner, tmp_path):
     """Text and speech run as separate lanes: a stuck channel write can't delay synthesis."""
     vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
-        {"type": "token", "content": "First sentence is here. "},
-        {"type": "token", "content": "Second sentence follows now."},
-        {"type": "final_response", "text": "First sentence is here. Second sentence follows now.", "response": None},
+        {"type": "token", "content": "<speech>First sentence is here. "},
+        {"type": "token", "content": "Second sentence follows now.</speech>"},
+        {"type": "token", "content": "First sentence is here. Second sentence follows now."},
+        _final(_spoken_reply("First sentence is here. Second sentence follows now.")),
     ])
     vm.config["post_transcript_to_chat"] = False
     release = asyncio.Event()
@@ -632,10 +715,9 @@ async def test_turn_trace_records_stages_and_first_audio(mock_bot_runner, tmp_pa
     vm, agent, _channel = _streaming_fixture(mock_bot_runner, tmp_path, [
         {"type": "tool_start", "tool_name": "home_assistant", "tool_args": {}},
         {"type": "tool_end", "tool_name": "home_assistant", "output": "ok"},
-        {"type": "token", "content": "The kitchen lights are off now."},
-        {"type": "final_response", "text": "The kitchen lights are off now.", "response": None},
+        {"type": "token", "content": _spoken_reply("The kitchen lights are off now.")},
+        _final(_spoken_reply("The kitchen lights are off now.")),
     ])
-    vm.reply.bridge_manager.get_or_create_bridge_audio = AsyncMock(return_value=None)
     traces = []
 
     async def play_now(path, priority=False, auto_delete=True, on_start=None):
@@ -665,14 +747,15 @@ async def test_turn_trace_records_stages_and_first_audio(mock_bot_runner, tmp_pa
     assert [e["kind"] for e in trace.events if e["kind"].startswith("tool")] == ["tool_start", "tool_end"]
     assert trace.meta["stt"] == "gemini_live"
     assert trace.meta["stt_final_after_end_ms"] == 412
+    assert trace.meta["speech"] == "ok"
 
 
 @pytest.mark.asyncio
 async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runner, tmp_path):
     """A short reply is fully queued before playback starts; TTFA must still be captured."""
     vm, agent, _channel = _streaming_fixture(mock_bot_runner, tmp_path, [
-        {"type": "token", "content": "Logged it."},
-        {"type": "final_response", "text": "Logged it.", "response": None},
+        {"type": "token", "content": _spoken_reply("Logged it.")},
+        _final(_spoken_reply("Logged it.")),
     ])
     starts = []
     vm.audio_queue.put = AsyncMock(side_effect=lambda path, priority=False, auto_delete=True, on_start=None: starts.append(on_start))
@@ -822,8 +905,8 @@ def _scripted_agent(agent, replies):
         reply = replies.pop(0)
         if reply is None:
             await asyncio.Event().wait()
-        yield {"type": "token", "content": reply}
-        yield {"type": "final_response", "text": reply, "response": None}
+        yield {"type": "token", "content": _spoken_reply(reply)}
+        yield _final(_spoken_reply(reply))
 
     agent.execute_stream = MagicMock(side_effect=stream)
     return prompts
@@ -880,11 +963,11 @@ async def test_words_whose_answer_was_heard_are_not_asked_again(mock_bot_runner,
     async def stream(prompt, session=None):
         prompts.append(prompt)
         if len(prompts) == 1:
-            yield {"type": "token", "content": "It will rain after four this afternoon. "}
+            yield {"type": "token", "content": "<speech>It will rain after four this afternoon. "}
             yield {"type": "token", "content": "Bring an umbrella"}
             await asyncio.Event().wait()  # still talking when interrupted
-        yield {"type": "token", "content": "Sunny all week."}
-        yield {"type": "final_response", "text": "Sunny all week.", "response": None}
+        yield {"type": "token", "content": _spoken_reply("Sunny all week.")}
+        yield _final(_spoken_reply("Sunny all week."))
 
     agent.execute_stream = MagicMock(side_effect=stream)
     started = []

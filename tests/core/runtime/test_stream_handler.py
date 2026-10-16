@@ -52,6 +52,38 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
                 DiscordStreamBuffer.filter_xml_for_stream(text), text
             )
 
+    def test_filter_xml_for_stream_hides_speech(self):
+        """The backstop for any path that skips the voice router: speech, closed,
+        still open, or half-streamed, never shows in the channel."""
+        closed = "<speech>Two meetings today.</speech>\n**Today**: standup, dentist"
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(closed), "\n**Today**: standup, dentist")
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream("Hi <speech>Two meet"), "Hi")
+        for tail in ["<sp", "<speech", "<spee"]:
+            self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream("Hi " + tail), "Hi", tail)
+
+    async def test_speech_across_a_message_boundary_is_hidden_as_a_unit(self):
+        """Hidden tags are filtered before the text is split into messages."""
+        channel = AsyncMock()
+        channel.send.return_value = AsyncMock()
+        buffer = DiscordStreamBuffer(channel, edit_interval=0, max_chunk_size=100)
+        speech = "<speech>" + "word " * 60 + "</speech>"
+        await buffer.append_token("Intro line.\n" + speech + "\nShown after.")
+        await buffer.finalize("")
+        posted = "".join(call.args[0] for call in channel.send.call_args_list)
+        self.assertNotIn("word", posted)
+        self.assertNotIn("speech", posted)
+        self.assertIn("Shown after.", posted)
+
+    async def test_a_reply_that_was_only_speech_still_reaches_the_channel(self):
+        from core.channel.response_parser import AgentResponse
+        channel = AsyncMock()
+        channel.send.return_value = AsyncMock()
+        buffer = DiscordStreamBuffer(channel, edit_interval=60)
+        response = AgentResponse.from_string("<speech>Done, the lights are off.</speech>")
+        await buffer.append_token("\n\n")  # the text lane only ever saw the whitespace after it
+        await buffer.finalize(response.text, response=response)
+        channel.send.assert_awaited_once_with("Done, the lights are off.")
+
     async def test_streaming_buffer_sends_and_throttles(self):
         mock_channel = AsyncMock()
         mock_msg = AsyncMock()
@@ -396,6 +428,25 @@ class TestOnlyTheOwningAgentsTokensAreStreamed(unittest.IsolatedAsyncioTestCase)
         # Must start with the header, NOT the duplicated "Let'"
         self.assertEqual(tokens, ["🌼 Daisy: ", "Let'", "s pick up"])
         self.assertEqual("".join(tokens), "🌼 Daisy: Let's pick up")
+
+    async def test_subagent_token_flags_are_forwarded(self):
+        """The consumer learns which tokens are an attribution or a callee's
+        error: the channel shows both, and voice must not read them out."""
+        from core.runtime.stream_handler import SUBAGENT_STREAM_TOKEN
+
+        def token(**data):
+            return {"event": "on_custom_event", "name": SUBAGENT_STREAM_TOKEN, "data": data}
+
+        graph = self._graph_with([
+            token(content="🛎️ Butler: ", agent_id="home-steward", is_header=True),
+            token(content="Checking", agent_id="home-steward"),
+            token(content="\n[Error: 503]", agent_id="home-steward", is_error=True),
+        ])
+        streamed = [ev async for ev in StreamHandler.stream_graph_events(graph, {}, {}, agent_id="main")]
+        self.assertEqual(
+            [(ev["content"], ev["is_header"], ev["is_error"]) for ev in streamed if ev["type"] == "token"],
+            [("🛎️ Butler: ", True, False), ("Checking", False, False), ("\n[Error: 503]", False, True)],
+        )
 
     async def test_agent_id_inferred_from_config(self):
         """If agent_id argument is None, it is inferred from config metadata."""

@@ -12,7 +12,7 @@ from core.util import models
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 TIERS = ("FLASH_LITE", "FLASH", "PRO", "IMAGE")
-DEFAULTS = ("DEFAULT_AGENT_MODEL", "DEFAULT_VERBALIZER_MODEL", "DEFAULT_BROWSER_MODEL")
+DEFAULTS = ("DEFAULT_AGENT_MODEL", "DEFAULT_BROWSER_MODEL")
 
 
 class TestModelConstants(unittest.TestCase):
@@ -32,11 +32,6 @@ class TestModelConstants(unittest.TestCase):
     def test_tiers_are_distinct(self):
         values = [getattr(models, name) for name in TIERS]
         self.assertEqual(len(values), len(set(values)), "two tiers name the same model")
-
-    def test_the_verbalizer_never_defaults_to_pro(self):
-        """It runs mid-turn, before the listener has heard anything, so the
-        round-trip is audible as silence."""
-        self.assertNotEqual(models.DEFAULT_VERBALIZER_MODEL, models.PRO)
 
     def test_the_default_tier_exists_in_every_provider_table(self):
         """A provider whose table omits the default cannot serve an agent that

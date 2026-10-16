@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from scripts import voice_dryrun as replay
+from core.channel.response_parser import AgentResponse
 from scripts.voice_dryrun import (
     CASES_PATH,
     CaseResult,
     check_expectations,
+    check_speech,
     isolate_sessions,
     load_cases,
     percentile,
@@ -18,8 +20,11 @@ from scripts.voice_dryrun import (
     replay_tokens,
     reset_history,
     run_case,
+    speech_coverage,
+    spoken_numbers,
     stage_table,
 )
+from tests.helpers import GOLDEN_INPUT
 
 
 def _cases_file(tmp_path, cases):
@@ -95,9 +100,97 @@ class TestReport:
         table = dict((stage, (p50, p90, n)) for stage, p50, p90, n in stage_table(results))
         assert table["first_token"] == (1200, 1600, 2)
         assert table["tts_first_byte"] == (1900, 1900, 1)
+        results[1].speech_missing = True
         report = render_report(results)
         assert "| a | 1 | PASS |" in report and "| a | 2 | FAIL |" in report
         assert "Quality: 1/2 runs passed." in report
+        assert "Speech: 1/2 runs came with a <speech> block." in report
+        results.append(CaseResult(case_id="b", run=1, marks={}, errored=True, failures=["agent error: 503"]))
+        assert "Speech: 1/2 runs came with a <speech> block. (1 failed runs aren't counted.)" in render_report(results)
+
+
+GOLDEN_SPEECH = (
+    "There are five options. Point Reyes is a two hour drive and free to enter, best in the morning fog. "
+    "Mount Tam is forty-five minutes with eight dollar parking. Muir Woods is an hour away, fifteen dollars "
+    "plus a nine dollar reservation. Stinson Beach is an hour fifteen, free, windy after noon. "
+    "Tennessee Valley is forty minutes, free, and stroller friendly."
+)
+
+
+class TestSpeechContract:
+
+    def test_numbers_are_heard_in_digits_or_words(self):
+        said = spoken_numbers("Seven thirty on October sixteenth, two and a half hours, forty-five minutes, "
+                              "one hundred and five, two thousand five hundred, 1,200 steps, an hour, free")
+        assert {"7", "30", "10", "16", "2.5", "45", "105", "2500", "1200", "1", "0"} <= said
+
+    def test_speech_that_keeps_everything_covers_the_reply(self):
+        assert speech_coverage(GOLDEN_INPUT, GOLDEN_SPEECH) == []
+
+    def test_a_dropped_item_is_named(self):
+        dropped = GOLDEN_SPEECH.replace(
+            "Muir Woods is an hour away, fifteen dollars plus a nine dollar reservation. ", "")
+        assert speech_coverage(GOLDEN_INPUT, dropped) == ["$9", "Muir Woods"]
+
+    def test_labels_headings_and_greetings_are_not_names(self):
+        reply = ("## Chores this week\n"
+                 "Good morning Alva! Here they are:\n"
+                 "- **Pay the Comcast bill**\n"
+                 "  - **Due Date**: Oct 21\n"
+                 "  - **Context**: Scheduled for next week, with Sarah.\n"
+                 "- **Renew the passport**\n"
+                 "  - **Due Date**: Nov 2\n"
+                 "  - **Context**: Takes six weeks *(Added last month)*.\n")
+        assert replay._required_names(reply) == ["Pay the Comcast bill", "Sarah", "Renew the passport"]
+
+    def test_a_one_off_label_names_its_item(self):
+        reply = "* **Amex Gold Dining Credit:** **$10** (Grubhub, Five Guys, Goldbelly)"
+        assert replay._required_names(reply) == ["Amex Gold Dining Credit", "Five Guys", "Goldbelly"]
+
+    def test_a_name_said_in_another_form_counts(self):
+        reply = "- 🌼 Daisy (Day Planner) and 🚀 Grace (Project Coach)"
+        assert speech_coverage(reply, "Daisy does day planning and Grace does project coaching.") == []
+
+    def test_links_ids_years_and_list_numbers_are_not_required(self):
+        reply = ("1. Order 1234567 shipped in 2026, see https://x.io/track/42.\n"
+                 "2. It arrives Friday at 14:30.")
+        assert speech_coverage(reply, "Your order shipped and arrives Friday at two thirty.") == []
+
+    def result(self, **kw):
+        base = dict(case_id="c", run=1, marks={}, reply="Mount Tam is 45 minutes away.",
+                    speech="Mount Tam is forty-five minutes away.")
+        base.update(kw)
+        return CaseResult(**base)
+
+    def test_a_spoken_reply_passes(self):
+        assert check_speech(self.result()) == ([], [])
+
+    def test_missing_speech_fails(self):
+        failures, _ = check_speech(self.result(speech="", speech_missing=True))
+        assert failures == ["no <speech> block (the fallback was spoken)"]
+
+    def test_speech_in_the_text_fails(self):
+        failures, _ = check_speech(self.result(shown="<speech>Mount Tam</speech> is 45 minutes away."))
+        assert failures == ["<speech> reached the text"]
+
+    def test_a_failed_run_is_not_held_to_speech(self):
+        assert check_speech(self.result(speech="", errored=True, reply="<speech>Cut off</spee")) == ([], [])
+        failures, _ = check_speech(self.result(errored=True, shown="<speech>Cut off"))
+        assert failures == ["<speech> reached the text"]
+
+    def test_speech_an_english_voice_cant_say_fails(self):
+        failures, _ = check_speech(self.result(reply="Use the **金針菇 (enoki)** first.", speech="Use the 金針菇 first."))
+        assert failures == ["speech isn't in English: 金針菇"]
+
+    def test_a_possibly_missed_name_is_a_note_not_a_failure(self):
+        failures, notes = check_speech(self.result(speech="It is forty-five minutes away."))
+        assert failures == [] and notes == ["speech may have missed: Mount Tam"]
+
+    def test_a_miss_fails_unless_the_speech_defers_to_the_channel(self):
+        failures, notes = check_speech(self.result(speech="Mount Tam is close."))
+        assert failures == ["speech missed: 45"] and notes == []
+        failures, notes = check_speech(self.result(speech="Mount Tam is close; the details are in the channel."))
+        assert failures == [] and notes == ["speech missed: 45 (it defers to the channel)"]
 
 
 class TestIsolation:
@@ -132,13 +225,17 @@ async def test_run_case_traces_and_checks_a_turn(tmp_path):
     case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?",
             "expect": {"agent": "home-steward", "tools_all": ["home_assistant"], "spoken_excludes": ["Butler"]}}
 
+    raw = "<speech>The kitchen light is on.</speech>The kitchen light is **on**."
+
     async def fake_stream(prompt, session):
         assert session.get_surface() == "voice" and session.record_memory is False
         yield {"type": "tool_start", "tool_name": "home_assistant", "tool_args": {}}
         yield {"type": "tool_end", "tool_name": "home_assistant", "output": "on"}
         yield {"type": "token", "content": "🛎️ Butler: ", "agent_id": "home-steward", "is_header": True}
-        yield {"type": "token", "content": "The kitchen light is on.", "agent_id": "home-steward"}
-        yield {"type": "final_response", "text": "The kitchen light is on.", "response": None}
+        yield {"type": "token", "content": raw[:20], "agent_id": "home-steward"}
+        yield {"type": "token", "content": raw[20:], "agent_id": "home-steward"}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
 
     agent = MagicMock()
     agent.execute_stream = MagicMock(side_effect=fake_stream)
@@ -158,6 +255,55 @@ async def test_run_case_traces_and_checks_a_turn(tmp_path):
         assert stage in result.marks
     assert "stt_done" not in result.marks, "no STT ran, so none may be reported"
     tts.synthesize_to_file.assert_awaited_once_with("The kitchen light is on.")
+    assert result.speech == "The kitchen light is on." and not result.speech_missing
+    assert result.shown == "🛎️ Butler: The kitchen light is **on**."
+
+
+@pytest.mark.asyncio
+async def test_run_case_fails_a_reply_without_speech_and_speaks_the_fallback(tmp_path):
+    case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?", "expect": {}}
+
+    async def fake_stream(prompt, session):
+        yield {"type": "token", "content": "The kitchen light is on. The rest are off."}
+        response = AgentResponse.from_string("The kitchen light is on. The rest are off.")
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        result = await run_case(case, 1, db, measure_tts=False)
+
+    assert result.speech_missing
+    assert result.failures == ["no <speech> block (the fallback was spoken)"]
+    assert result.spoken == ["The kitchen light is on. The rest is in the channel."]
+
+
+@pytest.mark.asyncio
+async def test_run_case_shows_a_delegates_error_and_speaks_the_error_line(tmp_path):
+    from core.voice.speech.reply import ERROR_LINE
+
+    case = {"id": "thermostat", "room": "home-automation", "utterance": "Thermostat?", "expect": {}}
+
+    async def fake_stream(prompt, session):
+        yield {"type": "token", "content": "🛎️ Butler: ", "agent_id": "home-steward", "is_header": True}
+        yield {"type": "token", "content": "<speech>Checking the thermostat.", "agent_id": "home-steward"}
+        yield {"type": "token", "content": "\n[Error: 503 UNAVAILABLE]", "agent_id": "home-steward", "is_error": True}
+        response = AgentResponse.from_string("Checking the thermostat.")
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        result = await run_case(case, 1, db, measure_tts=False)
+
+    assert result.errored and not result.speech_missing
+    assert result.failures == ["agent error: [Error: 503 UNAVAILABLE]"]
+    assert result.spoken == ["Checking the thermostat.", ERROR_LINE]
+    assert "[Error: 503 UNAVAILABLE]" in result.shown
 
 
 @pytest.mark.asyncio

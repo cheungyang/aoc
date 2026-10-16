@@ -66,7 +66,6 @@ REQUIRED_BLURPS = {
 RUNTIME_DIRS = [
     "sessions",
     "workspaces",
-    "assets/sounds/bridge",
     ".gogcli/config",
     ".gogcli/data",
     ".gogcli/state",

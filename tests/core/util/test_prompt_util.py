@@ -10,9 +10,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from core.util.config import Config
 from core.util.prompt_util import (
+    VOICE_MODE_PROMPT,
     get_knowledge_prompt,
     get_formatting_prompt,
     get_channel_prompt,
+    get_voice_mode_prompt,
     get_agent_memory_prompt,
     get_agent_static_prompt,
 )
@@ -117,6 +119,59 @@ class TestPromptUtil(unittest.TestCase):
             self.assertEqual(prompt, "")
         finally:
             current_execution_context.reset(token)
+
+
+class TestVoiceModePrompt(unittest.TestCase):
+    """<voice_mode> reaches exactly the turns the user hears."""
+
+    def _prompt_in(self, **session_kwargs):
+        from core.runtime.execution_context import current_execution_context
+        from core.runtime.session_manager import SessionManager
+        token = current_execution_context.set(SessionManager.get_session(**session_kwargs))
+        try:
+            return get_voice_mode_prompt()
+        finally:
+            current_execution_context.reset(token)
+
+    def test_a_voice_turn_gets_the_block(self):
+        prompt = self._prompt_in(agent_id="main", source="discord", channel="general", surface="voice")
+        self.assertEqual(prompt, VOICE_MODE_PROMPT)
+        self.assertIn("Begin each response with a <speech>...</speech> block", prompt)
+        self.assertIn("Before calling tools, write a one-sentence <speech> block", prompt)
+
+    def test_a_typed_turn_does_not(self):
+        self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general"), "")
+
+    def test_a_delegate_inherits_it_but_a_stateless_worker_never_gets_it(self):
+        from core.runtime.execution_context import current_execution_context
+        from core.runtime.session_manager import SessionManager
+        voice_turn = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
+        token = current_execution_context.set(voice_turn)
+        try:
+            delegate = SessionManager.get_session(agent_id="day-planner", source="tool", channel="day-planning")
+            worker = SessionManager.get_session(agent_id="graph-worker-low", source="tool", channel="general",
+                                                stateless=True)
+        finally:
+            current_execution_context.reset(token)
+        self.assertEqual((delegate.get_surface(), worker.get_surface()), ("voice", "voice"))
+        for session, expected in ((delegate, VOICE_MODE_PROMPT), (worker, "")):
+            token = current_execution_context.set(session)
+            try:
+                self.assertEqual(get_voice_mode_prompt(), expected, session.agent_id)
+            finally:
+                current_execution_context.reset(token)
+
+    def test_no_context_no_block(self):
+        from core.runtime.execution_context import current_execution_context
+        token = current_execution_context.set(None)
+        try:
+            self.assertEqual(get_voice_mode_prompt(), "")
+        finally:
+            current_execution_context.reset(token)
+
+    def test_the_formatting_rules_allow_speech_under_voice_mode(self):
+        """Otherwise they forbid the very block <voice_mode> asks for."""
+        self.assertIn("<speech> when <voice_mode> asks for it", get_formatting_prompt())
 
 
 class TestAgentPrompts(unittest.TestCase):

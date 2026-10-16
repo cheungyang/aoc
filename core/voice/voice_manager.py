@@ -208,7 +208,7 @@ class VoiceManager:
 
         # Same session as the text channel (so context is shared), but
         # tagged as voice so token rows can tell spoken turns from typed
-        # ones. The verbalizer bills its calls to this same context.
+        # ones, and so the agent gets <voice_mode>.
         session = SessionManager().get_session(
             agent_id=self.agent_id,
             source="discord",

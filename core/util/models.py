@@ -59,11 +59,6 @@ LOCAL_GEMMA4_26B = "gemma4-26b-hw-q4_0-20260622"
 # the agent's provider, which is the same hardcode this module exists to stop.
 DEFAULT_AGENT_TIER = "FLASH_LITE"
 
-# Rewriting agent output for speech. Deliberately the cheapest tier: it runs
-# mid-turn, before the listener has heard anything, so the round-trip is
-# audible as silence. Never raise this to PRO.
-DEFAULT_VERBALIZER_MODEL = FLASH_LITE
-
 # Browser automation needs to read rendered pages, so it needs the strongest
 # multimodal reasoning rather than the cheapest.
 DEFAULT_BROWSER_MODEL = PRO

@@ -8,7 +8,7 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, Config, resolve_model
+from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, get_voice_mode_prompt, Config, resolve_model
 from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt
 from core.util.message_util import cap_tool_output
 from langgraph.types import interrupt
@@ -43,6 +43,9 @@ class GraphBuilder:
             # 4. Channel Prompt
             channel_prompt = get_channel_prompt()
 
+            # 4.5. Voice mode: on turns the user will hear, the <speech> contract
+            voice_mode_prompt = get_voice_mode_prompt()
+
             # 5. Formatting Prompt
             formatting_prompt = get_formatting_prompt()
 
@@ -53,9 +56,12 @@ class GraphBuilder:
             #   knowledge                                        -> changes once a day
             #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
             #   channel                                          -> differs per channel/thread
+            #   voice mode                                       -> voice turns only
             # Memory precedes channel: memory is identical across all of an agent's
             # channels and changes rarely, so channel-varying calls (e.g. agent_call
             # into another channel) still share the prefix up to and including memory.
+            # Voice mode comes last, so a voice turn shares every block before it with
+            # a typed turn in the same channel.
             system_messages = [
                 ("system", formatting_prompt),
                 ("system", agent_static_prompt.replace("{", "{{").replace("}", "}}")),
@@ -64,6 +70,7 @@ class GraphBuilder:
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", agent_memory_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", channel_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", voice_mode_prompt.replace("{", "{{").replace("}", "}}")),
             ]
 
             # Filter out empty prompt messages (e.g. when channel_prompt is empty)

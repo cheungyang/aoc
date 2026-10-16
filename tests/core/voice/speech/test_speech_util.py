@@ -1,8 +1,7 @@
 """Tests for the speech notation pass: XML, hashtags and priority symbols."""
 import pytest
 
-from core.voice.speech.speech_util import speak_priority_symbols, strip_hashtags, strip_xml
-from core.voice.speech.verbalizer import has_structure
+from core.voice.speech.speech_util import speak_priority_symbols, speakable, strip_hashtags, strip_xml
 
 
 # --------------------------------------------------------------------------
@@ -68,11 +67,8 @@ def test_strip_hashtags_leaves_non_tags_alone(text):
 
 
 def test_strip_hashtags_preserves_line_structure():
-    """`has_structure` reads line beginnings; flattening here would route a
-    list down the prose path and lose the rewriting."""
     cleaned = strip_hashtags("- eggs #shopping\n- milk #shopping")
     assert cleaned == "- eggs\n- milk"
-    assert has_structure(cleaned) is True
 
 
 def test_strip_hashtags_drops_a_tag_only_line_entirely():
@@ -126,3 +122,9 @@ def test_speak_priority_symbols_does_not_double_up_punctuation():
 def test_speak_priority_symbols_leaves_plain_text_alone():
     text = "Call the dentist tomorrow."
     assert speak_priority_symbols(text) == text
+
+
+def test_speakable_runs_every_pass():
+    """XML, tags, priority symbols, then the sanitizer: what the synthesizer gets."""
+    text = "<memory>x</memory>**Call** the dentist \u23EB #health, see [notes](https://x.io)."
+    assert speakable(text) == "Call the dentist, high priority, see notes."

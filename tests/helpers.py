@@ -4,9 +4,9 @@ Tools no longer accept a model-supplied `agent_id`; identity is derived from the
 ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
-token-usage-handler and logging-util tests, the voice fixtures (`GOLDEN_INPUT`,
-`voice_session`) shared by the verbalizer and voice-stream tests, and
-`fake_audio_source` for tests that play audio through the voice audio queue.
+token-usage-handler and logging-util tests, `GOLDEN_INPUT`, the structured reply
+shared by the missing-speech and speech-coverage tests, and `fake_audio_source`
+for tests that play audio through the voice audio queue.
 """
 from contextlib import contextmanager
 
@@ -61,8 +61,8 @@ def llm_result(usage=None, response_metadata=None, llm_output=None, generation_i
 
 USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
-# Shared by the verbalizer and voice-stream tests: a numbered list with a
-# heading, the canonical "nothing may be dropped" input.
+# Shared by the missing-speech and speech-coverage tests: a numbered list with
+# a heading, the canonical "nothing may be dropped" input.
 GOLDEN_INPUT = """## Weekend options
 
 1. **Point Reyes** - 2 hour drive, $0 entry, best in the morning fog.
@@ -71,13 +71,6 @@ GOLDEN_INPUT = """## Weekend options
 4. **Stinson Beach** - 1 hour 15, free, windy after noon.
 5. **Tennessee Valley** - 40 minutes, free, flat and stroller friendly.
 """
-
-
-def voice_session():
-    """A voice-surface ExecutionContext for token-attribution tests."""
-    return SessionManager.get_session(
-        agent_id="main", source="discord", channel="general", surface="voice"
-    )
 
 
 def fake_audio_source():

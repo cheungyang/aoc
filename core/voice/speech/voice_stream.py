@@ -1,143 +1,52 @@
-"""Streaming agent tokens into speech-ready chunks."""
-from typing import List, Optional
+"""Streaming a turn's speech into sentences to synthesize one at a time."""
+from typing import List
 
-from core.voice.speech.speech_util import (
-    find_unclosed_xml_start,
-    speak_priority_symbols,
-    strip_completed_xml,
-    strip_hashtags,
-    strip_xml,
-)
-from core.voice.engines.tts_engine import TextSanitizer
-from core.voice.speech.verbalizer import Verbalizer, has_structure
+from core.voice.speech.sentence_chunker import SentenceChunker
+from core.voice.speech.speech_util import speakable
 
 
 class VoiceStream:
-    """Accumulates streamed tokens and yields speech-ready chunks.
+    """Accumulates the turn's <speech> text and yields sentences as they
+    complete, so audio starts while the agent is still writing.
 
-    Two cadences, chosen per block rather than per turn:
-
-    - **Prose** is emitted sentence by sentence as it arrives, so audio starts
-      while the agent is still writing.
-    - **Structured text** is held until the block is complete -- a blank line, a
-      list that stops, or a size cap -- because a bullet cannot be rewritten for
-      speech until you can see the whole list it belongs to.
-
-    Waiting for a block boundary costs latency, which is why it is not the
-    default path. A conversational answer never pays it.
+    The text was written for the ear (`<voice_mode>`), so nothing is rewritten
+    here: each sentence only gets the notation pass and the sanitizer
+    (`speakable`), in case a hashtag or a stray asterisk slipped in. A line
+    break ends a chunk however short it is: the router puts one after every
+    <speech> block, so a block is spoken as soon as it closes.
     """
 
-    def __init__(
-        self,
-        verbalizer: Optional[Verbalizer] = None,
-        min_chars: int = 20,
-        max_chars: int = 140,
-        max_block_chars: int = 900,
-        session=None,
-    ):
-        self.verbalizer = verbalizer or Verbalizer()
-        self.min_chars = min_chars
-        self.max_chars = max_chars
-        self.max_block_chars = max_block_chars
-        # The turn's ExecutionContext, so model calls made while restructuring
-        # a block are billed to it. Optional: without it the verbalizer falls
-        # back to the ambient context.
-        self.session = session
+    def __init__(self, min_chars: int = 20, max_chars: int = 140):
+        self._splitter = SentenceChunker(min_chars=min_chars, max_chars=max_chars)
         self._buffer = ""
 
-        from core.voice.speech.sentence_chunker import SentenceChunker
-
-        self._splitter = SentenceChunker(min_chars=min_chars, max_chars=max_chars)
-
-    async def add_token(self, token: str) -> List[str]:
-        """Appends a token delta and returns any chunks ready to speak."""
-        if not token:
+    def add(self, text: str) -> List[str]:
+        """Appends speech text and returns any sentences ready to speak."""
+        if not text:
             return []
-        self._buffer += token
-        return await self._drain(final=False)
+        self._buffer += text
+        return self._drain(final=False)
 
-    async def flush(self) -> List[str]:
-        """Emits whatever remains, verbalizing it if it has structure."""
-        return await self._drain(final=True)
+    def flush(self) -> List[str]:
+        """Returns whatever remains, sentence by sentence."""
+        return self._drain(final=True)
 
-    async def _drain(self, final: bool) -> List[str]:
+    def _drain(self, final: bool) -> List[str]:
         chunks: List[str] = []
-
-        if final:
-            self._buffer = strip_xml(self._buffer)
-        else:
-            self._buffer = strip_completed_xml(self._buffer)
-
         while self._buffer:
-            unclosed_idx = None if final else find_unclosed_xml_start(self._buffer)
-            if unclosed_idx == 0:
-                break
-
-            if unclosed_idx is not None:
-                work_buf = self._buffer[:unclosed_idx]
-                held = self._buffer[unclosed_idx:]
-            else:
-                work_buf = self._buffer
-                held = ""
-
-            if has_structure(work_buf):
-                block, rest = self._take_block(final, work_buf)
-                if block is None:
+            position = self._splitter._find_split_position(self._buffer)
+            line_end = self._buffer.find("\n")
+            if line_end >= 0 and (position is None or line_end < position):
+                position = line_end + 1
+            if position is None and len(self._buffer) >= self._splitter.max_chars:
+                position = self._splitter._find_fallback_split(self._buffer)
+            if position is None:
+                if not final:
                     break
-                self._buffer = rest + held
-                if self.session is not None:
-                    spoken = await self.verbalizer.verbalize(block, session=self.session)
-                else:
-                    spoken = await self.verbalizer.verbalize(block)
-                chunks.extend(self._splitter.split_into_sentences(spoken))
+                sentence, self._buffer = self._buffer, ""
             else:
-                sentence, rest = self._take_sentence(final, work_buf)
-                if sentence is None:
-                    break
-                self._buffer = rest + held
-                # This branch never reaches `verbalize`, so the same notation
-                # pass has to happen here. Sentences arrive at a boundary, so
-                # a tag or symbol is whole by the time it is emitted.
-                spoken = speak_priority_symbols(strip_hashtags(sentence))
-                cleaned = TextSanitizer.sanitize(spoken)
-                if cleaned:
-                    chunks.append(cleaned)
-
-            if not final:
-                self._buffer = strip_completed_xml(self._buffer)
-
-        return [c for c in chunks if c]
-
-    def _take_block(self, final: bool, text: Optional[str] = None):
-        """Splits off a complete structural block, or (None, buffer) if pending."""
-        buf = self._buffer if text is None else text
-        boundary = buf.find("\n\n")
-        if boundary != -1:
-            return buf[:boundary], buf[boundary + 2:].lstrip("\n")
-
-        if len(buf) >= self.max_block_chars:
-            # A list that never ends still has to be spoken. Break on the last
-            # line boundary so a bullet is not split down the middle.
-            cut = buf.rfind("\n", 0, self.max_block_chars)
-            if cut > 0:
-                return buf[:cut], buf[cut + 1:]
-            return buf[:self.max_block_chars], buf[self.max_block_chars:]
-
-        if final:
-            return buf, ""
-
-        return None, buf
-
-    def _take_sentence(self, final: bool, text: Optional[str] = None):
-        """Splits off one prose sentence, or (None, buffer) if none is complete."""
-        buf = self._buffer if text is None else text
-        position = self._splitter._find_split_position(buf)
-        if position is None and len(buf) >= self.max_chars:
-            position = self._splitter._find_fallback_split(buf)
-
-        if position is None:
-            if final:
-                return buf, ""
-            return None, buf
-
-        return buf[:position], buf[position:].lstrip()
+                sentence, self._buffer = self._buffer[:position], self._buffer[position:].lstrip()
+            spoken = speakable(sentence.strip())  # the sanitizer reads a line break as a full stop
+            if spoken:
+                chunks.append(spoken)
+        return chunks

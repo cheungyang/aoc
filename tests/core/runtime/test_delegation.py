@@ -313,6 +313,32 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
     @patch('core.channel.discord.loader.BotsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_a_callee_error_is_flagged_as_an_error_token(
+        self, mock_agents_loader, mock_bots_loader, mock_dispatch
+    ):
+        """`is_error` lets voice show the error in the channel without reading it out."""
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        agent = MagicMock()
+        agent.config = {"channels": ["home-automation"], "emoji": "🛎️", "name": "Butler"}
+
+        async def failing_stream(prompt, session=None):
+            yield {"type": "token", "content": "Checking"}
+            yield {"type": "error", "content": "503 UNAVAILABLE"}
+
+        agent.execute_stream = failing_stream
+        mock_loader.get_agent.return_value = agent
+        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
+
+        await stream_delegate("home-steward", "thermostat?", "home-automation")
+
+        tokens = [c.args[1] for c in mock_dispatch.call_args_list if c.args[0] == SUBAGENT_STREAM_TOKEN]
+        self.assertEqual([t["content"] for t in tokens if t.get("is_error")], ["\n[Error: 503 UNAVAILABLE]"])
+        self.assertEqual([t["content"] for t in tokens if not t.get("is_error")], ["🛎️ Butler: ", "Checking"])
+
+    @patch('core.runtime.delegation.safe_dispatch_custom_event')
+    @patch('core.channel.discord.loader.BotsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_reaction_is_announced_before_any_output(
         self, mock_agents_loader, mock_bots_loader, mock_dispatch
     ):

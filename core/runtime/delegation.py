@@ -243,9 +243,10 @@ async def stream_delegate(
         elif etype == EVENT_ERROR:
             err_msg = event.get("content", "Error in subagent execution")
             await _emit_header()
+            # `is_error`: the channel shows the error; voice never reads it out.
             await safe_dispatch_custom_event(
                 SUBAGENT_STREAM_TOKEN,
-                {"content": f"\n[Error: {err_msg}]", "agent_id": agent_id},
+                {"content": f"\n[Error: {err_msg}]", "agent_id": agent_id, "is_error": True},
             )
 
     if subagent_response is not None and getattr(subagent_response, "text", ""):

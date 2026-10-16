@@ -101,6 +101,32 @@ def _extract_system_memory_log(text: str) -> tuple[str, Optional[str]]:
     return cleaned_text, system_memory_log
 
 
+_SPEECH_BLOCK_RE = re.compile(r"<speech\s*>(.*?)</speech\s*>", re.DOTALL | re.IGNORECASE)
+_SPEECH_OPEN_RE = re.compile(r"<speech\s*>", re.IGNORECASE)
+_SPEECH_TAG_RE = re.compile(r"</?speech\s*>", re.IGNORECASE)
+
+
+def _extract_speech(text: str) -> tuple[str, Optional[str]]:
+    """Extracts and strips <speech> blocks: what a voice turn says aloud.
+
+    A reply can hold several -- a sentence before a tool call, then the
+    answer's -- and they are joined in order. A block the model never closed
+    is speech too, but its words also stay in the text: the channel must not
+    lose the reply to a missing tag.
+    """
+    if not _SPEECH_TAG_RE.search(text):
+        return text, None
+
+    blocks = [m.group(1).strip() for m in _SPEECH_BLOCK_RE.finditer(text)]
+    cleaned_text = _SPEECH_BLOCK_RE.sub("", text)
+    unclosed = _SPEECH_OPEN_RE.search(cleaned_text)
+    if unclosed:
+        blocks.append(cleaned_text[unclosed.end():].strip())
+    cleaned_text = _SPEECH_TAG_RE.sub("", cleaned_text).strip()
+    speech = " ".join(block for block in blocks if block)
+    return cleaned_text, speech or None
+
+
 @dataclass
 class AgentResponse:
     text: str
@@ -108,10 +134,13 @@ class AgentResponse:
     image_paths: Optional[List[str]] = None
     video_paths: Optional[List[str]] = None
     system_memory_log: Optional[str] = None
+    # The reply's <speech> blocks, on a voice turn (see <voice_mode>).
+    speech: Optional[str] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text = reply_text
+        text, speech = _extract_speech(text)
         text, poll_data = _extract_poll(text)
         text, image_paths = _extract_images(text)
         text, video_paths = _extract_videos(text)
@@ -123,4 +152,5 @@ class AgentResponse:
             image_paths=image_paths,
             video_paths=video_paths,
             system_memory_log=system_memory_log,
+            speech=speech,
         )

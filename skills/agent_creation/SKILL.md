@@ -91,9 +91,9 @@ You MUST use this exact JSON structure:
 *Before setting `"provider": "local"`, know two things:*
 - **The server handles one request at a time.** Local agents queue behind each other, so keep
   the local roster small and prefer low-volume, single-purpose agents.
-- **Never put a mid-turn caller on it.** Components that invoke a model *inside* another turn —
-  `graph-worker-low` (used by `ContextPruner`) and the voice verbalizer — would queue behind the
-  very turn they are serving, stalling it. These stay on Gemini.
+- **Never put a mid-turn caller on it.** A component that invokes a model *inside* another turn's
+  flow — `graph-worker-low` (used by `ContextPruner`) — would queue behind the very turn it is
+  serving, stalling it. It stays on Gemini.
 
 ### Why the Prompt Budget Is Strict
 A paragraph written once is paid for thousands of times. Total authored persona under 3500 characters is ~875 tokens.

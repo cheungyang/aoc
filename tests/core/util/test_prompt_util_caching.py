@@ -166,6 +166,14 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertEqual(len(blocks), 5)
         self.assertTrue(all(b.strip() for b in blocks))
 
+    def test_voice_mode_comes_last_and_leaves_the_prefix_unchanged(self):
+        """A voice turn shares every cached block with a typed turn in the same channel."""
+        typed = self._system_blocks()
+        with patch("core.runtime.graph_builder.get_voice_mode_prompt", return_value="<voice_mode>V</voice_mode>"):
+            spoken = self._system_blocks()
+        self.assertEqual(spoken[:-1], typed)
+        self.assertEqual(spoken[-1], "<voice_mode>V</voice_mode>")
+
 
 if __name__ == "__main__":
     unittest.main()

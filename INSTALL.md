@@ -261,12 +261,11 @@ Deleting the `provider` key moves the agent back to Gemini.
   `LOCAL_LLM_TIMEOUT` defaults to 300s: a turn's latency includes everything
   queued ahead of it, and the OpenAI client's 60s default would abort turns that
   were merely waiting.
-- **Do not move `graph-worker-low` or the voice verbalizer.** Both call a model
-  *inside* another turn — `graph-worker-low` summarizes context before the user's
-  request is processed, and the verbalizer runs mid-speech. On a serializing
-  server they queue behind the very turn they are serving. `graph-worker-low`
-  looks like an ideal candidate (toolless, stateless, cheapest tier) and is
-  precisely the wrong one.
+- **Do not move `graph-worker-low`.** It calls a model *inside* another turn's
+  flow: it summarizes a session's history right after a turn, and that
+  session's next turn waits for it. On a serializing server it queues behind
+  the very turns it is serving. It looks like an ideal candidate (toolless,
+  stateless, cheapest tier) and is precisely the wrong one.
 - **`IMAGE` is not available locally.** Configuring it raises at graph-build
   time rather than failing later at an image call site.
 - **In Docker, `localhost` is the container.** `docker-compose.yml` overrides

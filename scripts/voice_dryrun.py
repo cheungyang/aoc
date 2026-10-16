@@ -5,11 +5,20 @@ reports a per-stage latency table plus a quality pass/fail for every case.
 Each case is an utterance in a room with an expected outcome
 (scripts/voice_replay_cases.json). A run takes the path a Discord voice turn
 takes, minus Discord itself: optional STT, the room's voice bot streamed on a
-voice-surface session (so thinking levels, routing and delegation are the
-production ones), the speech chunker, and TTS of the first chunk. Every case is
-traced with the production TurnTrace, so the stage names match the
-`[TurnTrace]` lines live turns log -- and checking quality on the same run keeps
-a latency win from hiding a worse answer.
+voice-surface session (so thinking levels, routing, delegation and
+`<voice_mode>` are the production ones), the speech router and chunker, and
+TTS of the first chunk. Every case is traced with the production TurnTrace, so
+the stage names match the `[TurnTrace]` lines live turns log -- and checking
+quality on the same run keeps a latency win from hiding a worse answer.
+
+Every run is also held to the speech contract, whatever its case expects: the
+reply came with a <speech> block (else the fallback was spoken, and the run
+fails), no <speech> reached the text, the speech is in English (the voices
+are), and it kept every number and named item of the text reply. Numbers are
+matched exactly (in digits or words), so a dropped one fails the run unless
+the speech says the rest is in the channel. Names can't be -- "day planning"
+says "Day Planner" well enough -- so possible misses are notes for a person
+to judge. A run that failed is held to none of it, as in production.
 
 Case shape:
 
@@ -53,8 +62,10 @@ import re
 import sqlite3
 import sys
 import time
+import unicodedata
+from collections import Counter
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -152,7 +163,12 @@ class CaseResult:
     model_calls: List[dict] = field(default_factory=list)
     tokens: Dict[str, int] = field(default_factory=dict)
     blocked_writes: List[str] = field(default_factory=list)
+    speech: str = ""            # the <speech> text the router heard
+    shown: str = ""             # what the text channel would show
+    speech_missing: bool = False
+    errored: bool = False       # the run failed: it speaks the error line and isn't held to <speech>
     failures: List[str] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -207,6 +223,262 @@ def check_expectations(case: dict, result: CaseResult) -> List[str]:
     return failures
 
 
+# --- the speech contract ----------------------------------------------------
+
+_UNIT_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS_WORDS = {w: 10 * i for i, w in enumerate(
+    "twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_UNIT_ORDINALS = {w: i for i, w in enumerate(
+    "zeroth first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth "
+    "thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth".split())}
+_TENS_ORDINALS = {w: 10 * i for i, w in enumerate(
+    "twentieth thirtieth fortieth fiftieth sixtieth seventieth eightieth ninetieth".split(), start=2)}
+_MONTHS = {w: i for i, w in enumerate(
+    "january february march april may june july august september october november december".split(), start=1)}
+# "an hour", "a dollar": the article is the number.
+_ONE_UNITS = {"hour", "minute", "day", "week", "month", "year", "dollar", "mile", "pound", "cup", "night"}
+# Speech that hands the rest to the channel (long lists, links): misses are noted, not failed.
+DEFERS_RE = re.compile(r"\b(?:in|on) the (?:text )?channel\b|\b(?:want|shall|should) I (?:continue|go on|keep going)\b",
+                       re.IGNORECASE)
+# Capitalized words that aren't names.
+_NOT_NAMES = {"i", "i'm", "i'll", "i've", "i'd", "ok", "okay", "am", "pm", "tl", "dr"}
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
+# A label: "**Due Date**:", "**Due Date:**", or a line opening "Due Date:" (the colon may be full-width).
+_LABEL_RE = re.compile(r"\*\*([^*\n]+?)\*\*\s*[:：]|\*\*([^*\n]+?)[:：]\s*\*\*"
+                       r"|^([A-Z][\w'’]*(?:[ &/]+[A-Z][\w'’]*){0,4})\s*[:：](?=\s)")
+# What a capitalized word follows when it opens a sentence or a phrase.
+_PHRASE_STARTS = ".!?:;：(-–—|/"
+
+
+def _number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def spoken_numbers(text: str) -> Set[str]:
+    """Every number `text` says, as digits: "45", "forty-five" and "forty five"
+    all give "45"; "seven thirty" gives "7" and "30"; "October" gives "10"."""
+    found: Set[str] = set()
+    words = re.findall(r"\d+(?:[.,:]\d+)*|[a-z]+|[,.;:!?]", text.lower().replace("-", " ").replace("’", "'"))
+    total, group = 0, None
+
+    def close():
+        nonlocal total, group
+        if group is not None or total:
+            found.add(_number(total + (group or 0)))
+        total, group = 0, None
+
+    i = 0
+    while i < len(words):
+        word = words[i]
+        unit = _UNIT_WORDS.get(word, _UNIT_ORDINALS.get(word))
+        tens = _TENS_WORDS.get(word, _TENS_ORDINALS.get(word))
+        if word[0].isdigit():
+            close()
+            found.update(_digit_forms(word))
+        elif unit is not None:
+            joins = (group is None and total > 0) or (group is not None and (
+                (unit < 10 and group % 100 >= 20 and group % 10 == 0) or (group % 100 == 0 and group > 0)))
+            if not joins:
+                close()
+            group = (group or 0) + unit if joins else unit
+        elif tens is not None:
+            joins = (group is None and total > 0) or (group is not None and group % 100 == 0 and group > 0)
+            if not joins:
+                close()
+            group = (group or 0) + tens if joins else tens
+        elif word == "hundred" and group is not None:
+            group *= 100
+        elif word == "thousand" and (group is not None or total):
+            total, group = total + (group or 1) * 1000, None
+        elif word == "and" and words[i + 1:i + 3] == ["a", "half"] and group is not None:
+            found.add(_number(total + group + 0.5))
+            total, group = 0, None
+            i += 2
+        elif word == "point" and group is not None and i + 1 < len(words) and _UNIT_WORDS.get(words[i + 1], 10) < 10:
+            digits = ""
+            while i + 1 < len(words) and _UNIT_WORDS.get(words[i + 1], 10) < 10:
+                i += 1
+                digits += str(_UNIT_WORDS[words[i]])
+            found.add(f"{total + group}.{digits}")
+            total, group = 0, None
+        elif word in ("a", "an") and i + 1 < len(words) and words[i + 1].rstrip("s") in _ONE_UNITS:
+            close()
+            found.add("1.5" if words[i + 2:i + 5] == ["and", "a", "half"] else "1")
+        elif word == "free":
+            close()
+            found.add("0")
+        elif word in _MONTHS:
+            close()
+            found.add(str(_MONTHS[word]))
+        elif word == "and" and group is not None and group >= 100:
+            pass  # "one hundred and five"
+        else:
+            close()
+        i += 1
+    close()
+    return found
+
+
+def _digit_forms(token: str) -> Set[str]:
+    """A number written in digits, in the forms speech may give it."""
+    if ":" in token:  # a time: the hour either way round the clock, and the minutes
+        hour, _, minutes = token.partition(":")
+        forms = {str(int(hour)), str(int(hour) % 12 or 12)}
+        return forms | ({str(int(minutes))} if minutes.isdigit() and int(minutes) else set())
+    token = token.replace(",", "")
+    try:
+        return {_number(float(token))}
+    except ValueError:
+        return set()
+
+
+def _required_numbers(reply: str) -> List[Tuple[str, List[Set[str]]]]:
+    """(label, alternatives): each number of the reply that speech must keep, with
+    the sets of spoken forms that count as keeping it."""
+    text = re.sub(r"```.*?```|`[^`]*`|https?://\S+|\]\([^)]*\)|\S*/\S*", " ", reply, flags=re.DOTALL)
+    text = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", text, flags=re.MULTILINE)  # list markers
+    required = []
+    for match in re.finditer(r"(\$)?(\d+(?:[.,:]\d+)*)", text):
+        money, token = match.group(1), match.group(2)
+        iso = re.fullmatch(r"(\d{4})", token) and re.match(r"-(\d{2})-(\d{2})", text[match.end():])
+        if iso:  # 2026-10-16: the month and the day
+            required.append((f"{token}{iso.group(0)}", [{str(int(iso.group(1))), str(int(iso.group(2)))}]))
+            continue
+        if re.fullmatch(r"\d{5,}", token.replace(",", "")) or re.fullmatch(r"(?:19|20)\d\d", token):
+            continue  # an ID, or a year
+        if re.match(r"-\d", text[match.end():match.end() + 2]) or re.search(r"\d-$", text[:match.start()]):
+            continue  # the rest of an ISO date
+        if ":" in token:
+            hour, _, minutes = token.partition(":")
+            alternatives = [{str(int(hour))}, {str(int(hour) % 12 or 12)}]
+            if minutes.isdigit() and int(minutes):
+                alternatives = [a | {str(int(minutes))} for a in alternatives]
+            required.append((token, alternatives))
+        elif "." in token and money:  # $3.50: dollars and cents
+            dollars, _, cents = token.partition(".")
+            forms = {str(int(dollars))} | ({str(int(cents))} if int(cents) else set())
+            required.append((f"${token}", [{_number(float(token))}, forms]))
+        elif "." in token:
+            whole, _, fraction = token.partition(".")
+            required.append((token, [{_number(float(token))}, {str(int(whole)), str(int(fraction))}]))
+        else:
+            required.append(((money or "") + token, [{_number(float(token.replace(",", "")))}]))
+    return required
+
+
+def _words(text: str) -> List[str]:
+    """`text` as lowercase words, possessives dropped."""
+    return re.findall(r"[a-z0-9]+", text.lower().replace("’", "'").replace("'s", ""))
+
+
+def _required_names(reply: str) -> List[str]:
+    """Named items of the reply: bold phrases, runs of capitalized words
+    ("Point Reyes", "Five Guys"), and single capitalized words in list items
+    ("Sarah", "Goldbelly").
+
+    Not counted: headings; field labels, which are short or repeat on every
+    item ("**Due Date**:") -- a longer one-off label is the item's own name;
+    and a single capitalized word that opens a sentence or phrase, or sits in
+    running prose, as often a greeting ("Good morning Alva") or a stressed
+    word as a name.
+    """
+    text = re.sub(r"```.*?```|`[^`]*`|https?://\S+|\]\([^)]*\)", " ", reply, flags=re.DOTALL)
+    lines = [_LIST_MARKER_RE.sub("- ", line) for line in text.splitlines()
+             if not re.match(r"\s*#|\s*\*\*[^*]+\*\*\s*[:：]?\s*$", line)]  # headings, bold title lines
+    labels = [next(g for g in m.groups() if g).strip() for line in lines
+              for m in _LABEL_RE.finditer(line[2:] if line.startswith("- ") else line)]
+    counts = Counter(label.lower() for label in labels)
+    names = [label for label in labels if len(_words(label)) > 2 and counts[label.lower()] == 1]
+    for line in lines:
+        listed = line.startswith("- ")
+        line = _LABEL_RE.sub(":", line[2:] if listed else line)
+        names += [b for b in re.findall(r"\*\*(.+?)\*\*", line) if not re.match(r"\W*\d", b)]  # not "**$25**"
+        plain = re.sub(r"[*_>]", "", re.sub(r"\*\*.+?\*\*", "·", line))  # a bold name counts once, whole
+        for match in re.finditer(r"(?<![\w'’])[A-Z][\w'’]*(?:\s+[A-Z][\w'’]*)*", plain):
+            words = [w for w in match.group(0).split()
+                     if w.lower().rstrip("'’s") not in _NOT_NAMES and not (w.isupper() and len(w) <= 3)]
+            before = plain[:match.start()].rstrip()
+            opens = not before or before[-1] in _PHRASE_STARTS
+            if len(words) > 1 or (words and listed and not opens):
+                names.append(" ".join(words))
+    seen, unique = set(), []
+    for name in names:
+        name = " ".join(re.sub(r"[^\w\s'’&-]", "", name).split())
+        if name and any(c.isalpha() for c in name) and name.lower() not in seen:
+            seen.add(name.lower())
+            unique.append(name)
+    return unique
+
+
+def _said(word: str, spoken: Set[str]) -> bool:
+    """Whether `word`, or a form of it ("planning" for "planner"), was spoken."""
+    return any(s.startswith(word) or (len(word) >= 5 and s[:5] == word[:5]) for s in spoken)
+
+
+def missed_numbers(reply: str, speech: str) -> List[str]:
+    """The numbers of `reply` that `speech` doesn't say, in digits or words."""
+    said = spoken_numbers(speech)
+    missed = [label for label, alternatives in _required_numbers(reply)
+              if not any(forms <= said for forms in alternatives)]
+    return list(dict.fromkeys(missed))
+
+
+def missed_names(reply: str, speech: str) -> List[str]:
+    """The named items of `reply` that `speech` may not say: one counts as said
+    when each of its words of three or more letters is, in some form."""
+    spoken = set(_words(speech))
+    missed = []
+    for name in _required_names(reply):
+        parts = [w for w in _words(name) if len(w) >= 3]
+        if parts and not all(_said(w, spoken) for w in parts):
+            missed.append(name)
+    return missed
+
+
+def speech_coverage(reply: str, speech: str) -> List[str]:
+    """The numbers and named items of `reply` that `speech` doesn't say.
+
+    Links, code, paths, IDs, years and list numbering are not required -- the
+    speech is told to leave those to the channel.
+    """
+    return missed_numbers(reply, speech) + missed_names(reply, speech)
+
+
+def foreign_words(speech: str) -> List[str]:
+    """Words of `speech` in a script other than Latin, which an English voice can't say."""
+    def foreign(c):
+        return unicodedata.category(c).startswith("L") and not (ord(c) < 0x250 or 0x1E00 <= ord(c) <= 0x1EFF)
+    words = [w.strip(",.;:!?()、，。") for w in speech.split() if any(foreign(c) for c in w)]
+    return list(dict.fromkeys(words))
+
+
+def check_speech(result: "CaseResult") -> Tuple[List[str], List[str]]:
+    """The speech contract every run is held to: (failures, notes)."""
+    failures, notes = [], []
+    # A failed run's reply is whatever had streamed, cut off anywhere; the channel shows `shown`.
+    text = result.shown if result.errored else result.reply + result.shown
+    if re.search(r"</?speech\b", text, re.IGNORECASE):
+        failures.append("<speech> reached the text")
+    if result.errored:
+        return failures, notes  # the error is the failure; production doesn't count it either
+    if result.speech_missing:
+        failures.append("no <speech> block (the fallback was spoken)")
+        return failures, notes
+    foreign = foreign_words(result.speech)
+    if foreign:
+        failures.append(f"speech isn't in English: {', '.join(foreign)}")
+    defers = " (it defers to the channel)" if DEFERS_RE.search(result.speech) else ""
+    numbers = missed_numbers(result.reply, result.speech)
+    if numbers:
+        (notes if defers else failures).append(f"speech missed: {', '.join(numbers)}{defers}")
+    names = missed_names(result.reply, result.speech)
+    if names:
+        notes.append(f"speech may have missed: {', '.join(names)}{defers}")
+    return failures, notes
+
+
 def percentile(values: List[float], pct: float) -> Optional[float]:
     """Nearest-rank percentile; None for no values."""
     if not values:
@@ -235,13 +507,18 @@ def render_report(results: List[CaseResult]) -> str:
             f"| {r.case_id} | {r.run} | {'PASS' if r.passed else 'FAIL'} "
             f"| {_ms(r.marks.get('first_token'))} | {_ms(r.marks.get('first_chunk'))} | {_ms(r.marks.get('tts_first_byte'))} "
             f"| {len(r.model_calls)} ({calls}) | {r.tokens.get('input', 0)}/{r.tokens.get('output', 0)} "
-            f"| {'; '.join(r.failures + [f'refused write: {w}' for w in r.blocked_writes])} |"
+            f"| {'; '.join(r.failures + r.notes + [f'refused write: {w}' for w in r.blocked_writes])} |"
         )
     lines += ["", "| Stage | p50 | p90 | n |", "|---|---|---|---|"]
     for stage, p50, p90, n in stage_table(results):
         lines.append(f"| {stage} | {_ms(p50)} | {_ms(p90)} | {n} |")
     passed = sum(r.passed for r in results)
-    lines += ["", f"Quality: {passed}/{len(results)} runs passed."]
+    held = [r for r in results if not r.errored]
+    with_speech = sum(not r.speech_missing for r in held)
+    speech_line = f"Speech: {with_speech}/{len(held)} runs came with a <speech> block."
+    if len(held) < len(results):
+        speech_line += f" ({len(results) - len(held)} failed runs aren't counted.)"
+    lines += ["", f"Quality: {passed}/{len(results)} runs passed.", speech_line]
     return "\n".join(lines)
 
 
@@ -350,10 +627,13 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     streaming STT first, and the trace is anchored at the last voiced frame,
     as in a live turn. `measure_tts`: synthesize the first chunk to time it.
     """
+    from core.channel.discord.stream_buffer import DiscordStreamBuffer
     from core.loaders.agents_loader import AgentsLoader
     from core.runtime.session_manager import SessionManager
     from core.runtime.turn_trace import start_turn_trace
-    from core.voice.speech.verbalizer import Verbalizer
+    from core.voice.speech.missing_speech import fallback_speech
+    from core.voice.speech.reply import ERROR_LINE, speech_of
+    from core.voice.speech.speech_router import SpeechTextRouter
     from core.voice.speech.voice_stream import VoiceStream
 
     reset_history(db_path)
@@ -378,7 +658,8 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
         agent_id=voice_bot, source=REPLAY_SOURCE, channel=case["room"], surface="voice", record_memory=False,
     )
     agent = AgentsLoader().get_agent(voice_bot)
-    voice_stream = VoiceStream(verbalizer=Verbalizer(), session=session)
+    router, voice_stream = SpeechTextRouter(), VoiceStream()
+    said, shown = [], []
     tts_task = None
 
     def speak(chunks):
@@ -393,24 +674,52 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
                         trace.mark("tts_first_byte")
                 tts_task = asyncio.create_task(first_audio())
 
+    def route(speech_part, text_part):
+        # As the voice pipeline routes them: the <speech> text to the speaker,
+        # everything else to the text channel.
+        shown.append(text_part)
+        if speech_part:
+            said.append(speech_part)
+            speak(voice_stream.add(speech_part))
+
+    response = None
     trace.mark("agent_start")
     async for event in agent.execute_stream(result.transcript, session=session):
         kind = event.get("type")
         if kind == "token" and event.get("content"):
             result.agents = sorted(set(result.agents) | {event.get("agent_id") or voice_bot})
-            if not event.get("is_header"):
+            if event.get("is_header") or event.get("is_error"):
+                # As the voice pipeline does: a delegate's attribution and its
+                # error go to the channel only.
+                shown.append(event["content"])
+                if event.get("is_error"):
+                    result.errored = True
+                    result.failures.append(f"agent error: {event['content'].strip()}")
+            else:
                 trace.mark("first_token")
-                speak(await voice_stream.add_token(event["content"]))
+                route(*router.feed(event["content"]))
         elif kind == "tool_start":
             result.tools.append(event.get("tool_name", ""))
             trace.event("tool_start", tool=event.get("tool_name", ""))
         elif kind == "tool_end":
             trace.event("tool_end", tool=event.get("tool_name", ""))
         elif kind == "final_response":
+            route(*router.flush())
+            response = event.get("response")
             result.reply = event.get("text", "") or ""
         elif kind == "error":
+            result.errored = True
             result.failures.append(f"agent error: {event.get('content')}")
-    speak(await voice_stream.flush())
+    route(*router.flush())
+    speak(voice_stream.flush())
+    result.speech = "".join(said).strip()
+    result.shown = DiscordStreamBuffer.filter_xml_for_stream("".join(shown))
+    if result.errored:
+        speak([ERROR_LINE])
+    else:
+        result.speech_missing = speech_of(response) is None
+        if result.speech_missing and result.reply.strip():
+            speak([line for line in [fallback_speech(result.reply)] if line])
     if tts_task is not None:
         await tts_task
 
@@ -420,6 +729,8 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     result.tokens = replay_tokens(started, db_path)
     result.blocked_writes = [f"{tool}.{action} {target or ''}".strip() for tool, action, target in BLOCKED_WRITES]
     result.failures += check_expectations(case, result)
+    speech_failures, result.notes = check_speech(result)
+    result.failures += speech_failures
     return result
 
 
