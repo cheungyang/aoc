@@ -6,13 +6,7 @@
   "tools": {
     "zillow_query": {},
     "filesystem": {
-      "pkm/wallet/real-estate/": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "ls"
-      ]
+      "pkm/wallet/real-estate/": ["@write"]
     }
   }
 }

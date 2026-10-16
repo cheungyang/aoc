@@ -5,14 +5,7 @@
   "emoji": "🧹",
   "tools": {
     "filesystem": {
-      "pkm/wiki": [
-        "find",
-        "grep",
-        "read",
-        "write",
-        "overwrite",
-        "delete"
-      ]
+      "pkm/wiki": ["@write", "delete"]
     },
     "vault_search": {}
   }

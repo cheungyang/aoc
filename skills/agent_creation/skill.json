@@ -5,32 +5,8 @@
   "emoji": "🤖",
   "tools": {
     "filesystem": {
-      "agents": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep",
-        "move",
-        "delete",
-        "rmdir"
-      ],
-      "pkm/agents": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "replace_block",
-        "ls",
-        "find",
-        "grep",
-        "move",
-        "delete",
-        "rmdir"
-      ]
+      "agents": ["@manage"],
+      "pkm/agents": ["@manage"]
     }
   }
 }

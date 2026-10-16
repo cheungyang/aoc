@@ -43,6 +43,7 @@ Named action bundles prefixed with `@` provide standard, drift-free permission s
   - `@read`: `["read", "read_image", "ls", "find", "grep"]`
   - `@write`: `["@read", "write", "overwrite", "append", "replace_block"]`
   - `@manage`: `["@write", "move", "delete", "rmdir"]` *(Note: `move` sits in `@manage`, not `@write`, because renaming files alters references across the workspace).*
+  - Name the smallest bundle that covers the need. Add bare actions only to grant less than the next bundle up: `["@read", "append"]` (append-only log), `["write"]` (create-only), `["@write", "delete"]` (no `move`/`rmdir`). Never list a bundle beside its own members (`["@read", "@write"]` is `["@write"]`). Tests reject a list that spells out a whole bundle.
 - **`home_assistant` Bundles**:
   - `@observe`: All read actions (`list_entities`, `get_state`, `search_registry`, `inventory`, `check_config`, `live_context`, `history`, `logbook`, `list_automations`, `get_automation`, `render_template`, `list_services`, `error_log`). Derived directly from `READ_ACTIONS`.
   - `@control`: `["call_service"]`

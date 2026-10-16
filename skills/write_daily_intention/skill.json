@@ -6,13 +6,7 @@
   "tools": {
     "task_query": [],
     "filesystem": {
-      "pkm/vault/journals": [
-        "read",
-        "write",
-        "append",
-        "overwrite",
-        "replace_block"
-      ]
+      "pkm/vault/journals": ["@write"]
     }
   }
 }

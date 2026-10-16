@@ -5,11 +5,7 @@
   "emoji": "🛠️",
   "tools": {
     "filesystem": {
-      "skills": [
-        "read",
-        "write",
-        "overwrite"
-      ]
+      "skills": ["@write"]
     }
   }
 }

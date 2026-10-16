@@ -8,15 +8,9 @@
     "task_query": [],
     "project_query": [],
     "filesystem": {
-      "pkm/vault/projects": [
-        "read"
-      ],
-      "pkm/ticktick": [
-        "read"
-      ],
-      "pkm/vault/journals": [
-        "read"
-      ]
+      "pkm/vault/projects": ["@read"],
+      "pkm/ticktick": ["@read"],
+      "pkm/vault/journals": ["@read"]
     }
   }
 }

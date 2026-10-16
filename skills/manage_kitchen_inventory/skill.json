@@ -5,13 +5,7 @@
   "emoji": "🗄️",
   "tools": {
     "filesystem": {
-      "pkm/wallet/kitchen": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite",
-        "append"
-      ]
+      "pkm/wallet/kitchen": ["@write"]
     }
   }
 }

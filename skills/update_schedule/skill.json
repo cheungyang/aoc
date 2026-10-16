@@ -5,11 +5,7 @@
   "emoji": "⏰",
   "tools": {
     "filesystem": {
-      "agents": [
-        "read",
-        "write",
-        "overwrite"
-      ]
+      "agents": ["@write"]
     },
     "schedule_validate": {}
   }

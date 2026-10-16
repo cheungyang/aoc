@@ -59,13 +59,14 @@ Create the `skill.json` file to explicitly declare the metadata and tool permiss
   "tools": {
     "<tool_name>": {
       "<resource_or_path>": [
-        "<permission_scopes>"
+        "<action or @bundle>"
       ]
     }
   }
 }
 ```
 *Critical Constraint:* The tools listed in the Required Tools section of `SKILL.md` MUST perfectly align with the tools and permission payloads defined in the `tools` object of `skill.json`.
+*Grants:* Use `@` bundles (`filesystem`: `@read`, `@write`, `@manage`), adding bare actions only to grant less than a bundle, e.g. `["@read", "append"]`. The `update_permissions` skill has the bundle rules.
 
 #### 4. Agent-Friendly Output & Memory (IPC Format)
 Once the files are successfully written, finalize the execution by outputting the strict XML structure below. This format is required to ensure perfect readability for routing agents.

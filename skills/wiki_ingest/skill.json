@@ -5,24 +5,9 @@
   "emoji": "🕸️",
   "tools": {
     "filesystem": {
-      "pkm/wiki": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite",
-        "append"
-      ],
-      "pkm/inbox": [
-        "read",
-        "find",
-        "ls",
-        "delete"
-      ],
-      "pkm/vault/assets": [
-        "ls",
-        "find",
-        "read_image"
-      ]
+      "pkm/wiki": ["@write"],
+      "pkm/inbox": ["@read", "delete"],
+      "pkm/vault/assets": ["@read"]
     },
     "web_search": []
   }

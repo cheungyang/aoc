@@ -9,12 +9,7 @@
     "project_query": {},
     "web_search": {},
     "filesystem": {
-      "pkm/wiki": [
-        "read",
-        "read_image",
-        "write",
-        "overwrite"
-      ]
+      "pkm/wiki": ["@write"]
     }
   }
 }

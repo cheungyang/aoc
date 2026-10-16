@@ -7,18 +7,9 @@
     "task_query": [],
     "project_query": [],
     "filesystem": {
-      "pkm/vault": [
-        "read"
-      ],
-      "pkm/vault/journals/weekly": [
-        "write",
-        "overwrite",
-        "append",
-        "delete"
-      ],
-      "pkm/templates": [
-        "read"
-      ]
+      "pkm/vault": ["@read"],
+      "pkm/vault/journals/weekly": ["@write", "delete"],
+      "pkm/templates": ["@read"]
     }
   }
 }
