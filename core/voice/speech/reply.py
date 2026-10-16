@@ -4,23 +4,28 @@ The cue that it heard you, then the reply, streamed as two lanes. The agent
 writes a <speech> block for the ear before its normal reply (`<voice_mode>`);
 the router (speech_router.py) sends the block to the speaker and everything
 else to the text channel. Before a tool call the agent says what it's
-checking the same way, so a tool wait is never silent. A reply without the
-block gets a deterministic fallback and a note under it (missing_speech.py).
-Fixed lines (room switching) go through `say`. Every method that would make a
-sound takes an `is_current` check, so a turn that was interrupted or
-superseded goes quiet.
+checking the same way, so a tool wait is never silent. Speech is synthesized
+while it's being written: each stretch -- a <speech> block, in the voice of
+the agent that wrote it -- is one TTS stream feeding one speaker in the audio
+queue (engines/tts.py, pcm_speaker.py). A reply without the block gets a
+deterministic fallback and a note under it (missing_speech.py). Fixed lines
+(room switching) go through `say`. Every method that would make a sound takes
+an `is_current` check, so a turn that was interrupted or superseded goes
+quiet.
 """
 import asyncio
 import os
-from typing import Callable, Optional
+from typing import Callable, Dict, List, Optional
 
 import discord
 
-from core.voice.engines.tts_engine import TTSEngine
+from core.voice import settings
+from core.voice.engines.tts import TTSEngine, Voice, agent_voice
 from . import missing_speech
-from .audio_queue import FFMPEG_EXE
 from .blurp_generator import BlurpGenerator
-from .speech_router import SpeechTextRouter
+from .pcm_speaker import PCMSpeaker
+from .speech_router import BLOCK_END, SpeechTextRouter
+from .speech_util import speakable
 from .voice_stream import VoiceStream
 
 # How long a finished turn's trace waits for its first audio to start playing
@@ -89,10 +94,7 @@ class ReplyStreamer:
         self.config = config
         self.audio = audio  # the AudioStreamQueue
         self.connection = connection
-        self.tts_engine = TTSEngine(
-            default_voice=config.get("tts_voice", "en-US-JennyNeural"),
-            default_speed=float(config.get("tts_speed", 1.0)),
-        )
+        self.tts = TTSEngine()
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -107,18 +109,30 @@ class ReplyStreamer:
                 self.audio.clear()
             blurp_file = BlurpGenerator.get_blurp_audio(self.config)
             if blurp_file and os.path.exists(blurp_file):
-                vc.play(discord.FFmpegPCMAudio(blurp_file, executable=FFMPEG_EXE))
+                vc.play(discord.FFmpegPCMAudio(blurp_file, executable=settings.ffmpeg_exe()))
         except Exception as e:
             self._log(f"Error playing static blurp: {e}")
 
-    async def say(self, text: str, is_current: IsCurrent = lambda: True):
-        """Speaks a fixed line (room switching) outside an agent reply."""
-        if not is_current():
+    async def say(self, text: str, agent_id: Optional[str] = None, is_current: IsCurrent = lambda: True):
+        """Speaks a fixed line (room switching) outside an agent reply, in
+        `agent_id`'s voice: the room's own by default."""
+        line = speakable(text)
+        if not line or not is_current() or not self.connection.is_connected():
             return
-        tts_file = await self.tts_engine.synthesize_to_file(text)
-        if tts_file and self.connection.is_connected():
-            self.audio.start()
-            await self.audio.put(tts_file, auto_delete=True)
+        stream = await self._open(agent_voice(agent_id or self.agent_id))
+        stream.send(line)
+        stream.finish()
+
+    async def _open(self, voice: Voice, speech: Optional[TurnSpeech] = None):
+        """Starts a stretch of speech in `voice`: a TTS stream into a speaker queued to play."""
+        on_audio = (lambda: speech.trace.mark("tts_first_byte")) if speech else None
+        speaker = PCMSpeaker(asyncio.get_running_loop(), on_audio=on_audio)
+        speaker.stream = await self.tts.open(voice, speaker)
+        if speech is not None:
+            speech.queued_audio = True
+        self.audio.start()
+        await self.audio.put(speaker, on_start=speech.on_audio_start if speech else None)
+        return speaker.stream
 
     async def stream(self, agent, transcript: str, author: str, session, channel, speech: TurnSpeech,
                      is_current: IsCurrent, on_final: Callable[[str], None]) -> bool:
@@ -155,7 +169,7 @@ class ReplyStreamer:
             if shown:
                 text_lane.put_nowait(("token", shown))
             if said:
-                speech_lane.put_nowait(("speech", said))
+                speech_lane.put_nowait(("speech", said, speaker))
 
         # Ensure audio queue is started
         self.audio.start()
@@ -208,11 +222,11 @@ class ReplyStreamer:
             route(*router.flush())
             # Only a model's reply is held to <speech>: not a failed run, nor a
             # turn that never reached a model (a system command).
-            closing = ERROR_LINE if failed else ""
+            closing, said_by = (ERROR_LINE, self.agent_id) if failed else ("", speaker)
             if replied and not failed and self._missing_speech(speaker, response, trace):
                 closing = missing_speech.fallback_speech(final_text)
                 text_lane.put_nowait(("note", missing_speech.alert(speaker)))
-            speech_lane.put_nowait(("end", closing))
+            speech_lane.put_nowait(("end", closing, said_by))
             text_lane.put_nowait(None)
             await asyncio.gather(text_task, speech_task)
             return True
@@ -261,31 +275,69 @@ class ReplyStreamer:
                 await self._post(channel, payload)
 
     async def _run_speech_lane(self, lane: asyncio.Queue, speech: TurnSpeech, is_current: IsCurrent):
-        """Speaks the <speech> text sentence by sentence, while the text lane runs."""
-        voice_stream = VoiceStream()
-        while True:
-            kind, payload = await lane.get()
-            if not is_current():
-                return
-            if kind == "speech":
-                for sentence in voice_stream.add(payload):
-                    await self._speak(sentence, speech, is_current)
-            elif kind == "end":
-                for sentence in voice_stream.flush():
-                    await self._speak(sentence, speech, is_current, label="final chunk")
-                if payload:
-                    await self._speak(payload, speech, is_current, label="closing line")
-                return
+        """Speaks the <speech> text as it's written, each agent in its own voice.
 
-    async def _speak(self, sentence: str, speech: TurnSpeech, is_current: IsCurrent, label: str = "chunk"):
-        """Synthesizes one chunk and queues it for playback."""
-        if not is_current():
-            return
-        speech.trace.mark("first_chunk")
-        self._log(f"🔊 Synthesizing {label}: '{sentence[:60]}...'")
-        tts_file = await self.tts_engine.synthesize_to_file(sentence)
-        if tts_file:
-            speech.trace.mark("tts_first_byte")
-        if tts_file and is_current() and self.connection.is_connected():
-            speech.queued_audio = True
-            await self.audio.put(tts_file, auto_delete=True, on_start=speech.on_audio_start)
+        A stretch of speech -- up to the end of a <speech> block, or until
+        another agent speaks -- is one TTS stream, fed a chunk at a time
+        (voice_stream.py), and one speaker in the audio queue.
+        """
+        chunks, stretch = VoiceStream(), _Stretch(self, speech)
+        voices: Dict[Optional[str], Voice] = {}
+        last = None  # the voice the buffered text is in
+        try:
+            while True:
+                kind, text, agent_id = await lane.get()
+                if not is_current():
+                    stretch.cancel()
+                    return
+                if agent_id not in voices:
+                    voices[agent_id] = agent_voice(agent_id)
+                voice = voices[agent_id]
+                if kind == "speech":
+                    last = voice
+                    *closed, rest = text.split(BLOCK_END)
+                    for block_end in closed:  # a <speech> block closed: say it all now
+                        await stretch.say(chunks.add(block_end + BLOCK_END), voice)
+                        stretch.end()
+                    await stretch.say(chunks.add(rest), voice)
+                else:  # "end": the rest, then any closing line
+                    await stretch.say(chunks.flush(), last or voice)
+                    if text:
+                        await stretch.say([text], voice)
+                    stretch.end()
+                    return
+        except BaseException:
+            stretch.cancel()
+            raise
+
+
+class _Stretch:
+    """The stretch of speech being fed: one voice, one TTS stream, one speaker."""
+
+    def __init__(self, reply: ReplyStreamer, speech: TurnSpeech):
+        self._reply = reply
+        self._speech = speech
+        self.stream = None
+        self.voice: Optional[Voice] = None
+
+    async def say(self, chunks: List[str], voice: Voice) -> None:
+        for chunk in chunks:
+            if self.stream is not None and voice != self.voice:
+                self.end()  # another agent speaks: in its own voice, after this one
+            if self.stream is None:
+                self.stream = await self._reply._open(voice, self._speech)
+                self.voice = voice
+            self._speech.trace.mark("first_chunk")
+            self._reply._log(f"🔊 {voice.name.rsplit('-', 1)[-1]}: '{chunk[:60]}'")
+            self.stream.send(chunk + " ")
+
+    def end(self) -> None:
+        """No more text for this stretch; its audio plays out."""
+        if self.stream is not None:
+            self.stream.finish()
+            self.stream = None
+
+    def cancel(self) -> None:
+        if self.stream is not None:
+            self.stream.cancel()
+            self.stream = None

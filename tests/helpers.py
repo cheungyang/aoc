@@ -5,8 +5,8 @@ ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
 token-usage-handler and logging-util tests, `GOLDEN_INPUT`, the structured reply
-shared by the missing-speech and speech-coverage tests, and `fake_audio_source`
-for tests that play audio through the voice audio queue.
+shared by the missing-speech and speech-coverage tests, and `FakeTTS` for voice
+tests that speak.
 """
 from contextlib import contextmanager
 
@@ -73,24 +73,44 @@ GOLDEN_INPUT = """## Weekend options
 """
 
 
-def fake_audio_source():
-    """A stand-in for discord.FFmpegPCMAudio: patch it in with
-    `patch("discord.FFmpegPCMAudio", fake_audio_source())`.
+class FakeTTS:
+    """Stands in for TTSEngine (core/voice/engines/tts.py): each stream records
+    its voice and the chunks it was sent, and gives its speaker 20 ms of audio
+    per chunk, so a queued speaker is ready at once."""
 
-    The audio queue wraps every source in discord.PCMVolumeTransformer (for
-    barge-in ducking), which rejects anything that isn't a real AudioSource,
-    so a MagicMock in its place makes every item fail to play.
-    """
-    import discord
+    def __init__(self):
+        self.streams = []
 
-    class FakeAudioSource(discord.AudioSource):
-        def __init__(self, *args, **kwargs):
-            self.args = args
+    async def open(self, voice, speaker):
+        stream = FakeTTSStream(voice, speaker)
+        self.streams.append(stream)
+        return stream
 
-        def read(self) -> bytes:
-            return b""
+    def said(self):
+        """What was spoken: one string per stretch of speech."""
+        return [stream.text for stream in self.streams]
 
-        def is_opus(self) -> bool:
-            return False
 
-    return FakeAudioSource
+class FakeTTSStream:
+    def __init__(self, voice, speaker):
+        self.voice = voice
+        self.speaker = speaker
+        self.chunks = []
+        self.finished = False
+        self.cancelled = False
+
+    @property
+    def text(self):
+        return " ".join(chunk.strip() for chunk in self.chunks)
+
+    def send(self, text):
+        self.chunks.append(text)
+        self.speaker.write(bytes(1920))
+
+    def finish(self):
+        self.finished = True
+        self.speaker.finish()
+
+    def cancel(self):
+        self.cancelled = True
+        self.speaker.finish()

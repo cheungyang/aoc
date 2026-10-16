@@ -4,7 +4,7 @@
 Measures today's engine against the candidates that could replace it, on the
 kind of replies this system actually speaks (scripts/tts_benchmark_utterances.json):
 
-    edge          edge-tts, today's engine (core/voice/engines/tts_engine.py)
+    edge          edge-tts, the voice's fallback (core/voice/engines/edge_tts_stream.py)
     chirp-unary   Chirp 3: HD on Cloud Text-to-Speech, one SynthesizeSpeech call per sentence
     chirp-stream  Chirp 3: HD, one bidirectional StreamingSynthesize call fed clause by clause
     gemini        Gemini 3.8 Flash-Lite TTS over the Interactions API, audio streamed back
@@ -131,7 +131,7 @@ from core.util.models import TRANSCRIBE as TRANSCRIBE_MODEL  # noqa: E402
 from core.util.models import TTS_FLASH_LITE as GEMINI_TTS_MODEL  # noqa: E402
 INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
-# main's voice_config.tts_voice today.
+# The edge voice main spoke in before Chirp; also the fallback's female voice.
 EDGE_VOICE = "en-US-AriaNeural"
 # edge-tts always asks for audio-24khz-48kbitrate-mono-mp3, a constant bitrate,
 # so a chunk's duration follows from its size.

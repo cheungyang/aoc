@@ -38,7 +38,11 @@ pynacl
 faster-whisper==1.2.1
 onnxruntime==1.30.0
 numpy==2.4.6
-edge-tts
+# The voice's fallback TTS (core/voice/engines/edge_tts_stream.py). Microsoft moved
+# to v2 request tokens (Sec-MS-GEC-Version "2-..."), so the newest release on PyPI,
+# 7.2.8, gets HTTP 403 on every call. 7.3.1 handles them but is tagged only on
+# GitHub; go back to a plain PyPI pin once a release above 7.2.8 is published.
+edge-tts @ https://github.com/rany2/edge-tts/archive/refs/tags/7.3.1.tar.gz
 soundfile
 imageio-ffmpeg
 pillow
@@ -59,9 +63,10 @@ websocket-client
 websockets>=13
 # Public market data for tools/yfinance.py (market_data skill / market-scout).
 yfinance
-# Chirp 3: HD voices on Cloud Text-to-Speech: scripts/tts_benchmark.py now, the
-# streaming TTS provider of the voice-first plan later. Bidirectional streaming
-# exists only over gRPC, so this brings grpcio -- a native wheel, with the
-# SIGILL risk described above. Before relying on it on the NAS, run
+# Chirp 3: HD voices on Cloud Text-to-Speech: the voice's streaming TTS
+# (core/voice/engines/chirp_tts.py) and scripts/tts_benchmark.py. Bidirectional
+# streaming exists only over gRPC, so this brings grpcio -- a native wheel, with
+# the SIGILL risk described above. The voice tries the import in a child process
+# first and falls back to edge-tts if it dies; to check by hand on the NAS, run
 #   python -c "import grpc; from google.cloud import texttospeech"
 google-cloud-texttospeech>=2.38,<3

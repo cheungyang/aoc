@@ -10,7 +10,7 @@ from core.voice.listening.utterance import Transcript, Utterance
 from core.voice.speech.missing_speech import alert
 from core.voice.speech.reply import ERROR_LINE
 from core.voice.voice_manager import VoiceManager
-from tests.helpers import fake_audio_source
+from tests.helpers import FakeTTS
 
 @pytest.fixture
 def mock_bot_runner():
@@ -69,17 +69,12 @@ def _spoken_reply(text):
 def test_voice_manager_init(mock_bot_runner):
     with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
         mock_agent = MagicMock()
-        mock_agent.config = {
-            "voice_config": {
-                "tts_voice": "en-US-JennyNeural",
-                "tts_speed": 1.0
-            }
-        }
+        mock_agent.config = {"voice_config": {"audio_blurp": "assets/sounds/blurps/concierge_ping.wav"}}
         mock_loader.return_value.get_agent.return_value = mock_agent
-        
+
         vm = VoiceManager(mock_bot_runner)
         assert vm.agent_id == "main"
-        assert vm.config.get("tts_voice") == "en-US-JennyNeural"
+        assert vm.config.get("audio_blurp") == "assets/sounds/blurps/concierge_ping.wav"
 
 
 def test_stt_vocabulary_is_every_agent_name_and_spoken_id(mock_bot_runner):
@@ -192,14 +187,10 @@ async def test_a_finished_utterance_runs_the_pipeline(mock_bot_runner, tmp_path)
     mock_agent = MagicMock()
     mock_agent.execute_stream = MagicMock(side_effect=fake_stream)
     
-    # Mock TTS file synthesis
-    fake_tts_file = tmp_path / "reply.mp3"
-    fake_tts_file.write_bytes(b"dummy_mp3_data")
-    vm.reply.tts_engine.synthesize_to_file = AsyncMock(return_value=str(fake_tts_file))
-    
+    vm.reply.tts = FakeTTS()
+
     with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
-         patch("discord.FFmpegPCMAudio", fake_audio_source()):
+         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
              
         mock_loader.return_value.get_agent.return_value = mock_agent
         
@@ -220,7 +211,7 @@ async def test_a_finished_utterance_runs_the_pipeline(mock_bot_runner, tmp_path)
         assert called_session.source == "discord"
         
         # 3. Verify the speech was synthesized and the text posted, each in its own lane
-        vm.reply.tts_engine.synthesize_to_file.assert_awaited_once_with("You have two tasks scheduled.")
+        assert vm.reply.tts.said() == ["You have two tasks scheduled."]
         mock_text_channel.send.assert_any_call("You have 2 tasks scheduled.")
 
         # 4. Answered: nothing is carried into the next turn
@@ -281,8 +272,8 @@ async def test_an_interruption_while_the_agent_works_discards_its_answer(mock_bo
         first = _say(vm, "Move my dentist appointment to Thursday.")
         await asyncio.gather(vm._current_task, return_exceptions=True)
 
-    # TTS synthesis should NOT be called for old discarded turn
-    vm.reply.tts_engine.synthesize_to_file.assert_not_called()
+    # Nothing is spoken for the discarded turn
+    assert vm.reply.tts.streams == []
     vm.audio_queue.put.assert_not_awaited()
     # Never heard, so the request rides along with the next turn (B19).
     assert vm.floor.unanswered() == [first]
@@ -341,18 +332,11 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     mock_agent = MagicMock()
     mock_agent.execute_stream = MagicMock(side_effect=[fake_stream_1(), fake_stream_2()])
     
-    fake_tts1 = tmp_path / "reply1.mp3"
-    fake_tts1.write_bytes(b"audio1")
-    fake_tts2 = tmp_path / "reply2.mp3"
-    fake_tts2.write_bytes(b"audio2")
-    
-    vm.reply.tts_engine.synthesize_to_file = AsyncMock(side_effect=[str(fake_tts1), str(fake_tts2)])
-    
+    vm.reply.tts = FakeTTS()
     user = MagicMock(display_name="Alva", bot=False)
-    
+
     with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None), \
-         patch("discord.FFmpegPCMAudio", fake_audio_source()):
+         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
         mock_loader.return_value.get_agent.return_value = mock_agent
         
         # Turn 1: "Help me ask Daisy to say hi."
@@ -380,7 +364,7 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
         # Verify second sentence was answered, on its own
         assert mock_agent.execute_stream.call_count == 2
         assert mock_agent.execute_stream.call_args_list[1][0][0] == "Tell me the list of agents."
-        assert vm.reply.tts_engine.synthesize_to_file.call_count == 2
+        assert len(vm.reply.tts.said()) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -431,9 +415,7 @@ def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
     agent = MagicMock()
     agent.execute_stream = MagicMock(side_effect=fake_stream)
 
-    tts_file = tmp_path / "reply.mp3"
-    tts_file.write_bytes(b"audio")
-    vm.reply.tts_engine.synthesize_to_file = AsyncMock(return_value=str(tts_file))
+    vm.reply.tts = FakeTTS()
 
     # The floor and the reply share this queue, so it's stubbed in place.
     vm.audio_queue.start = MagicMock()
@@ -452,7 +434,13 @@ def _posted(text_channel):
 
 
 def _synthesized(vm):
-    return [c.args[0] for c in vm.reply.tts_engine.synthesize_to_file.call_args_list]
+    """What was spoken: one string per stretch of speech."""
+    return vm.reply.tts.said()
+
+
+def _chunks(vm):
+    """How many chunks went to TTS, across stretches."""
+    return sum(len(stream.chunks) for stream in vm.reply.tts.streams)
 
 
 def _sent(text_channel):
@@ -466,7 +454,7 @@ def _notes(text_channel):
 
 def _play_at_once(vm):
     """Queued audio starts playing at once, so the trace records at the turn's end."""
-    async def play_now(path, priority=False, auto_delete=True, on_start=None):
+    async def play_now(speaker, on_start=None):
         if on_start:
             on_start()
 
@@ -505,13 +493,13 @@ async def test_the_preamble_is_spoken_while_the_tool_runs(mock_bot_runner, tmp_p
     """Bridge phrases are gone: the agent says what it's checking in the same
     response as the tool call, so the wait isn't silent."""
     vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
-    synthesize = vm.reply.tts_engine.synthesize_to_file
+    streams = vm.reply.tts.streams
     answer = "<speech>You're free after four.</speech>You're free after 16:00."
 
     async def stream(*_args, **_kwargs):
         yield {"type": "token", "content": "<speech>Checking your calendar.</speech>"}
         yield {"type": "tool_start", "tool_name": "gog", "tool_args": {}}
-        await _until(lambda: synthesize.await_count == 1)  # heard while the tool runs
+        await _until(lambda: streams and streams[0].finished)  # said in full while the tool runs
         yield {"type": "tool_end", "tool_name": "gog", "output": "free"}
         yield {"type": "token", "content": answer}
         yield _final(answer)  # the final message is the answer's
@@ -631,7 +619,7 @@ async def test_delegation_header_is_shown_but_not_spoken(mock_bot_runner, tmp_pa
     ])
     await _run_turn(vm, agent)
 
-    spoken = " ".join(c.args[0] for c in vm.reply.tts_engine.synthesize_to_file.call_args_list)
+    spoken = " ".join(_synthesized(vm))
     assert "Daisy" not in spoken
     assert "You have two meetings today." in spoken
     message = text_channel.send.return_value
@@ -664,12 +652,12 @@ async def test_transcript_mirror_does_not_delay_the_agent(mock_bot_runner, tmp_p
         mock_loader.return_value.get_agent.return_value = agent
         _say(vm, QUESTION)
         for _ in range(50):
-            if vm.reply.tts_engine.synthesize_to_file.await_count:
+            if _chunks(vm):
                 break
             await asyncio.sleep(0.01)
         # The agent ran and speech was synthesized while the transcript post was stuck...
         agent.execute_stream.assert_called_once()
-        vm.reply.tts_engine.synthesize_to_file.assert_awaited()
+        assert _chunks(vm)
         assert sent == []
         release.set()
         await vm._current_task
@@ -702,10 +690,10 @@ async def test_slow_discord_edits_do_not_hold_up_speech(mock_bot_runner, tmp_pat
         mock_loader.return_value.get_agent.return_value = agent
         _say(vm, QUESTION)
         for _ in range(50):
-            if vm.reply.tts_engine.synthesize_to_file.await_count >= 2:
+            if _chunks(vm) >= 2:
                 break
             await asyncio.sleep(0.01)
-        assert vm.reply.tts_engine.synthesize_to_file.await_count >= 2, "speech waited on the text channel"
+        assert _chunks(vm) >= 2, "speech waited on the text channel"
         release.set()
         await vm._current_task
 
@@ -719,12 +707,7 @@ async def test_turn_trace_records_stages_and_first_audio(mock_bot_runner, tmp_pa
         _final(_spoken_reply("The kitchen lights are off now.")),
     ])
     traces = []
-
-    async def play_now(path, priority=False, auto_delete=True, on_start=None):
-        if on_start:
-            on_start()
-
-    vm.audio_queue.put = AsyncMock(side_effect=play_now)
+    _play_at_once(vm)
     utterance = _spoken(QUESTION, speech_end_at=time.monotonic() - 0.9)
     utterance.stream = MagicMock(timings={"final_after_end_ms": 412.4})  # the live session's timings
     with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
@@ -758,7 +741,7 @@ async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runne
         _final(_spoken_reply("Logged it.")),
     ])
     starts = []
-    vm.audio_queue.put = AsyncMock(side_effect=lambda path, priority=False, auto_delete=True, on_start=None: starts.append(on_start))
+    vm.audio_queue.put = AsyncMock(side_effect=lambda speaker, on_start=None: starts.append(on_start))
     traces = []
     with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
                side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
@@ -815,7 +798,8 @@ async def test_room_switch_moves_the_user_and_greets_without_a_model_call(mock_b
     user.move_to.assert_awaited_once_with(day)
     agent.execute_stream.assert_not_called()
     vm.connection.join.assert_not_awaited()
-    vm.reply.tts_engine.synthesize_to_file.assert_awaited_once_with("Daisy here.")
+    assert vm.reply.tts.said() == ["Daisy here."]
+    assert vm.reply.tts.streams[0].voice.name == "en-US-Chirp3-HD-Zephyr", "greeted in Daisy's own voice"
 
 
 @pytest.mark.asyncio
@@ -864,7 +848,7 @@ async def test_room_switch_without_move_permission_says_so(mock_bot_runner, tmp_
         _say(vm, "Switch to day planning", user=user)
         await vm._current_task
 
-    spoken = vm.reply.tts_engine.synthesize_to_file.call_args.args[0]
+    spoken = vm.reply.tts.said()[-1]
     assert "Move Members" in spoken
     agent.execute_stream.assert_not_called()
 
@@ -972,8 +956,8 @@ async def test_words_whose_answer_was_heard_are_not_asked_again(mock_bot_runner,
     agent.execute_stream = MagicMock(side_effect=stream)
     started = []
 
-    async def play_now(path, priority=False, auto_delete=True, on_start=None):
-        started.append(path)
+    async def play_now(speaker, on_start=None):
+        started.append(speaker)
         if on_start:
             on_start()
 

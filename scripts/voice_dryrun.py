@@ -633,6 +633,8 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     from core.runtime.turn_trace import start_turn_trace
     from core.voice.speech.missing_speech import fallback_speech
     from core.voice.speech.reply import ERROR_LINE, speech_of
+    from core.voice.engines.tts import agent_voice
+    from core.voice.speech.pcm_speaker import PCMSpeaker
     from core.voice.speech.speech_router import SpeechTextRouter
     from core.voice.speech.voice_stream import VoiceStream
 
@@ -660,7 +662,16 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     agent = AgentsLoader().get_agent(voice_bot)
     router, voice_stream = SpeechTextRouter(), VoiceStream()
     said, shown = [], []
+    speaking = voice_bot  # the agent whose words are being said
     tts_task = None
+
+    async def first_audio(text, voice):
+        # Streamed into a speaker no one plays: its first audio is the mark.
+        out = PCMSpeaker(asyncio.get_running_loop(), on_audio=lambda: trace.mark("tts_first_byte"))
+        stream = await tts.open(voice, out)
+        stream.send(text)
+        stream.finish()
+        await asyncio.wait_for(out.ready(), 30)
 
     def speak(chunks):
         nonlocal tts_task
@@ -668,11 +679,9 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
             trace.mark("first_chunk")
             result.spoken.append(chunk)
             if tts_task is None and measure_tts and tts is not None:
-                # Synthesized beside the stream, as the voice pipeline's speech lane does.
-                async def first_audio(text=chunk):
-                    if await tts.synthesize_to_file(text):
-                        trace.mark("tts_first_byte")
-                tts_task = asyncio.create_task(first_audio())
+                # Synthesized beside the stream, as the voice pipeline's speech
+                # lane does, in the voice of the agent speaking.
+                tts_task = asyncio.create_task(first_audio(chunk, agent_voice(speaking)))
 
     def route(speech_part, text_part):
         # As the voice pipeline routes them: the <speech> text to the speaker,
@@ -697,6 +706,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
                     result.failures.append(f"agent error: {event['content'].strip()}")
             else:
                 trace.mark("first_token")
+                speaking = event.get("agent_id") or speaking
                 route(*router.feed(event["content"]))
         elif kind == "tool_start":
             result.tools.append(event.get("tool_name", ""))
@@ -758,9 +768,9 @@ async def main(argv: Optional[List[str]] = None) -> int:
     db_path = isolate_sessions(args.state_dir or tempfile.mkdtemp(prefix="aoc-voice-replay-"))
 
     from core.runtime.execution_context import surface_scope
-    from core.voice.engines.tts_engine import TTSEngine
+    from core.voice.engines.tts import TTSEngine
 
-    tts = TTSEngine(default_voice="en-US-JennyNeural") if not args.no_tts else None
+    tts = TTSEngine() if not args.no_tts else None
     hear = live_hearing() if args.stt == "live" else None
 
     if not args.allow_mutations:

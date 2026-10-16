@@ -1,7 +1,5 @@
-import os
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from core.voice.engines.tts_engine import TextSanitizer, TTSEngine
+"""TextSanitizer: agent markdown and XML -> words the synthesizer can say."""
+from core.voice.speech.speech_util import TextSanitizer
 
 def test_text_sanitizer_empty():
     assert TextSanitizer.sanitize("") == ""
@@ -74,58 +72,3 @@ def test_text_sanitizer_removes_emojis():
     assert "✅" not in cleaned
     assert "<:custom:123>" not in cleaned
     assert cleaned == "Loud and clear, Alva. The system is operational. Ready for your next instruction!"
-
-@pytest.mark.asyncio
-async def test_tts_engine_synthesize_empty():
-    engine = TTSEngine()
-    result = await engine.synthesize_to_file("")
-    assert result == ""
-
-@pytest.mark.asyncio
-async def test_tts_engine_synthesize_success(tmp_path):
-    engine = TTSEngine(default_voice="en-US-JennyNeural", default_speed=1.1)
-    
-    mock_comm = MagicMock()
-    mock_comm.save = AsyncMock()
-    
-    with patch("edge_tts.Communicate", return_value=mock_comm) as mock_class:
-        file_path = await engine.synthesize_to_file("Hello there!")
-        assert file_path != ""
-        assert file_path.endswith(".mp3")
-        mock_class.assert_called_once_with("Hello there!", voice="en-US-JennyNeural", rate="+10%")
-        mock_comm.save.assert_awaited_once_with(file_path)
-        
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-
-@pytest.mark.asyncio
-async def test_tts_engine_synthesize_error():
-    engine = TTSEngine()
-    
-    with patch("edge_tts.Communicate", side_effect=RuntimeError("TTS failure")):
-        file_path = await engine.synthesize_to_file("Hello there!")
-        assert file_path == ""
-
-@pytest.mark.asyncio
-async def test_tts_engine_synthesizes_with_xml_stripped():
-    engine = TTSEngine()
-    mock_comm = MagicMock()
-    mock_comm.save = AsyncMock()
-
-    with patch("edge_tts.Communicate", return_value=mock_comm) as mock_class:
-        file_path = await engine.synthesize_to_file(
-            "<memory>Remember user likes tea.</memory>Here is your tea. <vote>yes</vote>"
-        )
-        assert file_path != ""
-        mock_class.assert_called_once_with("Here is your tea.", voice="en-US-JennyNeural", rate="+0%")
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-
-@pytest.mark.asyncio
-async def test_tts_engine_synthesize_xml_only_returns_empty():
-    engine = TTSEngine()
-    with patch("edge_tts.Communicate") as mock_class:
-        result = await engine.synthesize_to_file("<memory>Remember this</memory><vote>yes</vote>")
-        assert result == ""
-        mock_class.assert_not_called()
-

@@ -35,6 +35,26 @@ def test_a_closed_block_is_spoken_at_once_however_short():
     assert stream.flush() == []
 
 
+def test_a_stretch_opens_on_its_first_sentence_however_short():
+    """Chirp starts speaking at a sentence end, so the first one goes at once;
+    later chunks are sentences of a comfortable length."""
+    stream = VoiceStream()
+    assert stream.add("Sure. Your ") == ["Sure."]
+    assert stream.add("morning run is logged. Nice. ") == ["Your morning run is logged."]
+    assert stream.flush() == ["Nice."]
+
+
+def test_a_clause_is_not_a_chunk():
+    """Sent early, a clause would wait at Chirp for the rest of its sentence anyway."""
+    assert VoiceStream().add("Checking your calendar, and ") == []
+
+
+def test_every_block_opens_on_its_first_sentence_again():
+    stream = VoiceStream()
+    assert stream.add("One moment.\n") == ["One moment."]
+    assert stream.add("Yes. You're free ") == ["Yes."]
+
+
 def test_a_runaway_sentence_is_cut_at_a_clause():
     speech = "First " + "and then another thing, " * 10 + "done."
     chunks = feed(VoiceStream(max_chars=80), speech)

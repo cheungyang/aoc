@@ -1,37 +1,40 @@
-import os
+"""Plays a turn's speech, in order, on the room's voice client.
+
+Each item is a speaker (pcm_speaker.py): a stretch of speech that is still
+being synthesized while it plays. Items play back to back, each as soon as its
+first audio is in. Barge-in clears the queue, which stops what's playing and
+cancels the synthesis behind everything queued; stage one of barge-in only
+ducks the speech that's playing.
+"""
 import asyncio
-import discord
 from typing import Callable, Optional
 
-# Ensure FFmpeg executable is located
-try:
-    import imageio_ffmpeg
-    FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
-except Exception:
-    FFMPEG_EXE = "ffmpeg"
+import discord
+
+# A queued speaker whose first audio hasn't arrived after this long is dropped.
+FIRST_AUDIO_TIMEOUT_S = 10.0
+
 
 class AudioItem:
-    def __init__(self, file_path: str, auto_delete: bool = True, on_start: Optional[Callable[[], None]] = None):
-        self.file_path = file_path
-        self.auto_delete = auto_delete
+    def __init__(self, speaker, on_start: Optional[Callable[[], None]] = None):
+        self.speaker = speaker
         # Called when playback of this item begins: how a turn learns when the
         # listener actually started hearing it (its TurnTrace `audio_start`).
         self.on_start = on_start
 
+
 class AudioStreamQueue:
-    """
-    Manages an asynchronous FIFO audio queue for seamless, back-to-back playback
-    in Discord voice channels with instant cancellation (barge-in) support.
-    """
+    """Plays speakers back to back, with instant cancellation (barge-in)."""
 
     def __init__(self, connection, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.connection = connection  # the VoiceConnection whose voice client plays
         self._loop = loop
-        self._queue: Optional[asyncio.Queue[Optional[AudioItem]]] = None
+        self._queue: Optional[asyncio.Queue[AudioItem]] = None
         self._queue_loop: Optional[asyncio.AbstractEventLoop] = None
         self._playback_task: Optional[asyncio.Task] = None
         self._current_done_event: Optional[asyncio.Event] = None
-        self._is_active = False
+        self._preparing: Optional[AudioItem] = None  # taken off the queue, waiting for its first audio
+        self._generation = 0  # bumped by clear(): an item from before it never plays
         self._running = True
         # Playback volume: lowered while the user talks over the agent (stage
         # one of barge-in) and back to full when the queue is cleared.
@@ -83,42 +86,19 @@ class AudioStreamQueue:
             except Exception as e:
                 print(f"[AudioStreamQueue] Error creating playback task: {e}")
 
-    async def put(self, file_path: str, priority: bool = False, auto_delete: bool = True,
-                  on_start: Optional[Callable[[], None]] = None):
-        """
-        Enqueues an audio file for playback.
-        If priority is True, clears existing queue items and plays immediately.
-        `on_start` is called when this item starts playing.
-        """
-        if not file_path or not os.path.exists(file_path):
-            return
-
-        if priority:
-            self.clear()
-
+    async def put(self, speaker, on_start: Optional[Callable[[], None]] = None):
+        """Queues a speaker after everything before it. `on_start` is called when it starts playing."""
         self._ensure_queue()
-        item = AudioItem(file_path=file_path, auto_delete=auto_delete, on_start=on_start)
-        await self._queue.put(item)
-        self.start()
-
-    def put_nowait(self, file_path: str, priority: bool = False, auto_delete: bool = True,
-                   on_start: Optional[Callable[[], None]] = None):
-        """Non-blocking enqueue for sync contexts."""
-        if not file_path or not os.path.exists(file_path):
-            return
-        if priority:
-            self.clear()
-        self._ensure_queue()
-        item = AudioItem(file_path=file_path, auto_delete=auto_delete, on_start=on_start)
-        self._queue.put_nowait(item)
+        await self._queue.put(AudioItem(speaker, on_start=on_start))
         self.start()
 
     def clear(self):
         """
-        Instantly halts current playback and clears all pending audio files in the queue.
+        Instantly halts current playback and drops everything queued.
         Used for barge-in / interruption handling.
         """
         self._volume = 1.0
+        self._generation += 1
 
         # Stop active voice playback
         vc = self._voice_client()
@@ -134,19 +114,17 @@ class AudioStreamQueue:
         if self._current_done_event:
             self._current_done_event.set()
 
-        # Drain the queue and remove pending files
+        # Drop what's queued, and stop synthesizing it
+        stale = [self._preparing] if self._preparing else []
         self._ensure_queue()
         while self._queue and not self._queue.empty():
             try:
-                item = self._queue.get_nowait()
-                if item and item.auto_delete and os.path.exists(item.file_path):
-                    try:
-                        os.unlink(item.file_path)
-                    except Exception:
-                        pass
+                stale.append(self._queue.get_nowait())
                 self._queue.task_done()
             except (asyncio.QueueEmpty, ValueError):
                 break
+        for item in stale:
+            item.speaker.cleanup()
 
     def duck(self, volume: float):
         """Keeps playing, at `volume`: stage one of barge-in, while the user's words
@@ -159,96 +137,86 @@ class AudioStreamQueue:
         self.duck(1.0)
 
     def is_playing(self) -> bool:
-        """Returns True if audio is actively playing or items are waiting in the queue."""
+        """True if speech is playing, about to (its first audio is on the way), or queued."""
         vc = self._voice_client()
         if vc and vc.is_playing():
+            return True
+        if self._preparing is not None:
             return True
         if self._queue is not None:
             return not self._queue.empty()
         return False
 
     async def _playback_loop(self):
-        """Worker loop that sequentially plays audio files from the queue."""
+        """Worker loop that plays the queued speakers one after another."""
         while self._running:
             try:
                 self._ensure_queue()
                 item = await self._queue.get()
-                if item is None or not self._running:
-                    if item is not None:
-                        self._queue.task_done()
-                    break
-
-                vc = self._voice_client()
-                if not vc or not vc.is_connected():
-                    # Discord voice client not available, discard file
-                    if item.auto_delete and os.path.exists(item.file_path):
-                        try:
-                            os.unlink(item.file_path)
-                        except Exception:
-                            pass
-                    self._queue.task_done()
-                    continue
-
-                if not os.path.exists(item.file_path):
-                    self._queue.task_done()
-                    continue
-
-                self._current_done_event = asyncio.Event()
-                cur_loop = self.loop
-
-                def _after(error):
-                    if error:
-                        print(f"[AudioStreamQueue] Playback error: {error}")
-                    if item.auto_delete and os.path.exists(item.file_path):
-                        try:
-                            os.unlink(item.file_path)
-                        except Exception:
-                            pass
-                    if self._current_done_event and not self._current_done_event.is_set():
-                        try:
-                            cur_loop.call_soon_threadsafe(self._current_done_event.set)
-                        except Exception:
-                            pass
-
                 try:
-                    # If voice client is currently playing something, stop it before starting next item
-                    if vc.is_playing():
-                        try:
-                            if hasattr(vc, "stop_playing"):
-                                vc.stop_playing()
-                            elif hasattr(vc, "stop"):
-                                vc.stop()
-                        except Exception:
-                            pass
-                        await asyncio.sleep(0.02)
-
-                    source = discord.PCMVolumeTransformer(
-                        discord.FFmpegPCMAudio(item.file_path, executable=FFMPEG_EXE), volume=self._volume
-                    )
-                    self._current_source = source
-                    vc.play(source, after=_after)
-                    if item.on_start is not None:
-                        try:
-                            item.on_start()
-                        except Exception as e:
-                            print(f"[AudioStreamQueue] on_start callback failed: {e}")
-                    await self._current_done_event.wait()
-                except Exception as e:
-                    print(f"[AudioStreamQueue] Error playing audio item: {e}")
-                    if item.auto_delete and os.path.exists(item.file_path):
-                        try:
-                            os.unlink(item.file_path)
-                        except Exception:
-                            pass
+                    if self._running:
+                        await self._play(item)
                 finally:
-                    self._current_source = None
                     self._queue.task_done()
-
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"[AudioStreamQueue] Loop exception: {e}")
                 await asyncio.sleep(0.1)
+
+    async def _play(self, item: AudioItem):
+        generation = self._generation
+        self._preparing = item
+        try:
+            try:
+                has_audio = await asyncio.wait_for(item.speaker.ready(), FIRST_AUDIO_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                print("[AudioStreamQueue] No audio arrived for queued speech; skipping it.")
+                has_audio = False
+        finally:
+            self._preparing = None
+        vc = self._voice_client()
+        if not has_audio or generation != self._generation or not vc or not vc.is_connected():
+            item.speaker.cleanup()
+            return
+
+        if vc.is_playing():  # the cue
+            try:
+                if hasattr(vc, "stop_playing"):
+                    vc.stop_playing()
+                elif hasattr(vc, "stop"):
+                    vc.stop()
+            except Exception:
+                pass
+            await asyncio.sleep(0.02)
+
+        done = asyncio.Event()
+        self._current_done_event = done
+        loop = self.loop
+
+        def _after(error):
+            if error:
+                print(f"[AudioStreamQueue] Playback error: {error}")
+            try:
+                loop.call_soon_threadsafe(done.set)
+            except RuntimeError:
+                pass
+
+        source = discord.PCMVolumeTransformer(item.speaker, volume=self._volume)
+        self._current_source = source
+        try:
+            vc.play(source, after=_after)
+            if item.on_start is not None:
+                try:
+                    item.on_start()
+                except Exception as e:
+                    print(f"[AudioStreamQueue] on_start callback failed: {e}")
+            await done.wait()
+        except Exception as e:
+            print(f"[AudioStreamQueue] Error playing audio item: {e}")
+            item.speaker.cleanup()
+        finally:
+            self._current_source = None
 
     async def stop(self):
         """Stops the audio queue completely."""

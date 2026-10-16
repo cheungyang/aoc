@@ -24,7 +24,7 @@ from scripts.voice_dryrun import (
     spoken_numbers,
     stage_table,
 )
-from tests.helpers import GOLDEN_INPUT
+from tests.helpers import GOLDEN_INPUT, FakeTTS
 
 
 def _cases_file(tmp_path, cases):
@@ -239,12 +239,13 @@ async def test_run_case_traces_and_checks_a_turn(tmp_path):
 
     agent = MagicMock()
     agent.execute_stream = MagicMock(side_effect=fake_stream)
-    tts = MagicMock()
-    tts.synthesize_to_file = AsyncMock(return_value=str(tmp_path / "a.mp3"))
+    tts = FakeTTS()
     db = isolate_sessions(str(tmp_path / "replay"))
 
     with patch("core.loaders.agents_loader.AgentsLoader") as loader:
         loader.return_value.get_agent.return_value = agent
+        loader.return_value.get_agent_config.side_effect = lambda agent_id: {
+            "home-steward": {"voice": {"name": "en-US-Chirp3-HD-Schedar"}}}.get(agent_id)
         result = await run_case(case, 1, db, tts=tts)
 
     assert result.passed, result.failures
@@ -254,7 +255,8 @@ async def test_run_case_traces_and_checks_a_turn(tmp_path):
     for stage in ("agent_start", "first_token", "first_chunk", "tts_first_byte", "turn_end"):
         assert stage in result.marks
     assert "stt_done" not in result.marks, "no STT ran, so none may be reported"
-    tts.synthesize_to_file.assert_awaited_once_with("The kitchen light is on.")
+    assert tts.said() == ["The kitchen light is on."]
+    assert tts.streams[0].voice.name == "en-US-Chirp3-HD-Schedar", "in Butler's own voice"
     assert result.speech == "The kitchen light is on." and not result.speech_missing
     assert result.shown == "🛎️ Butler: The kitchen light is **on**."
 
@@ -361,7 +363,7 @@ async def test_main_exit_code_and_json(tmp_path):
     failing = CaseResult(case_id="read", run=1, marks={}, failures=["answered by nobody"])
     with patch.object(replay, "run_case", AsyncMock(return_value=failing)), \
          patch.object(replay, "guard_writes") as guard, \
-         patch("core.voice.engines.tts_engine.TTSEngine"):
+         patch("core.voice.engines.tts.TTSEngine"):
         code = await replay.main(["--cases", path, "--state-dir", str(tmp_path / "s"), "--out", str(out)])
     assert code == 2
     guard.assert_called_once()

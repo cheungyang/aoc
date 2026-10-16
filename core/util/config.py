@@ -27,6 +27,7 @@ class Config:
             cls._instance._langsmith_api_key = None
             cls._instance._langsmith_workspace_id = None
             cls._instance._gemini_api_key = None
+            cls._instance._google_tts_api_key = None
             cls._instance._brave_api_key = None
             cls._instance._openai_api_key = None
             cls._instance._anthropic_api_key = None
@@ -180,6 +181,17 @@ class Config:
     @gemini_api_key.setter
     def gemini_api_key(self, value):
         self._gemini_api_key = str(value) if value is not None else None
+
+    @property
+    def google_tts_api_key(self) -> str:
+        """Cloud Text-to-Speech, for the voices (Chirp 3: HD)."""
+        if self._google_tts_api_key is not None:
+            return self._google_tts_api_key
+        return os.getenv("GOOGLE_TTS_API_KEY", "").strip()
+
+    @google_tts_api_key.setter
+    def google_tts_api_key(self, value):
+        self._google_tts_api_key = str(value) if value is not None else None
 
     @property
     def brave_api_key(self) -> str:

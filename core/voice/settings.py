@@ -12,9 +12,9 @@ their own (Concierge, Rio, ...), not an omission.
 
 Everything that is the same for all agents belongs here rather than in any
 agent.json, so it cannot drift between agents. Operational knobs for the voice
-pipeline live here too: speech-to-text and turn taking below; the TTS provider
-joins them as that phase lands.
+pipeline live here too: speech-to-text, turn taking and text-to-speech below.
 """
+import functools
 import os
 import re
 from typing import Optional
@@ -58,6 +58,36 @@ BARGE_IN_MIN_WORDS = 2
 # A question the agent never got to answer is prepended to the next utterance,
 # unless it is older than this.
 UNANSWERED_MAX_AGE_S = 90
+
+# --- Text to speech --------------------------------------------------------
+# "chirp3_hd": Cloud Text-to-Speech, streamed. Each stretch of speech is one
+# bidirectional stream, fed a sentence at a time as the agent writes it and
+# played as its audio arrives (core/voice/engines/chirp_tts.py). Chirp starts a
+# sentence's audio ~150 ms after the sentence ends, and not before: a clause
+# sent early waits for the rest of its sentence. edge-tts takes over
+# when Chirp can't run here -- no GOOGLE_TTS_API_KEY, or a gRPC client that
+# won't load on this CPU -- and for a stream that fails before its first audio.
+# "edge": edge-tts only.
+TTS_PROVIDER = os.getenv("AOC_TTS_PROVIDER", "chirp3_hd")
+# For agents whose `voice` block sets no `rate`. Chirp 3: HD's own pace is 1.0.
+DEFAULT_SPEAKING_RATE = 1.2
+# Discord plays 48 kHz audio, and Chirp synthesizes at that rate when asked,
+# so nothing is resampled here.
+TTS_SAMPLE_RATE = 48_000
+# A stream still open after this long is cut off.
+TTS_STREAM_TIMEOUT_S = 300
+# The fallback's voices, by the gender of the agent's Chirp voice.
+EDGE_FALLBACK_VOICES = {"female": "en-US-AriaNeural", "male": "en-US-GuyNeural"}
+
+
+@functools.lru_cache(maxsize=None)
+def ffmpeg_exe() -> str:
+    """FFmpeg, for the audio cues and decoding the fallback's MP3 (Chirp's PCM needs none)."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
 
 # Chirp 3: HD voices, keyed by the name that follows the locale prefix
 # (`en-US-Chirp3-HD-<name>`). Gender is from Google Cloud's Chirp 3: HD voice

@@ -118,15 +118,18 @@ class RoomSwitcher:
             rooms.append((str(room), names))
         return build_room_aliases(rooms)
 
-    def greeting(self, room) -> str:
-        """What the room says when you arrive: its agent's name, or the room's."""
+    def greeting(self, room) -> Tuple[str, Optional[str]]:
+        """What the room says when you arrive, and whose voice says it: its
+        agent's name in its agent's voice, or the room's name."""
         loader = AgentsLoader()
         text_channel = re.sub(r"[-_]voice$", "", room.name)
         agent_id = loader.sole_eligible_agent(text_channel, exclude_agent_id=self.agent_id)
         name = (loader.get_agent_config(agent_id) or {}).get("name") if agent_id else None
-        return f"{name} here." if name else f"You're in {room_label(room.name)}."
+        if name:
+            return f"{name} here.", agent_id
+        return f"You're in {room_label(room.name)}.", None
 
-    async def switch(self, user, transcript: str, say: Callable[[str], Awaitable[None]]) -> bool:
+    async def switch(self, user, transcript: str, say: Callable[..., Awaitable[None]]) -> bool:
         """Moves the user to the room they asked for. True if this was a switch request.
 
         No model call: the phrase is matched against the known rooms. The bot
@@ -161,5 +164,5 @@ class RoomSwitcher:
 
         if not await self.connection.wait_for(room, ROOM_FOLLOW_TIMEOUT_S):
             await self.connection.join(str(room.id))
-        await say(self.greeting(room))
+        await say(*self.greeting(room))
         return True

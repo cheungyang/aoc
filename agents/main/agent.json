@@ -49,8 +49,6 @@
     "enabled": true,
     "auto_join": true,
     "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
-    "tts_voice": "en-US-AriaNeural",
-    "tts_speed": 1.2,
     "post_transcript_to_chat": true
   }
 }
