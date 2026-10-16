@@ -11,13 +11,7 @@
     "audio_stream_probe": {},
     "video_ocr_validator": {},
     "filesystem": {
-      "pkm/wiki/software": [
-        "read",
-        "write",
-        "overwrite",
-        "append",
-        "read_image"
-      ]
+      "pkm/wiki/software": ["@write"]
     }
   },
   "skills": []
