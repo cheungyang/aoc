@@ -4,7 +4,7 @@ from typing import Optional, List
 import discord
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
-from core.util import split_message
+from core.util import safe_chunks
 
 
 async def dispatch_discord_output(
@@ -21,7 +21,7 @@ async def dispatch_discord_output(
     image_paths = response.image_paths
     video_paths = response.video_paths
 
-    chunks = split_message(text_content)
+    chunks = safe_chunks(text_content)
 
     view = None
     if poll_data and source == "discord" and poll_data.get("options"):

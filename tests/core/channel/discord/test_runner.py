@@ -357,7 +357,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(chunk), 2000)
         # ...and the chunks must reassemble to exactly the response (no loss, no
         # reordering, and no error message tacked on by the exception handler).
-        self.assertEqual("".join(sent_chunks), long_response)
+        # Messages break at line boundaries, so each break stands for a newline.
+        self.assertEqual("\n".join(sent_chunks), long_response)
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')

@@ -2,7 +2,7 @@
 Core utility package containing common utilities, message handling, prompts, summarization, error handling, configuration, and git sync.
 """
 from core.util.message_util import (
-    split_message,
+    safe_chunks,
     estimate_message_tokens,
     estimate_total_tokens,
     find_safe_boundary,
@@ -73,7 +73,7 @@ from core.util.git_ops import (
 from core.util import git_ops
 
 __all__ = [
-    "split_message",
+    "safe_chunks",
     "estimate_message_tokens",
     "estimate_total_tokens",
     "find_safe_boundary",

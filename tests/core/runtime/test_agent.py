@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import os
@@ -627,15 +628,70 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session')
     @patch('core.runtime.agent.LoggingHandler')
-    async def test_execute_auto_prunes_session(self, mock_logging_handler_class, mock_auto_prune):
+    async def test_execute_prunes_after_the_turn_not_before(self, mock_logging_handler_class, mock_auto_prune):
+        """B22: pruning used to run before the graph, on the critical path."""
+        order = []
+        mock_auto_prune.side_effect = lambda **kw: order.append("prune")
+
+        async def run_graph(*args, **kwargs):
+            order.append("graph")
+            return {"messages": [MagicMock(content="Done")]}
+
         mock_graph = MagicMock()
-        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Done")]})
+        mock_graph.ainvoke = AsyncMock(side_effect=run_graph)
         agent = Agent("test-agent", {})
         agent._graphs[""] = mock_graph
 
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
         await agent.execute("test prompt", session=session)
+        await asyncio.sleep(0)  # let the background prune run
+        await asyncio.sleep(0)
+        self.assertEqual(order, ["graph", "prune"])
         mock_auto_prune.assert_called_once_with(session=session)
+
+    @patch('core.runtime.agent.LoggingHandler')
+    async def test_next_turn_waits_for_a_pending_prune(self, mock_logging_handler_class):
+        """A turn must never read a checkpoint the previous turn's prune is rewriting."""
+        order = []
+        release = asyncio.Event()
+
+        async def slow_prune(**kwargs):
+            await release.wait()
+            order.append("prune done")
+
+        async def run_graph(*args, **kwargs):
+            order.append("graph")
+            return {"messages": [MagicMock(content="Done")]}
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(side_effect=run_graph)
+        agent = Agent("test-agent", {})
+        agent._graphs[""] = mock_graph
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
+
+        with patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
+            await agent.execute("first", session=session)
+            second = asyncio.create_task(agent.execute("second", session=session))
+            await asyncio.sleep(0.01)
+            self.assertEqual(order, ["graph"], "the second turn must wait for the prune")
+            release.set()
+            await second
+            await asyncio.sleep(0)
+
+        self.assertEqual(order[:3], ["graph", "prune done", "graph"])
+
+    @patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session')
+    @patch('core.runtime.agent.LoggingHandler')
+    async def test_stateless_sessions_are_not_pruned(self, mock_logging_handler_class, mock_auto_prune):
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Done")]})
+        agent = Agent("test-agent", {})
+        agent._graphs[""] = mock_graph
+
+        session = SessionManager.get_session(agent_id="test-agent", source="job")
+        await agent.execute("test prompt", session=session)
+        await asyncio.sleep(0)
+        mock_auto_prune.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

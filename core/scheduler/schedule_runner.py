@@ -42,7 +42,7 @@ from core.scheduler.spec import (
     WorkDecision,
 )
 from core.scheduler.state import ScheduleState
-from core.util import split_message
+from core.util import safe_chunks
 from core.channel.discord.ownership import PROD, Ownership
 from core.util.time_util import get_local_now
 
@@ -344,6 +344,7 @@ class ScheduleRunner:
             agent_id=spec.agent_id,
             source="scheduled",
             channel=channel or spec.channel,
+            thinking_level=spec.thinking_level,
         )
         if spec.session_policy is SessionPolicy.STATELESS:
             try:
@@ -373,7 +374,7 @@ class ScheduleRunner:
         if output.strip():
             channel = self._resolve_channel(spec.agent_id, spec.channel, spec.thread)
             if channel is not None:
-                for chunk in split_message(output):
+                for chunk in safe_chunks(output):
                     await channel.send(chunk)
                 record_channel_post(channel, output, origin=spec.schedule_id, loader=self.loader)
             else:

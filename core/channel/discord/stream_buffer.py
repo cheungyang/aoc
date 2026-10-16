@@ -6,12 +6,14 @@ import discord
 from typing import Optional, List
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
+from core.util import safe_chunks
 
 
 class DiscordStreamBuffer:
     """
     Manages rate-limited (1.5s) message editing and multi-message overflow
-    (1,900 chars) for real-time Discord text streaming while filtering
+    (1,900 chars, split by `safe_chunks` so code blocks and inline code
+    survive the split) for real-time Discord text streaming while filtering
     incomplete/completed XML tags.
     """
 
@@ -114,10 +116,11 @@ class DiscordStreamBuffer:
         self.last_rendered_text = visible_text
         self.last_edit_time = time.time()
 
-        chunks = [
-            visible_text[i:i + self.max_chunk_size]
-            for i in range(0, len(visible_text), self.max_chunk_size)
-        ]
+        # Hidden tags were filtered from the whole text above, before this
+        # split, so a block that crosses a message boundary goes as a unit.
+        chunks = safe_chunks(
+            visible_text, self.max_chunk_size, streaming=True
+        )
         if not chunks:
             chunks = ["..."]
 
@@ -171,10 +174,7 @@ class DiscordStreamBuffer:
             if not clean_text:
                 clean_text = "Done."
 
-            chunks = [
-                clean_text[i:i + self.max_chunk_size]
-                for i in range(0, len(clean_text), self.max_chunk_size)
-            ]
+            chunks = safe_chunks(clean_text, self.max_chunk_size)
             if not chunks:
                 chunks = ["Done."]
 

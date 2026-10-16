@@ -4,7 +4,7 @@ import asyncio
 from typing import Union
 from core.runtime.execution_context import ExecutionContext
 from core.runtime.session_manager import SessionManager
-from core.util import split_message
+from core.util import safe_chunks
 
 class CommandHandler:
     """
@@ -49,7 +49,7 @@ class CommandHandler:
     async def _handle_newall(self, session: ExecutionContext):
         archive_status = SessionManager().clear_sessions()
         full_msg = f"All session contexts cleared. {archive_status}"
-        chunks = split_message(full_msg)
+        chunks = safe_chunks(full_msg)
         channel = session.channel_obj
         for i, chunk in enumerate(chunks):
             if i > 0:
@@ -108,6 +108,6 @@ class CommandHandler:
             f"- Savings: ~{max(0, orig_tokens - new_tokens):,} tokens ({((orig_tokens - new_tokens) / max(1, orig_tokens) * 100):.1f}%)"
         )
         if channel is not None and hasattr(channel, "send"):
-            chunks = split_message(msg)
+            chunks = safe_chunks(msg)
             for chunk in chunks:
                 await channel.send(chunk)

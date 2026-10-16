@@ -91,7 +91,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          
          from core.runtime.graph_builder import GraphBuilder
          builder = GraphBuilder()
-         graph = await builder.build_graph(make_context(agent_id="test_agent"), config={"tools": {"tool1": {}}, "skills": ["skill1"]})
+         graph = await builder.build_graph(make_context(agent_id="test_agent"), config={"tools": {"tool1": {}}, "skills": {"skill1": {}}})
  
          self.mock_create_graph.assert_called_once_with(
              llm=unittest.mock.ANY,
@@ -99,7 +99,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
              prompt=unittest.mock.ANY,
              checkpointer=mock_sqlite_checkpointer.return_value,
              agent_id="test_agent",
-             config={"tools": {"tool1": {}}, "skills": ["skill1"]}
+             config={"tools": {"tool1": {}}, "skills": {"skill1": {}}}
          )
  
      @patch('core.runtime.graph_builder.get_agent_static_prompt')

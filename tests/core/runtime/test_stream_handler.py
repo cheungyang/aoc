@@ -1,6 +1,7 @@
 import unittest
 import asyncio
 import os
+import re
 import sys
 from unittest.mock import patch, MagicMock, AsyncMock
 import discord
@@ -96,6 +97,76 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(buffer._disabled)
         await buffer.append_token("Hello ")
         await buffer.finalize(final_text="Hello")
+
+    @staticmethod
+    def _fences_balanced(chunk):
+        return len(re.findall(r"`{3,}", chunk)) % 2 == 0
+
+    async def test_live_preview_closes_an_open_block_until_it_ends(self):
+        mock_channel = AsyncMock()
+        mock_msg = AsyncMock()
+        mock_channel.send.return_value = mock_msg
+        buffer = DiscordStreamBuffer(mock_channel, edit_interval=0)
+
+        await buffer.append_token('Here:\n```json\n{"a": 1')
+        mock_channel.send.assert_called_once_with('Here:\n```json\n{"a": 1\n```')
+
+        await buffer.append_token('}\n```\nDone.')
+        await buffer.finalize(final_text="")
+        mock_msg.edit.assert_called_with(content='Here:\n```json\n{"a": 1}\n```\nDone.')
+
+    async def test_render_keeps_code_blocks_balanced_across_messages(self):
+        mock_channel = AsyncMock()
+        mock_channel.send.side_effect = lambda *args, **kwargs: AsyncMock()
+        buffer = DiscordStreamBuffer(mock_channel, edit_interval=0, max_chunk_size=200)
+
+        code = "\n".join(f"x{i} = {i}" for i in range(60))
+        await buffer.append_token(f"Intro\n```python\n{code}")  # block still streaming
+
+        sent = [c.args[0] for c in mock_channel.send.call_args_list]
+        self.assertGreater(len(sent), 1)
+        for chunk in sent:
+            self.assertLessEqual(len(chunk), 200)
+            self.assertTrue(self._fences_balanced(chunk), chunk)
+        self.assertTrue(all(c.startswith("```python\n") for c in sent[1:]))
+
+    async def test_finalize_splits_without_breaking_words_or_code_blocks(self):
+        mock_channel = AsyncMock()
+        mock_channel.send.side_effect = lambda *args, **kwargs: AsyncMock()
+        buffer = DiscordStreamBuffer(mock_channel, edit_interval=60, max_chunk_size=200)
+
+        prose = " ".join(["alpha", "beta", "gamma"] * 40)
+        code = "\n".join(f"x{i} = {i}" for i in range(40))
+        text = f"{prose}\n```python\n{code}\n```\nDone."
+        await buffer.finalize(final_text=text)
+
+        sent = [c.args[0] for c in mock_channel.send.call_args_list]
+        self.assertGreater(len(sent), 1)
+        for chunk in sent:
+            self.assertLessEqual(len(chunk), 200)
+            self.assertTrue(self._fences_balanced(chunk), chunk)
+        fence = re.compile(r"`{3,}\w*")
+        self.assertEqual(fence.sub(" ", "\n".join(sent)).split(), fence.sub(" ", text).split())
+
+    async def test_hidden_block_crossing_a_message_boundary_is_hidden_whole(self):
+        # Tags are filtered on the whole text before it is split, so a block
+        # spanning two messages can't leak its tail into the second one.
+        mock_channel = AsyncMock()
+        mock_channel.send.side_effect = lambda *args, **kwargs: AsyncMock()
+        buffer = DiscordStreamBuffer(mock_channel, edit_interval=0, max_chunk_size=100)
+
+        log = "\n".join(f"- [12:00:0{i}] [MEMORY] private note {i}" for i in range(5))
+        await buffer.append_token(f"{'Visible start. ' * 5}\n<system_memory_log>\n{log}")
+        await buffer.append_token("\n</system_memory_log>\nVisible end.")
+        await buffer.finalize(final_text="")
+
+        rendered = [c.args[0] for c in mock_channel.send.call_args_list]
+        for msg in buffer.messages:
+            rendered += [c.kwargs["content"] for c in msg.edit.call_args_list]
+        rendered = "\n".join(rendered)
+        self.assertIn("Visible end.", rendered)
+        self.assertNotIn("private note", rendered)
+        self.assertNotIn("system_memory_log", rendered)
 
 
 class TestStreamHandler(unittest.IsolatedAsyncioTestCase):

@@ -113,6 +113,29 @@ class SqliteSessionStore:
             conn.commit()
         return f"Appended token usage to {session_id}"
 
+    def append_turn_trace(self, session_id: str, trace: Dict[str, Any], surface: Optional[str] = "voice") -> str:
+        """Stores one turn's latency trace (see core.runtime.turn_trace) beside its token rows.
+
+        The whole trace is JSON in `message`; time to first audio is also put in
+        `execution_time` (seconds) so p50/p90 need no JSON parsing. A turn that
+        never played audio has a NULL there, not 0, so it can't flatter the median.
+        """
+        table_name = sanitize_table_name(session_id)
+        now = time.time()
+        ttfa_ms = trace.get("ttfa_ms")
+        with self._get_connection() as conn:
+            self._ensure_table(conn, table_name)
+            conn.execute(
+                f"""
+                INSERT INTO "{table_name}" (
+                    entry_type, message, execution_time, surface, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                ("turn_trace", json.dumps(trace, default=str), None if ttfa_ms is None else ttfa_ms / 1000.0, surface, now)
+            )
+            conn.commit()
+        return f"Appended turn trace to {session_id}"
+
     def archive_session(self, session_id: str) -> str:
         if not session_id:
             return "No active session table found to archive."

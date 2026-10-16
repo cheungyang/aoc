@@ -1,10 +1,11 @@
 import asyncio
+import contextvars
 import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, List, Union
 
-from core.util import split_message, Config, format_error_message, save_agent_memory_log
+from core.util import Config, format_error_message, save_agent_memory_log
 from core.runtime.base_agent import BaseAgent
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import current_execution_context
@@ -32,6 +33,9 @@ class Agent(BaseAgent):
         # Compiled graphs are cached per graph binding: the same agent invoked under two
         # different graphs gets two different tool rosters, so it needs two compiled graphs.
         self._graphs: Dict[str, Any] = {}
+        # History pruning runs after a turn, in the background (see _schedule_prune).
+        # Keyed by session id so the session's next turn can wait for it.
+        self._prune_tasks: Dict[str, asyncio.Task] = {}
 
     @staticmethod
     def _is_empty_prompt(prompt: str | list) -> bool:
@@ -62,8 +66,8 @@ class Agent(BaseAgent):
         role: str = "user"
     ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], Any]]:
         """
-        Executes system commands, auto-prunes context,
-        ensures graph compilation, and returns (config, inputs, graph).
+        Executes system commands, waits for any pending post-turn prune of this
+        session, ensures graph compilation, and returns (config, inputs, graph).
         Returns None if handled by a system command.
         """
         session_id = session.session_id
@@ -74,14 +78,10 @@ class Agent(BaseAgent):
         if await CommandHandler().handle_command(prompt, session=session):
             return None
 
-        # Auto-prune session checkpoint in SQLite storage before execution if history exceeds thresholds
-        if not session.is_stateless():
-            try:
-                await ContextPruner(
-                    provider=self.config.get("provider")
-                ).aauto_prune_session(session=session)
-            except Exception as e:
-                print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session_id}': {e}", file=sys.stderr)
+        # History is pruned after each turn (see _schedule_prune), not here: a
+        # summary call before the model's first token was audible on voice. If the
+        # previous turn's prune is still rewriting this checkpoint, wait for it.
+        await self._await_pending_prune(session)
 
         # Lazy load langgraph graph object via GraphBuilder
         graph = await self._get_graph(session)
@@ -117,6 +117,68 @@ class Agent(BaseAgent):
 
         inputs = {"messages": [{"role": role, "content": prompt}]}
         return config, inputs, graph
+
+    def _schedule_prune(self, session: ExecutionContext) -> None:
+        """Prunes the session's history after the turn, in the background.
+
+        Pruning summarises old messages with a model call once history passes its
+        thresholds. Run before a turn, that call sat between the user and the
+        first token; run after, it overlaps the time the user spends reading or
+        listening. The turn that crosses the threshold runs over budget once.
+        """
+        if session.is_stateless():
+            return
+        pending = self._prune_tasks.get(session.session_id)
+        if pending is not None and not pending.done():
+            return
+        try:
+            from core.runtime.turn_trace import detach_turn_trace
+            context = contextvars.copy_context()
+            # Run as the session being pruned, wherever this is called from, and
+            # outside the voice turn's trace: the summariser's model calls are not
+            # part of the turn being measured.
+            context.run(current_execution_context.set, session)
+            context.run(detach_turn_trace)
+            task = asyncio.get_running_loop().create_task(self._prune_after_turn(session), context=context)
+        except RuntimeError:
+            return  # no running loop (a generator closed during shutdown): skip this time
+        session_id = session.session_id
+        self._prune_tasks[session_id] = task
+
+        def _forget(done: asyncio.Task) -> None:
+            if self._prune_tasks.get(session_id) is done:
+                del self._prune_tasks[session_id]
+
+        task.add_done_callback(_forget)
+
+    async def _prune_after_turn(self, session: ExecutionContext) -> None:
+        try:
+            await ContextPruner(
+                provider=self.config.get("provider")
+            ).aauto_prune_session(session=session)
+        except Exception as e:
+            print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session.session_id}': {e}", file=sys.stderr)
+
+    async def _await_pending_prune(self, session: ExecutionContext) -> None:
+        """Waits for the previous turn's prune of this session, if it is still running.
+
+        Shielded: cancelling the new turn (a barge-in) must not abandon a
+        checkpoint rewrite halfway.
+        """
+        pending = self._prune_tasks.get(session.session_id)
+        if pending is None or pending.done():
+            return
+        if pending.get_loop() is not asyncio.get_running_loop():
+            # Started on another of the process's event loops: it can't be
+            # awaited from here. Same-session turns on two loops are rare enough
+            # that proceeding beats failing the turn.
+            return
+        try:
+            await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass  # _prune_after_turn already logged it
 
     def _update_job_status(self, session: ExecutionContext, config: Dict[str, Any], graph: Any = None):
         """Updates job status based on final graph state."""
@@ -241,30 +303,36 @@ class Agent(BaseAgent):
         # The context is entered *before* preparation: _prepare_execution builds the graph, and
         # graph construction resolves this agent's tool roster and skills. Entering afterwards
         # meant construction ran under the caller's identity (or none at all).
-        async with self._execution_context(session):
-            prep = await self._prepare_execution(prompt, session, callbacks, role)
-            if prep is None:
-                return ""
-            config, inputs, graph = prep
+        prepared = False
+        try:
+            async with self._execution_context(session):
+                prep = await self._prepare_execution(prompt, session, callbacks, role)
+                if prep is None:
+                    return ""
+                prepared = True
+                config, inputs, graph = prep
 
-            try:
-                print(f"Invoking graph for {self.agent_id}")
                 try:
-                    result = await graph.ainvoke(inputs, config=config)
-                except Exception as e:
-                    if self._is_corrupt_checkpoint_error(e):
-                        self._recover_corrupt_checkpoint(session)
+                    print(f"Invoking graph for {self.agent_id}")
+                    try:
                         result = await graph.ainvoke(inputs, config=config)
-                    else:
-                        raise e
-                self._update_job_status(session, config, graph)
-            except Exception as e:
-                return await self._handle_execution_error(session, e)
+                    except Exception as e:
+                        if self._is_corrupt_checkpoint_error(e):
+                            self._recover_corrupt_checkpoint(session)
+                            result = await graph.ainvoke(inputs, config=config)
+                        else:
+                            raise e
+                    self._update_job_status(session, config, graph)
+                except Exception as e:
+                    return await self._handle_execution_error(session, e)
 
-        reply_message = result["messages"][-1]
-        response = self._parse_final_response(reply_message.content, session)
-        await self._dispatch_discord_output(session, response)
-        return response.text
+            reply_message = result["messages"][-1]
+            response = self._parse_final_response(reply_message.content, session)
+            await self._dispatch_discord_output(session, response)
+            return response.text
+        finally:
+            if prepared:
+                self._schedule_prune(session)
 
     async def execute_stream(
         self,
@@ -296,51 +364,59 @@ class Agent(BaseAgent):
 
         accumulated_tokens = []
         subagent_final_response = None
-        # Context entered before preparation — see the note in execute().
-        async with self._execution_context(session):
-            prep = await self._prepare_execution(prompt, session, callbacks, role)
-            if prep is None:
-                return
-            config, inputs, graph = prep
+        prepared = False
+        try:
+            # Context entered before preparation — see the note in execute().
+            async with self._execution_context(session):
+                prep = await self._prepare_execution(prompt, session, callbacks, role)
+                if prep is None:
+                    return
+                prepared = True
+                config, inputs, graph = prep
 
-            try:
-                print(f"Streaming graph for {self.agent_id}")
-                async for event in StreamHandler.stream_with_recovery(
+                try:
+                    print(f"Streaming graph for {self.agent_id}")
+                    async for event in StreamHandler.stream_with_recovery(
+                        graph=graph,
+                        inputs=inputs,
+                        config=config,
+                        session=session,
+                        recover_checkpoint_fn=self._recover_corrupt_checkpoint,
+                        is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error,
+                        agent_id=self.agent_id
+                    ):
+                        if event.get("type") == EVENT_TOKEN:
+                            accumulated_tokens.append(event.get("content", ""))
+                        elif event.get("type") == EVENT_SUBAGENT_FINAL:
+                            subagent_final_response = event.get("response")
+                        yield event
+                    self._update_job_status(session, config, graph)
+                except Exception as e:
+                    err_msg = await self._handle_execution_error(session, e)
+                    yield {"type": EVENT_ERROR, "content": err_msg}
+                    return
+
+            response = subagent_final_response
+            if not response:
+                """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
+                response = StreamHandler.resolve_final_response(
                     graph=graph,
-                    inputs=inputs,
                     config=config,
-                    session=session,
-                    recover_checkpoint_fn=self._recover_corrupt_checkpoint,
-                    is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error,
-                    agent_id=self.agent_id
-                ):
-                    if event.get("type") == EVENT_TOKEN:
-                        accumulated_tokens.append(event.get("content", ""))
-                    elif event.get("type") == EVENT_SUBAGENT_FINAL:
-                        subagent_final_response = event.get("response")
-                    yield event
-                self._update_job_status(session, config, graph)
-            except Exception as e:
-                err_msg = await self._handle_execution_error(session, e)
-                yield {"type": EVENT_ERROR, "content": err_msg}
-                return
+                    accumulated_tokens=accumulated_tokens,
+                    parse_fn=lambda raw: self._parse_final_response(raw, session)
+                )
 
-        response = subagent_final_response
-        if not response:
-            """Extracts final response from graph state or accumulated stream tokens and parses AgentResponse."""
-            response = StreamHandler.resolve_final_response(
-                graph=graph,
-                config=config,
-                accumulated_tokens=accumulated_tokens,
-                parse_fn=lambda raw: self._parse_final_response(raw, session)
-            )
-
-        yield {
-            "type": EVENT_FINAL_RESPONSE,
-            "text": response.text,
-            "poll_data": response.poll_data,
-            "image_paths": response.image_paths,
-            "video_paths": response.video_paths,
-            "system_memory_log": response.system_memory_log,
-            "response": response
-        }
+            yield {
+                "type": EVENT_FINAL_RESPONSE,
+                "text": response.text,
+                "poll_data": response.poll_data,
+                "image_paths": response.image_paths,
+                "video_paths": response.video_paths,
+                "system_memory_log": response.system_memory_log,
+                "response": response
+            }
+        finally:
+            # After the final response was read from the checkpoint, or when the
+            # consumer stopped early (a voice barge-in closes the stream).
+            if prepared:
+                self._schedule_prune(session)

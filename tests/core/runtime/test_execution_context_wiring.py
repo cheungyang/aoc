@@ -123,7 +123,7 @@ class TestGraphGrantedSkills(unittest.TestCase):
     def test_graph_skill_reaches_agent_whose_home_graph_differs(self, mock_get_agent, mock_graph_skills):
         mock_agent = MagicMock()
         # The agent's own home graph is "main"; it owns no skills of its own.
-        mock_agent.config = {"skills": [], "graph": "main"}
+        mock_agent.config = {"skills": {}, "graph": "main"}
         mock_get_agent.return_value = mock_agent
         mock_graph_skills.side_effect = lambda g: ["coding_skill"] if g == "coding" else []
 
@@ -140,7 +140,7 @@ class TestGraphGrantedSkills(unittest.TestCase):
     @patch('core.loaders.agents_loader.AgentsLoader.get_agent')
     def test_graph_skill_appears_in_overview_and_loads(self, mock_get_agent, mock_graph_skills):
         mock_agent = MagicMock()
-        mock_agent.config = {"skills": [], "graph": "main"}
+        mock_agent.config = {"skills": {}, "graph": "main"}
         mock_get_agent.return_value = mock_agent
         mock_graph_skills.side_effect = lambda g: ["coding_skill"] if g == "coding" else []
 
