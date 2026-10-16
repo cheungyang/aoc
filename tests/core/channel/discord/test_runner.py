@@ -44,9 +44,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner = BotRunner("test_token", "main")
         runner.voice_manager = MagicMock()
-        runner.voice_manager.voice_client = None
-        runner.voice_manager.join_voice_channel = AsyncMock()
-        runner.voice_manager.normalize_channel_name = lambda n: n.replace("-voice", "").replace("-", "")
+        runner.voice_manager.connection.channel = None
+        runner.voice_manager.connection.join = AsyncMock()
         
         # User joins day-planning-voice
         mock_member = MagicMock(bot=False, display_name="Alva")
@@ -56,7 +55,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_after = MagicMock(channel=mock_channel)
         
         await runner.on_voice_state_update(mock_member, mock_before, mock_after)
-        runner.voice_manager.join_voice_channel.assert_awaited_once_with("day-planning-voice")
+        runner.voice_manager.connection.join.assert_awaited_once_with("day-planning-voice")
 
     @patch('core.channel.discord.runner.commands.Bot')
     def test_get_hosted_voice_channels_convention(self, mock_bot_class):
@@ -92,7 +91,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader_class.return_value = mock_loader
 
         runner = BotRunner("test_token", "main")
-        runner.voice_manager.join_voice_channel = AsyncMock(return_value=True)
+        runner.voice_manager.connection.join = AsyncMock(return_value=True)
         
         with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
             await runner.on_ready()
@@ -101,7 +100,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         # Verify change_presence was called
         mock_bot.change_presence.assert_called_once()
-        runner.voice_manager.join_voice_channel.assert_called_with("general-voice")
+        runner.voice_manager.connection.join.assert_called_with("general-voice")
 
     @patch('core.channel.discord.runner.commands.Bot')
     @patch('core.channel.discord.runner.AgentsLoader')
@@ -128,14 +127,14 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader_class.return_value = mock_loader
 
         runner = BotRunner("test_token", "main")
-        runner.voice_manager.join_voice_channel = AsyncMock(return_value=True)
+        runner.voice_manager.connection.join = AsyncMock(return_value=True)
         
         with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
             await runner.on_ready()
             mock_create_task.assert_called_once()
             await mock_create_task.call_args[0][0]
         
-        runner.voice_manager.join_voice_channel.assert_called_with("day-planning-voice")
+        runner.voice_manager.connection.join.assert_called_with("day-planning-voice")
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')

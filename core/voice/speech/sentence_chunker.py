@@ -1,6 +1,6 @@
 import re
 from typing import List
-from core.voice.tts_engine import TextSanitizer
+from core.voice.engines.tts_engine import TextSanitizer
 
 class SentenceChunker:
     """

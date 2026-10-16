@@ -1,7 +1,7 @@
 """Room switching by voice: matching "take me to X" against known rooms."""
 import unittest
 
-from core.voice.room_switch import build_room_aliases, match_room, parse_room_request, room_label
+from core.voice.room.room_switch import build_room_aliases, match_room, parse_room_request, room_label
 
 ROOMS = build_room_aliases([
     ("day-planning-voice", ["Daisy", "day-planner"]),

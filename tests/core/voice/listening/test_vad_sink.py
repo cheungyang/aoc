@@ -1,0 +1,302 @@
+"""VADSink: turns a speaker's audio into streamed utterances with an adaptive end of turn.
+
+Silero is replaced by a scripted probability per 36 ms window, so each test
+states exactly how much speech and silence the sink hears. Every 20 ms
+Discord frame yields 320 samples at 16 kHz, so a write processes at most one
+576-sample window, and `feed` writes frames until the requested number of
+windows has been processed.
+"""
+import asyncio
+import time
+from collections import deque
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+from core.voice import settings
+from core.voice.utterance import Utterance
+from core.voice.vad_sink import WINDOW_MS, WINDOW_SAMPLES, UserVADState, VADSink
+
+WINDOW_BYTES = WINDOW_SAMPLES * 2
+# 20 ms of 48 kHz stereo at a level that passes the energy gate.
+FRAME = (np.ones(1920, dtype=np.int16) * 3000).tobytes()
+USER = MagicMock(id=7, display_name="Alva", bot=False)
+
+
+class ScriptedVAD:
+    """Stands in for the Silero ONNX session."""
+
+    def __init__(self):
+        self.upcoming = deque()
+        self.calls = 0
+
+    def run(self, _output_names, feed):
+        self.calls += 1
+        prob = self.upcoming.popleft() if self.upcoming else 0.0
+        return np.array([prob], dtype=np.float32), feed["h"], feed["c"]
+
+
+class RecordingFloor:
+    """Records the utterance hooks the sink posts, in order."""
+
+    def __init__(self):
+        self.events = []
+
+    def utterance_opened(self, u):
+        self.events.append(("opened", u, 0))
+
+    def utterance_audio(self, u, pcm):
+        self.events.append(("audio", u, len(pcm)))
+
+    def utterance_paused(self, u):
+        self.events.append(("paused", u, 0))
+
+    def utterance_resumed(self, u):
+        self.events.append(("resumed", u, 0))
+
+    def utterance_finished(self, u):
+        self.events.append(("finished", u, 0))
+
+    def utterance_discarded(self, u):
+        self.events.append(("discarded", u, 0))
+
+    def kinds(self):
+        return [kind for kind, _, _ in self.events if kind != "audio"]
+
+    def utterances(self):
+        return [u for kind, u, _ in self.events if kind == "opened"]
+
+    def audio_bytes(self):
+        return sum(n for kind, _, n in self.events if kind == "audio")
+
+
+@pytest.fixture
+def vad():
+    return ScriptedVAD()
+
+
+@pytest.fixture
+def make_sink(vad):
+    """Builds sinks on the running loop. The watchdog is off unless asked for,
+    so wall-clock time can't end a turn in the write-path tests."""
+    sinks = []
+
+    def make(watchdog=False, **kwargs):
+        floor = RecordingFloor()
+        with patch("onnxruntime.InferenceSession", return_value=vad):
+            sink = VADSink(floor, loop=asyncio.get_running_loop(), **kwargs)
+        if not watchdog:
+            sink._watchdog_task.cancel()
+        sinks.append(sink)
+        return sink, floor
+
+    yield make
+    for sink in sinks:
+        sink.cleanup()
+
+
+def feed(sink, vad, user=USER, speech=0, silence=0):
+    vad.upcoming.extend([0.9] * speech + [0.05] * silence)
+    target = vad.calls + speech + silence
+    while vad.calls < target:
+        sink.write(user, MagicMock(pcm=FRAME))
+
+
+async def drain():
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+
+def windows(ms):
+    """Silence windows needed to reach `ms`."""
+    return -(-ms // WINDOW_MS)
+
+
+# --- state ----------------------------------------------------------------------
+
+def test_user_vad_state_reset():
+    state = UserVADState()
+    state.utterance = Utterance()
+    state.is_speaking = state.paused = True
+    state.silence_chunks, state.speech_chunks, state.last_voiced_at = 10, 5, 1.0
+    state.pre_speech_chunks.append(b"x")
+
+    state.reset_speech()
+    assert state.utterance is None
+    assert not state.is_speaking and not state.paused
+    assert (state.silence_chunks, state.speech_chunks, state.last_voiced_at) == (0, 0, None)
+    assert len(state.pre_speech_chunks) == 0
+
+
+def test_vad_sink_wants_opus():
+    with patch("onnxruntime.InferenceSession"):
+        assert VADSink(RecordingFloor()).wants_opus() is False
+
+
+def test_the_agents_voice_config_sets_the_thresholds():
+    config = {"vad_min_speech_ms": 400, "vad_onset_ms": 90, "vad_speech_prob": 0.8, "vad_continue_prob": 0.5}
+    with patch("onnxruntime.InferenceSession"):
+        sink = VADSink(RecordingFloor(), config=config)
+        default = VADSink(RecordingFloor())
+    assert (sink.min_speech_ms, sink.onset_ms, sink.onset_speech_prob, sink.continue_prob) == (400, 90, 0.8, 0.5)
+    assert (default.min_speech_ms, default.onset_ms) == (250, 180)
+
+
+def test_write_ignores_empty_frames():
+    """write() returns before touching any state on empty PCM: no user keyed,
+    and the VAD never invoked."""
+    session = MagicMock()
+    with patch("onnxruntime.InferenceSession", return_value=session):
+        sink = VADSink(RecordingFloor())
+    sink.write(None, MagicMock(pcm=b""))
+    sink.write(USER, MagicMock(pcm=b""))
+    sink.write(USER, MagicMock(pcm=None))
+    assert sink.user_states == {}
+    session.run.assert_not_called()
+
+    # Control: a non-empty frame does key the speaker (4 bytes = 1 stereo
+    # sample: too short to reach the VAD), so the above is the early return.
+    sink.write(USER, MagicMock(pcm=b"\x00\x00\x00\x00"))
+    assert list(sink.user_states) == [7]
+    assert sink.user_states[7].utterance is None
+    session.run.assert_not_called()
+
+
+def test_bot_audio_is_ignored():
+    with patch("onnxruntime.InferenceSession"):
+        sink = VADSink(RecordingFloor())
+    sink.write(MagicMock(id=9, bot=True), MagicMock(pcm=FRAME))
+    assert sink.user_states == {}
+
+
+# --- the write path --------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_speech_then_silence_is_one_utterance_streamed_as_it_is_heard(make_sink, vad):
+    sink, floor = make_sink()
+    no_words = settings.END_OF_TURN_DEFAULT_MS
+    feed(sink, vad, speech=10, silence=windows(no_words) - 1)
+    await drain()
+    # The open segment is finalized a moment into the pause; the turn isn't over yet.
+    assert floor.kinds() == ["opened", "paused"]
+
+    feed(sink, vad, silence=1)
+    await drain()
+    assert floor.kinds() == ["opened", "paused", "finished"]
+    utterance = floor.utterances()[0]
+    # 4 windows of pre-roll before the onset was confirmed, 6 more of speech,
+    # then the silence up to the end of the turn.
+    assert len(utterance.pcm) == (4 + 6 + windows(no_words)) * WINDOW_BYTES
+    assert floor.audio_bytes() == len(utterance.pcm), "the transcriber hears exactly the utterance"
+    assert utterance.speech_end_at is not None
+
+
+@pytest.mark.asyncio
+async def test_the_segment_is_finalized_early_in_a_pause(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS) - 1)
+    await drain()
+    assert floor.kinds() == ["opened"]
+    feed(sink, vad, silence=1)
+    await drain()
+    assert floor.kinds() == ["opened", "paused"]
+
+
+@pytest.mark.asyncio
+async def test_a_complete_sentence_ends_the_turn_sooner(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS))
+    await drain()
+    floor.utterances()[0].segments.append("Add milk to the shopping list.")  # the live final
+
+    complete = windows(settings.END_OF_TURN_COMPLETE_MS)
+    feed(sink, vad, silence=complete - 1 - windows(settings.STT_EARLY_END_MS))
+    await drain()
+    assert "finished" not in floor.kinds()
+    feed(sink, vad, silence=1)
+    await drain()
+    assert floor.kinds()[-1] == "finished"
+    assert complete * WINDOW_MS < settings.END_OF_TURN_DEFAULT_MS
+
+
+@pytest.mark.asyncio
+async def test_a_trailing_conjunction_waits_longer(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS))
+    await drain()
+    floor.utterances()[0].interim = "Add milk and"
+
+    continuing = windows(settings.END_OF_TURN_CONTINUING_MS)
+    feed(sink, vad, silence=continuing - 1 - windows(settings.STT_EARLY_END_MS))
+    await drain()
+    assert "finished" not in floor.kinds(), "ended mid-sentence at the default wait"
+    feed(sink, vad, silence=1)
+    await drain()
+    assert floor.kinds()[-1] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_talking_again_before_the_turn_ends_keeps_one_utterance(make_sink, vad):
+    """A ~540 ms mid-sentence pause resumes the same utterance instead of
+    splitting it into two agent turns."""
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10, silence=15)
+    feed(sink, vad, speech=10, silence=windows(settings.END_OF_TURN_DEFAULT_MS))
+    await drain()
+    assert floor.kinds() == ["opened", "paused", "resumed", "paused", "finished"]
+    assert len({id(u) for _, u, _ in floor.events}) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_utterance_starts_after_a_finished_one(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10, silence=windows(settings.END_OF_TURN_DEFAULT_MS))
+    feed(sink, vad, speech=10)
+    await drain()
+    assert floor.kinds() == ["opened", "paused", "finished", "opened"]
+    first, second = floor.utterances()
+    assert first is not second
+
+
+# --- the watchdog: Discord stops sending packets in silence ------------------------
+
+@pytest.mark.asyncio
+async def test_the_watchdog_ends_the_turn_when_packets_stop(make_sink, vad):
+    sink, floor = make_sink(watchdog=True)
+    feed(sink, vad, speech=10)
+    sink.user_states[7].last_voiced_at = time.monotonic() - 2
+    await asyncio.sleep(0.2)
+    assert floor.kinds() == ["opened", "paused", "finished"]
+
+
+@pytest.mark.asyncio
+async def test_the_watchdog_counts_from_the_last_voiced_frame_not_the_last_packet(make_sink, vad):
+    """Discord sends silence frames for a while after speech stops; counting
+    from those delayed every end of turn."""
+    sink, floor = make_sink(watchdog=True)
+    feed(sink, vad, speech=10, silence=3)  # packets still arriving
+    state = sink.user_states[7]
+    state.last_voiced_at = time.monotonic() - 1.0
+    assert time.monotonic() - state.last_packet_time < 0.5
+    await asyncio.sleep(0.2)
+    assert floor.kinds()[-1] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_a_blip_too_short_to_be_speech_is_discarded(make_sink, vad):
+    sink, floor = make_sink(watchdog=True)
+    feed(sink, vad, speech=5)  # onset confirmed at 180 ms, then nothing
+    sink.user_states[7].last_voiced_at = time.monotonic() - 2
+    await asyncio.sleep(0.2)
+    assert floor.kinds() == ["opened", "paused", "discarded"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_discards_the_open_utterance(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, speech=10)
+    sink.cleanup()
+    await drain()
+    assert floor.kinds() == ["opened", "discarded"]
+    assert sink.user_states == {}

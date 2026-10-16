@@ -1,7 +1,7 @@
 import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from core.voice.tts_engine import TextSanitizer, TTSEngine
+from core.voice.engines.tts_engine import TextSanitizer, TTSEngine
 
 def test_text_sanitizer_empty():
     assert TextSanitizer.sanitize("") == ""

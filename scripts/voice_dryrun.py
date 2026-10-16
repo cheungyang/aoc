@@ -42,7 +42,7 @@ Without Discord there is no playback, so the reported time to first audio is
 Usage:
     python scripts/voice_dryrun.py                        # every read-only case, once
     python scripts/voice_dryrun.py --case lights-status --runs 3
-    python scripts/voice_dryrun.py --stt synth            # include STT (TTS -> WAV -> Whisper)
+    python scripts/voice_dryrun.py --stt live             # speak it into the VAD and streaming STT first
     python scripts/voice_dryrun.py --out results.json
 """
 import argparse
@@ -51,7 +51,6 @@ import json
 import os
 import re
 import sqlite3
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -62,9 +61,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CASES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_replay_cases.json")
 REPLAY_SOURCE = "voice_replay"
 
-# Stages a replay can measure, in pipeline order. There is no VAD (the
-# utterance is given) and no playback (audio_start), so those are absent.
-REPLAY_STAGES = ("stt_done", "agent_start", "first_token", "first_chunk", "tts_first_byte", "turn_end")
+# Stages a replay can measure, in pipeline order. There is no playback
+# (audio_start); vad_final and stt_done appear only with --stt live, when the
+# utterance is spoken into the VAD instead of given as text.
+REPLAY_STAGES = ("vad_final", "stt_done", "agent_start", "first_token", "first_chunk", "tts_first_byte", "turn_end")
+# The voice --stt live speaks each utterance in (Chirp 3: HD).
+LIVE_STT_VOICE = "en-US-Chirp3-HD-Charon"
 
 EXPECT_KEYS = {
     "agent", "tools_any", "tools_all", "tools_none",
@@ -304,42 +306,71 @@ def replay_tokens(since: float, db_path: str) -> Dict[str, int]:
     return totals
 
 
-async def _synth_wav(tts, text: str, path: str) -> bytes:
-    """Speech for `text` as 16 kHz mono WAV, for exercising STT without a microphone."""
-    import imageio_ffmpeg
-
-    mp3 = await tts.synthesize_to_file(text)
-    subprocess.run(
-        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", mp3, "-f", "wav", "-ar", "16000", "-ac", "1", path],
-        capture_output=True, check=True,
-    )
-    with open(path, "rb") as f:
-        return f.read()
+@dataclass
+class HeardSpeech:
+    """An utterance as the listening path heard it (time.monotonic() stamps)."""
+    transcript: str
+    speech_end_at: Optional[float]
+    vad_final_at: float
+    stt_done_at: float
 
 
-async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", stt=None, tts=None,
-                   measure_tts: bool = True, audio_path: Optional[str] = None) -> CaseResult:
+def live_hearing(voice: str = LIVE_STT_VOICE):
+    """Returns `hear(text)`: speaks `text` with Chirp 3: HD into the real VAD and
+    streaming recognizer, in real time, as a voice turn would hear it (the
+    machinery of scripts/stt_benchmark.py). Needs GOOGLE_TTS_API_KEY and
+    GEMINI_API_KEY."""
+    import stt_benchmark as bench
+    from core.loaders.agents_loader import AgentsLoader
+    from core.util.config import Config
+    from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
+    from core.voice.turn_taking import merge_transcripts
+    from tts_benchmark import API_KEY_ENV_VAR, Options, make_chirp_client
+
+    client, tts_module = make_chirp_client(Options(tts_api_key=(Config().get(API_KEY_ENV_VAR) or "").strip()))
+    recognizer = SpeechRecognizer(provider="gemini_live", vocabulary=agent_vocabulary(AgentsLoader()))
+
+    async def hear(text: str) -> Optional[HeardSpeech]:
+        pcm = await asyncio.to_thread(bench.synthesize, client, tts_module, text, voice)
+        heard = [h for h in await bench.listen([pcm], 0, recognizer) if h.stt_done_at is not None]
+        if not heard:
+            return None
+        last = heard[-1]
+        return HeardSpeech(merge_transcripts(h.text for h in heard), last.utterance.speech_end_at,
+                           last.vad_final_at, last.stt_done_at)
+
+    return hear
+
+
+async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", hear=None, tts=None,
+                   measure_tts: bool = True) -> CaseResult:
     """Replays one case and returns what happened.
 
-    `stt` set: the utterance is spoken with `tts` and transcribed first, so STT
-    is in the trace. `measure_tts`: synthesize the first chunk to time it.
+    `hear` set (see `live_hearing`): the utterance is spoken into the VAD and
+    streaming STT first, and the trace is anchored at the last voiced frame,
+    as in a live turn. `measure_tts`: synthesize the first chunk to time it.
     """
     from core.loaders.agents_loader import AgentsLoader
     from core.runtime.session_manager import SessionManager
     from core.runtime.turn_trace import start_turn_trace
-    from core.voice.verbalizer import Verbalizer
-    from core.voice.voice_stream import VoiceStream
+    from core.voice.speech.verbalizer import Verbalizer
+    from core.voice.speech.voice_stream import VoiceStream
 
     reset_history(db_path)
     BLOCKED_WRITES.clear()
-    wav = await _synth_wav(tts, case["utterance"], audio_path) if stt is not None else None
+    heard = await hear(case["utterance"]) if hear is not None else None
+    result = CaseResult(case_id=case["id"], run=run, marks={})
+    if hear is not None and heard is None:
+        result.transcript = ""
+        result.failures.append("STT heard nothing")
+        return result
 
     started = time.time()
-    trace = start_turn_trace(voice_bot, run, case=case["id"])
-    result = CaseResult(case_id=case["id"], run=run, marks={})
-    if stt is not None:
-        result.transcript = await stt.transcribe(wav)
-        trace.mark("stt_done")
+    trace = start_turn_trace(voice_bot, run, speech_end_at=heard.speech_end_at if heard else None, case=case["id"])
+    if heard is not None:
+        result.transcript = heard.transcript
+        trace.mark("vad_final", at=heard.vad_final_at)
+        trace.mark("stt_done", at=heard.stt_done_at)
     else:
         result.transcript = case["utterance"]
 
@@ -397,8 +428,8 @@ async def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--cases", default=CASES_PATH, help="Case file (JSON list).")
     parser.add_argument("--case", action="append", dest="only", help="Run only this case id (repeatable).")
     parser.add_argument("--runs", type=int, default=1, help="Runs per case, for p50/p90.")
-    parser.add_argument("--stt", choices=("off", "synth"), default="off",
-                        help="synth: speak each utterance with TTS and transcribe it, to include STT.")
+    parser.add_argument("--stt", choices=("off", "live"), default="off",
+                        help="live: speak each utterance into the VAD and streaming STT, to include them.")
     parser.add_argument("--no-tts", action="store_true", help="Don't synthesize the first chunk.")
     parser.add_argument("--allow-mutations", action="store_true", help="Also run cases marked mutates=true.")
     parser.add_argument("--voice-bot", default="main", help="The bot that hosts the rooms (default: main).")
@@ -416,14 +447,10 @@ async def main(argv: Optional[List[str]] = None) -> int:
     db_path = isolate_sessions(args.state_dir or tempfile.mkdtemp(prefix="aoc-voice-replay-"))
 
     from core.runtime.execution_context import surface_scope
-    from core.voice.tts_engine import TTSEngine
+    from core.voice.engines.tts_engine import TTSEngine
 
-    tts = TTSEngine(default_voice="en-US-JennyNeural") if (args.stt == "synth" or not args.no_tts) else None
-    stt = None
-    if args.stt == "synth":
-        from core.voice.stt_engine import STTEngine
-        stt = STTEngine(model_size="base.en")
-    audio_path = os.path.join(os.path.dirname(db_path), "replay_utterance.wav")
+    tts = TTSEngine(default_voice="en-US-JennyNeural") if not args.no_tts else None
+    hear = live_hearing() if args.stt == "live" else None
 
     if not args.allow_mutations:
         guard_writes()
@@ -433,8 +460,8 @@ async def main(argv: Optional[List[str]] = None) -> int:
         for case in cases:
             for run in range(1, args.runs + 1):
                 print(f"[replay] {case['id']} run {run}: {case['utterance']!r}", file=sys.stderr)
-                results.append(await run_case(case, run, db_path, args.voice_bot, stt=stt, tts=tts,
-                                              measure_tts=not args.no_tts, audio_path=audio_path))
+                results.append(await run_case(case, run, db_path, args.voice_bot, hear=hear, tts=tts,
+                                              measure_tts=not args.no_tts))
 
     print(render_report(results))
     if args.out:

@@ -6,7 +6,7 @@ heading merges into the sentence after it. That is the difference between a
 plan that is readable and the same plan read aloud as a list of fragments.
 
 This module restructures instead of deleting. It is not a summariser -- the
-no-compression contract lives with the prompt in `core.voice.prompts`.
+no-compression contract lives with the prompt in `core.voice.speech.prompts`.
 
 The model is only consulted for text that has structure to restructure. Plain
 conversational prose -- the majority of turns -- takes the fast path and never
@@ -17,17 +17,17 @@ also rendered by rule (`render_simple_structure`); the model is kept for the
 blocks those rules decline.
 
 Notation that always resolves the same way -- XML blocks, filing hashtags,
-priority symbols -- is normalised in `core.voice.speech_util` before any of
-this runs. Streaming lives in `core.voice.voice_stream`.
+priority symbols -- is normalised in `core.voice.speech.speech_util` before any of
+this runs. Streaming lives in `core.voice.speech.voice_stream`.
 """
 import asyncio
 import re
 
 from core.util.models import DEFAULT_VERBALIZER_MODEL
-from core.voice.prompts import build_verbalizer_prompt
-from core.voice.simple_structure import render_simple_structure
-from core.voice.speech_util import speak_priority_symbols, strip_hashtags, strip_xml
-from core.voice.tts_engine import TextSanitizer
+from core.voice.speech.prompts import build_verbalizer_prompt
+from core.voice.speech.simple_structure import render_simple_structure
+from core.voice.speech.speech_util import speak_priority_symbols, strip_hashtags, strip_xml
+from core.voice.engines.tts_engine import TextSanitizer
 
 # Markers that mean the text was written to be *seen*: list bullets, numbered
 # items, headings, tables, code fences, or bold/italic runs. Their presence is

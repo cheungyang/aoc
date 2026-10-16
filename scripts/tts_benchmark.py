@@ -4,7 +4,7 @@
 Measures today's engine against the candidates that could replace it, on the
 kind of replies this system actually speaks (scripts/tts_benchmark_utterances.json):
 
-    edge          edge-tts, today's engine (core/voice/tts_engine.py)
+    edge          edge-tts, today's engine (core/voice/engines/tts_engine.py)
     chirp-unary   Chirp 3: HD on Cloud Text-to-Speech, one SynthesizeSpeech call per sentence
     chirp-stream  Chirp 3: HD, one bidirectional StreamingSynthesize call fed clause by clause
     gemini        Gemini 3.8 Flash-Lite TTS over the Interactions API, audio streamed back

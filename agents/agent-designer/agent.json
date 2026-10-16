@@ -45,7 +45,6 @@
     "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
     "tts_voice": "en-US-GuyNeural",
     "tts_speed": 1.2,
-    "stt_model": "base.en",
     "post_transcript_to_chat": true
   }
 }

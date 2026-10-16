@@ -24,8 +24,8 @@ class AudioStreamQueue:
     in Discord voice channels with instant cancellation (barge-in) support.
     """
 
-    def __init__(self, voice_manager, loop: Optional[asyncio.AbstractEventLoop] = None):
-        self.voice_manager = voice_manager
+    def __init__(self, connection, loop: Optional[asyncio.AbstractEventLoop] = None):
+        self.connection = connection  # the VoiceConnection whose voice client plays
         self._loop = loop
         self._queue: Optional[asyncio.Queue[Optional[AudioItem]]] = None
         self._queue_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -33,6 +33,13 @@ class AudioStreamQueue:
         self._current_done_event: Optional[asyncio.Event] = None
         self._is_active = False
         self._running = True
+        # Playback volume: lowered while the user talks over the agent (stage
+        # one of barge-in) and back to full when the queue is cleared.
+        self._volume = 1.0
+        self._current_source = None
+
+    def _voice_client(self):
+        return getattr(self.connection, "voice_client", None) if self.connection else None
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -111,8 +118,10 @@ class AudioStreamQueue:
         Instantly halts current playback and clears all pending audio files in the queue.
         Used for barge-in / interruption handling.
         """
+        self._volume = 1.0
+
         # Stop active voice playback
-        vc = getattr(self.voice_manager, "voice_client", None) if self.voice_manager else None
+        vc = self._voice_client()
         if vc and (vc.is_playing() or (hasattr(vc, "is_paused") and vc.is_paused())):
             try:
                 if hasattr(vc, "stop_playing"):
@@ -139,9 +148,19 @@ class AudioStreamQueue:
             except (asyncio.QueueEmpty, ValueError):
                 break
 
+    def duck(self, volume: float):
+        """Keeps playing, at `volume`: stage one of barge-in, while the user's words
+        don't yet say whether they are interrupting."""
+        self._volume = volume
+        if self._current_source is not None:
+            self._current_source.volume = volume
+
+    def unduck(self):
+        self.duck(1.0)
+
     def is_playing(self) -> bool:
         """Returns True if audio is actively playing or items are waiting in the queue."""
-        vc = getattr(self.voice_manager, "voice_client", None) if self.voice_manager else None
+        vc = self._voice_client()
         if vc and vc.is_playing():
             return True
         if self._queue is not None:
@@ -159,7 +178,7 @@ class AudioStreamQueue:
                         self._queue.task_done()
                     break
 
-                vc = getattr(self.voice_manager, "voice_client", None) if self.voice_manager else None
+                vc = self._voice_client()
                 if not vc or not vc.is_connected():
                     # Discord voice client not available, discard file
                     if item.auto_delete and os.path.exists(item.file_path):
@@ -203,7 +222,10 @@ class AudioStreamQueue:
                             pass
                         await asyncio.sleep(0.02)
 
-                    source = discord.FFmpegPCMAudio(item.file_path, executable=FFMPEG_EXE)
+                    source = discord.PCMVolumeTransformer(
+                        discord.FFmpegPCMAudio(item.file_path, executable=FFMPEG_EXE), volume=self._volume
+                    )
+                    self._current_source = source
                     vc.play(source, after=_after)
                     if item.on_start is not None:
                         try:
@@ -219,6 +241,7 @@ class AudioStreamQueue:
                         except Exception:
                             pass
                 finally:
+                    self._current_source = None
                     self._queue.task_done()
 
             except asyncio.CancelledError:

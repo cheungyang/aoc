@@ -14,6 +14,7 @@ from core.runtime.session_manager import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
 from core.util import format_error_message
+from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
 
 # How much of a replied-to message is quoted back to the agent. Enough to know
@@ -74,20 +75,17 @@ class BotRunner:
             target = channel_name
             if not target and ctx.author.voice:
                 target = str(ctx.author.voice.channel.id)
-            success = await self.voice_manager.join_voice_channel(target, text_channel=ctx.channel)
+            success = await self.voice_manager.connection.join(target, text_channel=ctx.channel)
             if success:
                 ch_name = getattr(ctx.channel, "name", str(ctx.channel.id))
-                await ctx.send(f"Connected to voice channel: `{self.voice_manager.voice_client.channel.name}` (linked to #{ch_name}) 🎙️")
+                await ctx.send(f"Connected to voice channel: `{self.voice_manager.connection.channel.name}` (linked to #{ch_name}) 🎙️")
             else:
                 await ctx.send("Could not join voice channel.")
 
         @self.bot.command(name="leave")
         async def cmd_leave(ctx):
-            await self.voice_manager.leave_voice_channel()
+            await self.voice_manager.connection.leave()
             await ctx.send("Disconnected from voice channel. 👋")
-
-        if hasattr(self, "voice_manager") and self.voice_manager:
-            self.voice_manager.bot = self.bot
 
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
@@ -129,12 +127,12 @@ class BotRunner:
         vc_targets = self.get_hosted_voice_channels(agent)
         
         if after.channel and any(
-            after.channel.name == vc or self.voice_manager.normalize_channel_name(after.channel.name) == self.voice_manager.normalize_channel_name(vc)
+            after.channel.name == vc or normalize_channel_name(after.channel.name) == normalize_channel_name(vc)
             for vc in vc_targets
         ):
-            if not self.voice_manager.voice_client or self.voice_manager.voice_client.channel != after.channel:
+            if self.voice_manager.connection.channel != after.channel:
                 print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
-                await self.voice_manager.join_voice_channel(after.channel.name)
+                await self.voice_manager.connection.join(after.channel.name)
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
@@ -170,13 +168,13 @@ class BotRunner:
                     
                     selected_target = None
                     for t in targets:
-                        norm_t = self.voice_manager.normalize_channel_name(str(t))
+                        norm_t = normalize_channel_name(str(t))
                         for guild in self.bot.guilds:
                             for vc in guild.voice_channels:
                                 if str(t).isdigit() and vc.id == int(t):
                                     selected_target = t
                                     break
-                                if vc.name == t or self.voice_manager.normalize_channel_name(vc.name) == norm_t:
+                                if vc.name == t or normalize_channel_name(vc.name) == norm_t:
                                     selected_target = t
                                     break
                             if selected_target:
@@ -186,7 +184,7 @@ class BotRunner:
 
                     target_to_join = selected_target or targets[0]
                     print(f"Agent {self.agent_id} auto-joining voice channel '{target_to_join}'...")
-                    await self.voice_manager.join_voice_channel(target_to_join)
+                    await self.voice_manager.connection.join(target_to_join)
                 asyncio.create_task(_auto_join())
 
     def _on_ownership_change(self, agent_id):
@@ -199,8 +197,8 @@ class BotRunner:
             return
         if Ownership().is_mine(self.agent_id):
             loop.create_task(self._maybe_auto_join())
-        elif self.voice_manager.voice_client:
-            loop.create_task(self.voice_manager.leave_voice_channel())
+        elif self.voice_manager.connection.voice_client:
+            loop.create_task(self.voice_manager.connection.leave())
 
     async def _handle_control_message(self, message):
         """Control-thread messages: claims, releases and user commands.
@@ -314,7 +312,7 @@ class BotRunner:
             channel_name = message.channel.parent.name
             
         # Check if channel or its normalized name matches channel_hosts (e.g. general-voice -> general)
-        normalized_name = self.voice_manager.normalize_channel_name(channel_name)
+        normalized_name = normalize_channel_name(channel_name)
         is_host = (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
         
         # Check mentions

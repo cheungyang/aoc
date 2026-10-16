@@ -1,5 +1,5 @@
 import unittest
-from core.voice.sentence_chunker import SentenceChunker
+from core.voice.speech.sentence_chunker import SentenceChunker
 
 class TestSentenceChunker(unittest.TestCase):
     def setUp(self):

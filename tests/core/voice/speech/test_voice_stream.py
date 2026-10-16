@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.voice.verbalizer import Verbalizer
-from core.voice.voice_stream import VoiceStream
+from core.voice.speech.verbalizer import Verbalizer
+from core.voice.speech.voice_stream import VoiceStream
 from tests.helpers import GOLDEN_INPUT, voice_session
 
 

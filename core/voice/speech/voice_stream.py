@@ -1,15 +1,15 @@
 """Streaming agent tokens into speech-ready chunks."""
 from typing import List, Optional
 
-from core.voice.speech_util import (
+from core.voice.speech.speech_util import (
     find_unclosed_xml_start,
     speak_priority_symbols,
     strip_completed_xml,
     strip_hashtags,
     strip_xml,
 )
-from core.voice.tts_engine import TextSanitizer
-from core.voice.verbalizer import Verbalizer, has_structure
+from core.voice.engines.tts_engine import TextSanitizer
+from core.voice.speech.verbalizer import Verbalizer, has_structure
 
 
 class VoiceStream:
@@ -45,7 +45,7 @@ class VoiceStream:
         self.session = session
         self._buffer = ""
 
-        from core.voice.sentence_chunker import SentenceChunker
+        from core.voice.speech.sentence_chunker import SentenceChunker
 
         self._splitter = SentenceChunker(min_chars=min_chars, max_chars=max_chars)
 

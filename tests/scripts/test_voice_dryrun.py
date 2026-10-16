@@ -161,13 +161,61 @@ async def test_run_case_traces_and_checks_a_turn(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_case_with_live_hearing_anchors_the_trace_at_speech_end(tmp_path):
+    import time as _time
+
+    case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?", "expect": {}}
+    prompts = []
+
+    async def fake_stream(prompt, session):
+        prompts.append(prompt)
+        yield {"type": "final_response", "text": "Yes.", "response": None}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    now = _time.monotonic()
+
+    async def hear(text):
+        return replay.HeardSpeech("Are the lights on?", speech_end_at=now - 0.8, vad_final_at=now - 0.3,
+                                  stt_done_at=now - 0.25)
+
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        result = await run_case(case, 1, db, hear=hear, measure_tts=False)
+
+    assert prompts == ["Are the lights on?"]
+    assert 450 <= result.marks["vad_final"] <= 550
+    assert 500 <= result.marks["stt_done"] <= 600
+    assert result.marks["agent_start"] >= result.marks["stt_done"]
+
+
+@pytest.mark.asyncio
+async def test_run_case_fails_when_nothing_is_heard(tmp_path):
+    case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?", "expect": {}}
+
+    async def hear(text):
+        return None
+
+    agent = MagicMock()
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        result = await run_case(case, 1, db, hear=hear, measure_tts=False)
+
+    assert not result.passed
+    assert result.failures == ["STT heard nothing"]
+    agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_main_exit_code_and_json(tmp_path):
     path = _cases_file(tmp_path, CASES)
     out = tmp_path / "out.json"
     failing = CaseResult(case_id="read", run=1, marks={}, failures=["answered by nobody"])
     with patch.object(replay, "run_case", AsyncMock(return_value=failing)), \
          patch.object(replay, "guard_writes") as guard, \
-         patch("core.voice.tts_engine.TTSEngine"):
+         patch("core.voice.engines.tts_engine.TTSEngine"):
         code = await replay.main(["--cases", path, "--state-dir", str(tmp_path / "s"), "--out", str(out)])
     assert code == 2
     guard.assert_called_once()

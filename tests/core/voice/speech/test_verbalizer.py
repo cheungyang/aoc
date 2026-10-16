@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.voice.prompts import build_verbalizer_prompt
-from core.voice.tts_engine import TextSanitizer
-from core.voice.verbalizer import Verbalizer, has_structure
+from core.voice.speech.prompts import build_verbalizer_prompt
+from core.voice.engines.tts_engine import TextSanitizer
+from core.voice.speech.verbalizer import Verbalizer, has_structure
 from tests.helpers import GOLDEN_INPUT, voice_session
 
 

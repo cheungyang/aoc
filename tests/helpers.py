@@ -4,8 +4,9 @@ Tools no longer accept a model-supplied `agent_id`; identity is derived from the
 ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
-token-usage-handler and logging-util tests, and the voice fixtures
-(`GOLDEN_INPUT`, `voice_session`) shared by the verbalizer and voice-stream tests.
+token-usage-handler and logging-util tests, the voice fixtures (`GOLDEN_INPUT`,
+`voice_session`) shared by the verbalizer and voice-stream tests, and
+`fake_audio_source` for tests that play audio through the voice audio queue.
 """
 from contextlib import contextmanager
 
@@ -77,3 +78,26 @@ def voice_session():
     return SessionManager.get_session(
         agent_id="main", source="discord", channel="general", surface="voice"
     )
+
+
+def fake_audio_source():
+    """A stand-in for discord.FFmpegPCMAudio: patch it in with
+    `patch("discord.FFmpegPCMAudio", fake_audio_source())`.
+
+    The audio queue wraps every source in discord.PCMVolumeTransformer (for
+    barge-in ducking), which rejects anything that isn't a real AudioSource,
+    so a MagicMock in its place makes every item fail to play.
+    """
+    import discord
+
+    class FakeAudioSource(discord.AudioSource):
+        def __init__(self, *args, **kwargs):
+            self.args = args
+
+        def read(self) -> bytes:
+            return b""
+
+        def is_opus(self) -> bool:
+            return False
+
+    return FakeAudioSource

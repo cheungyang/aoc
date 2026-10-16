@@ -1,7 +1,7 @@
 import os
 import pytest
 from unittest.mock import patch
-from core.voice.blurp_generator import BlurpGenerator, DEFAULT_BLURP
+from core.voice.speech.blurp_generator import BlurpGenerator, DEFAULT_BLURP
 
 def test_blurp_generator_configured_file(tmp_path):
     fake_blurp = tmp_path / "custom_ping.wav"

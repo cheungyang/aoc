@@ -171,8 +171,8 @@ _patch_voice_recv_opus()
 
 from .voice_manager import VoiceManager
 from .vad_sink import VADSink
-from .stt_engine import STTEngine
-from .tts_engine import TTSEngine
-from .blurp_generator import BlurpGenerator
+from .engines.stt import SpeechRecognizer
+from .engines.tts_engine import TTSEngine
+from .speech.blurp_generator import BlurpGenerator
 
-__all__ = ["VoiceManager", "VADSink", "STTEngine", "TTSEngine", "BlurpGenerator"]
+__all__ = ["VoiceManager", "VADSink", "SpeechRecognizer", "TTSEngine", "BlurpGenerator"]

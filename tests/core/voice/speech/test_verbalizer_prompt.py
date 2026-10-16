@@ -7,7 +7,7 @@ sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 )
 
-from core.voice.prompts.verbalizer_prompt import build_verbalizer_prompt
+from core.voice.speech.prompts.verbalizer_prompt import build_verbalizer_prompt
 
 
 class TestVerbalizerPrompt(unittest.TestCase):

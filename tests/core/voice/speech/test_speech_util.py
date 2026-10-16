@@ -1,8 +1,8 @@
 """Tests for the speech notation pass: XML, hashtags and priority symbols."""
 import pytest
 
-from core.voice.speech_util import speak_priority_symbols, strip_hashtags, strip_xml
-from core.voice.verbalizer import has_structure
+from core.voice.speech.speech_util import speak_priority_symbols, strip_hashtags, strip_xml
+from core.voice.speech.verbalizer import has_structure
 
 
 # --------------------------------------------------------------------------

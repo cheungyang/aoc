@@ -1,7 +1,7 @@
 import unittest
 import os
 from unittest.mock import patch, MagicMock, AsyncMock
-from core.voice.bridge_manager import BridgeManager
+from core.voice.speech.bridge_manager import BridgeManager
 
 class TestBridgeManager(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

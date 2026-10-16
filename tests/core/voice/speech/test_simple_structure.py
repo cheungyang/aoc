@@ -2,8 +2,8 @@
 and which are declined so the Verbalizer sends them to the model."""
 import pytest
 
-from core.voice.simple_structure import render_simple_structure
-from core.voice.tts_engine import TextSanitizer
+from core.voice.speech.simple_structure import render_simple_structure
+from core.voice.engines.tts_engine import TextSanitizer
 
 
 @pytest.mark.parametrize("text,expected", [

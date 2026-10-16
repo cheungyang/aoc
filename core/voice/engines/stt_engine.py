@@ -30,12 +30,18 @@ class STTEngine:
         self.model = self._models[key]
 
     def _sync_transcribe(self, wav_bytes: bytes) -> str:
-        """Synchronously transcribes WAV bytes into text."""
+        """Synchronously transcribes WAV bytes into text.
+
+        Greedy decoding (beam_size=1): this is the fallback behind streaming
+        Gemini, so it runs when the turn is already late, and a 5-beam search
+        costs several times more CPU on the NAS for little accuracy on short
+        commands.
+        """
         audio_stream = io.BytesIO(wav_bytes)
         print(f"[STTEngine] 🎙️ Feeding {len(wav_bytes)} bytes (~{len(wav_bytes)/32000:.2f}s) to Faster-Whisper...")
         segments, info = self.model.transcribe(
             audio_stream,
-            beam_size=5,
+            beam_size=1,
             language="en",
             temperature=0.0,
             repetition_penalty=1.2,

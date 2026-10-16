@@ -12,11 +12,52 @@ their own (Concierge, Rio, ...), not an omission.
 
 Everything that is the same for all agents belongs here rather than in any
 agent.json, so it cannot drift between agents. Operational knobs for the voice
-pipeline (providers, speech mode, end-of-turn timing) join this module as the
-streaming STT/TTS phases land.
+pipeline live here too: speech-to-text and turn taking below; the TTS provider
+and speech mode join them as those phases land.
 """
+import os
 import re
 from typing import Optional
+
+# --- Speech to text --------------------------------------------------------
+# "gemini_live": each utterance streams to gemini-3.5-transcribe-live while the
+# user is still talking (core/voice/engines/live_stt.py); local Whisper takes over only
+# if a live session fails. "whisper": local only, for running without network.
+STT_PROVIDER = os.getenv("AOC_STT_PROVIDER", "gemini_live")
+STT_LANGUAGE_CODES = ["en-US"]
+# SMART drops "um"s and false starts and resolves self-corrections ("Tuesday --
+# no, Wednesday"), which is what an agent should act on. VERBATIM keeps them.
+STT_MODE = "SMART"
+# Agent and room names bias recognition toward them; the docs advise at most
+# ~100 terms for best results.
+STT_VOCABULARY_LIMIT = 100
+STT_CONNECT_TIMEOUT_S = 5.0
+# How long after the turn ends to wait for the live transcript before falling
+# back to Whisper. Finals normally arrive ~0.4 s after the segment ends.
+STT_FINAL_TIMEOUT_S = 2.0
+# Silence after which the open speech segment is finalized speculatively, so its
+# transcript is usually ready by the time the end-of-turn silence has elapsed.
+# If the user goes on talking, a new segment starts and the two are joined.
+STT_EARLY_END_MS = 200
+# Whisper model for the fallback (and for STT_PROVIDER="whisper"). The same
+# variable selects what scripts/provision_assets.py caches into the image.
+WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
+
+# --- Turn taking -----------------------------------------------------------
+# How long a silence ends the turn depends on what was said so far
+# (core/voice/turn_taking.py): a finished sentence ends quickly, a trailing
+# "and" or "um" waits longer, and no words yet keeps the old fixed wait.
+END_OF_TURN_COMPLETE_MS = 500
+END_OF_TURN_DEFAULT_MS = 900
+END_OF_TURN_CONTINUING_MS = 1200
+# Barge-in is two-stage: speech over the agent first lowers its volume to this,
+# and stops it only once the words confirm an interruption (a stop phrase, or
+# at least this many words that aren't just "okay" or "mm-hmm").
+BARGE_IN_DUCK_VOLUME = 0.25
+BARGE_IN_MIN_WORDS = 2
+# A question the agent never got to answer is prepended to the next utterance,
+# unless it is older than this.
+UNANSWERED_MAX_AGE_S = 90
 
 # Chirp 3: HD voices, keyed by the name that follows the locale prefix
 # (`en-US-Chirp3-HD-<name>`). Gender is from Google Cloud's Chirp 3: HD voice
