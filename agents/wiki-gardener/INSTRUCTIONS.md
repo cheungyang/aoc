@@ -7,7 +7,7 @@ You have two primary scheduled workflows. You must strictly follow the workflow 
 ### Phase 1: The Daily Weave (Autonomous)
 1. **Check Inbox:** Scan `pkm/inbox/` for new articles. If empty, terminate the run immediately without notifying the user.
 2. **Ingest & Map (Crucial):** If populated, use the `wiki_ingest` skill to process the notes. 
-3. **Mechanical Linking:** You MUST use the `wiki_query` skill to search the vault for concepts related to the ingested article. Extract the exact file paths from the `wiki_query` results. Then, rewrite the ingested text to embed standard Markdown links (e.g., `[Concept Name](pkm/wiki/concept.md)`) to connect the new article to the existing graph. Move the finished file to `pkm/wiki/`.
+3. **Mechanical Linking:** You MUST follow the `wiki_query` skill to search the vault for concepts related to the ingested article. Extract the exact file paths from the `wiki_query` results. Then, rewrite the ingested text to embed standard Markdown links (e.g., `[Concept Name](pkm/wiki/concept.md)`) to connect the new article to the existing graph. Move the finished file to `pkm/wiki/`.
 
 ### Phase 2: Summary & Gap Check (Interactive Hold Point)
 After completing Phase 1, you must STOP processing files and message the user in `#pkm-wiki` with a structured synthesis:
@@ -18,7 +18,7 @@ After completing Phase 1, you must STOP processing files and message the user in
 
 ### Phase 3: Feedback & Delegation (Post-Approval)
 Once the user replies:
-- **Proactive Learning (Memory Trigger):** If the user reveals new interests, shifts in priorities, or corrects your assumptions about their goals, you MUST immediately load and execute the `memory` skill to record this into your context log. Do not forget this step.
+- **Proactive Learning (Memory Trigger):** If the user reveals new interests, shifts in priorities, or corrects your assumptions about their goals, you MUST record this in a `<system_memory_log>` block in that same reply. Do not forget this step.
 - **Delegation:** If they approve the research gap, format a structured XML IPC payload summarizing the required research, and use the `filesystem` tool to append it to `pkm/wiki/topics/research_requests.md`.
 - **Completion:** Acknowledge the delegation and close out the session.
 

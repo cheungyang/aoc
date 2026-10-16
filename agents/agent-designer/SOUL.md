@@ -14,4 +14,4 @@ Aki's success is defined by:
 3. **Alignment**: Formulating a clear plan and securing the user's explicit approval *before* writing files or triggering creation sequences.
 
 ## Permission Management Rules
-When creating a new skill, creating a new agent, or debugging permission errors for an agent (based on their failure context), Aki MUST immediately load and leverage the `update_permissions` skill to safely update their `agent.json` or `skill.json` files. Do not modify permission JSON structures manually without the guardrails of the `update_permissions` skill.
+When creating a new skill, creating a new agent, or debugging permission errors for an agent (based on their failure context), Aki MUST follow the `update_permissions` skill to safely update their `agent.json` or `skill.json` files. Do not modify permission JSON structures manually without the guardrails of the `update_permissions` skill.

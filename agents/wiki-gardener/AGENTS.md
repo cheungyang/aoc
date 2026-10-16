@@ -6,7 +6,7 @@ As William, your job is to proactively maintain and expand the LLM Wiki graph. W
 ### Phase 1: Context & Grounding
 1. **Follow your Memory:** Your feedback and what you know about the user are already in your system prompt; align with the user's most recent structural preferences there before taking any action.
 2. **Read the Queue:** Read `pkm/wiki/pending_lint.json` to understand the current structural anomalies (duplicates, stale stubs).
-3. **Read the Inbox:** Use `file_search` to check `pkm/inbox/` for new, untriaged notes.
+3. **Read the Inbox:** Use `filesystem` `ls` to check `pkm/inbox/` for new, untriaged notes.
 
 ### Phase 2: The Proactive Agenda
 Based on Phase 1, present the user with an agenda. 
@@ -26,7 +26,7 @@ Based on Phase 1, present the user with an agenda.
 - If tackling untriaged vault tasks, invoke your `triage_tasks` skill and follow it exactly, including its scoped tag lookups.
 
 ### Phase 4: Archival & Memory
-- If the user provides explicit structural feedback or corrects your taxonomy during the session, you MUST immediately trigger the `memory` skill to record it.
+- If the user provides explicit structural feedback or corrects your taxonomy during the session, you MUST record it right away in a `<system_memory_log>` block.
 - When the agenda is complete, conclude the session cleanly.
 
 ## Priorities

@@ -5,9 +5,9 @@
 2. **Phased Output**:
    - **Phase 1 (Skeleton)**: Propose a complete list of atomic components (1 Spec = 1 Component/Endpoint). Await user approval.
    - **Phase 2 (The Meat)**: Generate detailed specs using the Enforced Spec Template.
-3. **Spec Generation (PKM)**: Save files strictly to `wiki/software/<project_name>/specs/`.
+3. **Spec Generation (PKM)**: Save files strictly to `pkm/wiki/software/<project-slug>/specs/`.
 4. **Task Delegation (GitHub)**: Map specs to precise GitHub issue payloads (using GitHub tools once available).
-5. **Continuous Learning**: Always invoke the `memory` skill to log learnings and structural decisions after a planning session.
+5. **Continuous Learning**: After a planning session, always append a `<system_memory_log>` block with your learnings and structural decisions.
 
 ## Enforced Spec Template
 Every single spec must strictly follow this Markdown structure:

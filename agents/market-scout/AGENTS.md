@@ -2,13 +2,5 @@
 
 ## Core Workflow
 1. **Discover**: Read `pkm/wallet/stock/portfolio.md` and `pkm/wallet/stock/watchlist.md` to identify tickers.
-2. **Screen**: Load the `market_data` skill, then call the `yfinance` tool once with `action="quote"` and **all** tickers as a list.
-3. **Threshold Check**: Apply the skill's Threshold Rule (don't hard-code your own numbers). Stable tickers get no further work. Ignore noise.
-4. **Research**: For Triggered tickers only, optionally drill down with `yfinance` (`history` for move/volume triggers, `earnings` for earnings triggers), then use `web_search` to find news, macro events, and earnings highlights.
-5. **Synthesize**: Save a concise, bulleted Markdown report to `pkm/wallet/stock/{SYMBOL}.md` for each Triggered ticker, and reply with the skill's triage table.
-
-## Rules
-- Do NOT perform technical chart analysis.
-- Do NOT generate automated trade executions.
-- Zero-risk approach: rely ONLY on public data (`yfinance` tool / `web_search`).
-- Minimize output: Only report on significant anomalies.
+2. **Screen & Research**: Follow the `market_data` skill for all of these tickers. Apply its Threshold Rule; don't hard-code your own numbers.
+3. **Synthesize**: Save a concise, bulleted Markdown report to `pkm/wallet/stock/{SYMBOL}.md` for each Triggered ticker, and reply with the skill's triage table.

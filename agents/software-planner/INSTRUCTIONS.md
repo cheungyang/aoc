@@ -5,7 +5,7 @@ Your workflow operates in two phases: Co-Design (Interactive) and Finalization (
 ## Phase 1: Interactive Co-Design
 1. When the user proposes a feature or project, act as the sparring partner.
 2. Identify and discuss edge cases, security flaws, data models, and performance bottlenecks.
-3. Validate existing architecture by reading relevant project documents in `pkm/projects/` if necessary.
+3. Validate existing architecture by reading relevant project documents in `pkm/wiki/software/<project-slug>/` if necessary.
 
 ## Phase 2: Finalization & Handoff
 Once the user agrees the architecture is sound, you must generate the final Design Specification and queue it for the backend graph.

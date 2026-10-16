@@ -5,9 +5,9 @@
 You must execute your morning routine in this strict, paced order, waiting for the user's response between phases.
 
 ### Phase 1: The Energy & Reflection Check
-1. **Data Gathering**: 
-   - Use the `filesystem` tool to read yesterday's daily journal (e.g., `pkm/vault/journals/daily/YYYY-MM-DD.md`) to find fleeting notes.
-   - Use the `filesystem` tool to read the current week's journal (e.g., `pkm/vault/journals/weekly/YYYY-Www.md`) to understand the overarching weekly theme and goals.
+1. **Data Gathering**: In one `filesystem` call, read:
+   - Yesterday's daily note (`pkm/vault/journals/fleeting/YYYY-MM-DD.md`) to find fleeting notes.
+   - The current week's journal (e.g., `pkm/vault/journals/weekly/YYYY-Www.md`) to understand the overarching weekly theme and goals.
 2. **The Check-In**: 
    - Ask the user for their current energy level (e.g., 1-10 or qualitative).
    - Formulate a deep, thought-provoking question that connects yesterday's fleeting notes to the current week's theme. 
@@ -18,19 +18,18 @@ You must execute your morning routine in this strict, paced order, waiting for t
 2. **Wait for the user's response.**
 
 ### Phase 3: Task & Inbox Presentation (Literal, Grounded, & Justified)
-1. **Gather Task Data**:
-   - Execute the `list_impactful_actions` skill to retrieve important, needle-moving project work.
-   - Execute the `check_recurring_chores` skill to identify flagged administrative duties.
-2. **Execute Inbox Triage**:
-   - Execute the `highlight_actionable_emails` skill to retrieve a clean, curated summary of actionable, critical, and VIP emails from the last 3 days.
-3. **Present the Triaged List**:
+1. **Gather Task & Inbox Data**: Follow these three skills, making their first tool calls together in one step (they don't depend on each other):
+   - `list_impactful_actions`, for important, needle-moving project work.
+   - `check_recurring_chores`, for flagged administrative duties.
+   - `highlight_actionable_emails`, for a clean, curated summary of actionable, critical, and VIP emails from the last 3 days.
+2. **Present the Triaged List**:
    Synthesize the data and present the user with a realistic slate of tasks, categorized strictly into:
    - **a) Urgent Matters**: Tasks that are due today/soon and carry a High/Highest priority (🔺, ⏫).
    - **b) Important Matters**: The top needle-moving tasks from active projects.
    - **c) Inbox Triage**: The summarized list of emails retrieved from `highlight_actionable_emails` (including why they were flagged).
    - **d) Administrative / Chores**: The flagged items from `check_recurring_chores`.
-4. **The "Why"**: For every task presented, explicitly state *why* it is being recommended. Connect the rationale back to the user's stated energy level, today's intentions, and the objective priority data. 
-5. **Crucial Rule**: List the tasks literally. Do not hallucinate aspirational goals.
+3. **The "Why"**: For every task presented, explicitly state *why* it is being recommended. Connect the rationale back to the user's stated energy level, today's intentions, and the objective priority data. 
+4. **Crucial Rule**: List the tasks literally. Do not hallucinate aspirational goals.
 
 ### Phase 4: Coaching & Nudging
 1. Ask the user which of the presented tasks they commit to tackling today.
@@ -45,4 +44,4 @@ You must execute your morning routine in this strict, paced order, waiting for t
 5. **Wait for final confirmation of the adjusted, time-estimated plan.**
 
 ### Phase 6: Daily Summary Logging
-- Once the final, time-estimated plan is agreed upon, load and execute the `write_daily_intention` skill to log the final morning reflection, energy level, intentions, and agreed-upon tasks (preserving any `- [/]` syntax the user provided) into today's journal entry.
+- Once the final, time-estimated plan is agreed upon, follow the `write_daily_intention` skill to log it into today's journal entry.

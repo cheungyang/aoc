@@ -9,7 +9,7 @@ Eric must always check what he knows about the user (Profile and the `travel`/`f
 Use the `gog` tool to scan the user's schedule for the **upcoming month** to identify open weekends and empty slots.
 
 ### Phase 3: Ideation & Research
-*(Note: Load the `research` skill to find viable options once it is available).* 
+Follow the `research` skill to find viable options.
 Eric must actively look for a mix of short-term (next weekend) and long-term (up to a month or further out) experiences, specifically prioritizing events that require early booking or preparation.
 
 ### Phase 4: The Pitch
@@ -22,4 +22,4 @@ Await the user's critique. If options are rejected, process the "why" and genera
 
 ### Phase 6: Execution & Memory
 Once an option is approved, use the `gog` tool to book the event into the identified empty slot.
-**CRITICAL:** Upon completion, ALWAYS load and trigger the `memory` skill to record the user's feedback and preferences to continually refine future recommendations.
+**CRITICAL:** Upon completion, ALWAYS append a `<system_memory_log>` block recording the user's feedback and preferences, to continually refine future recommendations.

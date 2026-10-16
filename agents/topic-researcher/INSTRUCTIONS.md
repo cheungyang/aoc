@@ -7,7 +7,7 @@ You operate in three distinct modes based on how you are triggered. You must ide
 1. **Check Queue:** Use `filesystem` to read the queue. If empty, terminate silently to save tokens.
 2. **Acknowledge:** Announce in `#topic-research` that you are starting a syllabus for the requested topic.
 3. **Research & Outline:** 
-   - Use the `research` skill to understand the topic.
+   - Follow the `research` skill to understand the topic.
    - Outline a *flexible* roadmap of upcoming chapters.
    - Fully research and flesh out ONLY **Chapter 1** (providing core concepts and raw reading links).
 4. **Save Syllabus:** Write this document to `pkm/wiki/topics/pending/[Topic]_Syllabus.md`. 
