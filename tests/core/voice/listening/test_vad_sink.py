@@ -178,12 +178,12 @@ async def test_speech_then_silence_is_one_utterance_streamed_as_it_is_heard(make
     no_words = settings.END_OF_TURN_DEFAULT_MS
     feed(sink, vad, speech=10, silence=windows(no_words) - 1)
     await drain()
-    # The open segment is finalized a moment into the pause; the turn isn't over yet.
-    assert floor.kinds() == ["opened", "paused"]
+    # The utterance stays open without mid-sentence ACTIVITY_END until the turn ends.
+    assert floor.kinds() == ["opened"]
 
     feed(sink, vad, silence=1)
     await drain()
-    assert floor.kinds() == ["opened", "paused", "finished"]
+    assert floor.kinds() == ["opened", "finished"]
     utterance = floor.utterances()[0]
     # 4 windows of pre-roll before the onset was confirmed, 6 more of speech,
     # then the silence up to the end of the turn.
@@ -193,9 +193,17 @@ async def test_speech_then_silence_is_one_utterance_streamed_as_it_is_heard(make
 
 
 @pytest.mark.asyncio
-async def test_the_segment_is_finalized_early_in_a_pause(make_sink, vad):
+async def test_mid_sentence_pauses_do_not_finalize_the_segment_early_by_default(make_sink, vad):
     sink, floor = make_sink()
-    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS) - 1)
+    feed(sink, vad, speech=10, silence=15)  # ~540 ms pause while collecting thoughts
+    await drain()
+    assert floor.kinds() == ["opened"]
+
+
+@pytest.mark.asyncio
+async def test_the_segment_is_finalized_early_when_configured(make_sink, vad):
+    sink, floor = make_sink(config={"vad_early_end_ms": 200})
+    feed(sink, vad, speech=10, silence=windows(200) - 1)
     await drain()
     assert floor.kinds() == ["opened"]
     feed(sink, vad, silence=1)
@@ -206,29 +214,29 @@ async def test_the_segment_is_finalized_early_in_a_pause(make_sink, vad):
 @pytest.mark.asyncio
 async def test_a_complete_sentence_ends_the_turn_sooner(make_sink, vad):
     sink, floor = make_sink()
-    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS))
+    feed(sink, vad, speech=10, silence=1)
     await drain()
     floor.utterances()[0].segments.append("Add milk to the shopping list.")  # the live final
 
     complete = windows(settings.END_OF_TURN_COMPLETE_MS)
-    feed(sink, vad, silence=complete - 1 - windows(settings.STT_EARLY_END_MS))
+    feed(sink, vad, silence=complete - 2)
     await drain()
     assert "finished" not in floor.kinds()
     feed(sink, vad, silence=1)
     await drain()
     assert floor.kinds()[-1] == "finished"
-    assert complete * WINDOW_MS < settings.END_OF_TURN_DEFAULT_MS
+    assert complete * WINDOW_MS <= settings.END_OF_TURN_DEFAULT_MS
 
 
 @pytest.mark.asyncio
 async def test_a_trailing_conjunction_waits_longer(make_sink, vad):
     sink, floor = make_sink()
-    feed(sink, vad, speech=10, silence=windows(settings.STT_EARLY_END_MS))
+    feed(sink, vad, speech=10, silence=1)
     await drain()
     floor.utterances()[0].interim = "Add milk and"
 
     continuing = windows(settings.END_OF_TURN_CONTINUING_MS)
-    feed(sink, vad, silence=continuing - 1 - windows(settings.STT_EARLY_END_MS))
+    feed(sink, vad, silence=continuing - 2)
     await drain()
     assert "finished" not in floor.kinds(), "ended mid-sentence at the default wait"
     feed(sink, vad, silence=1)
@@ -239,12 +247,12 @@ async def test_a_trailing_conjunction_waits_longer(make_sink, vad):
 @pytest.mark.asyncio
 async def test_talking_again_before_the_turn_ends_keeps_one_utterance(make_sink, vad):
     """A ~540 ms mid-sentence pause resumes the same utterance instead of
-    splitting it into two agent turns."""
+    splitting it into two agent turns or ending the live segment early."""
     sink, floor = make_sink()
     feed(sink, vad, speech=10, silence=15)
     feed(sink, vad, speech=10, silence=windows(settings.END_OF_TURN_DEFAULT_MS))
     await drain()
-    assert floor.kinds() == ["opened", "paused", "resumed", "paused", "finished"]
+    assert floor.kinds() == ["opened", "finished"]
     assert len({id(u) for _, u, _ in floor.events}) == 1
 
 
@@ -254,9 +262,55 @@ async def test_a_new_utterance_starts_after_a_finished_one(make_sink, vad):
     feed(sink, vad, speech=10, silence=windows(settings.END_OF_TURN_DEFAULT_MS))
     feed(sink, vad, speech=10)
     await drain()
-    assert floor.kinds() == ["opened", "paused", "finished", "opened"]
+    assert floor.kinds() == ["opened", "finished", "opened"]
     first, second = floor.utterances()
     assert first is not second
+
+
+@pytest.mark.asyncio
+async def test_consonant_dip_during_onset_does_not_reset_or_clip_leading_words(make_sink, vad):
+    """Once the first window crosses onset_speech_prob (0.65), consonant transitions
+    above continue_prob (0.35) must not reset speech_chunks and delay onset."""
+    sink, floor = make_sink()
+    # Window 1 crosses 0.65; windows 2-5 dip to 0.45 on a consonant but stay >= 0.35.
+    vad.upcoming.extend([0.80, 0.85, 0.45, 0.80, 0.85])
+    while vad.calls < 5:
+        sink.write(USER, MagicMock(pcm=FRAME))
+    await drain()
+    assert floor.kinds() == ["opened"]
+    utterance = floor.utterances()[0]
+    assert len(utterance.pcm) == 5 * WINDOW_BYTES
+
+
+@pytest.mark.asyncio
+async def test_soft_lead_in_before_onset_is_kept_in_preroll(make_sink, vad):
+    """Soft sentence starts (>360 ms before the 180 ms onset run) stay in pre_speech_chunks."""
+    sink, floor = make_sink()
+    # 12 windows (432 ms) of soft lead-in below onset_speech_prob, then 5 windows of onset.
+    vad.upcoming.extend([0.25] * 12 + [0.90] * 5)
+    while vad.calls < 17:
+        sink.write(USER, MagicMock(pcm=FRAME))
+    await drain()
+    assert floor.kinds() == ["opened"]
+    utterance = floor.utterances()[0]
+    assert len(utterance.pcm) == 17 * WINDOW_BYTES
+
+
+@pytest.mark.asyncio
+async def test_stale_preroll_before_a_packet_gap_is_not_prepended_to_new_speech(make_sink, vad):
+    """When Discord stops sending RTP packets during silence, old pre-roll frames from
+    before the gap are flushed when packets resume."""
+    sink, floor = make_sink()
+    feed(sink, vad, silence=8)
+    state = sink.user_states[7]
+    assert len(state.pre_speech_chunks) == 8
+    state.last_packet_time = time.monotonic() - 1.0  # > PACKET_GAP_RESET_S
+
+    feed(sink, vad, speech=5)
+    await drain()
+    assert floor.kinds() == ["opened"]
+    utterance = floor.utterances()[0]
+    assert len(utterance.pcm) == 5 * WINDOW_BYTES
 
 
 # --- the watchdog: Discord stops sending packets in silence ------------------------
@@ -267,7 +321,7 @@ async def test_the_watchdog_ends_the_turn_when_packets_stop(make_sink, vad):
     feed(sink, vad, speech=10)
     sink.user_states[7].last_voiced_at = time.monotonic() - 2
     await asyncio.sleep(0.2)
-    assert floor.kinds() == ["opened", "paused", "finished"]
+    assert floor.kinds() == ["opened", "finished"]
 
 
 @pytest.mark.asyncio
@@ -289,7 +343,7 @@ async def test_a_blip_too_short_to_be_speech_is_discarded(make_sink, vad):
     feed(sink, vad, speech=5)  # onset confirmed at 180 ms, then nothing
     sink.user_states[7].last_voiced_at = time.monotonic() - 2
     await asyncio.sleep(0.2)
-    assert floor.kinds() == ["opened", "paused", "discarded"]
+    assert floor.kinds() == ["opened", "discarded"]
 
 
 @pytest.mark.asyncio

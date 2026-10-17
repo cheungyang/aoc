@@ -37,8 +37,10 @@ STT_CONNECT_TIMEOUT_S = 5.0
 STT_FINAL_TIMEOUT_S = 2.0
 # Silence after which the open speech segment is finalized speculatively, so its
 # transcript is usually ready by the time the end-of-turn silence has elapsed.
-# If the user goes on talking, a new segment starts and the two are joined.
-STT_EARLY_END_MS = 200
+# Disabled (None): mid-sentence pauses while collecting thoughts otherwise send
+# ACTIVITY_END, causing SMART mode to punctuate incomplete clauses and split
+# acoustic context across segments.
+STT_EARLY_END_MS = None
 # Whisper model for the fallback (and for STT_PROVIDER="whisper"). The same
 # variable selects what scripts/provision_assets.py caches into the image.
 WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
@@ -47,7 +49,7 @@ WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
 # How long a silence ends the turn depends on what was said so far
 # (core/voice/listening/turn_taking.py): a finished sentence ends quickly, a trailing
 # "and" or "um" waits longer, and no words yet keeps the old fixed wait.
-END_OF_TURN_COMPLETE_MS = 500
+END_OF_TURN_COMPLETE_MS = 800
 END_OF_TURN_DEFAULT_MS = 900
 END_OF_TURN_CONTINUING_MS = 1200
 # Barge-in is two-stage: speech over the agent first lowers its volume to this,

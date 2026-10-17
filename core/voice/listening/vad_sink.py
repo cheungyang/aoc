@@ -15,6 +15,8 @@ from core.voice.listening.utterance import Utterance
 
 WINDOW_SAMPLES = 576  # 36 ms at 16 kHz: Silero VAD v6's window
 WINDOW_MS = 36
+PRE_SPEECH_CHUNKS = 25  # 25 * 36 ms = 900 ms pre-roll audio (includes the 180 ms onset run)
+PACKET_GAP_RESET_S = 0.5
 
 
 class UserVADState:
@@ -25,7 +27,7 @@ class UserVADState:
         self.h = np.zeros((1, 1, 128), dtype=np.float32)
         self.c = np.zeros((1, 1, 128), dtype=np.float32)
         self.resample_fifo = np.array([], dtype=np.float32)
-        self.pre_speech_chunks = deque(maxlen=10) # 10 * 36ms = 360ms pre-roll audio
+        self.pre_speech_chunks = deque(maxlen=PRE_SPEECH_CHUNKS)
         self.utterance: Optional[Utterance] = None
         self.is_speaking = False
         # The utterance's open transcription segment was ended early in a pause.
@@ -45,6 +47,8 @@ class UserVADState:
         self.silence_chunks = 0
         self.speech_chunks = 0
         self.last_voiced_at = None
+        self.h.fill(0)
+        self.c.fill(0)
 
 class VADSink(voice_recv.AudioSink):
     """
@@ -56,8 +60,8 @@ class VADSink(voice_recv.AudioSink):
 
       * `utterance_opened` at speech onset,
       * `utterance_audio` for every 36 ms window from onset on,
-      * `utterance_paused` a moment into each pause (STT_EARLY_END_MS) and
-        `utterance_resumed` if speech returns before the turn ends,
+      * `utterance_paused` a moment into each pause (when STT_EARLY_END_MS is set)
+        and `utterance_resumed` if speech returns before the turn ends,
       * `utterance_finished` at the end of the turn, or `utterance_discarded`
         if it was too short to be speech.
 
@@ -87,7 +91,8 @@ class VADSink(voice_recv.AudioSink):
         self.onset_ms = int(voice_config.get("vad_onset_ms", 180)) # ~5 chunks of 36ms
         self.onset_speech_prob = float(voice_config.get("vad_speech_prob", 0.65))
         self.continue_prob = float(voice_config.get("vad_continue_prob", 0.35))
-        self.early_end_ms = STT_EARLY_END_MS
+        early_end = voice_config.get("vad_early_end_ms", STT_EARLY_END_MS)
+        self.early_end_ms = int(early_end) if early_end else None
         # `write` runs on Discord's packet thread and the watchdog on the event
         # loop; both can end the same turn, so state changes happen under this.
         self._lock = threading.Lock()
@@ -137,10 +142,10 @@ class VADSink(voice_recv.AudioSink):
         self._post(self.floor.utterance_audio, state.utterance, chunk)
 
     def _on_silence(self, state: UserVADState, silence_ms: float, user_name: str):
-        """Ends the open segment early, then the turn once the silence is long enough."""
+        """Ends the open segment early (if enabled), then the turn once the silence is long enough."""
         if state.utterance is None:
             return
-        if not state.paused and silence_ms >= self.early_end_ms:
+        if self.early_end_ms and not state.paused and silence_ms >= self.early_end_ms:
             state.paused = True
             self._post(self.floor.utterance_paused, state.utterance)
         if silence_ms >= self._end_of_turn_ms(state):
@@ -222,7 +227,16 @@ class VADSink(voice_recv.AudioSink):
             state = self.user_states[user_key]
             if user is not None:
                 state.user = user
-            state.last_packet_time = time.monotonic()
+            now = time.monotonic()
+            if not state.is_speaking and (now - state.last_packet_time > PACKET_GAP_RESET_S):
+                # Discord sends no RTP packets during silence; flush stale pre-roll,
+                # leftover decimation samples, and LSTM state before new speech begins.
+                state.pre_speech_chunks.clear()
+                state.speech_chunks = 0
+                state.resample_fifo = np.array([], dtype=np.float32)
+                state.h.fill(0)
+                state.c.fill(0)
+            state.last_packet_time = now
 
             # 1. Downsample 48kHz stereo -> 16kHz mono float32
             int16_stereo = np.frombuffer(pcm_bytes, dtype=np.int16)
@@ -251,9 +265,16 @@ class VADSink(voice_recv.AudioSink):
                 speech_prob = float(prob[0])
                 rms = float(np.sqrt(np.mean(chunk[0] ** 2)))
 
-                # 3. State machine with hysteresis and energy gate to reject ambient noise
+                # 3. State machine with hysteresis and energy gate to reject ambient noise.
+                # Once onset has begun (speech_chunks > 0 after crossing onset_speech_prob),
+                # use continue_prob so consonant dips inside the opening word(s) don't reset
+                # speech_chunks to 0 and clip the start of the sentence.
                 chunk_int16 = (chunk[0] * 32767.0).astype(np.int16).tobytes()
-                prob_thresh = self.continue_prob if state.is_speaking else self.onset_speech_prob
+                prob_thresh = (
+                    self.continue_prob
+                    if (state.is_speaking or state.speech_chunks > 0)
+                    else self.onset_speech_prob
+                )
                 is_speech = (speech_prob >= prob_thresh) and (rms > 1e-6)
 
                 if is_speech:
