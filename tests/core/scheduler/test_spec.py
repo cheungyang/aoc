@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from core.scheduler.spec import (
+    Findings,
     PromptSchedule,
     ScheduleContext,
     ScriptSchedule,
@@ -87,6 +88,16 @@ class TestPromptSchedule(unittest.TestCase):
         self.assertIs(spec.session_policy, SessionPolicy.PERSISTENT)
         self.assertIn("[prompt]", spec.describe())
         self.assertIn("#c", spec.describe())
+
+    def test_findings_are_appended_as_a_block(self):
+        spec = PromptSchedule(prompt="Scan the market.", **common())
+        decision = WorkDecision(True, "r", detail=Findings("market_screen", "NVDA -6%\n"))
+        self.assertEqual(spec.build_prompt(ctx(), decision),
+                         'Scan the market.\n\n<findings source="market_screen">\nNVDA -6%\n</findings>')
+
+    def test_other_details_leave_the_prompt_alone(self):
+        spec = PromptSchedule(prompt="Scan the market.", **common())
+        self.assertEqual(spec.build_prompt(ctx(), WorkDecision(True, "r", detail=["x"])), "Scan the market.")
 
 
 class TestScriptSchedule(unittest.TestCase):

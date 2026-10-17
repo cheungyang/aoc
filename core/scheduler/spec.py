@@ -84,6 +84,20 @@ class WorkDecision:
         )
 
 
+@dataclass(frozen=True)
+class Findings:
+    """What a scan precondition found, handed to the run it triggered.
+
+    `PromptSchedule.build_prompt` appends it to the prompt, so the agent starts
+    from what the check already read instead of reading it again.
+    """
+    source: str
+    text: str
+
+    def as_block(self) -> str:
+        return f'<findings source="{self.source}">\n{self.text.strip()}\n</findings>'
+
+
 @dataclass
 class ScheduleContext:
     """What a schedule knows when it is asked whether it has work.
@@ -172,8 +186,14 @@ class PromptSchedule(ScheduleSpec):
     def has_work(self, ctx: ScheduleContext) -> WorkDecision:
         return self._check_precondition(ctx)
 
-    def build_prompt(self, ctx: ScheduleContext) -> str:
-        """Only called when has_work() is True."""
+    def build_prompt(self, ctx: ScheduleContext, decision: Optional[WorkDecision] = None) -> str:
+        """Only called when has_work() is True.
+
+        A scan precondition's findings (`decision.detail`) are appended in a
+        `<findings>` block, so the run starts from what the check already read.
+        """
+        if decision is not None and isinstance(decision.detail, Findings):
+            return f"{self.prompt}\n\n{decision.detail.as_block()}"
         return self.prompt
 
 

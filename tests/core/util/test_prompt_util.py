@@ -59,6 +59,25 @@ class TestPromptUtil(unittest.TestCase):
         self.assertIn("Today's Date:", prompt)
         self.assertIn("Current Timezone:", prompt)
 
+    def test_knowledge_prompt_has_the_iso_week_and_is_stable_within_the_day(self):
+        tz = ZoneInfo("America/Los_Angeles")
+        morning = datetime.datetime(2026, 10, 16, 6, 42, tzinfo=tz)
+        evening = datetime.datetime(2026, 10, 16, 21, 5, tzinfo=tz)
+        with patch("core.util.prompt_util.get_local_now", return_value=morning):
+            first = get_knowledge_prompt()
+        with patch("core.util.prompt_util.get_local_now", return_value=evening):
+            second = get_knowledge_prompt()
+        self.assertIn("Friday (Weekday), ISO week 2026-W42", first)
+        self.assertEqual(first, second, "the time of day must not reach the cached system prompt")
+
+    def test_user_messages_carry_the_local_time(self):
+        from core.util.prompt_util import stamp_user_message
+
+        now = datetime.datetime(2026, 10, 16, 6, 42, tzinfo=ZoneInfo("America/Los_Angeles"))
+        with patch("core.util.prompt_util.get_local_now", return_value=now):
+            self.assertEqual(stamp_user_message("lights off"), "[Fri 06:42] lights off")
+            parts = [{"type": "image_url", "image_url": "x"}]
+            self.assertEqual(stamp_user_message(parts), [{"type": "text", "text": "[Fri 06:42]"}, *parts])
 
     def test_get_formatting_prompt(self):
         prompt = get_formatting_prompt()

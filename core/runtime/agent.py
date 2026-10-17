@@ -2,10 +2,12 @@ import asyncio
 import contextvars
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, List, Union
 
 from core.util import Config, format_error_message, save_agent_memory_log
+from core.util.prompt_util import stamp_user_message
 from core.runtime.base_agent import BaseAgent
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import current_execution_context
@@ -83,6 +85,9 @@ class Agent(BaseAgent):
         # previous turn's prune is still rewriting this checkpoint, wait for it.
         await self._await_pending_prune(session)
 
+        # Turn hints (a set_thinking pick) are scratch state for one turn.
+        session.turn_hints.clear()
+
         # Lazy load langgraph graph object via GraphBuilder
         graph = await self._get_graph(session)
 
@@ -115,7 +120,10 @@ class Agent(BaseAgent):
             }
         }
 
-        inputs = {"messages": [{"role": role, "content": prompt}]}
+        # The time of day rides on the user's message rather than in the system
+        # prompt, where it would break the cached prefix every minute.
+        content = stamp_user_message(prompt) if role == "user" else prompt
+        inputs = {"messages": [{"role": role, "content": content}]}
         return config, inputs, graph
 
     def _schedule_prune(self, session: ExecutionContext) -> None:
@@ -173,12 +181,18 @@ class Agent(BaseAgent):
             # awaited from here. Same-session turns on two loops are rare enough
             # that proceeding beats failing the turn.
             return
+        from core.runtime.turn_trace import current_turn_trace
+        started = time.monotonic()
         try:
             await asyncio.shield(pending)
         except asyncio.CancelledError:
             raise
         except Exception:
             pass  # _prune_after_turn already logged it
+        finally:
+            trace = current_turn_trace()
+            if trace is not None:
+                trace.event("prune_wait", ms=round((time.monotonic() - started) * 1000))
 
     def _update_job_status(self, session: ExecutionContext, config: Dict[str, Any], graph: Any = None):
         """Updates job status based on final graph state."""

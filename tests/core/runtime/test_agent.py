@@ -215,9 +215,11 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_graph.ainvoke.assert_called_once()
         self.assertEqual(reply, "Reply text")
         
-        # Verify inputs passed to graph
+        # Verify inputs passed to graph: the parts, after the local-time stamp
         args, kwargs = mock_graph.ainvoke.call_args
-        self.assertEqual(args[0]["messages"][0]["content"], list_content)
+        content = args[0]["messages"][0]["content"]
+        self.assertRegex(content[0]["text"], r"^\[\w{3} \d\d:\d\d\]$")
+        self.assertEqual(content[1:], list_content)
 
     async def test_execute_empty_list_content(self):
         agent = Agent("test-agent", {})
@@ -679,6 +681,36 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
 
         self.assertEqual(order[:3], ["graph", "prune done", "graph"])
+
+    @patch('core.runtime.agent.LoggingHandler')
+    async def test_a_prune_wait_is_recorded_in_the_turn_trace(self, mock_logging_handler_class):
+        from core.runtime.turn_trace import start_turn_trace
+
+        release = asyncio.Event()
+
+        async def slow_prune(**kwargs):
+            await release.wait()
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Done")]})
+        agent = Agent("test-agent", {})
+        agent._graphs[""] = mock_graph
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
+
+        async def traced_turn(prompt):
+            trace = start_turn_trace("test-agent", 1)
+            await agent.execute(prompt, session=session)
+            return [e for e in trace.events if e["kind"] == "prune_wait"]
+
+        with patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
+            self.assertEqual(await traced_turn("first"), [], "nothing to wait for on the first turn")
+            second = asyncio.create_task(traced_turn("second"))
+            await asyncio.sleep(0.02)
+            release.set()
+            waits = await second
+
+        self.assertEqual(len(waits), 1)
+        self.assertGreaterEqual(waits[0]["ms"], 15)
 
     @patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session')
     @patch('core.runtime.agent.LoggingHandler')

@@ -111,22 +111,53 @@ def get_voice_mode_prompt() -> str:
 
 
 def get_knowledge_prompt() -> str:
+    """Date facts for the system prompt. Changes once a day, so it caches well.
+
+    The time of day is not here: it would change the system prompt every
+    minute and with it the cached prefix, history included. Each user message
+    carries it instead (`stamp_user_message`).
+    """
     now = get_local_now()
     date_str = now.strftime("%Y-%m-%d")
     day_of_week = now.strftime("%A")
     weekday = now.weekday()
     day_type = "Weekday" if weekday < 5 else "Weekend"
+    iso_year, iso_week, _ = now.isocalendar()
 
     knowledge = [
         f"Today's Date: {date_str}",
-        f"Today is: {day_of_week} ({day_type})",
+        f"Today is: {day_of_week} ({day_type}), ISO week {iso_year}-W{iso_week:02d}",
         f"Current Timezone: {format_timezone_label(now)}",
         "All dates and times you state or receive are in this timezone "
         "unless explicitly labeled otherwise. Convert timestamps coming "
         "from tools/APIs (commonly UTC) into it before reporting them.",
+        # A fixed example: this block must not change during the day.
+        "Each user message starts with the local time it was sent, like [Mon 09:05]. "
+        "Never write such a stamp yourself.",
     ]
 
     return "<common_knowledge>\n" + "\n".join([f"- {k}" for k in knowledge]) + "\n</common_knowledge>"
+
+
+def time_stamp(now=None) -> str:
+    """The local-time stamp put in front of user messages, e.g. "[Fri 06:42]"."""
+    now = now or get_local_now()
+    return f"[{now.strftime('%a %H:%M')}]"
+
+
+def stamp_user_message(content):
+    """`content` with the current local time in front, for the model.
+
+    Text gets a "[Fri 06:42] " prefix; multimodal content (a list of parts)
+    gets the stamp as a leading text part. The stamp is stored with the
+    message, so history also shows when each message was sent.
+    """
+    stamp = time_stamp()
+    if isinstance(content, str):
+        return f"{stamp} {content}"
+    if isinstance(content, list):
+        return [{"type": "text", "text": stamp}, *content]
+    return content
 
 
 def _read_prompt_file(file_path: str) -> str:

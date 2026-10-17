@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from typing import Optional, Any, Union
+from typing import Any, Dict, Optional, Union
 import contextvars
 import sys
 
@@ -137,6 +137,12 @@ class ExecutionContext:
     - `thinking_level` is an authority field: the reasoning depth for this
       call's model requests, overriding the agent's per-surface level (a
       schedule entry's `thinking_level`). Not inherited, like `model`.
+    - `turn_hints` is the one mutable field: scratch state for the turn in
+      flight, shared by the turn's tools and the model wrapper (the agent's own
+      `set_thinking` pick lives here). The runtime clears it when a turn starts.
+      A context for another agent (`with_agent`) gets its own, so a pick never
+      crosses agents; the other derivations share it, since they are the same
+      agent's turn.
     """
     agent_id: str
     source: str
@@ -148,6 +154,7 @@ class ExecutionContext:
     record_memory: bool = True
     model: Optional[str] = None
     thinking_level: Optional[str] = None
+    turn_hints: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _secret: Any = field(default=None, repr=False, compare=False)
 
     @staticmethod
@@ -237,11 +244,11 @@ class ExecutionContext:
         """Derives a child context for a different agent, keeping graph.
 
         Model and thinking overrides belong to the agent they were set for, so
-        they are dropped.
+        they are dropped, and the new agent starts with its own turn hints.
         """
         if agent_id == self.agent_id:
             return self
-        return replace(self, agent_id=agent_id, model=None, thinking_level=None)
+        return replace(self, agent_id=agent_id, model=None, thinking_level=None, turn_hints={})
 
     def with_surface(self, surface: Optional[str]) -> "ExecutionContext":
         """Derives a context tagged with `surface`, keeping the same session identity."""

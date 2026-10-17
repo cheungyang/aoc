@@ -11,6 +11,7 @@ from core.scheduler.limiter import ScheduleLimiter
 from core.scheduler.schedule_runner import ScheduleRunner, reset_conversation
 from core.scheduler.script_runner import ScriptResult
 from core.scheduler.spec import (
+    Findings,
     PromptSchedule,
     ScriptSchedule,
     ScriptStep,
@@ -229,6 +230,17 @@ class TestPromptDispatch(RunnerCase):
             agent_id="agent1", source="scheduled", channel=self.channel, thinking_level=None
         )
         self.assertIsNotNone(self.state.get_last_success(spec.schedule_id))
+
+    async def test_a_scans_findings_reach_the_agent(self):
+        class FindingsGate:
+            def evaluate(self, ctx):
+                return WorkDecision(True, "found", detail=Findings("market_screen", "NVDA -6%"))
+
+        runner = self.make_runner()
+        self.assertTrue(await runner.run_schedule(self.prompt_spec(precondition=FindingsGate())))
+        self.agent.execute.assert_awaited_once_with(
+            'do it\n\n<findings source="market_screen">\nNVDA -6%\n</findings>', session=self.session, role="user"
+        )
 
     async def test_schedule_thinking_level_reaches_the_session(self):
         runner = self.make_runner()

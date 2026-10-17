@@ -241,16 +241,100 @@ def print_voice_stats(since_ts=0, db_path=DB_PATH):
             print(f"{agent:<25} | {calls:>8d} | {in_tok:>12,d} | {out_tok:>12,d}")
 
 
+# Tool outputs (stored as system messages) that mean a turn hit a wall: the
+# filesystem tool's permission refusal, and load_skill's failures.
+DENIED_MARKERS = ("does not have permission to perform",)
+SKILL_FAILURE_MARKERS = ("Error loading skill", "does not have access to skill", "not found.")
+
+
+def get_health_stats(db_path=DB_PATH, since_ts=0):
+    """Round trips and dead ends per agent since `since_ts`, from every session table.
+
+    A turn is a user message plus everything up to the next one; its model
+    calls are the token rows in between, and its surface is theirs. Denied
+    reads and failed load_skill calls are found in the stored tool outputs.
+    """
+    stats = {"calls": defaultdict(list), "denied": defaultdict(list), "skill_failures": defaultdict(list)}
+    if not os.path.exists(db_path):
+        print(f"Database not found at {db_path}")
+        return None
+    conn = sqlite3.connect(db_path)
+    agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
+    agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
+    try:
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
+        for t in tables:
+            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{t}")')}
+            if "surface" not in columns:
+                continue
+            agent = _agent_for_table(t, agent_ids)
+            turn = None  # [model calls, surface]
+
+            def close(turn):
+                if turn is not None and turn[0]:
+                    stats["calls"][(agent, turn[1] or "?")].append(turn[0])
+
+            rows = conn.execute(
+                f"""SELECT entry_type, from_role, message, surface FROM "{t}"
+                    WHERE entry_type IN ('message', 'token') AND created_at >= ? ORDER BY id""", (since_ts,)
+            )
+            for entry_type, role, message, surface in rows:
+                if entry_type == "token":
+                    if turn is not None:
+                        turn[0] += 1
+                        turn[1] = turn[1] or surface
+                elif role == "user":
+                    close(turn)
+                    turn = [0, None]
+                elif role == "system" and isinstance(message, str) and message.startswith("Tool Output"):
+                    if any(m in message for m in DENIED_MARKERS):
+                        stats["denied"][agent].append(message[:200])
+                    elif "load_skill" in message and any(m in message for m in SKILL_FAILURE_MARKERS):
+                        stats["skill_failures"][agent].append(message[:200])
+            close(turn)
+    finally:
+        conn.close()
+    return stats
+
+
+def print_health_stats(since_ts=0, db_path=DB_PATH):
+    """The Phase 2 "done when" checks: round trips per turn, denied reads, failed load_skill."""
+    stats = get_health_stats(db_path=db_path, since_ts=since_ts)
+    if stats is None:
+        return
+    since = datetime.datetime.fromtimestamp(since_ts).strftime('%Y-%m-%d %H:%M') if since_ts else "the beginning"
+    print("=" * 85)
+    print(f"AGENT HEALTH since {since}")
+    print("=" * 85)
+    print(f"{'Agent':<22} | {'Surface':<9} | {'Turns':>6} | {'Model calls p50':>15} | {'p90':>4} | {'max':>4}")
+    print("-" * 75)
+    for (agent, surface), calls in sorted(stats["calls"].items()):
+        print(f"{agent:<22} | {surface:<9} | {len(calls):>6} | {_percentile(calls, 50):>15} | "
+              f"{_percentile(calls, 90):>4} | {max(calls):>4}")
+    for title, key in (("Denied tool permissions", "denied"), ("Failed load_skill calls", "skill_failures")):
+        total = sum(len(v) for v in stats[key].values())
+        print(f"\n{title}: {total}")
+        for agent, samples in sorted(stats[key].items()):
+            print(f"  {agent}: {len(samples)}  e.g. {samples[-1]}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare historical vs current token usage and latency.")
     parser.add_argument("--cutoff", type=int, default=DEFAULT_CUTOFF_TS, help="Unix timestamp dividing historical from current.")
     parser.add_argument("--archive-all", action="store_true", help="Archive all active sessions now so all future runs start in fresh tables.")
     parser.add_argument("--voice", action="store_true", help="Report the voice baseline: voice token use and per-stage latency from turn traces.")
     parser.add_argument("--since", type=int, default=0, help="With --voice: only rows after this Unix timestamp.")
+    parser.add_argument("--health", action="store_true",
+                        help="Report model calls per user turn by agent, denied tool permissions and failed load_skill calls.")
+    parser.add_argument("--days", type=float, default=7, help="With --health: look back this many days (default 7).")
     args = parser.parse_args()
 
     if args.voice:
         print_voice_stats(since_ts=args.since)
+        sys.exit(0)
+
+    if args.health:
+        print_health_stats(since_ts=datetime.datetime.now().timestamp() - args.days * 86400)
         sys.exit(0)
 
     if args.archive_all:

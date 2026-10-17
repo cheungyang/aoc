@@ -108,6 +108,14 @@ class TestReport:
         results.append(CaseResult(case_id="b", run=1, marks={}, errored=True, failures=["agent error: 503"]))
         assert "Speech: 1/2 runs came with a <speech> block. (1 failed runs aren't counted.)" in render_report(results)
 
+    def test_thinking_picks_are_reported_with_their_reasons(self):
+        result = CaseResult(case_id="a", run=1, marks={}, thinking_picks=[
+            {"kind": "thinking_pick", "level": "high", "applied": "medium", "reason": "choosing 4 of 12"},
+            {"kind": "thinking_pick", "level": "minimal", "applied": "minimal", "reason": "relaying"},
+        ])
+        report = render_report([result])
+        assert "picked medium (asked high): choosing 4 of 12; picked minimal: relaying" in report
+
 
 GOLDEN_SPEECH = (
     "There are five options. Point Reyes is a two hour drive and free to enter, best in the morning fog. "
@@ -172,6 +180,12 @@ class TestSpeechContract:
     def test_speech_in_the_text_fails(self):
         failures, _ = check_speech(self.result(shown="<speech>Mount Tam</speech> is 45 minutes away."))
         assert failures == ["<speech> reached the text"]
+
+    def test_a_reply_that_copies_the_message_stamp_fails(self):
+        failures, _ = check_speech(self.result(reply="[Fri 06:43] Mount Tam is 45 minutes away."))
+        assert "the reply copies a message time stamp" in failures
+        failures, _ = check_speech(self.result(speech="[Fri 06:43] Mount Tam is forty-five minutes away."))
+        assert "the reply copies a message time stamp" in failures
 
     def test_a_failed_run_is_not_held_to_speech(self):
         assert check_speech(self.result(speech="", errored=True, reply="<speech>Cut off</spee")) == ([], [])
@@ -393,3 +407,21 @@ def test_write_guard_refuses_writes_and_lets_reads_through(monkeypatch):
     assert refused.returncode == 1 and "read-only" in refused.stderr
     assert [b[0] for b in replay.BLOCKED_WRITES] == ["filesystem", "home_assistant", "gog"]
     replay.BLOCKED_WRITES.clear()
+
+
+def test_every_tool_that_declares_read_actions_is_guarded():
+    """A new write tool declares READ_ACTIONS and is covered without editing the replay."""
+    import importlib
+    import re as regex
+
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
+    allowed = replay.read_only_actions()
+    declared = []
+    for filename in sorted(os.listdir(tools_dir)):
+        if filename.endswith(".py") and not filename.startswith("_"):
+            with open(os.path.join(tools_dir, filename), encoding="utf-8") as f:
+                if regex.search(r"^READ_ACTIONS\b", f.read(), regex.MULTILINE):
+                    declared.append(filename[:-3])
+    assert "google_health" in declared
+    for tool in declared:
+        assert allowed[tool] == set(importlib.import_module(f"tools.{tool}").READ_ACTIONS), tool

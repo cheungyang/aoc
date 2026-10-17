@@ -93,17 +93,20 @@ class TestAllSchedulesValid(unittest.TestCase):
 
 
 class TestSchedulerTestPairing(unittest.TestCase):
-    """One test module per `core/scheduler` module."""
+    """One test module per `core/scheduler` module, the preconditions package included."""
 
     def test_every_module_has_a_test(self):
-        modules = sorted(
-            os.path.splitext(os.path.basename(p))[0]
-            for p in glob.glob(os.path.join(ROOT, "core", "scheduler", "*.py"))
-            if not p.endswith("__init__.py")
-        )
-        self.assertTrue(modules)
         here = os.path.dirname(__file__)
-        missing = [m for m in modules if not os.path.exists(os.path.join(here, f"test_{m}.py"))]
+        modules, missing = [], []
+        for package in ("", "preconditions"):
+            for p in sorted(glob.glob(os.path.join(ROOT, "core", "scheduler", package, "*.py"))):
+                module = os.path.splitext(os.path.basename(p))[0]
+                if module == "__init__":
+                    continue
+                modules.append(module)
+                if not os.path.exists(os.path.join(here, package, f"test_{module}.py")):
+                    missing.append(os.path.join(package, module))
+        self.assertTrue(modules)
         self.assertEqual(missing, [])
 
 

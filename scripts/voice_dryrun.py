@@ -97,18 +97,30 @@ _GOG_WRITE_WORDS = {
 def read_only_actions() -> Dict[str, set]:
     """Per tool, the actions a read-only replay allows; anything else is refused.
 
-    Taken from each tool's own read bundle, so a new read action needs no change
-    here. Tools absent from this map (yfinance, seats_aero, zillow_query, ...)
-    have no write actions to guard.
+    Taken from each tool's own read bundle, or from the `READ_ACTIONS` every
+    tool that can write declares, so a new read action or a new write tool
+    needs no change here. Tools that declare neither (yfinance, seats_aero,
+    zillow_query, ...) have no write actions to guard.
     """
-    from tools import filesystem, google_health, home_assistant
+    import importlib
 
-    return {
+    from tools import filesystem, home_assistant
+
+    allowed = {
         "filesystem": set(filesystem.PERMISSION_BUNDLES["@read"]),
         "home_assistant": set(home_assistant.PERMISSION_BUNDLES["@observe"]),
-        "google_health": set(google_health.READ_ACTIONS),
         "bash": set(),
     }
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
+    for filename in sorted(os.listdir(tools_dir)):
+        tool = filename[:-3]
+        if not filename.endswith(".py") or filename.startswith("_") or tool in allowed:
+            continue
+        with open(os.path.join(tools_dir, filename), encoding="utf-8") as f:
+            declares = re.search(r"^READ_ACTIONS\b", f.read(), re.MULTILINE)
+        if declares:  # import only the tools that declare it
+            allowed[tool] = set(importlib.import_module(f"tools.{tool}").READ_ACTIONS)
+    return allowed
 
 
 class _ReadOnlySubprocess:
@@ -161,6 +173,7 @@ class CaseResult:
     tools: List[str] = field(default_factory=list)
     agents: List[str] = field(default_factory=list)
     model_calls: List[dict] = field(default_factory=list)
+    thinking_picks: List[dict] = field(default_factory=list)  # set_thinking: level, applied, reason
     tokens: Dict[str, int] = field(default_factory=dict)
     blocked_writes: List[str] = field(default_factory=list)
     speech: str = ""            # the <speech> text the router heard
@@ -454,6 +467,10 @@ def foreign_words(speech: str) -> List[str]:
     return list(dict.fromkeys(words))
 
 
+# The local-time stamp user messages carry ("[Fri 06:42]"); replies must not copy it.
+STAMP_RE = re.compile(r"\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}\]")
+
+
 def check_speech(result: "CaseResult") -> Tuple[List[str], List[str]]:
     """The speech contract every run is held to: (failures, notes)."""
     failures, notes = [], []
@@ -461,6 +478,8 @@ def check_speech(result: "CaseResult") -> Tuple[List[str], List[str]]:
     text = result.shown if result.errored else result.reply + result.shown
     if re.search(r"</?speech\b", text, re.IGNORECASE):
         failures.append("<speech> reached the text")
+    if STAMP_RE.search(text) or STAMP_RE.search(result.speech):
+        failures.append("the reply copies a message time stamp")
     if result.errored:
         return failures, notes  # the error is the failure; production doesn't count it either
     if result.speech_missing:
@@ -507,7 +526,7 @@ def render_report(results: List[CaseResult]) -> str:
             f"| {r.case_id} | {r.run} | {'PASS' if r.passed else 'FAIL'} "
             f"| {_ms(r.marks.get('first_token'))} | {_ms(r.marks.get('first_chunk'))} | {_ms(r.marks.get('tts_first_byte'))} "
             f"| {len(r.model_calls)} ({calls}) | {r.tokens.get('input', 0)}/{r.tokens.get('output', 0)} "
-            f"| {'; '.join(r.failures + r.notes + [f'refused write: {w}' for w in r.blocked_writes])} |"
+            f"| {'; '.join(r.failures + r.notes + [f'refused write: {w}' for w in r.blocked_writes] + _picks(r))} |"
         )
     lines += ["", "| Stage | p50 | p90 | n |", "|---|---|---|---|"]
     for stage, p50, p90, n in stage_table(results):
@@ -520,6 +539,12 @@ def render_report(results: List[CaseResult]) -> str:
         speech_line += f" ({len(results) - len(held)} failed runs aren't counted.)"
     lines += ["", f"Quality: {passed}/{len(results)} runs passed.", speech_line]
     return "\n".join(lines)
+
+
+def _picks(r: CaseResult) -> List[str]:
+    """The agent's set_thinking picks, with the reason it gave."""
+    return [f"picked {p['applied']}" + (f" (asked {p['level']})" if p["level"] != p["applied"] else "")
+            + f": {p['reason']}" for p in r.thinking_picks]
 
 
 def _ms(value) -> str:
@@ -736,6 +761,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     summary = trace.finish(session_id=None)
     result.marks = summary["marks"]
     result.model_calls = [e for e in summary["events"] if e["kind"] == "model_call"]
+    result.thinking_picks = [e for e in summary["events"] if e["kind"] == "thinking_pick"]
     result.tokens = replay_tokens(started, db_path)
     result.blocked_writes = [f"{tool}.{action} {target or ''}".strip() for tool, action, target in BLOCKED_WRITES]
     result.failures += check_expectations(case, result)

@@ -19,7 +19,9 @@ later token never moves `first_token`):
     turn_end        the pipeline finished (all audio queued or played)
 
 Repeated events (`tool_start`, `tool_end`, `model_call` with the thinking
-level it was sent with) are kept in order as `events`.
+level it was sent with) are kept in order as `events`. A `prune_wait` event
+records the milliseconds a turn waited for the previous turn's history prune;
+it appears only when there was one to wait for.
 
 VoiceManager opens one trace per turn with `start_turn_trace`, which binds it
 to the running task's context; code inside the turn (the model wrapper, the

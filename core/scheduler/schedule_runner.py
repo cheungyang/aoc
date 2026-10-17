@@ -287,7 +287,7 @@ class ScheduleRunner:
             steps = decision.detail if isinstance(decision.detail, list) and decision.detail else spec.steps
             return await self._run_script(spec, ctx, steps)
         if isinstance(spec, PromptSchedule):
-            return await self._run_prompt(spec, ctx)
+            return await self._run_prompt(spec, ctx, decision)
         raise TypeError(f"Unknown schedule type: {type(spec).__name__}")
 
     def _resolve_channel(self, agent_id: str, channel_name: Optional[str], thread_name: Optional[str] = None):
@@ -336,7 +336,7 @@ class ScheduleRunner:
             return True
         return job is None or job.status not in FAILED_JOB_STATUSES
 
-    async def _run_prompt(self, spec: PromptSchedule, ctx: ScheduleContext) -> bool:
+    async def _run_prompt(self, spec: PromptSchedule, ctx: ScheduleContext, decision: Optional[WorkDecision] = None) -> bool:
         channel = self._resolve_channel(spec.agent_id, spec.channel, spec.thread)
 
         # Execute regardless of channel existence
@@ -355,7 +355,7 @@ class ScheduleRunner:
                 print(f"ScheduleRunner: could not reset {session.session_id} for a stateless run: {e}")
 
         agent = self.loader.get_agent(spec.agent_id)
-        reply = await agent.execute(spec.build_prompt(ctx), session=session, role="user")
+        reply = await agent.execute(spec.build_prompt(ctx, decision), session=session, role="user")
         ok = self._job_succeeded(getattr(session, "job_id", None))
         # Only a successful run's reply was posted as the schedule's output (a
         # failure posts an error message instead), and only if there was a
