@@ -23,4 +23,5 @@ pkm
 pkm-oc
 scratch
 sessions/
-workspaces/
+# A local link to the workspaces volume; entrypoint.sh creates it in the container.
+/workspaces
