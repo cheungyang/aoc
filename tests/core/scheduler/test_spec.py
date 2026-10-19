@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from core.scheduler.spec import (
     Findings,
+    Problems,
     PromptSchedule,
     ScheduleContext,
     ScriptSchedule,
@@ -91,13 +92,57 @@ class TestPromptSchedule(unittest.TestCase):
 
     def test_findings_are_appended_as_a_block(self):
         spec = PromptSchedule(prompt="Scan the market.", **common())
-        decision = WorkDecision(True, "r", detail=Findings("market_screen", "NVDA -6%\n"))
+        decision = WorkDecision(True, "r", detail=Findings("market_screen", "CAT -6%\n"))
         self.assertEqual(spec.build_prompt(ctx(), decision),
-                         'Scan the market.\n\n<findings source="market_screen">\nNVDA -6%\n</findings>')
+                         'Scan the market.\n\n<findings source="market_screen">\nCAT -6%\n</findings>')
 
     def test_other_details_leave_the_prompt_alone(self):
         spec = PromptSchedule(prompt="Scan the market.", **common())
         self.assertEqual(spec.build_prompt(ctx(), WorkDecision(True, "r", detail=["x"])), "Scan the market.")
+
+    def test_findings_pass_on_what_the_scan_couldnt_read(self):
+        block = Findings("market_screen", "CAT -6%", ("pkm/wallet/stock/watchlist.md: 'XYZ' has no quote",)).as_block()
+        self.assertEqual(block, (
+            '<findings source="market_screen">\nCAT -6%\n\n'
+            "The scan couldn't read everything; tell the user what's missing in one line "
+            "and don't fill the gap with a guess:\n"
+            "- pkm/wallet/stock/watchlist.md: 'XYZ' has no quote\n</findings>"
+        ))
+
+
+class TestProblems(unittest.TestCase):
+    def test_the_notice_names_the_check_and_each_issue(self):
+        problems = Problems("property_screen", ("criteria.md: names no state", "criteria.md: max price unreadable"))
+        self.assertEqual(problems.message("The scheduled check `weekly-scout`"), (
+            "⚠️ The scheduled check `weekly-scout` couldn't run normally:\n"
+            "- criteria.md: names no state\n- criteria.md: max price unreadable\n"
+            "Reply here and I'll help fix it."
+        ))
+        self.assertTrue(problems.message().startswith("⚠️ The property_screen scan couldn't run normally:"))
+
+    def test_the_notice_quotes_the_first_raw_lines_under_their_issue(self):
+        problems = Problems(
+            "property_screen",
+            ("criteria.md: names no state", "criteria.md: 3 lines not recognized"),
+            raw=(("criteria.md: 3 lines not recognized", ("Lot: big yard", "Near a park", "Quiet street")),),
+        )
+        self.assertEqual(problems.message("The scheduled check `weekly-scout`"), (
+            "⚠️ The scheduled check `weekly-scout` couldn't run normally:\n"
+            "- criteria.md: names no state\n"
+            "- criteria.md: 3 lines not recognized\n"
+            "> Lot: big yard\n> Near a park\n> ... and 1 more\n"
+            "Reply here and I'll help fix it."
+        ))
+
+    def test_raw_lines_dont_change_what_counts_as_the_same_problem(self):
+        issues = ("criteria.md: 1 line not recognized",)
+        self.assertEqual(Problems("property_screen", issues, raw=((issues[0], ("Lot: big yard",)),)),
+                         Problems("property_screen", issues))
+
+    def test_findings_quote_the_raw_lines_too(self):
+        issue = "pkm/wallet/stock/watchlist.md: 1 line not recognized"
+        block = Findings("market_screen", "XYZ -6%", (issue,), raw=((issue, ("* xyz corp",)),)).as_block()
+        self.assertIn(f"- {issue}\n> * xyz corp\n</findings>", block)
 
 
 class TestScriptSchedule(unittest.TestCase):

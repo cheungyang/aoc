@@ -3,16 +3,14 @@ name: list_impactful_actions
 description: Navigates the personal databases and vault to identify the most impactful tasks.
 ---
 ## Overview
-Find the most impactful things to do for the day, week, or quarter from `tasks.db`, `projects.db`, and the weekly journal.
+Find the most impactful things to do for the day, week, or quarter from this week's focus and the active projects' open tasks.
 
 ## Rules
-- Discover tasks and projects only with `task_query` and `project_query`, never by searching the filesystem. Use `filesystem` `read` only for the weekly journal or a path the databases returned.
-- Priority icons: 🔺 Highest, ⏫ High, 🔼 Medium, 🔽 Low, ⏬ Lowest. Categories: 💌 Gmail, 🦄 Personal, 🏠 Family, 💼 Work (implied). Tags: `#a/` actions; `#p/` projects (the alias in a project note's frontmatter); `#c/` a year's prioritized commitment (e.g. `#c/⏫2026`).
+- Today's briefing (the morning findings, or `day_briefing()`) holds this week's focus, this year's active projects by priority with their top open tasks, and the tasks due or slipping, with every day count computed. Work from it; don't redo those reads or the date math.
+- For more of a project's tasks, use `task_query` (`action="search"`, `status="todo"`, `tags=[<alias>]`); for other projects or years, `project_query`. Never search the filesystem for tasks. Use `filesystem` `read` only for a path the briefing or the databases returned.
+- Priority icons: 🔺 Highest, ⏫ High, 🔼 Medium, 🔽 Low, ⏬ Lowest. Categories come with each project (the briefing and `project_query` return them); a project with none is work. Tags: `#a/` actions; `#p/` projects (the alias in a project note's frontmatter); `#c/` a year's prioritized commitment (e.g. `#c/⏫2026`).
 
 ## Workflow
-1. In one step:
-   - `read` last week's journal, `pkm/vault/journals/weekly/YYYY-Www.md` (the ISO week before the current one): the items under `##🌱 Next week's focus` are this week's goals.
-   - `project_query` (`action="search"`): active projects (`executing` or `planning`) for the current `commitment_year`. Sort them by priority icon and note each one's alias and file path.
-2. `task_query` (`action="search"`, `status="todo"`) for those projects' aliases. Optionally run `git` `log-p` on a project's file to gauge recent momentum.
-3. Pick the top 3 tasks that most need attention to move active projects forward, judged by their due or scheduled dates and priority icons. If a pick lacks the context to act on, do not guess: read its project file.
-4. Return the picks grouped by Work, Personal, Family, Others, each with why it was chosen (priority, momentum, this week's focus), and the sources you read. Note workload balance, stalled projects, or new PKM patterns in your `<system_memory_log>`.
+1. In one step, call `set_thinking("medium")` (choosing from the briefing is the heavy step) and, if today's briefing is not in this conversation, `day_briefing()`. Optionally run `git` `log-p` on a project's file to gauge recent momentum.
+2. Pick the top 3 tasks that most need attention to move active projects forward, judged by their due or scheduled dates, priority icons and this week's focus. If a pick lacks the context to act on, do not guess: read its project file.
+3. Return the picks grouped by Work, Personal, Family, Others, each with why it was chosen (priority, momentum, this week's focus), and the sources you read. Note workload balance, stalled projects, or new PKM patterns in your `<system_memory_log>`.

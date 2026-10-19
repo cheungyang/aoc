@@ -1,0 +1,15 @@
+{
+  "skill_id": "round_trip_audit",
+  "name": "Round-trip Audit",
+  "description": "Audits an agent for model round trips, phantom references, prompt budget and how its work is split (tools on @agent_tool, decisions in skills) with agent_lint, and proposes the fixes as a plan.",
+  "emoji": "⏱️",
+  "tools": {
+    "agent_lint": {},
+    "set_thinking": {},
+    "filesystem": {
+      "agents": ["@read"],
+      "skills": ["@read"],
+      "pkm/agents": ["@read"]
+    }
+  }
+}

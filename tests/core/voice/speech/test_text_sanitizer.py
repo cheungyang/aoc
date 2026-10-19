@@ -64,11 +64,11 @@ def test_text_sanitizer_headers_lists_and_quotes():
     assert "Task 3" in cleaned
 
 def test_text_sanitizer_removes_emojis():
-    raw = "Loud and clear, Alva. The system is operational. 🛎️ Ready for your next instruction! 🤖✨ <:custom:123> ✅"
+    raw = "Loud and clear, Sam. The system is operational. 🛎️ Ready for your next instruction! 🤖✨ <:custom:123> ✅"
     cleaned = TextSanitizer.sanitize(raw)
     assert "🛎️" not in cleaned
     assert "🤖" not in cleaned
     assert "✨" not in cleaned
     assert "✅" not in cleaned
     assert "<:custom:123>" not in cleaned
-    assert cleaned == "Loud and clear, Alva. The system is operational. Ready for your next instruction!"
+    assert cleaned == "Loud and clear, Sam. The system is operational. Ready for your next instruction!"

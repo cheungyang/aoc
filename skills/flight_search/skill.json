@@ -1,8 +1,9 @@
 {
   "skill_id": "flight_search",
   "name": "Flight Search",
-  "description": "Skill for querying award flight availability, evaluating routing options, inspecting itinerary segments, and calculating Cent-Per-Point (CPP) valuations using Seats.aero.",
+  "description": "Skill for querying award flight availability, evaluating routing options, inspecting itinerary segments, and valuing redemptions in Cent-Per-Point (CPP) using Seats.aero and award_value.",
   "tools": {
-    "seats_aero": []
+    "seats_aero": [],
+    "award_value": {}
   }
 }

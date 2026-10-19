@@ -5,8 +5,10 @@
   "emoji": "⏰",
   "tools": {
     "filesystem": {
-      "agents": ["@write"]
+      "agents": ["@write"],
+      "scripts": ["@read"]
     },
-    "schedule_validate": {}
+    "schedule_validate": {},
+    "agent_lint": {}
   }
 }

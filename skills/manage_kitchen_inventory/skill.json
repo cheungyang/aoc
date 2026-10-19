@@ -1,11 +1,13 @@
 {
   "skill_id": "manage_kitchen_inventory",
   "name": "Manage Kitchen Inventory",
-  "description": "Translates English grocery inputs and receipts into Traditional Chinese and smartly deduces/deducts ingredients for cooked meals in INVENTORY.md.",
+  "description": "Records groceries, receipts and cooked meals in the kitchen inventory, in Traditional Chinese, deducing a dish's ingredients from its name.",
   "emoji": "🗄️",
   "tools": {
+    "kitchen_inventory": {},
+    "kitchen_snapshot": {},
     "filesystem": {
-      "pkm/wallet/kitchen": ["@write"]
+      "pkm/wallet/kitchen/STAPLES.md": ["read", "append", "replace_block"]
     }
   }
 }

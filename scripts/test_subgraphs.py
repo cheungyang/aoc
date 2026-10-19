@@ -150,7 +150,7 @@ async def main():
     parser.add_argument("--subgraph", choices=["ideation", "video", "copywriting", "remix_node", "all"], default="remix_node",
                         help="Which subgraph or component to run.")
     parser.add_argument("--topic", default="dog", help="Topic / word name (default: dog).")
-    parser.add_argument("--project-path", default="pkm/wiki/software/ayla-first-words", help="Project directory.")
+    parser.add_argument("--project-path", default="pkm/wiki/software/first-words", help="Project directory.")
     parser.add_argument("--use-existing", action="store_true", default=True, help="Use existing assets on disk.")
 
     args = parser.parse_args()

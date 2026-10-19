@@ -8,10 +8,11 @@ Read-only questions about the home (what exists, where it is, what's on) and the
 
 ### Rules
 - Put every lookup a question needs into one `home_assistant` call.
+- Devices in your device list (`device_list`) need no lookup first: read them with `get_state` (one instruction per id), or a whole room with `search_registry` by `area` and `domain`.
 - Pass `"include_disabled": true` only when troubleshooting missing or offline hardware.
 
 ### Weekly digest
-Run `inventory`, then report: totals, entities per area (largest first), the `(unassigned)` bucket by domain, and disabled or hidden counts. Name unassigned entities with a follow-up `search_registry` only when there are a handful. Compare with last week's totals if your memory has them, to call out what's new.
+In your first step, run `inventory` and call `device_list(refresh=true)`. Then report: totals, entities per area (largest first), the `(unassigned)` bucket by domain, and disabled or hidden counts. Name unassigned entities with a follow-up `search_registry` only when there are a handful. Compare with last week's totals if your memory has them, to call out what's new. If the refresh failed, say so.
 
 Call `load_skill("ha_inventory")` for the fields `inventory` and `search_registry` return.
 

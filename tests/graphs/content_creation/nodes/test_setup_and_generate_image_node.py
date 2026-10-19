@@ -136,7 +136,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "project_path": temp_dir,
                 "output_path": output_path,
                 "creator_instructions_path": instr_path,
-                "latest_human_feedback": "Ayla should wear a cozy kitten onesie."
+                "latest_human_feedback": "Kiki should wear a cozy kitten onesie."
             }
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
@@ -147,7 +147,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 call_prompt = mock_gen.ainvoke.call_args[0][0]["prompt"]
                 self.assertIn("DYNAMIC_CREATOR_RULEBOOK_TEXT", call_prompt)
                 self.assertIn("DYNAMIC_3D_CHARACTER_SHEET", call_prompt)
-                self.assertIn("Ayla should wear a cozy kitten onesie.", call_prompt)
+                self.assertIn("Kiki should wear a cozy kitten onesie.", call_prompt)
 
     async def test_reuses_image_when_decision_is_approved_even_with_feedback(self):
         """A task may not overrule the gate.
@@ -171,7 +171,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "project_path": temp_dir,
                 "output_path": output_path,
                 "gate1_decision": "approved",
-                "latest_human_feedback": "have ayla wear a cat costume",
+                "latest_human_feedback": "have kiki wear a cat costume",
             }
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_gen:
@@ -194,9 +194,9 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
             with open(existing_image_path, "w") as f:
                 f.write("existing_image_bytes")
 
-            ref_img_path = os.path.join(char_dir, "ayla_3d.jpg")
+            ref_img_path = os.path.join(char_dir, "kiki_3d.jpg")
             with open(ref_img_path, "wb") as f:
-                f.write(b"AYLA_3D_REF_BYTES")
+                f.write(b"KIKI_3D_REF_BYTES")
 
             state = {
                 "topic": "cat",
@@ -204,7 +204,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 "project_path": temp_dir,
                 "output_path": output_path,
                 "gate1_decision": "revise_image",
-                "latest_human_feedback": "Use reference image and character/ayla_3d.jpg. have ayla wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
+                "latest_human_feedback": "Use reference image and character/kiki_3d.jpg. have kiki wear a cat costume, in the post of pretending like a cat crawling on the floor. Do not include any actual cats in the image."
             }
 
             canonical_target = os.path.join(output_path, "cat_image.jpg")
@@ -219,7 +219,7 @@ class TestSetupAndGenerateImageNode(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(os.path.exists(archived_v1))
                 call_args = mock_gen.ainvoke.call_args[0][0]
                 self.assertEqual(call_args.get("image_path"), ref_img_path)
-                self.assertIn("have ayla wear a cat costume", call_args["prompt"])
+                self.assertIn("have kiki wear a cat costume", call_args["prompt"])
 
 
 if __name__ == "__main__":

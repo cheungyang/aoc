@@ -9,9 +9,12 @@
   "description": "Extracts itemized data from receipt snapshots and maintains structured monthly ledgers.",
   "model": "FLASH_LITE",
   "tools": {
+    "ledger_append": {},
     "filesystem": {
-      "pkm/wallet/finance": ["@write"]
+      "pkm/wallet/finance": ["@read", "replace_block"]
     }
   },
-  "skills": {}
+  "skills": {
+    "tool_audit": {}
+  }
 }

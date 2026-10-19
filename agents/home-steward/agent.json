@@ -43,12 +43,18 @@
         "@control",
         "@author"
       ]
-    }
+    },
+    "device_list": {},
+    "filesystem": {
+      "pkm/wallet/home/DEVICES.md": ["@read"]
+    },
+    "set_thinking": {}
   },
   "skills": {
     "ha_inventory": { "preload": "core" },
     "ha_automation_authoring": {},
-    "ha_config_audit": { "preload": "core" }
+    "ha_config_audit": { "preload": "core" },
+    "tool_audit": {}
   },
   "voice": { "name": "en-US-Chirp3-HD-Schedar" },
   "schedules": [
@@ -58,12 +64,12 @@
       "channel": "home-automation",
       "cron": "0 8 * * *",
       "precondition": {
-        "type": "always",
-        "reason": "Audits live Home Assistant state (errors, unavailable entities); there is no local signal that says it has changed."
+        "type": "ha_audit"
       },
       "session_policy": "stateless",
       "prompt": [
-        "Following your ha_config_audit skill, run a daily audit of Home Assistant health, error logs, and unavailable entities. Report any issues concisely or confirm all systems normal."
+        "Report the new Home Assistant problems in the findings below,",
+        "as the daily audit in your ha_config_audit skill describes."
       ]
     },
     {
@@ -77,7 +83,7 @@
       },
       "session_policy": "stateless",
       "prompt": [
-        "Following your ha_inventory skill, generate a weekly inventory summary of devices, areas, and newly discovered or unassigned entities."
+        "Following your ha_inventory skill, refresh your device list and generate a weekly inventory summary of devices, areas, and newly discovered or unassigned entities."
       ]
     }
   ]

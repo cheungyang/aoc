@@ -95,8 +95,8 @@ class TestBudget(VaultCase):
 
     def test_save_writes_a_titled_file(self):
         scope = store.profile_scope(self.pkm)
-        store.save(scope, MemoryFile([self.entry("Lives in San Jose.", tag=PROFILE)]))
-        self.assertTrue(self.read(scope.path).startswith("# Profile\n\n- [profile] Lives in San Jose."))
+        store.save(scope, MemoryFile([self.entry("Lives in Springfield.", tag=PROFILE)]))
+        self.assertTrue(self.read(scope.path).startswith("# Profile\n\n- [profile] Lives in Springfield."))
 
 
 class TestTagsAndFiles(VaultCase):

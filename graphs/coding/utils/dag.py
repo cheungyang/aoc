@@ -41,8 +41,8 @@ def resolve_path(path: Optional[str], default: Optional[str] = None, must_exist:
 def project_slug(project_name: str) -> str:
     """The folder a project's specs and manifest live in.
 
-    Accepts what people actually type — `French Learning Cards`,
-    `french_learning_cards` — and lands on one folder name either way.
+    Accepts what people actually type — `Demo Project`,
+    `demo_project` — and lands on one folder name either way.
     """
     slug = re.sub(r"[\s_]+", "-", str(project_name).strip().lower())
     return re.sub(r"[^a-z0-9.-]", "", slug).strip("-")

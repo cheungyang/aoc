@@ -78,7 +78,7 @@ class TestGraph(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.next, ("process_gate1_decision",))
 
             # Simulate User providing revision feedback at HITL Gate 1 (as graph_call does)
-            user_feedback = "revise image: have ayla wear a cat costume, pretending to crawl like a cat. Do not include any actual cats."
+            user_feedback = "revise image: have kiki wear a cat costume, pretending to crawl like a cat. Do not include any actual cats."
             instruction = user_feedback.split(":", 1)[1].strip()
             graph.update_state(config, {
                 "latest_human_feedback": user_feedback,

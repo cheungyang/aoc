@@ -13,9 +13,19 @@ fi
 # Secrets that live in the project directory. /app is a bind mount of the host
 # checkout, so every chmod below writes through to the host's inodes -- these
 # names are held out of the blanket `a+rX` sweep and locked to 600 afterwards.
-# Mirrors the ignore lists in .gitignore / .dockerignore. .env.example is
-# tracked sample config, not a secret, so it is excluded from the match.
-AOC_SECRET_NAMES=( '*bot_token*' 'client_secret_*' '.env' '.env.*' 'google_health_credentials.json' )
+# Mirrors the credential entries in .gitignore / .dockerignore; a name missing
+# here is widened to 644 on every start (tests/test_secret_files.py lists the
+# known ones). .env.example is tracked sample config, not a secret, so it is
+# excluded from the match.
+AOC_SECRET_NAMES=(
+    '*bot_token*'
+    'client_secret_*'
+    '.env'
+    '.env.*'
+    'e2b_api_key'
+    'google_health_credentials.json'
+    'home_assistant_token'
+)
 
 secret_match=()
 for pattern in "${AOC_SECRET_NAMES[@]}"; do

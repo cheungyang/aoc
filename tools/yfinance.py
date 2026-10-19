@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 
 from core.runtime.execution_context import try_context
 from core.util import format_tool_response
+from core.util.time_util import get_local_now
 
 
 TOOL_NAME = "yfinance"
@@ -21,6 +22,10 @@ MAX_HISTORY_BARS = 65
 VALID_PERIODS = ("1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max")
 # Sessions averaged (excluding the latest one) for avg_volume / volume_ratio.
 AVG_VOLUME_SESSIONS = 20
+# Yahoo quotes some exchanges in minor units: code -> (ISO code, minor units per unit).
+MINOR_UNITS = {"GBp": ("GBP", 100), "GBX": ("GBP", 100), "ZAc": ("ZAR", 100), "ILA": ("ILS", 100)}
+# The reply writes these with the ticker's ISO currency code (the bars' closes too).
+PRICE_FIELDS = ("current_price", "previous_close", "period_high", "period_low")
 
 # yfinance prints "possibly delisted" etc. straight to its logger; those are surfaced
 # per ticker in the payload instead.
@@ -38,7 +43,7 @@ def yfinance(
 
     Supported Actions:
     - 'quote' (default): Snapshot per ticker for screening.
-        Returns: symbol, currency, current_price, previous_close, daily_movement_pct, volume,
+        Returns: symbol, current_price, previous_close, daily_movement_pct, volume,
         avg_volume (mean of the prior 20 sessions), volume_ratio (volume / avg_volume),
         next_earnings_date (YYYY-MM-DD or null), days_to_earnings (int or null), as_of_date.
     - 'history': Daily bars for the requested period.
@@ -50,13 +55,17 @@ def yfinance(
 
     Args:
         action: 'quote', 'history', or 'earnings'. Defaults to 'quote'.
-        tickers: List of ticker symbols, e.g. ["AAPL", "TSLA", "MSFT"]. Case-insensitive,
+        tickers: List of ticker symbols, e.g. ["KO", "XOM", "IBM"]. Case-insensitive,
             de-duplicated, max 50 per call. Pass ALL tickers in one call rather than looping.
         period: Only used by 'history'. One of 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max.
             Defaults to '1mo'.
 
     Output notes:
         - All *_pct fields are percentages (3.2 means +3.2%), rounded to 2 decimals.
+        - Money carries its ISO currency code: "USD 182.40"; prices quoted in pence or cents
+          (GBp, ZAc, ILA) are in main units. A price whose currency Yahoo doesn't give reads
+          "182.40 (currency unknown)", and errors name its ticker. EPS always reads
+          "1.52 (currency unknown)": Yahoo's earnings calendar names no currency.
         - Payload is JSON: {"action", "as_of", "count", "results": [...]}, results in input order.
         - Failures are reported per ticker via an "error" field; other tickers still return data.
         - Prices may be delayed and reflect the latest session (intraday during market hours).
@@ -73,7 +82,7 @@ def yfinance(
 
     symbols = _normalize_tickers(tickers)
     if not symbols:
-        return format_tool_response(TOOL_NAME, payload="", errors="Error: 'tickers' must be a non-empty list of symbols, e.g. [\"AAPL\", \"TSLA\"].")
+        return format_tool_response(TOOL_NAME, payload="", errors="Error: 'tickers' must be a non-empty list of symbols, e.g. [\"KO\", \"XOM\"].")
     if len(symbols) > MAX_TICKERS:
         return format_tool_response(TOOL_NAME, payload="", errors=f"Error: At most {MAX_TICKERS} tickers per call (got {len(symbols)}).")
 
@@ -91,8 +100,7 @@ def yfinance(
         return format_tool_response(TOOL_NAME, payload="", errors=f"Error: Unknown action '{action}'. Supported actions: 'quote', 'history', 'earnings'.")
 
     try:
-        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(symbols))) as pool:
-            results = list(pool.map(lambda s: _safe(worker, s), symbols))
+        results = _fetch(worker, symbols)
     except Exception as e:
         return format_tool_response(TOOL_NAME, payload="", errors=f"Error in {TOOL_NAME}: {e}")
 
@@ -100,10 +108,16 @@ def yfinance(
         "action": norm_action,
         "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "count": len(results),
-        "results": results,
+        "results": [_with_codes(r) for r in results],
     }
     failed = [r["symbol"] for r in results if "error" in r]
-    errors = "None" if not failed else f"Data unavailable for: {', '.join(failed)}"
+    uncoded = [r["symbol"] for r in results if "currency" in r and not r["currency"] and "error" not in r]
+    problems = []
+    if failed:
+        problems.append(f"Data unavailable for: {', '.join(failed)}")
+    if uncoded:
+        problems.append(f"No currency from Yahoo for: {', '.join(uncoded)}; their prices carry no code")
+    errors = "; ".join(problems) or "None"
     return format_tool_response(TOOL_NAME, payload=json.dumps(payload, indent=2), errors=errors)
 
 
@@ -129,6 +143,41 @@ def _safe(worker, symbol: str) -> Dict[str, Any]:
         return worker(symbol)
     except Exception as e:
         return {"symbol": symbol, "error": f"{type(e).__name__}: {e}"}
+
+
+def _fetch(worker, symbols: List[str]) -> List[Dict[str, Any]]:
+    """`worker` over every symbol in parallel, results in input order; failures become error rows."""
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(symbols))) as pool:
+        return list(pool.map(lambda s: _safe(worker, s), symbols))
+
+
+def _with_codes(result: Dict[str, Any]) -> Dict[str, Any]:
+    """A result as the reply shows it: money with its ISO currency code, and no separate currency field.
+
+    EPS reads "(currency unknown)": Yahoo's earnings calendar names none, and a
+    listing's trading currency isn't always the one its company reports in.
+    """
+    currency = result.get("currency")
+    out = {key: _money(value, currency) if key in PRICE_FIELDS else value
+           for key, value in result.items() if key != "currency"}
+    if "bars" in out:
+        out["bars"] = [{**bar, "close": _money(bar.get("close"), currency)} for bar in out["bars"]]
+    if "recent" in out:
+        out["recent"] = [{**row, "eps_estimate": _money(row.get("eps_estimate"), None),
+                          "eps_reported": _money(row.get("eps_reported"), None)} for row in out["recent"]]
+    return out
+
+
+def _money(value: Optional[float], currency: Optional[str]) -> Optional[str]:
+    """An amount with its ISO currency code, "USD 1,336.64". Minor units (pence, cents) become main units.
+
+    Without a currency the amount is marked, never guessed: "182.40 (currency unknown)".
+    """
+    if value is None:
+        return None
+    code, per_unit = MINOR_UNITS.get(currency or "", ((currency or "").strip().upper(), 1))
+    amount = f"{value / per_unit:,.2f}"
+    return f"{code} {amount}" if code else f"{amount} (currency unknown)"
 
 
 def _num(value: Any, digits: int = 2) -> Optional[float]:
@@ -180,13 +229,18 @@ def _next_earnings(ticker: "yf.Ticker") -> Optional[date]:
         return None
     if not isinstance(raw, (list, tuple)):
         raw = [raw]
-    today = date.today()
+    today = _today()
     upcoming = sorted(d for d in (_to_date(x) for x in raw) if d is not None and d >= today)
     return upcoming[0] if upcoming else None
 
 
+def _today() -> date:
+    """Today in the user's timezone; the container's clock is UTC, a day ahead every evening."""
+    return get_local_now().date()
+
+
 def _days_until(d: Optional[date]) -> Optional[int]:
-    return (d - date.today()).days if d else None
+    return (d - _today()).days if d else None
 
 
 def _load_history(ticker: "yf.Ticker", period: str):
@@ -197,6 +251,14 @@ def _load_history(ticker: "yf.Ticker", period: str):
     if hist.empty:
         raise ValueError("No price data returned (invalid or delisted symbol?)")
     return hist
+
+
+def _currency(ticker: "yf.Ticker") -> Optional[str]:
+    """The code Yahoo quotes the ticker in ("USD", "GBp"), or None when it doesn't say."""
+    try:
+        return ticker.fast_info.get("currency")
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- actions
@@ -218,16 +280,10 @@ def _quote(symbol: str) -> Dict[str, Any]:
         avg_volume = _num(prior.mean(), 0)
     volume_ratio = round(volume / avg_volume, 2) if volume is not None and avg_volume else None
 
-    currency = None
-    try:
-        currency = ticker.fast_info.get("currency")
-    except Exception:
-        pass
-
     next_earn = _next_earnings(ticker)
     return {
         "symbol": symbol,
-        "currency": currency,
+        "currency": _currency(ticker),
         "current_price": current,
         "previous_close": previous,
         "daily_movement_pct": _pct(current, previous),
@@ -263,6 +319,7 @@ def _history(symbol: str, period: str) -> Dict[str, Any]:
     low_col = hist["Low"] if "Low" in hist else closes
     return {
         "symbol": symbol,
+        "currency": _currency(ticker),
         "period": period,
         "period_change_pct": _pct(_num(closes.iloc[-1]), _num(closes.iloc[0])),
         "period_high": _num(high_col.max()),
@@ -281,7 +338,7 @@ def _earnings(symbol: str) -> Dict[str, Any]:
     try:
         df = ticker.get_earnings_dates(limit=12)
         if df is not None and not df.empty:
-            today = date.today()
+            today = _today()
             for idx, row in df.iterrows():
                 d = _to_date(idx)
                 reported = _num(row.get("Reported EPS"))

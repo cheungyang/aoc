@@ -64,7 +64,7 @@ services:
       # On-device LLM, for agents setting "provider": "local". localhost would
       # be this container, so the host alias below is used instead.
       #
-      # Unused on the current deployment target: the Synology DS220+ cannot host
+      # Unused on the current deployment target: a low-power NAS cannot host
       # a 26B model, so every agent there stays on Gemini. Wired anyway so that
       # moving to a capable host needs no compose edit.
       - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-http://host.docker.internal:9379/v1}

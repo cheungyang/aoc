@@ -9,6 +9,8 @@ file that changed while the run was in flight may have been missed by it, and
 must still count as "changed since" next time.
 
 Lives in its own `schedule_state` table in `memory.db`, next to the jobs table.
+The `schedule_notices` table beside it remembers which scan problems were
+already posted each day, so a restart doesn't post them again.
 """
 import os
 import sqlite3
@@ -51,6 +53,17 @@ class ScheduleState:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schedule_notices (
+                    schedule_id TEXT NOT NULL,
+                    issue TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    posted_at REAL NOT NULL,
+                    PRIMARY KEY (schedule_id, issue, day)
+                )
+                """
+            )
             yield conn
             conn.commit()
         finally:
@@ -89,3 +102,20 @@ class ScheduleState:
 
     def record_skip(self, schedule_id: str, reason: str, at: Optional[float] = None) -> None:
         self._upsert(schedule_id, last_skip_at=at or time.time(), last_skip_reason=reason)
+
+    def claim_notice(self, schedule_id: str, issue: str, day: str) -> bool:
+        """True the first time `issue` is claimed for `schedule_id` on `day`: post it then, not again."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO schedule_notices (schedule_id, issue, day, posted_at) VALUES (?, ?, ?, ?)",
+                (schedule_id, issue, day, time.time()),
+            )
+            return cursor.rowcount == 1
+
+    def release_notice(self, schedule_id: str, issue: str, day: str) -> None:
+        """Undoes a claim whose post failed, so a later run may post it."""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM schedule_notices WHERE schedule_id = ? AND issue = ? AND day = ?",
+                (schedule_id, issue, day),
+            )

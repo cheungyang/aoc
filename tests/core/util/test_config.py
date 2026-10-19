@@ -38,10 +38,10 @@ class TestConfig(unittest.TestCase):
             self.config.max_concurrency = None
             self.assertEqual(self.config.max_concurrency, 5)
 
-    def test_control_thread_id_default_and_env(self):
+    def test_control_thread_id_comes_only_from_the_env(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CONTROL_THREAD_ID", None)
-            self.assertEqual(self.config.control_thread_id, "1555004109415915540")
+            self.assertEqual(self.config.control_thread_id, "")
         with patch.dict(os.environ, {"CONTROL_THREAD_ID": " 42 "}):
             self.assertEqual(self.config.control_thread_id, "42")
 

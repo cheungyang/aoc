@@ -90,11 +90,14 @@ class TestZillowQueryTool(unittest.TestCase):
         )
 
         self.assertIn("2144 N Westlake Ave N", result)
-        self.assertIn("price_per_sqft", result)
-        # Price 700000 / 2000 = 350.0
-        self.assertIn("350.0", result)
-        # Rent 4000 * 12 = 48000 - HOA 1200 = 46800 / 700000 = 6.69%
-        self.assertIn("6.69", result)
+        # Money carries its ISO code; price per sqft keeps its cents: 700000 / 2000 = 350.00
+        self.assertIn('"price": "USD 700,000"', result)
+        self.assertIn('"hoa_fee": "USD 100"', result)
+        self.assertIn('"rent_zestimate": "USD 4,000"', result)
+        self.assertIn('"price_per_sqft": "USD 350.00"', result)
+        self.assertIn('"estimated_annual_gross_rent": "USD 48,000"', result)
+        # Rent 4000 * 12 = 48000 - HOA 1200 = 46800 / 700000 = 6.69%: a percentage, no code
+        self.assertIn('"estimated_cap_rate_percent": 6.69', result)
 
     @patch.dict(os.environ, {"RAPIDAPI_KEY": "test_rapidapi_key"})
     @patch("tools.zillow_query.requests.get")
@@ -166,10 +169,10 @@ class TestZillowQueryTool(unittest.TestCase):
                 {
                     "url": "https://www.zillow.com/homedetails/48749425_zpid/",
                     "success": True,
-                    "zpid": 48749425,
+                    "zpid": 10000001,
                     "status_code": 200,
                     "property": {
-                        "zpid": 48749425,
+                        "zpid": 10000001,
                         "street_address": "2114 Bigelow Ave N",
                         "city": "Seattle",
                         "state": "WA",
@@ -188,14 +191,14 @@ class TestZillowQueryTool(unittest.TestCase):
 
         result = zillow_query.invoke({
             "action": "details",
-            "zpid": 48749425,
+            "zpid": 10000001,
             "poll_interval": 0.01,
             "timeout_seconds": 5
         })
 
         mock_post.assert_called_once()
         called_payload = mock_post.call_args[1]["json"]
-        self.assertEqual(called_payload["zpids"], [48749425])
+        self.assertEqual(called_payload["zpids"], [10000001])
         self.assertIn("2114 Bigelow Ave N", result)
         self.assertIn("500.0", result) # 1250000 / 2500 = 500.0
 

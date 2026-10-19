@@ -198,7 +198,6 @@ def _agent_prompt_files(agent_id: str) -> dict:
         "INSTRUCTIONS": (os.path.join(agent_path, "INSTRUCTIONS.md"), "Your instructions and workflow:"),
         "IDENTITY": (os.path.join(agent_path, "IDENTITY.md"), "Short description of who you are:"),
         "SOUL": (os.path.join(agent_path, "SOUL.md"), "Your personality, behavior and guiding success in your tasks:"),
-        "USER": (os.path.join(agent_path, "USER.md"), "Information about your human:"),
     }
 
 
@@ -216,10 +215,51 @@ def get_agent_static_prompt(agent_id: str) -> str:
     return "\n\n".join(prompt_parts)
 
 
+# Every agent's prompt carries these (`get_tool_rules_prompt`). Tools built on
+# core.tooling report `partial` or `failed` with the issues; the gap line in
+# the memory log is how a tool's limits reach agent-designer.
+TOOL_RULES = (
+    "- When a tool says partial or failed, tell the user in one line what's missing. "
+    "Don't fill the gap with a guess. Offer the fix.",
+    "- When a tool falls short, note it in your memory log: "
+    "`[MEMORY] Tool gap: <tool>, <file>: <what was missing or asked for>.`",
+)
+
+
+def get_tool_rules_prompt(agent_id: str) -> str:
+    """How to treat what tools return, for every agent; static.
+
+    An agent with tools of its own also gets pointers to its WORKFLOW.md and
+    RULES.md, once it has them. Only `agents/<agent_id>/` is read, so the block
+    changes on deploy, never mid-day.
+    """
+    agent_dir = os.path.dirname(_agent_prompt_files(agent_id)["AGENT"][0])
+    lines = list(TOOL_RULES)
+    if os.path.isfile(os.path.join(agent_dir, "WORKFLOW.md")):
+        lines.append(
+            f"- How your own tools work, rule by rule with worked examples: agents/{agent_id}/WORKFLOW.md. "
+            "Read it when the user asks how a number was reached."
+        )
+    if os.path.isfile(os.path.join(agent_dir, "lib", "rules.py")):
+        lines.append(
+            f"- The thresholds your tools use are in pkm/agents/{agent_id}/RULES.md. To change one, say the old "
+            "and new value, and edit that line once the user agrees."
+        )
+    return _block("TOOL_RULES", "\n".join(lines), "How to treat what tools return")
+
+
+def user_path(agent_id: str) -> str:
+    """`<pkm>/agents/<agent_id>/USER.md`: the agent's one USER.md, about its human. It never enters the repo."""
+    from core.util.config import Config
+
+    return os.path.join(Config().pkm_dir, "agents", agent_id, "USER.md")
+
+
 def get_agent_memory_prompt(agent_id: str, config: Optional[dict] = None) -> str:
     """The agent's mutable memory (Memory v2), most stable first.
 
-    HUMAN_CONTEXT is USER.md plus the shared Profile; SHARED_MEMORY holds the
+    HUMAN_CONTEXT is the agent's USER.md, in the PKM (`user_path`: facts
+    about the user never enter the repo), plus the shared Profile; SHARED_MEMORY holds the
     topics the agent subscribes to (`memory_topics`); then its private memory
     and feedback. The dream rewrites these files, so this text must sit at the
     END of the system prompt, after every stable block -- otherwise a memory
@@ -232,10 +272,9 @@ def get_agent_memory_prompt(agent_id: str, config: Optional[dict] = None) -> str
     if config is None:
         from core.loaders.agents_loader import AgentsLoader
         config = AgentsLoader().get_agent_config(agent_id) or {}
-    files = _agent_prompt_files(agent_id)
     shared = not config.get("stateless")
 
-    user = _read_prompt_file(files["USER"][0])
+    user = _read_prompt_file(user_path(agent_id))
     profile = inject.render_profile() if shared else ""
     human = "\n\n".join(part for part in (user, profile) if part)
     topics = inject.render_topics(inject.memory_topics(config, agent_id=agent_id)) if shared else ""

@@ -12,6 +12,7 @@ from core.scheduler.schedule_runner import ScheduleRunner, reset_conversation
 from core.scheduler.script_runner import ScriptResult
 from core.scheduler.spec import (
     Findings,
+    Problems,
     PromptSchedule,
     ScriptSchedule,
     ScriptStep,
@@ -234,13 +235,74 @@ class TestPromptDispatch(RunnerCase):
     async def test_a_scans_findings_reach_the_agent(self):
         class FindingsGate:
             def evaluate(self, ctx):
-                return WorkDecision(True, "found", detail=Findings("market_screen", "NVDA -6%"))
+                return WorkDecision(True, "found", detail=Findings("market_screen", "CAT -6%"))
 
         runner = self.make_runner()
         self.assertTrue(await runner.run_schedule(self.prompt_spec(precondition=FindingsGate())))
         self.agent.execute.assert_awaited_once_with(
-            'do it\n\n<findings source="market_screen">\nNVDA -6%\n</findings>', session=self.session, role="user"
+            'do it\n\n<findings source="market_screen">\nCAT -6%\n</findings>', session=self.session, role="user"
         )
+
+    async def test_a_scans_problems_are_posted_once_per_issue_per_day(self):
+        issues = ["pkm/wallet/real-estate/criteria.md: names no state"]
+
+        class ProblemGate:
+            def evaluate(self, ctx):
+                return WorkDecision(False, "can't run", detail=Problems("property_screen", tuple(issues)))
+
+        runner = self.make_runner()
+        spec = self.prompt_spec(precondition=ProblemGate(), entry={"id": "weekly-scout"})
+        self.assertFalse(await runner.run_schedule(spec))
+        self.agent.execute.assert_not_called()
+        self.channel.send.assert_awaited_once()
+        posted = self.channel.send.call_args[0][0]
+        self.assertEqual(posted, (
+            "⚠️ The scheduled check `weekly-scout` couldn't run normally:\n"
+            "- pkm/wallet/real-estate/criteria.md: names no state\n"
+            "Reply here and I'll help fix it."
+        ))
+        self.record_post.assert_called_once_with(self.channel, posted, origin=spec.schedule_id, loader=self.loader)
+
+        # The same issue later that day is not posted again, even after a restart; a new one is.
+        await self.make_runner().run_schedule(spec)
+        self.channel.send.assert_awaited_once()
+        issues.append("pkm/wallet/real-estate/criteria.md: max price unreadable")
+        await runner.run_schedule(spec)
+        self.assertEqual(self.channel.send.await_count, 2)
+        self.assertNotIn("names no state", self.channel.send.call_args[0][0])
+        self.assertIn("max price unreadable", self.channel.send.call_args[0][0])
+
+    async def test_problems_without_a_channel_are_logged_and_not_claimed(self):
+        class ProblemGate:
+            def evaluate(self, ctx):
+                return WorkDecision(False, "can't run", detail=Problems("ha_audit", ("x: broken",)))
+
+        self.bots.get_channel.return_value = None
+        runner = self.make_runner()
+        spec = self.prompt_spec(precondition=ProblemGate())
+        await runner.run_schedule(spec)
+        self.channel.send.assert_not_called()
+        self.assertTrue(self.state.claim_notice(spec.schedule_id, "x: broken", get_local_now().strftime("%Y-%m-%d")))
+
+    async def test_a_notice_that_fails_to_post_is_tried_again_next_run(self):
+        class ProblemGate:
+            def evaluate(self, ctx):
+                return WorkDecision(False, "can't run", detail=Problems("ha_audit", ("x: broken",)))
+
+        runner = self.make_runner()
+        spec = self.prompt_spec(precondition=ProblemGate())
+        self.channel.send.side_effect = [RuntimeError("discord down"), None]
+        await runner.run_schedule(spec)
+        self.record_post.assert_not_called()
+        await runner.run_schedule(spec)
+        self.assertEqual(self.channel.send.await_count, 2)
+        self.record_post.assert_called_once()
+
+    async def test_a_quiet_skip_posts_nothing(self):
+        runner = self.make_runner()
+        self.assertFalse(await runner.run_schedule(self.prompt_spec(gate=False)))
+        self.channel.send.assert_not_called()
+        self.record_post.assert_not_called()
 
     async def test_schedule_thinking_level_reaches_the_session(self):
         runner = self.make_runner()

@@ -92,7 +92,7 @@ class TestBuildInput(OpsCase):
 
     def test_numbers_every_scope_and_marks_stale_for_review(self):
         old = TODAY - datetime.timedelta(days=120)
-        self.put(store.profile_scope(self.pkm), self.entry(PROFILE, "Lives in <San Jose>"))
+        self.put(store.profile_scope(self.pkm), self.entry(PROFILE, "Lives in <Springfield>"))
         self.put(store.topic_scope("travel", self.pkm), self.entry("travel", "Old trip", seen=old))
         self.put(store.private_scope("a", FEEDBACK, self.pkm), self.entry(FEEDBACK, "Be brief"))
         self.put(store.private_scope("b", PRIVATE, self.pkm), self.entry(PRIVATE, "Someone else's"))
@@ -101,7 +101,7 @@ class TestBuildInput(OpsCase):
 
         self.assertEqual(sorted(dream_input.ids), ["e1", "e2", "e3"])
         self.assertEqual(dream_input.reviewed, {"e2"})
-        self.assertIn('<entry id="e1" tag="profile">Lives in &lt;San Jose&gt;</entry>', dream_input.xml)
+        self.assertIn('<entry id="e1" tag="profile">Lives in &lt;Springfield&gt;</entry>', dream_input.xml)
         self.assertIn('<entry id="e2" tag="travel" stale="true">Old trip</entry>', dream_input.xml)
         self.assertNotIn("Someone else", dream_input.xml)
         self.assertIn('<tag name="food">Diet.</tag>', dream_input.xml)
@@ -135,8 +135,8 @@ class TestApply(OpsCase):
         self.assertEqual(report.changed_topics, {"food", "travel"})
 
     def test_unknown_tag_goes_private_and_is_counted(self):
-        self.dream('<add tag="pets">Nik eats kibble.</add>')
-        self.assertEqual(self.texts(store.private_scope("a", PRIVATE, self.pkm)), ["Nik eats kibble."])
+        self.dream('<add tag="pets">Rex eats kibble.</add>')
+        self.assertEqual(self.texts(store.private_scope("a", PRIVATE, self.pkm)), ["Rex eats kibble."])
         self.assertEqual(self.events(mstate.UNKNOWN_TAG), [("a", "pets")])
 
     def test_placeholder_text_is_rejected(self):

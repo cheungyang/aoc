@@ -1,6 +1,6 @@
 ---
 name: flight_search
-description: Search and optimize award flight routing, check live/cached seat inventory across airline alliances, drill down into flight segments, and calculate Cent-Per-Point (CPP) valuations using the Seats.aero tool.
+description: Search and optimize award flight routing, check live/cached seat inventory across airline alliances, drill down into flight segments, and value redemptions in Cents-Per-Point (CPP) with the Seats.aero and award_value tools.
 ---
 
 ## Core
@@ -10,16 +10,17 @@ Find and rank award flights with the `seats_aero` tool (its description covers e
 ### Guardrails
 1. **Lifestyle Over Grind**: Never recommend itineraries with 15+ hour layovers or 3+ connections just to save a few thousand points. Always flag total travel duration, layover duration, and whether the itinerary is nonstop.
 2. **Transfer Partner Accuracy**: Only recommend transfers from currencies the user actually holds in `pkm/wallet/credit-card/` (e.g. Amex MR, Chase UR, Capital One, Citi ThankYou, Bilt). Point out known transfer bonuses and program quirks (e.g. British Airways / Virgin high fuel surcharges vs. Air Canada / Avianca low cash surcharges).
-3. **Valuation (CPP)**: Always evaluate CPP = (cash price − award taxes/fees) ÷ required points × 100. Flag redemptions below 1.3 CPP for Chase UR / Amex MR, and exceptional ones above 3.0 CPP for international Business/First.
+3. **Valuation (CPP)**: Value every option you recommend with `award_value`, never by hand. Flag `poor` redemptions of Chase UR / Amex MR, and `exceptional` international Business/First ones.
 4. **No Final Booking**: Provide the direct `booking_links` from `seats_aero` so the user can verify availability and complete the redemption on the airline portal.
 
 ### Workflow
+Run independent calls in the same step.
 1. **Read state**: use `filesystem` to read `pkm/wallet/travel/travel_preferences.md` (home airports, dream destinations, loyalty programs, cabin preferences) and the active cards and point balances in `pkm/wallet/credit-card/`.
-2. **Search**: one `search` call covering every candidate airport and the whole date range (comma-separated codes, e.g. `SFO,OAK,SJC` to `HND,NRT`), with `cabins` set and `order_by="lowest_mileage"`.
-3. **Drill down**: call `trips` for the 2-3 most promising availability IDs, in parallel, to verify exact flight numbers, layover times, aircraft product, and cash taxes. Treat availability older than 3 hours as stale: request a `refresh` and tell the user it may have changed.
+2. **Search**: one `search` call covering every candidate airport and the whole date range (comma-separated codes, e.g. `SFO,OAK,SJC` to `HND,NRT`), with `cabins` set, `order_by="lowest_mileage"` and `include_trips=true`; alongside it, `web_search` the cash fare for the same route, dates and cabin.
+3. **Drill down and value**, in one step: `trips` for the 2-3 most promising availability IDs, to verify exact flight numbers, layover times, aircraft product, and booking links, and one `award_value` per candidate. Pass a trip's `total_taxes` as given (e.g. `56.20 CAD`); when it says the currency wasn't given, tell the user rather than assume USD. Treat availability older than 3 hours as stale: request a `refresh` and tell the user it may have changed. Without a cash fare, say so rather than estimate one.
 4. **Recommend**, as a structured, multi-turn concierge recommendation:
    1. **Top Recommendation**: airline, cabin, flight numbers, departure/arrival times, total duration, nonstop status.
-   2. **Point Cost & Transfer Strategy**: required points + exact cash taxes, and which card/bank currency to transfer from (e.g. *"Transfer 75,000 points from Amex MR to Air Canada Aeroplan"*).
+   2. **Point Cost & Transfer Strategy**: required points + exact cash taxes, the CPP and its band, and which card/bank currency to transfer from (e.g. *"Transfer 75,000 points from Amex MR to Air Canada Aeroplan"*).
    3. **Product Highlights**: aircraft type or cabin product (e.g. *ANA "The Room" 77W* or *Air France A350*).
    4. **Booking Link**: the direct booking link from the trip data.
 
@@ -60,15 +61,19 @@ seats_aero(
     start_date="2024-11-10",
     end_date="2024-11-25",
     cabins="business",
-    order_by="lowest_mileage"
+    order_by="lowest_mileage",
+    include_trips=True
 )
 ```
 
-Drill-down on a selected candidate:
+Drill-down and valuation of a selected candidate, in the same step:
 ```python
 seats_aero(action="trips", availability_id="<selected_id>")
+award_value(points=75000, taxes="5.60 USD", cash=4200)
 ```
 
 ### Required Tools
 - `seats_aero`: Required to perform cached searches, trip segment drilldown, nonstop destination discovery, and live inventory queries.
-- `filesystem`: Required to read user wallet state (`pkm/wallet/`) and preferences.
+- `award_value`: CPP and value band for each candidate.
+- `filesystem`: Required to read the cards (`pkm/wallet/credit-card/`) and travel preferences (`pkm/wallet/travel/`).
+- `web_search`: Cash fares to value awards against.

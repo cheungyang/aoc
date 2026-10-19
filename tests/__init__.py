@@ -23,15 +23,6 @@ except ImportError:
         sys.modules['discord.ext.commands'] = MagicMock()
         sys.modules['discord.ui'] = MagicMock()
 
-if 'mcp' not in sys.modules:
-    sys.modules['mcp'] = MagicMock()
-    sys.modules['mcp.client'] = MagicMock()
-    sys.modules['mcp.client.stdio'] = MagicMock()
-
-if 'langchain_mcp_adapters' not in sys.modules:
-    sys.modules['langchain_mcp_adapters'] = MagicMock()
-    sys.modules['langchain_mcp_adapters.tools'] = MagicMock()
-
 # Mock croniter only when it is not installed: a mock accepts every cron
 # expression and returns mock run times, which hides real schedule bugs.
 try:

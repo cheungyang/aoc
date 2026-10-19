@@ -59,10 +59,10 @@ class TestTokenFile(unittest.TestCase):
 
     def test_load_push_identity_defaults_email(self):
         self._write_token()
-        identity = load_push_identity("cheungyang-bot", token_path=self.token_path)
-        self.assertEqual(identity.login, "cheungyang-bot")
-        self.assertEqual(identity.email, default_email_for("cheungyang-bot"))
-        self.assertEqual(identity.author, "cheungyang-bot <cheungyang-bot@users.noreply.github.com>")
+        identity = load_push_identity("owner-bot", token_path=self.token_path)
+        self.assertEqual(identity.login, "owner-bot")
+        self.assertEqual(identity.email, default_email_for("owner-bot"))
+        self.assertEqual(identity.author, "owner-bot <owner-bot@users.noreply.github.com>")
 
     def test_load_push_identity_requires_login(self):
         with self.assertRaises(PushIdentityError):

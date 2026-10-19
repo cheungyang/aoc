@@ -2,7 +2,8 @@
 
 Reads activity, sleep and body metrics from the Google Health API
 (health.googleapis.com/v4, the successor to the Fitbit Web API) and logs
-workout sessions. Shaped like `tools/home_assistant.py`: one tool, a batch of
+workout sessions. Shaped like home-steward's `home_assistant` tool
+(agents/home-steward/tools/home_assistant.py): one tool, a batch of
 instructions, a fixed action vocabulary, permission bundles declared beside the
 actions, and a guard chain that every write passes through.
 
@@ -335,7 +336,7 @@ WRITE_ACTIONS = {
 ACTION_TARGETS = {**READ_ACTIONS, **WRITE_ACTIONS}
 
 # Named bundles for agent.json, e.g. {"*": ["@observe"], "exercise": ["@log"]}.
-# Resolved by ToolsLoader; see core/loaders/permission_bundles.py.
+# Resolved by ToolsLoader; see core/permissions/bundles.py.
 PERMISSION_BUNDLES = {
     # Every read. Safe to run unattended.
     "@observe": sorted(READ_ACTIONS),

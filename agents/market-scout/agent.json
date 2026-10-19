@@ -11,12 +11,14 @@
   "tools": {
     "web_search": {},
     "yfinance": {},
+    "market_screen": {},
     "filesystem": {
       "pkm/wallet/stock": ["@write"]
     }
   },
   "skills": {
-    "market_data": { "preload": "full" }
+    "market_data": { "preload": "full" },
+    "tool_audit": {}
   },
   "voice": { "name": "en-US-Chirp3-HD-Charon" },
   "memory_topics": ["finance"],
@@ -26,16 +28,11 @@
       "kind": "prompt",
       "channel": "market-scout",
       "cron": "30 13 * * 1-5",
-      "precondition": {
-        "type": "always",
-        "reason": "Threshold checks need fresh post-market data from the yfinance tool, so the scan always runs."
-      },
+      "precondition": { "type": "market_screen" },
       "session_policy": "stateless",
       "prompt": [
-        "Review the tickers in pkm/wallet/stock/portfolio.md and pkm/wallet/stock/watchlist.md.",
-        "Following your market_data skill, call the yfinance tool once (action=quote) with all tickers, then apply the skill's Threshold Rule.",
-        "For Triggered tickers only, optionally drill down with yfinance history/earnings, then perform a web_search for news/macro/earnings.",
-        "Save a markdown report for each Triggered ticker under pkm/wallet/stock/{SYMBOL}.md and reply with the skill's triage table."
+        "Daily scan. The findings below are today's market_screen of your portfolio and watchlist; don't screen again.",
+        "Following your market_data skill, research only the Triggered tickers, append each one's entry to pkm/wallet/stock/{SYMBOL}.md, and reply with the triage table."
       ]
     }
   ]

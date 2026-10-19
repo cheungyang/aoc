@@ -4,6 +4,6 @@
   "emoji": "🕰️",
   "skill_id": "check_recurring_chores",
   "tools": {
-    "task_query": []
+    "recurring_chores_due": {}
   }
 }

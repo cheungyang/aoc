@@ -14,8 +14,8 @@ from core.util.git_ops import (
 from core.util.push_identity import PushIdentity, TOKEN_ENV_VAR
 
 BOT = PushIdentity(
-    login="cheungyang-bot",
-    email="cheungyang-bot@users.noreply.github.com",
+    login="owner-bot",
+    email="owner-bot@users.noreply.github.com",
     token="ghp_secret",
     token_path="/tmp/bot_token"
 )
@@ -41,7 +41,7 @@ class TestCommitAndPushAsMachineUser(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok)
 
         commit_cmd = mock_run.call_args_list[1][0][0]
-        self.assertIn("user.name=cheungyang-bot", commit_cmd)
+        self.assertIn("user.name=owner-bot", commit_cmd)
         # The machine user owns the history, so it overrides the caller's default author.
         self.assertIn(f"--author={BOT.author}", commit_cmd)
 
@@ -117,7 +117,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
     @patch('core.util.git_ops.run_cmd_async')
     async def test_passes_when_the_dry_run_push_is_accepted(self, mock_run):
         mock_run.side_effect = [
-            (0, "cheungyang-bot\n", ""),   # gh api user
+            (0, "owner-bot\n", ""),   # gh api user
             (0, "", "To https://github.com/owner/repo.git"),  # git push --dry-run
         ]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
@@ -126,7 +126,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.util.git_ops.run_cmd_async')
     async def test_the_probe_is_a_push_and_does_not_update_a_ref(self, mock_run):
-        mock_run.side_effect = [(0, "cheungyang-bot\n", ""), (0, "", "")]
+        mock_run.side_effect = [(0, "owner-bot\n", ""), (0, "", "")]
         await preflight_push_access("owner/repo", push_identity=BOT)
         argv = mock_run.await_args_list[1].args[0]
         self.assertIn("push", argv)
@@ -144,10 +144,10 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
     async def test_fails_when_token_belongs_to_someone_else(self, mock_run):
         # The whole point of the machine user is that the PR is not authored by the
         # reviewer; a token that resolves to the human silently defeats that.
-        mock_run.side_effect = [(0, "cheungyang\n", "")]
+        mock_run.side_effect = [(0, "owner\n", "")]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
         self.assertFalse(ok)
-        self.assertIn("cheungyang-bot", msg)
+        self.assertIn("owner-bot", msg)
 
     @patch('core.util.git_ops.run_cmd_async')
     async def test_a_denied_push_is_caught_before_any_llm_work(self, mock_run):
@@ -156,8 +156,8 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         # not scoped to the repo answers "true" there and 403s at the real push,
         # so this case used to pass preflight and burn a full implementation run.
         mock_run.side_effect = [
-            (0, "cheungyang-bot\n", ""),
-            (1, "", "remote: Permission to owner/repo.git denied to cheungyang-bot.\n"
+            (0, "owner-bot\n", ""),
+            (1, "", "remote: Permission to owner/repo.git denied to owner-bot.\n"
                     "fatal: unable to access ...: The requested URL returned error: 403"),
         ]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
@@ -168,8 +168,8 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
     @patch('core.util.git_ops.run_cmd_async')
     async def test_a_denied_push_names_the_fine_grained_pat_trap(self, mock_run):
         mock_run.side_effect = [
-            (0, "cheungyang-bot\n", ""),
-            (1, "", "remote: Permission to owner/repo.git denied to cheungyang-bot."),
+            (0, "owner-bot\n", ""),
+            (1, "", "remote: Permission to owner/repo.git denied to owner-bot."),
         ]
         _, msg = await preflight_push_access("owner/repo", push_identity=BOT)
         # Widening the token's permissions cannot fix this, so the message must
@@ -180,7 +180,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
     @patch('core.util.git_ops.run_cmd_async')
     async def test_an_unreachable_remote_is_not_reported_as_a_permission_problem(self, mock_run):
         mock_run.side_effect = [
-            (0, "cheungyang-bot\n", ""),
+            (0, "owner-bot\n", ""),
             (1, "", "fatal: unable to access ...: Could not resolve host: github.com"),
         ]
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)

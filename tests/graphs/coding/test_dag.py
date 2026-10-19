@@ -133,17 +133,17 @@ class TestOneManifestPerProject(unittest.TestCase):
     def test_a_project_name_becomes_one_folder_name(self):
         from graphs.coding.utils.dag import project_slug
 
-        for given in ("French Learning Cards", "french_learning_cards",
-                      "  French-Learning-Cards  "):
-            self.assertEqual(project_slug(given), "french-learning-cards", given)
+        for given in ("Demo Project", "demo_project",
+                      "  Demo-Project  "):
+            self.assertEqual(project_slug(given), "demo-project", given)
 
     def test_the_manifest_lives_beside_the_projects_specs(self):
         from graphs.coding.utils.dag import manifest_path_for_project
 
-        path = manifest_path_for_project("French Learning Cards")
+        path = manifest_path_for_project("Demo Project")
 
         self.assertTrue(
-            path.endswith("pkm/wiki/software/french-learning-cards/build_request.json"),
+            path.endswith("pkm/wiki/software/demo-project/build_request.json"),
             path
         )
 

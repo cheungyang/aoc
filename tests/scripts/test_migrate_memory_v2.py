@@ -54,10 +54,10 @@ class TestApply(MigrationCase):
 
     def items(self):
         return [
-            {"agent": "a", "file": "CONTEXT.md", "text": "Lives in San Jose.", "date": "2026-09-01", "tag": "profile"},
-            {"agent": "b", "file": "CONTEXT.md", "text": "lives in san jose", "date": "2026-09-10", "tag": "profile"},
-            {"agent": "a", "file": "CONTEXT.md", "text": "Parents visiting.", "date": "2026-09-01", "tag": "family",
-             "until": "2026-12-05"},
+            {"agent": "a", "file": "CONTEXT.md", "text": "Lives in Springfield.", "date": "2026-09-01", "tag": "profile"},
+            {"agent": "b", "file": "CONTEXT.md", "text": "lives in springfield", "date": "2026-09-10", "tag": "profile"},
+            {"agent": "a", "file": "CONTEXT.md", "text": "Guests visiting.", "date": "2026-09-01", "tag": "family",
+             "until": "2026-11-20"},
             {"agent": "a", "file": "MEMORY.md", "text": "Precedent.", "date": "2026-08-01", "tag": "private"},
             {"agent": "a", "file": "FEEDBACK.md", "text": "Be brief.", "date": "2026-08-01", "tag": "feedback"},
             {"agent": "a", "file": "MEMORY.md", "text": "Noise.", "date": "2026-08-01", "drop": True},
@@ -98,9 +98,9 @@ class TestApply(MigrationCase):
         self.assertEqual(problems, [])
         self.assertIn("wrote wiki/memory/TAGS.md", report)
         self.assertEqual(store.tag_names(self.pkm)[0], "food")
-        self.assertEqual([e.text for e in store.load(store.profile_scope(self.pkm)).entries], ["Lives in San Jose."])
+        self.assertEqual([e.text for e in store.load(store.profile_scope(self.pkm)).entries], ["Lives in Springfield."])
         [family] = store.load(store.topic_scope("family", self.pkm)).entries
-        self.assertEqual(family.until, datetime.date(2026, 12, 5))
+        self.assertEqual(family.until, datetime.date(2026, 11, 20))
         self.assertEqual([e.text for e in store.load(store.private_scope("a", PRIVATE, self.pkm)).entries], ["Precedent."])
         self.assertEqual([e.text for e in store.load(store.private_scope("a", FEEDBACK, self.pkm)).entries], ["Be brief."])
         self.assertEqual(store.load(store.private_scope("b", PRIVATE, self.pkm)).entries, [])

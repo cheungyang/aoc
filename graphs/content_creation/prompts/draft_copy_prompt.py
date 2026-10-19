@@ -11,7 +11,7 @@ def build_draft_copy_prompt(
     """Builds structured <playbook>, <current_state>, <assigned_task> prompt for graph-worker copywriting with strict XML output format."""
     playbook_sections = [
         f"You are the Content Creator drafting social media publication copy for the topic '{topic}'.",
-        "Draft engaging social post title, caption, Cantonese/English vocabulary pronunciation tips, and hashtags strictly following the creator instructions.",
+        "Draft engaging social post title, caption, vocabulary pronunciation tips (in the languages the creator instructions name), and hashtags strictly following the creator instructions.",
         "Output ONLY a machine-readable XML payload wrapped in <payload>...</payload> adhering strictly to the schema below without any conversational text outside the tags."
     ]
     if instructions_text:

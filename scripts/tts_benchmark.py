@@ -81,7 +81,7 @@ Sources (checked 2026-10-15):
 - Transcription: gemini-3.5-transcribe, verbatim mode, language_codes, inline audio:
   https://ai.google.dev/gemini-api/docs/transcribe
 
-Running on the NAS (Synology DS220+, Celeron J4025, no AVX): everything here is
+Running on the NAS (a low-power x86 CPU without AVX): everything here is
 already in the image (numpy, soundfile, edge-tts, and httpx, which comes with
 google-genai) except google-cloud-texttospeech, whose grpcio wheel is the one new
 native dependency. Smoke-test it on the NAS first:

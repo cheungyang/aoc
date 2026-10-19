@@ -30,8 +30,8 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     def test_bind_canonical_paths_validation(self):
         """Tests deterministic path binding at graph ingress."""
         paths = bind_canonical_paths(
-            "pkm/wiki/software/ayla-first-words",
-            "pkm/wiki/software/ayla-first-words/words/horse",
+            "pkm/wiki/software/first-words",
+            "pkm/wiki/software/first-words/words/horse",
             "horse"
         )
         self.assertTrue(paths["output_path"].endswith("words/horse"))
@@ -63,7 +63,7 @@ class TestInterNodeFlows(unittest.IsolatedAsyncioTestCase):
     async def test_audio_ingestion_to_ideation_path_flow(self):
         """Tests end-to-end path consistency from Audio Ingestion into Ideation."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = os.path.join(temp_dir, "ayla-first-words")
+            project_path = os.path.join(temp_dir, "first-words")
             words_dir = os.path.join(project_path, "words")
             horse_dir = os.path.join(words_dir, "horse")
             os.makedirs(horse_dir, exist_ok=True)

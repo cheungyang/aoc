@@ -11,8 +11,8 @@ PRIORITY_MAP = {
     "⏬": 5,
 }
 
-# Regex for task checkbox: matches "- [ ]", "* [ ]", "- [x]", "- [-]", etc. with optional leading whitespace
-TASK_LINE_REGEX = re.compile(r"^(\s*[-*]\s*\[([ xX\-])\]\s*)(.+)$")
+# Regex for task checkbox: matches "- [ ]", "* [ ]", "- [x]", "- [-]", "- [/]" (in progress), with optional leading whitespace
+TASK_LINE_REGEX = re.compile(r"^(\s*[-*]\s*\[([ xX\-/])\]\s*)(.+)$")
 
 # Regex for ticktick ID: %%[ticktick_id:: ID]%%, %%ticktick_id: ID%%, [ticktick_id:: ID]
 TICKTICK_ID_REGEX = re.compile(
@@ -43,6 +43,9 @@ MD_LINK_REGEX = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 
 # Comments %% ... %%
 COMMENT_REGEX = re.compile(r"%%.*?%%", re.DOTALL)
+
+# A bare URL at the end of a title, alone or in (...) or <...>, with the separator before it
+TRAILING_URL_REGEX = re.compile(r"[\s:|\-–—]*[(<]?(?:https?://|www\.)\S+?[)>]?\s*$")
 
 
 def is_task_line(line: str) -> bool:
@@ -149,6 +152,7 @@ def clean_title(content: str) -> str:
     - Removing Obsidian Tasks emoji metadata (✅, ❌, 📅, ⏳, ➕, 🛫, 🔁, 🔒, 🕸️, priorities)
     - Removing comments %%...%%
     - Cleaning up extra whitespace
+    - Dropping URLs at the end of the title, unless the title is only a URL
     """
     text = content
 
@@ -181,7 +185,15 @@ def clean_title(content: str) -> str:
 
     # 8. Clean up extra punctuation/spaces
     text = re.sub(r"\s+", " ", text).strip()
-    return text
+
+    # 9. Drop URLs trailing the title (raw_title keeps them); a title that is only a URL stays
+    trimmed = text
+    while True:
+        shorter = TRAILING_URL_REGEX.sub("", trimmed).strip()
+        if shorter == trimmed:
+            break
+        trimmed = shorter
+    return trimmed or text
 
 
 def parse_task_line(
@@ -205,8 +217,8 @@ def parse_task_line(
     check_char = m.group(2).lower()
     raw_content = m.group(3)
 
-    # Map status
-    if check_char == " ":
+    # Map status. In progress ("/") is still open work, so it counts as todo.
+    if check_char in (" ", "/"):
         status = "todo"
     elif check_char == "x":
         status = "completed"

@@ -1,25 +1,52 @@
 ---
 name: agent_creation
-description: Skill for creating new agents with required files and vault structures, ending with a Markdown report.
+description: Designs and creates a new agent from a worksheet that classifies each step of its workflow (config, skill, RULES.md, tool or scan, memory, schedule), ending with the classification table for the user to confirm.
 ---
 ## Core
 
-Use this skill only when the user explicitly requests the creation of a new agent persona.
+Use this skill when the user asks for a new agent. Plan first; write nothing until the user approves the plan.
 
 ### Guardrails
-- **Strict Approval**: NEVER create an agent or write configuration files without first presenting a detailed plan (purpose, tools, skills, SOUL, prompt cost) and receiving explicit user approval.
-- **Identity Consistency**: `SOUL.md` must strongly align with the description and tools in `agent.json`.
-- **System Isolation**: Do not modify existing agents or system files, except the routing entries a new channel requires (`update_permissions` rule 7).
+- Change no other agent or system file, except the routing entries a new channel needs (`update_permissions`).
+- `SOUL.md` must match the description and tools in `agent.json`.
+- Budgets: persona under 3,500 chars, preloaded skills under 6,000, a voice flow 2–3 model calls a turn (Reference).
 
-### Workflow
-1. Create `agents/<agent_id>/`.
-2. Build `agent.json` from the Reference template and write it by following the `update_permissions` skill.
-3. Write `SOUL.md` (persona, tone, boundaries), `AGENTS.md` (operating instructions, rules, priorities), `USER.md` (the human, and how to address them) and `IDENTITY.md` (Agent ID, Name, Emoji, Description).
-4. Create `pkm/agents/<agent_id>/memory_logs`, `pkm/agents/<agent_id>/MEMORY.md` and `pkm/agents/<agent_id>/FEEDBACK.md`.
-5. Report to the user in Markdown, as the Reference's Final Report describes.
+### Design worksheet
+1. List the workflow's steps: what starts each one (a message, voice, a schedule), what it reads, what it decides, what it writes.
+2. Classify each step with the table in AGENTS.md. Call `set_thinking("high", ...)` in the same step as the reads it needs; this is the heavy step.
+   - agent config: `agent.json` and the persona;
+   - skill: steps and decision logic;
+   - RULES.md: a number that expresses the user's preference;
+   - tool or scan: only when the code rule in AGENTS.md holds;
+   - memory topic: facts several agents share (`pkm/wiki/memory/TAGS.md`);
+   - schedule: recurring work, gated by a precondition or scan.
+3. Present the plan: the classification table, the prompt cost, and the model calls per workflow. Wait for approval.
+4. Draft the files in the layout (Reference): `agents/<agent_id>/` gets `agent.json`, `AGENTS.md`, `SOUL.md` and `IDENTITY.md`; `pkm/agents/<agent_id>/` gets `USER.md`, `memory_logs/`, `MEMORY.md` and `FEEDBACK.md`. Build `agent.json` from the template under `update_permissions`; schedules go through `update_schedule`.
+5. RULES.md defaults: give each threshold a key, a default and a plain-words description. Write `pkm/agents/<agent_id>/RULES.md` yourself, one `- key: value  # description` line each. The same keys go in the code spec, as `lib/rules.py`.
+6. Code (tools, scans, `lib/`, WORKFLOW.md): ask for it with `workflow_change`. Never write it yourself. A new tool is granted only after its PR merges, in `workflow_change`'s last step.
+7. Run `agent_lint` and fix what it finds before reporting done. Findings that wait on the PR (RULES.md keys no code reads yet, text naming a tool not built yet) stay; name them in the report.
+8. Report as the Final Report says, ending with the classification table for the user to confirm.
+
+Call `load_skill("agent_creation")` before writing `agent.json` or the report, for the template, the budgets and the report format.
+
+## Reference
+
+### Classifying a step
+The table in AGENTS.md decides. Examples:
+
+| Step | Kind | Why |
+|---|---|---|
+| Snap a load to a buildable weight | tool | arithmetic the model gets wrong at low thinking |
+| "Alert me on a 3% move" | RULES.md (`move_pct: 3`) | a number the user owns |
+| Pick which project to coach, and how | skill | judgment |
+| What a tool reads, computes and leaves out | WORKFLOW.md | the contract; it changes with the code |
+| Skip the 21:00 check-in when dinner is logged | scan | a schedule that would wake the model for nothing |
+| The user's cards, shared by two agents | memory topic | facts more than one agent needs |
+
+Safety limits stay in code, not RULES.md: they aren't preferences (an API budget, a duplicate check).
 
 ### Prompt Budget
-These files are in the system prompt on every turn, forever:
+Paid on every turn, forever:
 
 | File | Target | Hard ceiling |
 |---|---:|---:|
@@ -29,20 +56,32 @@ These files are in the system prompt on every turn, forever:
 | `IDENTITY.md` | 250 chars | 400 |
 | `INSTRUCTIONS.md` (if used) | 0 | 2500 |
 
-Keep authored persona under 3500 characters. Preloaded skill text (full bodies plus Core sections) is capped at 6,000 characters per agent; a test enforces it.
+Keep authored persona under 3500 characters. Preloaded skill text is capped at 6,000 characters per agent (a test enforces it).
+
+A paragraph written once is paid for thousands of times. Memory rides on the same prompt (the shared Profile, the agent's `memory_topics`, its `MEMORY.md` and `FEEDBACK.md`), about 2,000 tokens for an active agent. Each bound tool schema costs 130–550 tokens a turn. An on-device agent (`"provider": "local"`) must fit its prompt, schemas and conversation in about 4,096 tokens; above ~2,000 tokens of static prompt it can't run locally.
+
+- One precise sentence beats three hedging ones. Never state a rule in both `SOUL.md` and `AGENTS.md`.
+- Examples go in skills, which cost nothing until loaded; the persona never unloads.
+- Facts about the user never go in the repo (it's public). An agent's one `USER.md` lives in `pkm/agents/<agent_id>/`; facts several agents share go in the Profile and topics. Never pre-seed memory files.
+- Subscribe to `memory_topics` sparingly: each costs prompt on every turn.
+
+### Round-trip Budget
+Voice-hot agents target 2–3 model calls per user turn; the plan states each workflow's count. Checklist:
+1. List each workflow's sequential calls (tools called in one step count once).
+2. Fixed reads → a context tool, or a scan for a schedule.
+3. Math (dates, totals, thresholds) → code: a tool returns the numbers (the code rule in AGENTS.md).
+4. Independent calls → one step.
+5. `append` or `replace_block` over a read and an overwrite.
+6. Preload always-used skills.
+7. Scan-gated schedules, not `always`.
+8. Voice-hot agents speak one short sentence before tools.
 
 ### Config Decisions
-- `model`: a tier, never a version string: `FLASH_LITE` for narrow, high-volume work, `FLASH` for everyday reasoning, `PRO` only when the agent genuinely needs the strongest model.
+- `model`: a tier, never a version string: `FLASH_LITE` for narrow, high-volume work, `FLASH` for everyday reasoning, `PRO` only when the agent needs the strongest model.
 - `skills`: an object; the list form is rejected. `{"preload": "full"}` for a small skill used on nearly every run, `{"preload": "core"}` for a larger one used often, `{}` for rare ones.
-- `thinking`: usually omitted. Defaults are voice `low`, text `medium`, scheduled `high`; override a surface only when its work needs a different depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat.
+- `thinking`: usually omitted (defaults: voice `low`, text `medium`, scheduled `high`). Override a surface whose work needs another depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat, or `{"text": "low"}` when most turns are quick and one skill step raises it.
+- `set_thinking` (tool): only for a mixed workload, quick turns plus one heavy step (a plan, a many-constraint choice); that skill names the step and level.
 - `voice`: a user-facing agent whose name suggests a voice gets a Chirp 3 HD voice matching its gender and personality; neutral names (Concierge, Rio) omit it.
-
-Call `load_skill("agent_creation")` before writing `agent.json` or the final report, for the template, its constraints and the report format.
-
-## Reference
-
-### Overview
-This skill guides agents on how to create a new agent in the system, including workspace files and Obsidian vault folders. It ends with a short Markdown report for the user.
 
 ### agent.json Template
 You MUST use this exact JSON structure:
@@ -76,61 +115,45 @@ You MUST use this exact JSON structure:
 - Do not explicitly add tools to the `tools` object if they are already inherited via the skills in `skills` (e.g., `web_search` is inherited via the `research` skill).
 - `skills` MUST be an object keyed by skill id. Each value is `{}` (on demand: the agent sees a one-line entry and calls `load_skill`), `{"preload": "full"}` (the whole SKILL.md body is in every prompt) or `{"preload": "core"}` (only its `## Core` section is; `load_skill` returns the rest). Preload only skills the agent uses on most runs, keep the agent's preloaded text within 6,000 characters, and preload as `core` only skills split into `## Core` / `## Reference` (see `skill_creation`).
 - Omit `schedules` unless the agent needs recurring work. To add schedules, load the `update_schedule` skill: every entry needs a `kind` and, for prompt schedules, a `precondition`, and it must pass `schedule_validate` before it is saved. Invalid entries are rejected at load and never run.
-- The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite` or an
-  on-device build id. This holds for every provider. Valid tiers are defined per provider in
-  `core/util/models.py`; omit the field to accept the default. Choose `FLASH_LITE` for narrow,
-  high-volume work, `FLASH` for everyday reasoning, and `PRO` only when the agent genuinely
-  needs the strongest model.
-- The `provider` field selects where the model runs. Omit it for Gemini. `"local"` routes the
-  agent to the on-device server configured by `LOCAL_LLM_BASE_URL`. Because both providers
-  answer the same tier names, moving an agent on-device is adding this one key and nothing
-  else — its `model` line is untouched.
-- `thinking` (optional, rare) overrides the code defaults (voice `low`, text `medium`, scheduled `high`) for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. Use it only when the agent's typed or scheduled work needs a different depth than the default, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
-- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Give one to user-facing agents whose name suggests a voice, matching gender and personality. Agents with neutral names (e.g. Concierge, Rio) omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
+- The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite` or an on-device build id. This holds for every provider. Valid tiers are defined per provider in `core/util/models.py`; omit the field to accept the default.
+- The `provider` field selects where the model runs. Omit it for Gemini. `"local"` routes the agent to the on-device server configured by `LOCAL_LLM_BASE_URL`. Both providers answer the same tier names, so moving an agent on-device is adding this one key and nothing else.
+- `thinking` (optional, rare) overrides the code defaults for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
+- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Agents with neutral names omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
 
 *Before setting `"provider": "local"`, know two things:*
-- **The server handles one request at a time.** Local agents queue behind each other, so keep
-  the local roster small and prefer low-volume, single-purpose agents.
-- **Never put a mid-turn caller on it.** A component that invokes a model *inside* another turn's
-  flow — `graph-worker-low` (used by `ContextPruner`) — would queue behind the very turn it is
-  serving, stalling it. It stays on Gemini.
+- **The server handles one request at a time.** Local agents queue behind each other, so keep the local roster small and prefer low-volume, single-purpose agents.
+- **Never put a mid-turn caller on it.** A component that invokes a model *inside* another turn's flow — `graph-worker-low` (used by `ContextPruner`) — would queue behind the very turn it is serving, stalling it. It stays on Gemini.
 
-### Why the Prompt Budget Is Strict
-A paragraph written once is paid for thousands of times. Total authored persona under 3500 characters is ~875 tokens.
+### Layout
+```
+agents/<agent_id>/
+  agent.json, AGENTS.md, SOUL.md, IDENTITY.md   the definition: yours to write
+  WORKFLOW.md          the contract: what each tool reads, computes and leaves out, with examples the tests run
+  tools/<name>.py      its tools, loaded only for this agent, when granted
+  preconditions/<type>.py   its scans, only for its own schedules
+  lib/                 helpers its tools and scans share
+  lib/rules.py         the thresholds its code reads: keys, defaults, descriptions
+pkm/agents/<agent_id>/
+  USER.md              about its human: never in the repo, which is public
+  RULES.md             the user's values for those thresholds; the agent edits a line once the user agrees
+  MEMORY.md, FEEDBACK.md, memory_logs/
+```
+Python imports the code as `agents.<agent_pkg>` (`agent_pkg`: the id with `_` for `-`). `tools/` at the repo root holds only tools general enough to share. You can read agent code but not change it: the code, its tests and WORKFLOW.md change through a reviewed PR (`workflow_change`).
 
-- Memory is appended to the same prompt: the shared Profile, the topics in
-  `memory_topics`, and the agent's own `MEMORY.md` / `FEEDBACK.md`. The dream
-  keeps each within a budget, but together they add up to ~2,000 tokens for an
-  active agent. Whatever you author sits on top of that.
-- Measured across the current roster, the largest agents reach ~4,500 tokens of
-  system prompt plus ~2,700 of tool schemas. The smallest do the same class of
-  work at ~800 + 636.
-- An agent intended to run on-device (`"provider": "local"`) must fit its whole
-  prompt, tool schemas *and* conversation inside the server's window, commonly
-  4096 tokens. Agents above ~2000 tokens of static prompt cannot run locally at
-  all.
-
-### Practical Rules
-- Prefer one precise sentence to three hedging ones. Do not restate the same
-  rule in both `SOUL.md` and `AGENTS.md`.
-- Do not paste examples into the persona if a skill can carry them — on-demand
-  skills cost nothing until loaded; the persona never unloads.
-- Put durable behaviour in the authored files and let the dream cycle own
-  memory. Never pre-seed the vault files. Facts about the user belong in the
-  shared Profile/topics, not in `USER.md`.
-- Set `memory_topics` in `agent.json` to the shared topics (from
-  `pkm/wiki/memory/TAGS.md`) the agent needs to read. List each one; subscribe
-  sparingly, since every topic costs prompt on every turn.
-- Fewer tools is also a prompt saving: each bound tool schema costs 130–550
-  tokens on every turn.
+RULES.md is a plain list, one rule per line, `- key: value  # description`. A table rule is `- key:` with indented `  - name: value` lines below it. A missing line means the default applies. Every agent can already write its own `pkm/agents/<agent_id>/` folder, so RULES.md needs no grant.
 
 ### Final Report
-Once the files and directories are written, reply in plain Markdown, never XML (your reply is shown in Discord):
+Once the files are written, reply in plain Markdown, never XML (your reply is shown in Discord):
 - The new agent's id and what it specializes in, with its tools and skills.
-- The files created: `agents/<agent_id>/agent.json`, `SOUL.md`, `AGENTS.md`, `USER.md` and `IDENTITY.md`, plus `pkm/agents/<agent_id>/MEMORY.md` and `FEEDBACK.md`.
+- The files created: `agents/<agent_id>/agent.json`, `SOUL.md`, `AGENTS.md` and `IDENTITY.md`, plus `pkm/agents/<agent_id>/USER.md`, `MEMORY.md`, `FEEDBACK.md` and `RULES.md`.
+- The code asked for with `workflow_change`, and its PR link once there is one.
+- Its round-trip budget (model calls per workflow), and any `agent_lint` finding you left in place, with why.
 - Any filesystem errors.
+- Last, the classification table for the user to confirm: step | kind | where it lives | why.
 
-**Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about persona design, context size or the user's preferences.
+**Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about agent design, context size or the user's preferences.
 
 ### Required Tools
-- `filesystem`: Required to read reference files and write/overwrite configuration files in both `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
+- `filesystem`: to read reference files (the tiers in `core/util/models.py`, the voice catalog in `core/voice/settings.py`) and write the files in `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
+- `set_thinking`: high for the classification step.
+- `agent_lint`: to check the new agent's files, grants and budgets before the final report.

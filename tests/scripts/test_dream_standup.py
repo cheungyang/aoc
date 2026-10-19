@@ -159,7 +159,7 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("Extract & Decide", prompt)
         self.assertNotIn("dream skill", prompt)
         # Core only: the Reference example is not repeated in every dream.
-        self.assertNotIn("Parents visiting until early December", prompt)
+        self.assertNotIn("Reply Example", prompt)
 
     def test_rules_require_a_core_section(self):
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
@@ -201,9 +201,9 @@ class TestRendering(unittest.TestCase):
         self.assertIn("🚨 Dream failed 2 nights in a row: boom", row)
 
     def test_report_details_and_profile_changes(self):
-        report = dream_ops.Report(archived={"evicted": 1}, profile_changes=["PROFILE + Lives in San Jose."])
+        report = dream_ops.Report(archived={"evicted": 1}, profile_changes=["PROFILE + Lives in Springfield."])
         row = self.row(status="Dreamed", learnings="x", report=report)
-        self.assertEqual(row, "🌼 Daisy | 🌙 Dreamed -> Key Update: x (evicted 1)\n    PROFILE + Lives in San Jose.")
+        self.assertEqual(row, "🌼 Daisy | 🌙 Dreamed -> Key Update: x (evicted 1)\n    PROFILE + Lives in Springfield.")
 
     def test_header_body_and_sections(self):
         output = render(
@@ -259,9 +259,9 @@ class TestDream(VaultMixin, unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_entries_are_shown_with_ids(self):
         self.log("day-planner")
-        store.save(store.profile_scope(), MemoryFile([Entry(PROFILE, "Lives in San Jose.", "main", TODAY, TODAY)]))
+        store.save(store.profile_scope(), MemoryFile([Entry(PROFILE, "Lives in Springfield.", "main", TODAY, TODAY)]))
         _, call = await self._dream(dream_xml('<confirm id="e1"/>'))
-        self.assertIn('<entry id="e1" tag="profile">Lives in San Jose.</entry>', call.await_args.kwargs["prompt"])
+        self.assertIn('<entry id="e1" tag="profile">Lives in Springfield.</entry>', call.await_args.kwargs["prompt"])
         self.assertEqual(store.load(store.profile_scope()).entries[0].count, 2)
 
     async def test_no_new_memories_consumes_the_logs_and_writes_nothing(self):

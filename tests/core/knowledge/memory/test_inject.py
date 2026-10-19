@@ -45,12 +45,12 @@ class TestInject(unittest.TestCase):
         self.assertIn("could not check memory_topics for a: unreadable", out.getvalue())
 
     def test_renders_facts_without_metadata(self):
-        self.put(store.profile_scope(self.pkm), "Lives in San Jose.")
+        self.put(store.profile_scope(self.pkm), "Lives in Springfield.")
         self.put(store.topic_scope("food", self.pkm), "Oat milk OK.", "No cilantro.")
         self.put(store.private_scope("a", PRIVATE, self.pkm), "Precedent.")
         self.put(store.private_scope("a", FEEDBACK, self.pkm), "Be brief.")
 
-        self.assertEqual(inject.render_profile(self.pkm), "- Lives in San Jose.")
+        self.assertEqual(inject.render_profile(self.pkm), "- Lives in Springfield.")
         self.assertEqual(inject.render_topics(["food", "travel"], self.pkm), "### food\n- Oat milk OK.\n- No cilantro.")
         self.assertEqual(inject.render_memory("a", self.pkm), "- Precedent.")
         self.assertEqual(inject.render_feedback("a", self.pkm), "- Be brief.")

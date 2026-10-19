@@ -16,13 +16,12 @@
             "channel": "project-planning",
             "cron": "0 9 * * 1,3,5",
             "precondition": {
-                "type": "project_list_non_empty",
-                "status": "executing"
+                "type": "projects_attention"
             },
             "session_policy": "persistent",
             "prompt": [
-                "Ask goal-setter to view active executing projects using project_query tool,",
-                "pick the one needing most attention, follow your coach_project skill to update strategy,",
+                "Ask goal-setter to pick the executing project to coach from the findings' ranking with its coach_project skill",
+                "(the findings carry the first one's project_context), update its dossier,",
                 "and proactively start a coaching session message for it."
             ]
         }
@@ -30,11 +29,14 @@
     "tools": {
         "filesystem": {
             "pkm/vault/projects": ["@write"]
-        }
+        },
+        "project_query": {},
+        "task_query": {}
     },
     "skills": {
         "coach_project": { "preload": "full" },
-        "wiki_query": { "preload": "core" }
+        "wiki_query": { "preload": "core" },
+        "tool_audit": {}
     },
     "voice": { "name": "en-US-Chirp3-HD-Laomedeia" }
 }

@@ -47,6 +47,21 @@ class TestScheduleState(unittest.TestCase):
         from core.knowledge.memory import sqlite_session_store
         self.assertEqual(ScheduleState().db_path, sqlite_session_store.DEFAULT_DB_PATH)
 
+    def test_a_notice_is_claimed_once_per_schedule_issue_and_day(self):
+        self.assertTrue(self.state.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
+        self.assertFalse(self.state.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
+        # A fresh connection (a restart) remembers it.
+        again = ScheduleState(self.state.db_path)
+        self.assertFalse(again.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
+        self.assertTrue(again.claim_notice("x", "criteria.md: names no state", "2026-10-19"))
+        self.assertTrue(again.claim_notice("y", "criteria.md: names no state", "2026-10-18"))
+        self.assertTrue(again.claim_notice("x", "another issue", "2026-10-18"))
+
+    def test_a_released_notice_can_be_claimed_again(self):
+        self.assertTrue(self.state.claim_notice("x", "broken", "2026-10-18"))
+        self.state.release_notice("x", "broken", "2026-10-18")
+        self.assertTrue(self.state.claim_notice("x", "broken", "2026-10-18"))
+
 
 if __name__ == "__main__":
     unittest.main()

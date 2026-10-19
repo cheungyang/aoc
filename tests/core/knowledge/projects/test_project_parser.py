@@ -126,6 +126,13 @@ class TestProjectParser(unittest.TestCase):
         fm_st, _ = extract_status({"status": "in-progress"}, [])
         self.assertEqual(fm_st, "executing")
 
+        # The tag's form in the status property reads like the tag; raw keeps the vault's text
+        prop_st, prop_raw = extract_status({"status": "s/✊Executing"}, ["c/⏫2026"])
+        self.assertEqual(prop_st, "executing")
+        self.assertEqual(prop_raw, "s/✊Executing")
+        paused, _ = extract_status({"status": "#s/⏸️Pause"}, [])
+        self.assertEqual(paused, "paused")
+
         # Implied active when commitment exists but no status tag
         implied_st, implied_raw = extract_status({}, ["c/🔺2026"], has_commitments=True)
         self.assertEqual(implied_st, "executing")

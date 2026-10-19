@@ -98,28 +98,32 @@ def read_only_actions() -> Dict[str, set]:
     """Per tool, the actions a read-only replay allows; anything else is refused.
 
     Taken from each tool's own read bundle, or from the `READ_ACTIONS` every
-    tool that can write declares, so a new read action or a new write tool
-    needs no change here. Tools that declare neither (yfinance, seats_aero,
-    zillow_query, ...) have no write actions to guard.
+    tool that can write declares, in tools/ and in each agent's own tools/, so a
+    new read action or a new write tool needs no change here. Tools that declare
+    neither (yfinance, seats_aero, zillow_query, ...) have no write actions to guard.
     """
     import importlib
+    import importlib.util
 
-    from tools import filesystem, home_assistant
+    from core.loaders.tools_loader import ToolsLoader
+
+    loader = ToolsLoader()
+
+    def module(tool):
+        return importlib.import_module(loader.module_path(tool))
 
     allowed = {
-        "filesystem": set(filesystem.PERMISSION_BUNDLES["@read"]),
-        "home_assistant": set(home_assistant.PERMISSION_BUNDLES["@observe"]),
+        "filesystem": set(module("filesystem").PERMISSION_BUNDLES["@read"]),
+        "home_assistant": set(module("home_assistant").PERMISSION_BUNDLES["@observe"]),
         "bash": set(),
     }
-    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools")
-    for filename in sorted(os.listdir(tools_dir)):
-        tool = filename[:-3]
-        if not filename.endswith(".py") or filename.startswith("_") or tool in allowed:
-            continue
-        with open(os.path.join(tools_dir, filename), encoding="utf-8") as f:
+    for tool in sorted((set(loader._discover_tools()) | set(loader._agent_tools())) - set(allowed)):
+        # The module's file, without importing it: agent folders keep their hyphens.
+        origin = importlib.util.find_spec(loader.module_path(tool)).origin
+        with open(origin, encoding="utf-8") as f:
             declares = re.search(r"^READ_ACTIONS\b", f.read(), re.MULTILINE)
         if declares:  # import only the tools that declare it
-            allowed[tool] = set(importlib.import_module(f"tools.{tool}").READ_ACTIONS)
+            allowed[tool] = set(module(tool).READ_ACTIONS)
     return allowed
 
 
@@ -152,6 +156,8 @@ def guard_writes() -> None:
 
     def check_permission(self, ctx, tool_id, action_name=None, path=None, **kwargs):
         allowed = allowed_by_tool.get(tool_id)
+        if kwargs.get("probe"):  # a question about what's allowed, not an action
+            return original(self, ctx, tool_id, action_name, path, **kwargs)
         if allowed is not None and action_name is not None and action_name not in allowed:
             BLOCKED_WRITES.append((tool_id, action_name, path))
             print(f"[replay] refused {tool_id}.{action_name} on {path} (read-only replay)", file=sys.stderr)
@@ -388,13 +394,13 @@ def _words(text: str) -> List[str]:
 
 def _required_names(reply: str) -> List[str]:
     """Named items of the reply: bold phrases, runs of capitalized words
-    ("Point Reyes", "Five Guys"), and single capitalized words in list items
-    ("Sarah", "Goldbelly").
+    ("Point Reyes", "Sample Diner"), and single capitalized words in list items
+    ("Pat", "Teahouse").
 
     Not counted: headings; field labels, which are short or repeat on every
     item ("**Due Date**:") -- a longer one-off label is the item's own name;
     and a single capitalized word that opens a sentence or phrase, or sits in
-    running prose, as often a greeting ("Good morning Alva") or a stressed
+    running prose, as often a greeting ("Good morning Sam") or a stressed
     word as a name.
     """
     text = re.sub(r"```.*?```|`[^`]*`|https?://\S+|\]\([^)]*\)", " ", reply, flags=re.DOTALL)

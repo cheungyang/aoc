@@ -29,12 +29,12 @@ class TestCodingAdapters(unittest.TestCase):
         self.assertEqual(res["build_request_path"], "")
 
     def test_the_project_name_resolves_to_that_projects_queue(self):
-        res = prepare_input(query="tick", project_name="French Learning Cards")
+        res = prepare_input(query="tick", project_name="Demo Project")
 
         self.assertEqual(res["error_message"], "")
         self.assertTrue(
             res["build_request_path"].endswith(
-                "pkm/wiki/software/french-learning-cards/build_request.json"
+                "pkm/wiki/software/demo-project/build_request.json"
             ),
             res["build_request_path"]
         )
@@ -42,7 +42,7 @@ class TestCodingAdapters(unittest.TestCase):
     def test_an_explicit_manifest_wins_over_the_project_name(self):
         res = prepare_input(
             query="tick",
-            project_name="french-learning-cards",
+            project_name="demo-project",
             build_request_path="pkm/wiki/software/other/build_request.json"
         )
 

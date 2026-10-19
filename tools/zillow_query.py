@@ -13,6 +13,10 @@ from core.util.config import Config
 
 BASE_URL = "https://zillow-property-data1.p.rapidapi.com/v1"
 RAPIDAPI_HOST = "zillow-property-data1.p.rapidapi.com"
+# Zillow's amounts are US dollars. The reply writes these fields "USD 849,000",
+# with the decimals each shows; the helpers property-scout imports keep plain numbers.
+CURRENCY = "USD"
+MONEY_FIELDS = {"price": 0, "hoa_fee": 0, "rent_zestimate": 0, "estimated_annual_gross_rent": 0, "price_per_sqft": 2}
 
 
 @tool
@@ -72,7 +76,9 @@ def zillow_query(
         poll_interval: Seconds between poll attempts (default: 2.0).
 
     Returns:
-        Structured XML-wrapped JSON response with properties, metrics, and any errors.
+        Structured XML-wrapped JSON response with properties, metrics, and any errors. Money reads
+        "USD 700,000": price, hoa_fee and rent_zestimate (both monthly), estimated_annual_gross_rent,
+        and price_per_sqft with cents. Zillow's other amounts are US dollars too.
     """
     # Permission verification. Identity comes from the execution context, so this can no
     # longer be skipped by omitting an argument.
@@ -318,6 +324,20 @@ def _enrich_property(prop: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 
+def _with_usd(prop: Dict[str, Any]) -> Dict[str, Any]:
+    """A copy of `prop` with each money field written "USD 700,000", with the decimals MONEY_FIELDS gives.
+
+    For the reply only. A field that isn't a number (missing, None) stays as it was.
+    """
+    labeled = dict(prop)
+    for key, decimals in MONEY_FIELDS.items():
+        value = prop.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            sign = "-" if value < 0 else ""
+            labeled[key] = f"{sign}{CURRENCY} {abs(value):,.{decimals}f}"
+    return labeled
+
+
 def _poll_job_results(
     headers: Dict[str, str],
     job_id: str,
@@ -368,8 +388,7 @@ def _format_completed_response(raw_data: Dict[str, Any], search_criteria: Option
         if isinstance(item, dict):
             prop = item.get("property")
             if prop and isinstance(prop, dict):
-                enriched = _enrich_property(prop)
-                properties_list.append(enriched)
+                properties_list.append(_with_usd(_enrich_property(prop)))
 
     payload_data: Dict[str, Any] = {
         "job_id": job_id,

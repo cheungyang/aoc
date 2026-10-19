@@ -5,7 +5,7 @@ class TestCodingSchemas(unittest.TestCase):
     def test_task_envelope_structure(self):
         task: TaskEnvelope = {
             "task_id": "TASK-01",
-            "project_name": "egm_coding_graph",
+            "project_name": "demo_project",
             "feature_name": "window_id",
             "spec_path": "wiki/software/specs/feature.md",
             "dependencies": ["TASK-00"],
@@ -14,7 +14,7 @@ class TestCodingSchemas(unittest.TestCase):
             "acceptance_criteria": "Given X When Y Then Z",
             "status": "in_review",
             "run_id": "run_8F2A",
-            "branch_name": "feat/egm/TASK-01_run_8F2A",
+            "branch_name": "feat/demo/TASK-01_run_8F2A",
             "pr_url": "https://github.com/org/repo/pull/1",
             "commit_url": "https://github.com/org/repo/commit/sha123",
             "error_message": None
@@ -28,7 +28,7 @@ class TestCodingSchemas(unittest.TestCase):
     def test_coding_state_structure(self):
         state: CodingState = {
             "build_request_path": "pkm/wiki/software/build_request.json",
-            "project_name": "egm_coding_graph",
+            "project_name": "demo_project",
             "max_concurrency": 1,
             "queue": [],
             "run_id": "run_8F2A",

@@ -48,7 +48,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         runner.voice_manager.connection.join = AsyncMock()
         
         # User joins day-planning-voice
-        mock_member = MagicMock(bot=False, display_name="Alva")
+        mock_member = MagicMock(bot=False, display_name="Sam")
         mock_before = MagicMock(channel=None)
         mock_channel = MagicMock(name="day-planning-voice")
         mock_channel.name = "day-planning-voice"
@@ -191,11 +191,11 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_starter = MagicMock()
         mock_starter.id = 1111111111111111111
-        mock_starter.author = MagicMock(display_name="Alva")
+        mock_starter.author = MagicMock(display_name="Sam")
         mock_starter.content = "Initial topic outline"
 
         mock_thread = MagicMock(spec=discord.Thread)
-        mock_thread.id = 1541110915540324533
+        mock_thread.id = 123456789012345678
         mock_thread.name = "AI thread"
         mock_thread.parent = MagicMock()
         mock_thread.parent.name = "topic-research"
@@ -226,7 +226,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         await runner.on_message(mock_message)
 
         mock_agent.execute_stream.assert_called_once()
-        self.assertIn('[Thread starter message from Alva: "Initial topic outline"]', captured_payload)
+        self.assertIn('[Thread starter message from Sam: "Initial topic outline"]', captured_payload)
         self.assertIn("Let's begin chapter 1", captured_payload)
 
     @patch('core.channel.discord.runner.commands.Bot')
@@ -503,11 +503,11 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         mock_starter = MagicMock()
         mock_starter.id = 1111111111111111111
-        mock_starter.author = MagicMock(display_name="Alva")
+        mock_starter.author = MagicMock(display_name="Sam")
         mock_starter.content = "Initial topic outline"
 
         mock_thread = MagicMock(spec=discord.Thread)
-        mock_thread.id = 1541110915540324533
+        mock_thread.id = 123456789012345678
         mock_thread.name = "AI thread"
         mock_thread.parent = MagicMock()
         mock_thread.parent.name = "topic-research"

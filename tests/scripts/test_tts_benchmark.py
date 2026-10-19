@@ -128,9 +128,9 @@ def test_term_found_ignores_spacing_both_ways():
 
 
 def test_term_found_uses_alternates_and_rejects_absent_terms():
-    hyp = tb.normalize_words("Nvidia is down six point two percent")
-    assert not tb.term_found(["NVDA"], hyp)
-    assert tb.term_found(["NVDA", "Nvidia"], hyp)
+    hyp = tb.normalize_words("Exxon is down six point two percent")
+    assert not tb.term_found(["XOM"], hyp)
+    assert tb.term_found(["XOM", "Exxon"], hyp)
     assert not tb.term_found(["gai lan"], tb.normalize_words("garlic guy lawn"))
 
 

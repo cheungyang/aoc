@@ -9,10 +9,15 @@
     "meal-planning",
     "general"
   ],
-  "tools": {},
+  "tools": {
+    "filesystem": {
+      "pkm/wallet/kitchen/": ["@read"]
+    }
+  },
   "skills": {
     "manage_kitchen_inventory": { "preload": "full" },
-    "recommend_meals": { "preload": "full" }
+    "recommend_meals": { "preload": "full" },
+    "tool_audit": {}
   },
   "voice": { "name": "en-US-Chirp3-HD-Sadachbia" },
   "schedules": [
@@ -21,14 +26,14 @@
       "kind": "prompt",
       "channel": "meal-planning",
       "cron": "0 21 * * *",
+      "description": "Ask what the family had for dinner, unless tonight's dinner is already logged.",
       "precondition": {
-        "type": "always",
-        "reason": "Nightly check-in that asks the user what they cooked; the question itself is the point."
+        "type": "dinner_checkin"
       },
       "session_policy": "stateless",
       "prompt": [
-        "Ask meal-planner to ask the user what they cooked for dinner tonight.",
-        "Upon reply, deduce ingredients, update inventory, and propose 3 new dinner ideas."
+        "Nightly dinner check-in: ask the user, in one short question, what they had for dinner tonight (cooked or eaten out).",
+        "Don't call tools for this; their answer starts the nightly check-in."
       ]
     }
   ]

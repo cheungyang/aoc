@@ -1,11 +1,11 @@
 {
   "skill_id": "recommend_meals",
   "name": "Recommend Meals",
-  "description": "Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.",
+  "description": "Suggests 3 flexible, healthy dinner ideas in Traditional Chinese from what's in the kitchen, what the family ate lately and their learned palate.",
   "emoji": "🍱",
   "tools": {
-    "filesystem": {
-      "pkm/wallet/kitchen": ["@read", "append"]
-    }
+    "kitchen_snapshot": {},
+    "kitchen_inventory": {},
+    "set_thinking": {}
   }
 }

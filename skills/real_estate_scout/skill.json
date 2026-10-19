@@ -1,9 +1,10 @@
 {
   "skill_id": "real_estate_scout",
   "name": "Real Estate Scout",
-  "description": "Guides the agent to proactively query active real estate listings, evaluate them against strict criteria, and generate Markdown property reports.",
+  "description": "Screens active listings against the user's criteria with property_screen, gives each match a binary verdict, and archives every verdict as a report or a pass-log line.",
   "emoji": "🏠",
   "tools": {
+    "property_screen": {},
     "zillow_query": {},
     "filesystem": {
       "pkm/wallet/real-estate/": ["@write"]

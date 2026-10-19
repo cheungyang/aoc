@@ -49,7 +49,7 @@ def seats_aero(
         Optional args: cabins ('economy,premium,business,first'), sources ('aeroplan,united,american,flyingblue,...'),
         carriers ('NH,JL,BA,...'), only_direct_flights (bool), order_by ('lowest_mileage'), take, skip, cursor,
         include_trips (bool), include_filtered (bool).
-    - 'trips' (or 'get_trips'): Retrieves flight-level itinerary details (flight numbers, duration, stops, exact taxes, aircraft, booking links) from an Availability object ID.
+    - 'trips' (or 'get_trips'): Retrieves flight-level itinerary details (flight numbers, duration, stops, exact taxes with their ISO currency code, aircraft, booking links) from an Availability object ID.
         Args: availability_id (required), include_filtered (bool).
     - 'destinations' (or 'get_destinations'): Discovers nonstop routes reachable from (or to) an airport and lowest points cost per cabin across all sources.
         Args: exactly one of origin_airport OR destination_airport.
@@ -385,9 +385,7 @@ def _format_trips_list(trips_raw: list, max_trips: int = 15) -> list:
         duration_mins = trip.get("TotalDuration", 0)
         dur_str = f"{duration_mins // 60}h {duration_mins % 60}m" if duration_mins else ""
 
-        taxes_raw = trip.get("TotalTaxes", 0)
-        taxes_curr = trip.get("TaxesCurrencySymbol") or "$"
-        taxes_formatted = f"{taxes_curr}{taxes_raw / 100:.2f}" if taxes_raw else "N/A"
+        taxes_formatted = _taxes_label(trip.get("TotalTaxes", 0), trip.get("TaxesCurrency"), trip.get("TaxesCurrencySymbol"))
 
         formatted.append({
             "trip_id": trip.get("ID"),
@@ -405,6 +403,22 @@ def _format_trips_list(trips_raw: list, max_trips: int = 15) -> list:
             "segments": segments,
         })
     return formatted
+
+
+def _taxes_label(taxes_cents: Any, currency: Optional[str], symbol: Optional[str]) -> str:
+    """Taxes with their ISO code, as award_value reads them: "56.20 CAD".
+
+    Seats.aero gives taxes in cents with the currency's ISO code. Its symbol alone
+    ("$") can be USD, CAD or AUD, so without a code the currency is left open.
+    """
+    if not taxes_cents:
+        return "N/A"
+    amount = f"{taxes_cents / 100:.2f}"
+    code = (currency or "").strip().upper()
+    if len(code) == 3 and code.isascii() and code.isalpha():
+        return f"{amount} {code}"
+    shown = f", shown as '{symbol}'" if symbol else ""
+    return f"{amount} (currency not given{shown})"
 
 
 def _handle_get_destinations(headers: dict, origin_airport: str, destination_airport: str) -> str:

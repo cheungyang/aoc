@@ -23,7 +23,7 @@ Pick the first unresolved item in the `review_queue` and evaluate its `type`:
 
 **A. If `type` is `duplicate_candidate` (Semantic Overlap):**
 - Use `vault_search` or `filesystem` (`read`) to fetch the content of the flagged files.
-- **Clear false positive:** if the two notes are plainly distinct concepts that only share vocabulary (e.g. `Ayla` vs `Kotlin`), don't ask: dismiss it yourself (Step 3, with `"by": "wiki-gardener"`), mention it in one line, and move on. When in doubt, ask.
+- **Clear false positive:** if the two notes are plainly distinct concepts that only share vocabulary (e.g. `Apple` vs `Android`), don't ask: dismiss it yourself (Step 3, with `"by": "wiki-gardener"`), mention it in one line, and move on. When in doubt, ask.
 - **Present to User:** Briefly summarize both files and highlight the overlap. Ask the user how to resolve it.
   - *Example:* "I found a 95% similarity between `Multi-Agent.md` and `Agent_Routing.md`. Would you like me to merge them, keep one, or keep both as distinct concepts?"
 - **Execute:** Based on the user's answer, use `filesystem` to `overwrite` the target file with the merged text and `delete` the redundant file.

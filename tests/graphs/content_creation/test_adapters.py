@@ -16,13 +16,13 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
 
     def test_prepare_input_with_project_and_output_path(self):
         input_data = prepare_input(
-            "topic: Puppy, project_path: pkm/wiki/software/toddler-tales, output_path: pkm/wiki/software/toddler-tales/words/puppy",
+            "topic: Puppy, project_path: pkm/wiki/software/first-words, output_path: pkm/wiki/software/first-words/words/puppy",
             caller="main-bot",
             session_id="test_sess_1"
         )
         self.assertEqual(input_data["topic"], "puppy")
-        self.assertEqual(input_data["project_path"], normalize_path("pkm/wiki/software/toddler-tales"))
-        self.assertEqual(input_data["output_path"], normalize_path("pkm/wiki/software/toddler-tales/words/puppy"))
+        self.assertEqual(input_data["project_path"], normalize_path("pkm/wiki/software/first-words"))
+        self.assertEqual(input_data["output_path"], normalize_path("pkm/wiki/software/first-words/words/puppy"))
         self.assertTrue(input_data["manifest_path"].endswith("01_Project_Manifest.md"))
         self.assertTrue(input_data["creator_instructions_path"].endswith("02_Creator_Instructions.md"))
         self.assertTrue(input_data["qc_playbook_path"].endswith("03_QC_Playbook.md"))
@@ -41,7 +41,7 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
     def test_prepare_input_missing_output_path_fails(self):
         # When output_path is missing, initialization halts with an error
         input_data = prepare_input(
-            "topic: Puppy, project_path: pkm/wiki/software/toddler-tales",
+            "topic: Puppy, project_path: pkm/wiki/software/first-words",
             caller="main-bot",
             session_id="test_sess_missing_out"
         )
@@ -53,7 +53,7 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
     def test_prepare_input_missing_project_path_fails(self):
         # When project_path is missing, initialization halts with an error
         input_data = prepare_input(
-            "topic: Puppy, output_path: pkm/wiki/software/toddler-tales/words/puppy",
+            "topic: Puppy, output_path: pkm/wiki/software/first-words/words/puppy",
             caller="main-bot",
             session_id="test_sess_missing_proj"
         )
@@ -69,7 +69,7 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
         self.assertEqual(input_data["manifest_path"], "")
 
     def test_prepare_input_does_not_treat_feedback_as_topic(self):
-        feedback = "project_path: pkm/wiki/software/toddler-tales, output_path: pkm/wiki/software/toddler-tales/words/fish, i am looking for ayla in a full fish mascot outfit, instead of wearing a jacket with fish icons."
+        feedback = "project_path: pkm/wiki/software/first-words, output_path: pkm/wiki/software/first-words/words/fish, i am looking for kiki in a full fish mascot outfit, instead of wearing a jacket with fish icons."
         input_data = prepare_input(feedback, session_id="test_sess_fb")
         self.assertNotEqual(input_data["topic"], feedback.lower())
         self.assertEqual(input_data["topic"], "scene")
@@ -90,14 +90,14 @@ class TestContentCreationStateAndAdapters(unittest.TestCase):
 
     def test_state_schema_propagates_project_and_output_paths(self):
         input_data = prepare_input(
-            "topic: puppy, project_path: pkm/wiki/software/ayla-first-words, output_path: pkm/wiki/software/ayla-first-words/words/puppy",
+            "topic: puppy, project_path: pkm/wiki/software/first-words, output_path: pkm/wiki/software/first-words/words/puppy",
             caller="main-bot",
             session_id="test_sess_propagate"
         )
-        self.assertEqual(input_data["project_path"], normalize_path("pkm/wiki/software/ayla-first-words"))
-        self.assertEqual(input_data["output_path"], normalize_path("pkm/wiki/software/ayla-first-words/words/puppy"))
-        self.assertTrue(input_data["manifest_path"].startswith(normalize_path("pkm/wiki/software/ayla-first-words")))
-        self.assertTrue(input_data["image_path"].startswith(normalize_path("pkm/wiki/software/ayla-first-words/words/puppy")))
+        self.assertEqual(input_data["project_path"], normalize_path("pkm/wiki/software/first-words"))
+        self.assertEqual(input_data["output_path"], normalize_path("pkm/wiki/software/first-words/words/puppy"))
+        self.assertTrue(input_data["manifest_path"].startswith(normalize_path("pkm/wiki/software/first-words")))
+        self.assertTrue(input_data["image_path"].startswith(normalize_path("pkm/wiki/software/first-words/words/puppy")))
 
     def test_paths_strictly_under_project_or_output_path(self):
         project_path = "projects/storybooks/vol1"

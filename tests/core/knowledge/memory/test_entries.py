@@ -13,13 +13,13 @@ D = datetime.date
 class TestEntryLine(unittest.TestCase):
 
     def test_round_trip(self):
-        entry = Entry("family", "Parents visiting (Bay Area).", "main", D(2026, 9, 10), D(2026, 9, 18), 3,
-                      D(2026, 12, 5))
+        entry = Entry("family", "Guests visiting (Springfield).", "main", D(2026, 9, 10), D(2026, 9, 18), 3,
+                      D(2026, 11, 20))
         line = entry.format()
         self.assertEqual(
             line,
-            "- [family] Parents visiting (Bay Area). "
-            "(src: main · first 2026-09-10 · seen 2026-09-18 · x3 · until 2026-12-05)",
+            "- [family] Guests visiting (Springfield). "
+            "(src: main · first 2026-09-10 · seen 2026-09-18 · x3 · until 2026-11-20)",
         )
         self.assertEqual(parse_line(line), entry)
 

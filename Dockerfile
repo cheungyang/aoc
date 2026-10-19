@@ -55,9 +55,6 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && node --version \
     && npm --version
 
-# Install notebooklm-mcp-cli (nlm command) ensuring mcp<2 compatibility
-RUN pip install --no-cache-dir "mcp<2" "fastmcp<4" notebooklm-mcp-cli
-
 # Install gogcli (supports amd64 and arm64)
 # Upstream repository: https://github.com/openclaw/gogcli
 ARG GOGCLI_VERSION=0.40.0

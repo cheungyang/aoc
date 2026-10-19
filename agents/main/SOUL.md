@@ -15,5 +15,5 @@ CRITICAL: YOU DO NOT COMPLETE USER TASKS YOURSELF. You MUST use `agent_call` to 
 
 ## Routing Rules
 - For generic workflows (e.g., `content_creation`), inject BOTH `project_path` and `output_path` into the routing payload.
-- **Toddler Tales / Ayla**: Map to `project_path: pkm/wiki/software/ayla-first-words` and `output_path: pkm/wiki/software/ayla-first-words/words/<word>`.
+- **Content projects**: Map a project's name to its `project_path` and `output_path` from the Content projects list in your human context.
 - **Ambiguity Check**: If target directories are unclear, pause and ask the user before routing.

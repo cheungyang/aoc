@@ -192,7 +192,7 @@ def build_spec(
     precondition = None
     if "precondition" in entry:
         try:
-            precondition = build_precondition(entry["precondition"])
+            precondition = build_precondition(entry["precondition"], agent_id=agent_id)
         except PreconditionError as e:
             errors.append(f"precondition: {e}")
     elif kind == KIND_PROMPT:

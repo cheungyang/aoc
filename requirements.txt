@@ -1,12 +1,12 @@
 browser-use<=0.13.9
+notebooklm-mcp-cli
+# The nlm CLI above breaks on mcp 2 / fastmcp 4; nothing else here uses MCP.
 mcp<2
 fastmcp<4
-notebooklm-mcp-cli
 croniter
 discord.py
 langchain-core
 langchain-google-genai
-langchain-mcp-adapters
 # Used by graph_builder for ChatOllama when a model sets provider: ollama.
 langchain-ollama
 # Used by graph_builder for ChatOpenAI when an agent sets provider: local. The

@@ -3,6 +3,8 @@
 For every due schedule the runner:
 
 1. asks `has_work()` — cheap, no model. A "no" is logged and costs nothing;
+   when a scan says why it couldn't decide, that is posted in the schedule's
+   channel, once per issue per day (`_post_problems`);
 2. takes a slot from the concurrency limiter, so simultaneous schedules queue
    instead of bursting the model's per-minute quota;
 3. dispatches by kind — a prompt becomes an agent turn, a script a subprocess;
@@ -34,6 +36,7 @@ from core.scheduler.limiter import ScheduleLimiter
 from core.scheduler.registry import Rejection, load_all
 from core.scheduler.script_runner import run_step
 from core.scheduler.spec import (
+    Problems,
     PromptSchedule,
     ScheduleContext,
     ScheduleSpec,
@@ -254,7 +257,9 @@ class ScheduleRunner:
             entry=spec.entry,
         )
 
-        decision = self._decide(spec, ctx)
+        # Off the event loop: a scan may make network calls (a Zillow job can poll for
+        # minutes), and the loop also serves Discord's heartbeat and voice.
+        decision = await asyncio.to_thread(self._decide, spec, ctx)
         if not decision:
             print(f"ScheduleRunner: skipping {spec.describe()}: {decision.reason}")
             try:
@@ -262,6 +267,8 @@ class ScheduleRunner:
             except Exception as e:
                 print(f"ScheduleRunner: on_skip failed for {spec.schedule_id}: {e}")
             self._record(self.state.record_skip, spec.schedule_id, decision.reason)
+            if isinstance(decision.detail, Problems):
+                await self._post_problems(spec, decision.detail)
             return False
 
         async with self.limiter.slot(spec.describe()):
@@ -414,3 +421,44 @@ class ScheduleRunner:
                 print(f"ScheduleRunner: failed to post rejection alert to #{rejection.channel}: {e}")
             del self._pending_alerts[key]
             self._alerted.add(key)
+
+    async def _post_problems(self, spec: ScheduleSpec, problems: Problems) -> None:
+        """Posts what a scan couldn't read in the schedule's channel, once per issue per day.
+
+        A scan that skipped quietly over a file that changed shape would leave the
+        user believing there was nothing to report. The schedule state remembers
+        what was posted, so a restart doesn't repeat it, and the post is recorded
+        as a channel post, so the agent sees it when the user replies to fix it.
+        """
+        try:
+            channel = self._resolve_channel(spec.agent_id, spec.channel, spec.thread)
+        except Exception as e:
+            print(f"ScheduleRunner: could not resolve #{spec.channel} for {spec.schedule_id}'s problems: {e}")
+            channel = None
+        if channel is None:
+            print(f"ScheduleRunner: {spec.schedule_id} problems (no channel to post to): {'; '.join(problems.issues)}")
+            return
+
+        day = get_local_now().strftime("%Y-%m-%d")
+        fresh = []
+        for issue in problems.issues:
+            try:
+                if self.state.claim_notice(spec.schedule_id, issue, day):
+                    fresh.append(issue)
+            except Exception as e:  # better a repeated notice than none
+                print(f"ScheduleRunner: could not record a notice for {spec.schedule_id}: {e}")
+                fresh.append(issue)
+        if not fresh:
+            return
+
+        name = spec.entry.get("id") or problems.source
+        message = Problems(problems.source, tuple(fresh), raw=problems.raw).message(f"The scheduled check `{name}`")
+        try:
+            for chunk in safe_chunks(message):
+                await channel.send(chunk)
+        except Exception as e:
+            print(f"ScheduleRunner: failed to post problems for {spec.schedule_id}: {e}")
+            for issue in fresh:  # not posted, so the next run may try again
+                self._record(self.state.release_notice, spec.schedule_id, issue, day)
+            return
+        record_channel_post(channel, message, origin=spec.schedule_id, loader=self.loader)

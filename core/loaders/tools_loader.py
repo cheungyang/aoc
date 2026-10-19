@@ -41,6 +41,38 @@ class ToolsLoader:
         self._discovered_tools = discovered
         return discovered
 
+    def _agent_tools(self):
+        """Each agent's own tools: {tool_name: (agent id, module path)}.
+
+        Found in `agents/<agent_id>/tools/` (see core/loaders/agent_code.py).
+        Tool names are unique across tools/ and every agent, so a name always
+        means one module; a clash is reported and the shared tool wins.
+        """
+        if getattr(self, "_discovered_agent_tools", None) is not None:
+            return self._discovered_agent_tools
+        from core.loaders.agent_code import agents_with_code, modules
+
+        shared = self._discover_tools()
+        found = {}
+        for agent_id in agents_with_code():
+            for tool_name, module_path in modules(agent_id, "tools").items():
+                clash = "tools/" if tool_name in shared else found.get(tool_name, (None,))[0]
+                if clash:
+                    print(f"Tool name clash: agents/{agent_id}/tools/{tool_name}.py and {clash}; "
+                          f"keeping the first.", file=sys.stderr)
+                    continue
+                found[tool_name] = (agent_id, module_path)
+        self._discovered_agent_tools = found
+        return found
+
+    def module_path(self, tool_name: str):
+        """The module that defines `tool_name`, shared or agent-specific, or None."""
+        folder = self._discover_tools().get(tool_name)
+        if folder is not None:
+            return f"tools.{folder}.{tool_name}" if folder else f"tools.{tool_name}"
+        owned = self._agent_tools().get(tool_name)
+        return owned[1] if owned else None
+
     @staticmethod
     def _require_ctx(ctx, caller: str):
         """Rejects the legacy `(agent_id, graph_id)` string form loudly instead of guessing."""
@@ -127,7 +159,7 @@ class ToolsLoader:
         # happens after every merge source has contributed and before the cache is
         # written, so it costs nothing per call and `check_permission` never has to
         # know bundles exist. Tools with no bundles defined pass through untouched.
-        from core.loaders.permission_bundles import expand_permissions
+        from core.permissions.bundles import expand_permissions
         expand_permissions(merged_tools)
 
         self._agent_permissions_cache[cache_key] = merged_tools
@@ -147,6 +179,13 @@ class ToolsLoader:
         return self._merge_tool_permissions(ctx).get(tool_id)
 
     def check_permission(self, ctx, tool_id: str, action_name: str = None, path: str = None, **kwargs) -> bool:
+        """Whether `ctx`'s agent may perform `action_name` on `path` with `tool_id`.
+
+        Tools call this right before acting. Pass `probe=True` when only asking
+        what's allowed (device_list picking the entities home-steward may
+        control): the answer is the same, and the read-only replay
+        (scripts/voice_dryrun.py) doesn't count it as a refused write.
+        """
         import os
         self._require_ctx(ctx, "check_permission")
         agent_id = ctx.agent_id
@@ -169,10 +208,13 @@ class ToolsLoader:
             # which would otherwise run os.path.abspath() over things like
             # "light.porch" and produce grants that read as permissive but deny.
             # Tools that declare no matcher are unaffected.
-            from core.loaders.permission_matchers import matcher_for, matches
+            from core.permissions.denies import deny_covers, is_deny
+            from core.permissions.matchers import matcher_for, matches
             matcher = matcher_for(tool_id)
             if matcher is not None:
                 for selector, actions in permissions.items():
+                    if is_deny(selector):
+                        continue  # deny entries are for path grants only
                     if matches(matcher, selector, target_path_to_check) and action_name in actions:
                         return True
                 return False
@@ -183,8 +225,16 @@ class ToolsLoader:
             # and also stops a symlink inside a granted dir from escaping it.
             workspace_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
             target_abs_path = os.path.realpath(os.path.expanduser(target_path_to_check))
-            
+
+            # A "!<path>" key refuses its actions under that path, whatever else
+            # is granted (core/permissions/denies.py).
+            for key, actions in permissions.items():
+                if is_deny(key) and action_name in actions and deny_covers(key, target_abs_path, workspace_root, agent_id):
+                    return False
+
             for base_path, actions in permissions.items():
+                if is_deny(base_path):
+                    continue
                 resolved_base_path = os.path.expanduser(base_path.replace("<agent_id>", agent_id))
                 if os.path.isabs(resolved_base_path):
                     base_abs_path = os.path.realpath(resolved_base_path)
@@ -216,17 +266,19 @@ class ToolsLoader:
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
                 
-        discovered = self._discover_tools()
+        # Shared tools load for any agent that is granted them; an agent's own
+        # tools load only for that agent (core/loaders/agent_code.py).
+        agent_tools = self._agent_tools()
         tools = []
         loaded_names = []
-        for tool_name, folder in sorted(discovered.items()):
-            if tool_name not in allowed_tool_names:
+        for tool_name in sorted(set(allowed_tool_names)):
+            module_path = self.module_path(tool_name)
+            if module_path is None:
                 continue
- 
-            if folder:
-                module_path = f"tools.{folder}.{tool_name}"
-            else:
-                module_path = f"tools.{tool_name}"
+            owner = agent_tools.get(tool_name, (None,))[0]
+            if owner is not None and owner != agent_id:
+                print(f"Not loading {tool_name} for {agent_id}: it belongs to agents/{owner}.", file=sys.stderr)
+                continue
             try:
                 mod = importlib.import_module(module_path)
                 if hasattr(mod, tool_name):

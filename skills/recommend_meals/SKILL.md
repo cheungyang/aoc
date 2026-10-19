@@ -1,31 +1,16 @@
 ---
 name: recommend_meals
-description: Analyzes inventory and user context to generate 3 flexible, healthy dinner recommendations in Traditional Chinese.
+description: Suggests 3 flexible, healthy dinner ideas in Traditional Chinese from what's in the kitchen, what the family ate lately and their learned palate.
 ---
-## Overview
-This skill generates 3 dinner suggestions by analyzing `pkm/wallet/kitchen/INVENTORY.md`, past meals and suggestions in `pkm/wallet/kitchen/MEAL_LOGS.md`, and the user's learned palate from your memory (the `food` topic and your feedback, already in your system prompt).
-
 ## Workflow
+1. Call `kitchen_snapshot` and, in the same step, `set_thinking("medium")`: choosing the dinners is the heavy step. Take the family's tastes and time limits from your prompt (profile, shared topics, feedback); don't re-read memory files.
+2. Choose 3 dinners, using first what expires first (the snapshot's days left, already computed; `est` ones are rough estimates):
+   - **Variety**: they differ in flavor profile or cooking method, and from recent meals and the last ideas.
+   - **Flexibility**: suggest a dish even if a minor ingredient is missing. If a core ingredient is missing, pick a dish that substitutes it easily or relies mostly on what's there. A missing ingredient rules a dish out only when the user says it's a blocker. Staples are always there.
+   - **Health and ease**: healthy, Asian-leaning (unless they ask otherwise), easy to make after a workday.
+3. Log them as `ideas` in a `kitchen_inventory` call (`op="log"`, or the `use` call when you're also logging a meal), then reply.
+4. If items are past their date, name them in one line and ask whether they're gone; `remove` the ones the user confirms.
 
-### 1. Read State
-In one `filesystem` call:
-- Read `pkm/wallet/kitchen/INVENTORY.md` to see what needs to be used immediately.
-- Read the end of `pkm/wallet/kitchen/MEAL_LOGS.md` with `"tail": 100` (about two weeks; newest entries are at the bottom) to avoid repeating recent meals.
-- Apply the taste preferences and time constraints already in your system prompt (Profile, shared topics, feedback); don't re-read memory files.
-
-### 2. Generate 3 Suggestions
-Develop 3 distinct meal options prioritizing items nearing expiration:
-- **Variety**: Ensure they differ in flavor profile or cooking method.
-- **Flexibility**: If a minor ingredient is missing from inventory, suggest the meal anyway. If a core ingredient is missing, ensure it's a dish that can easily substitute it or relies mostly on what's available. A missing ingredient rules a dish out only when the user says it's a blocker.
-- **Health & Ease**: Focus on healthy, Asian-leaning dishes (unless they request otherwise) that are relatively easy to prepare after a workday.
-
-### 3. Output Requirements
-Present the 3 options to the user.
-- **Language**: Dish names, required ingredients, and cooking instructions MUST be in Traditional Chinese. 
-- **Format**: Keep instructions clear and actionable. Do not provide English translations for the recipes, though introductory/transitional text can be in English.
-
-### 4. Log the Suggestions
-- `append` the suggested meals (with date) to `pkm/wallet/kitchen/MEAL_LOGS.md` so the system knows what was proposed today.
-
-## Required Tools
-- `filesystem`: Required to read inventory/logs and append suggestions to `pkm/wallet/kitchen/MEAL_LOGS.md`.
+## Output
+- Dish names, ingredients and cooking instructions in Traditional Chinese, with no English translations of the recipes; the text around them can be English.
+- Keep instructions clear and actionable.

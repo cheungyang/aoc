@@ -10,7 +10,7 @@ from core.runtime.execution_context import try_context
 # deciding which bundle it belongs to are the same edit -- a central registry
 # drifts the moment someone adds an action and forgets the other file.
 # `ToolsLoader` resolves these during permission merge; see
-# core/loaders/permission_bundles.py for the mechanism.
+# core/permissions/bundles.py for the mechanism.
 PERMISSION_BUNDLES = {
     "@read": ["read", "read_image", "ls", "find", "grep"],
     "@write": ["@read", "write", "overwrite", "append", "replace_block"],
@@ -18,6 +18,11 @@ PERMISSION_BUNDLES = {
     # references elsewhere, which is a different kind of consequence from
     # editing one in place.
     "@manage": ["@write", "move", "delete", "rmdir"],
+    # Every action that changes something, and none that only reads. Meant mainly
+    # for deny entries ("!agents/*/tools/": ["@change"] keeps agent code
+    # read-only; core/permissions/denies.py). As a grant it would give write
+    # without read, which is rarely what you want.
+    "@change": ["write", "overwrite", "append", "replace_block", "move", "delete", "rmdir"],
 }
 
 @tool

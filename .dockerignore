@@ -1,6 +1,8 @@
 __pycache__/
 .DS_Store
 .env
+.env.*
+!.env.example
 .gemini/
 .git
 .gitignore
@@ -13,6 +15,7 @@ __pycache__/
 *bot_token*
 client_secret_*
 debug_log.log
+e2b_api_key
 home_assistant_token
 google_health_credentials.json
 pkm

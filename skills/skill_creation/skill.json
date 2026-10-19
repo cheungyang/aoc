@@ -1,11 +1,13 @@
 {
   "skill_id": "skill_creation",
   "name": "Skill Creation",
-  "description": "Skill for creating new skills with required guidelines and structure, including SKILL.md and skill.json.",
+  "description": "Skill for creating new skills with required guidelines and structure, including SKILL.md and skill.json. Skills hold steps and decision logic; numbers stay in RULES.md and tool facts in WORKFLOW.md.",
   "emoji": "🛠️",
   "tools": {
     "filesystem": {
-      "skills": ["@write"]
-    }
+      "skills": ["@write"],
+      "agents": ["@read"]
+    },
+    "agent_lint": {}
   }
 }

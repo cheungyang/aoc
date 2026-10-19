@@ -12,11 +12,6 @@ if 'discord' not in sys.modules:
     sys.modules['discord.ext'] = MagicMock()
     sys.modules['discord.ext.commands'] = MagicMock()
     sys.modules['discord.ui'] = MagicMock()
-    sys.modules['mcp'] = MagicMock()
-    sys.modules['mcp.client'] = MagicMock()
-    sys.modules['mcp.client.stdio'] = MagicMock()
-    sys.modules['langchain_mcp_adapters'] = MagicMock()
-    sys.modules['langchain_mcp_adapters.tools'] = MagicMock()
     sys.modules['croniter'] = MagicMock()
 
 import main

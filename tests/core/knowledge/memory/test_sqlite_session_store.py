@@ -226,29 +226,29 @@ class TestSqliteSessionStore(unittest.TestCase):
         cp = SqliteCheckpointer(db_path=self.db_path)
 
         main_sess = "main:discord:topic-research"
-        thread_sess = "main:discord:topic-research:1541110915540324533"
+        thread_sess = "main:discord:topic-research:123456789012345678"
 
         self.store.append_message(main_sess, "user", "msg in main channel")
         self.store.append_message(thread_sess, "user", "msg in thread")
 
         cp.put({"configurable": {"thread_id": "graph:coding:topic-research"}}, {"id": "cp_main"}, {"step": 1}, {})
-        cp.put({"configurable": {"thread_id": "graph:coding:topic-research:1541110915540324533"}}, {"id": "cp_th"}, {"step": 1}, {})
+        cp.put({"configurable": {"thread_id": "graph:coding:topic-research:123456789012345678"}}, {"id": "cp_th"}, {"step": 1}, {})
 
         active = self.store.list_active_sessions()
         self.assertIn("ctx_main_discord_topic_research", active)
-        self.assertIn("ctx_main_discord_topic_research_1541110915540324533", active)
+        self.assertIn("ctx_main_discord_topic_research_123456789012345678", active)
         self.assertIn("ctx_graph_coding_topic_research", active)
-        self.assertIn("ctx_graph_coding_topic_research_1541110915540324533", active)
+        self.assertIn("ctx_graph_coding_topic_research_123456789012345678", active)
 
         # Archive only the thread session
         result = self.store.archive_session(thread_sess)
-        self.assertIn("ctx_main_discord_topic_research_1541110915540324533_archived_", result)
-        self.assertIn("Archived ctx_graph_coding_topic_research_1541110915540324533 to", result)
+        self.assertIn("ctx_main_discord_topic_research_123456789012345678_archived_", result)
+        self.assertIn("Archived ctx_graph_coding_topic_research_123456789012345678 to", result)
 
         active_after = self.store.list_active_sessions()
         # Thread tables must be archived
-        self.assertNotIn("ctx_main_discord_topic_research_1541110915540324533", active_after)
-        self.assertNotIn("ctx_graph_coding_topic_research_1541110915540324533", active_after)
+        self.assertNotIn("ctx_main_discord_topic_research_123456789012345678", active_after)
+        self.assertNotIn("ctx_graph_coding_topic_research_123456789012345678", active_after)
 
         # Parent channel tables MUST remain active
         self.assertIn("ctx_main_discord_topic_research", active_after)

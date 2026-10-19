@@ -22,7 +22,9 @@ Rules:
 - prod owns every agent nobody holds;
 - dev owns only agents held by its own host, and ignores messages sent before
   its claim (already handled by prod) or older than `DEV_MAX_MESSAGE_AGE`
-  (replayed by Discord after the laptop wakes from sleep).
+  (replayed by Discord after the laptop wakes from sleep);
+- with `CONTROL_THREAD_ID` unset there is no thread, so nobody can claim:
+  prod owns every agent and dev none, and the log says so once.
 """
 import asyncio
 import datetime
@@ -111,6 +113,7 @@ class Ownership:
         self._pending: list = []
         self._last_rebuild = 0.0
         self._listeners: List[Callable[[str], None]] = []
+        self._off_logged = False
 
     @classmethod
     def reset(cls):
@@ -126,11 +129,16 @@ class Ownership:
     def control_thread_id(self) -> str:
         return Config().control_thread_id
 
+    @property
+    def enabled(self) -> bool:
+        """Whether prod/dev coordination is on: it needs `CONTROL_THREAD_ID`."""
+        return bool(self.control_thread_id)
+
     def label(self) -> str:
         return f"{self.role}@{self.host}"
 
     def is_control_channel(self, channel) -> bool:
-        return str(getattr(channel, "id", "")) == self.control_thread_id
+        return self.enabled and str(getattr(channel, "id", "")) == self.control_thread_id
 
     # ------------------------------------------------------------------
     # Ownership queries
@@ -230,9 +238,21 @@ class Ownership:
             except Exception as e:
                 print(f"[Ownership] listener error for {agent_id}: {e}")
 
+    def _coordination_off(self):
+        """No control thread: nobody can claim, so the empty claims are final.
+        Says so once per process (one instance per process)."""
+        if not self._off_logged:
+            self._off_logged = True
+            who = "this instance answers for every agent" if self.role == PROD else "this dev instance answers for none"
+            print(f"[Ownership:{self.label()}] CONTROL_THREAD_ID is not set, so prod/dev coordination is off: {who}.")
+        self._ready_event().set()
+
     async def rebuild(self, bot, force: bool = False):
         """Replays the control thread's history. Called on every bot's
         on_ready; concurrent and back-to-back calls collapse into one."""
+        if not self.enabled:
+            self._coordination_off()
+            return
         if self._rebuild_lock is None:
             self._rebuild_lock = asyncio.Lock()
         async with self._rebuild_lock:
@@ -303,7 +323,7 @@ class Ownership:
     # ------------------------------------------------------------------
     async def claim(self, bot, agent_id: str):
         """Posts a claim for agent_id from this (dev) host, unless already held."""
-        if self.role != DEV:
+        if self.role != DEV or not self.enabled:
             return
         if self.holder(agent_id) == self.host:
             print(f"[Ownership:{self.label()}] {agent_id} already held by this host; reusing claim.")
@@ -317,7 +337,7 @@ class Ownership:
 
         Goes through the REST API directly because by the time this runs the
         discord.py clients are already closed."""
-        if self.role != DEV:
+        if self.role != DEV or not self.enabled:
             return
         mine = [a for a, h in self.holds.items() if h.holder == self.host]
         if not mine:

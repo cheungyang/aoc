@@ -21,6 +21,7 @@ from core.util.config import Config
 from core.util.prompt_util import (
     get_agent_memory_prompt,
     get_agent_static_prompt,
+    get_tool_rules_prompt,
 )
 from tests.helpers import make_context
 
@@ -33,7 +34,7 @@ class _AgentFiles:
         "INSTRUCTIONS": "INSTRUCTIONS.md",
         "IDENTITY": "IDENTITY.md",
         "SOUL": "SOUL.md",
-        "USER": "USER.md",
+        "USER": "pkm/agents/test-agent/USER.md",
         "PROFILE": "pkm/wiki/memory/PROFILE.md",
         "MEMORY": "pkm/agents/test-agent/MEMORY.md",
         "FEEDBACK": "pkm/agents/test-agent/FEEDBACK.md",
@@ -129,11 +130,13 @@ class TestPromptCacheLayout(unittest.TestCase):
 
     def test_block_order_static_then_memory_then_channel(self):
         blocks = self._system_blocks()
-        self.assertEqual(len(blocks), 7)
-        formatting, agent_static, skills, subgraphs, knowledge, memory, channel = blocks
+        self.assertEqual(len(blocks), 8)
+        formatting, agent_static, tool_rules, skills, subgraphs, knowledge, memory, channel = blocks
 
         self.assertIn("<formatting_rules>", formatting)
         self.assertEqual(agent_static, get_agent_static_prompt("test-agent"))
+        self.assertEqual(tool_rules, get_tool_rules_prompt("test-agent"))
+        self.assertIn("<TOOL_RULES>", tool_rules)
         self.assertEqual((skills, subgraphs, knowledge), ("SKILLS", "SUBGRAPHS", "KNOWLEDGE"))
         self.assertEqual(memory, get_agent_memory_prompt("test-agent"))
         self.assertEqual(channel, "CHANNEL general")
@@ -146,24 +149,24 @@ class TestPromptCacheLayout(unittest.TestCase):
         after = self._system_blocks()
 
         # Everything up to and including the daily knowledge block is identical.
-        self.assertEqual(before[:5], after[:5])
-        self.assertNotEqual(before[5], after[5])
-        self.assertIn("memory v2", after[5])
-        self.assertEqual(before[6], after[6])
+        self.assertEqual(before[:6], after[:6])
+        self.assertNotEqual(before[6], after[6])
+        self.assertIn("memory v2", after[6])
+        self.assertEqual(before[7], after[7])
 
     def test_channel_change_leaves_memory_and_static_prefix_unchanged(self):
         before = self._system_blocks()
         self.mock_channel.return_value = "CHANNEL other"
         after = self._system_blocks()
-        self.assertEqual(before[:6], after[:6])
-        self.assertEqual(after[6], "CHANNEL other")
+        self.assertEqual(before[:7], after[:7])
+        self.assertEqual(after[7], "CHANNEL other")
 
     def test_missing_pkm_files_add_no_blank_system_block(self):
         for key in ("USER", "PROFILE", "MEMORY", "FEEDBACK"):
             os.remove(self.agent.path(key))
         self.mock_channel.return_value = ""
         blocks = self._system_blocks()
-        self.assertEqual(len(blocks), 5)
+        self.assertEqual(len(blocks), 6)
         self.assertTrue(all(b.strip() for b in blocks))
 
     def test_voice_mode_comes_last_and_leaves_the_prefix_unchanged(self):

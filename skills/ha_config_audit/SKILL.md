@@ -6,6 +6,9 @@ description: Audits Home Assistant health, error logs, unavailable entities, and
 ## Core
 A structured, read-only health check of Home Assistant, on demand or as the daily scheduled audit.
 
+### Daily audit
+It runs only when Home Assistant has a new problem, and its prompt carries the new problems in `<findings source="ha_audit">`: errors first seen since the last audit (repeats folded, with counts) and entities that turned unavailable or unknown (one line per device), then counts of what was already broken. Report from the findings; don't re-run the checks below. Look something up only to explain a finding.
+
 ### Checks: one `home_assistant` call with all of these
 1. `check_config`: any result other than `valid` is an immediate attention item.
 2. `error_log`: look for repeated exceptions, connection timeouts to external APIs, and template rendering failures. Separate benign warnings from critical failures (failing integrations, database corruption).
@@ -19,6 +22,8 @@ A structured, read-only health check of Home Assistant, on demand or as the dail
 - **Notable Errors**: high-signal items from the error log.
 - **Action Items**: concrete steps the user or Butler can take to resolve anomalies.
 - No issues: one line, *"Home Assistant audit clean: config is valid, all devices healthy, no recent error logs."*
+
+The daily report covers only the new problems (notable errors, devices gone offline) and their action items, with the ongoing counts in one line.
 
 Call `load_skill("ha_config_audit")` for how to dig into a finding: an automation's references, or when an entity went offline.
 

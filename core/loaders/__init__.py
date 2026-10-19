@@ -1,5 +1,7 @@
 """
-Loaders package: static definitions, discovery, permissions, and reloading.
+Loaders package: agents, skills, tools and graphs, read from their definitions,
+and the discovery and reloading they use. Tool permissions are in
+core/permissions/.
 """
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.graphs_loader import GraphsLoader

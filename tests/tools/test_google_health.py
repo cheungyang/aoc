@@ -43,8 +43,8 @@ SLEEP = [
 ]
 
 WEIGHT = [
-    {"weight": {"sampleTime": {"physicalTime": "2026-10-04T14:00:00Z"}, "weightGrams": 80000.0}},
-    {"weight": {"sampleTime": {"physicalTime": "2026-09-28T14:00:00Z"}, "weightGrams": 81500.0}},
+    {"weight": {"sampleTime": {"physicalTime": "2026-10-04T14:00:00Z"}, "weightGrams": 60000.0}},
+    {"weight": {"sampleTime": {"physicalTime": "2026-09-28T14:00:00Z"}, "weightGrams": 61500.0}},
 ]
 
 ROLLUP = {"rollupDataPoints": [
@@ -183,9 +183,9 @@ class TestReads(unittest.TestCase):
 
     def test_weight_reports_latest_and_change(self):
         out = run([{"action": "weight", "days": 30}])
-        self.assertIn('"kg": 80.0', out)
+        self.assertIn('"kg": 60.0', out)
         self.assertIn('"change_kg": -1.5', out)
-        self.assertIn('"lb": 176.4', out)
+        self.assertIn('"lb": 132.3', out)
 
     def test_bad_range_is_an_error(self):
         out = run([{"action": "sleep", "start_date": "2026-10-05", "end_date": "2026-10-01"}])
@@ -218,7 +218,7 @@ class TestPermissions(unittest.TestCase):
         self.assertFalse(gh.PERMISSION_MATCHER("exercise", "sleep"))
 
     def test_bundles_are_valid_and_cover_the_vocabulary(self):
-        from core.loaders import permission_bundles as pb
+        from core.permissions import bundles as pb
         pb.validate("google_health")
         covered = set()
         for name in pb.definitions_for("google_health"):

@@ -21,16 +21,20 @@
             },
             "session_policy": "stateless",
             "prompt": [
-                "Ask excursion-planner to help plan for the next 3 weekends based on location",
-                "and existing calendar events, and tell excellent event opportunities to prep for."
+                "Ask excursion-planner to plan the next 3 weekends around the user's location and calendar:",
+                "call weekend_availability in the same step as the first research searches,",
+                "pitch options that fit each weekend's free windows, and tell excellent event opportunities to prep for."
             ]
         }
     ],
     "tools": {
-        "gog": {}
+        "gog": {},
+        "weekend_availability": {},
+        "calendar_add": {}
     },
     "skills": {
-        "research": { "preload": "core" }
+        "research": { "preload": "core" },
+        "tool_audit": {}
     },
     "voice": { "name": "en-US-Chirp3-HD-Puck" }
 }

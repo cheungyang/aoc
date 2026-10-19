@@ -3,13 +3,12 @@ import os
 import json
 from langgraph.prebuilt import create_react_agent
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.tools_loader import ToolsLoader
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, get_voice_mode_prompt, Config, resolve_model
-from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt
+from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt, get_tool_rules_prompt
 from core.util.message_util import cap_tool_output
 from langgraph.types import interrupt
 from core.runtime.job_manager import JobManager
@@ -27,6 +26,8 @@ class GraphBuilder:
             # (static) and the PKM memory files (mutable at runtime).
             agent_static_prompt = get_agent_static_prompt(agent_id)
             agent_memory_prompt = get_agent_memory_prompt(agent_id)
+            # How to treat what tools return (partial/failed, tool gaps); static.
+            tool_rules_prompt = get_tool_rules_prompt(agent_id)
 
             # 2. Skills Prompt
             skills_loader = SkillsLoader()
@@ -52,7 +53,8 @@ class GraphBuilder:
             # Order from most static to most dynamic to maximize prefix prompt caching.
             # Every block is a part of one system_instruction; tool schemas are NOT
             # in this list -- the LLM client sends them in a separate request field.
-            #   formatting, agent definition, skills, subgraphs  -> change on deploy
+            #   formatting, agent definition, tool rules,
+            #   skills, subgraphs                                -> change on deploy
             #   knowledge                                        -> changes once a day
             #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
             #   channel                                          -> differs per channel/thread
@@ -65,6 +67,7 @@ class GraphBuilder:
             system_messages = [
                 ("system", formatting_prompt),
                 ("system", agent_static_prompt.replace("{", "{{").replace("}", "}}")),
+                ("system", tool_rules_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
                 ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),

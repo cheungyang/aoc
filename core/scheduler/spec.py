@@ -84,18 +84,65 @@ class WorkDecision:
         )
 
 
+RAW_LINES_SHOWN = 2  # the raw lines shown under each issue in a findings block or a notice
+
+
+def listed_issues(issues: tuple, raw: tuple = ()) -> str:
+    """Each issue as a bullet, with the first lines the scan couldn't read quoted under it.
+
+    `raw` pairs an issue with its raw lines: ((issue, (line, ...)), ...).
+    """
+    lines_of = dict(raw)
+    out = []
+    for issue in issues:
+        out.append(f"- {issue}")
+        lines = lines_of.get(issue, ())
+        out.extend(f"> {line}" for line in lines[:RAW_LINES_SHOWN])
+        if len(lines) > RAW_LINES_SHOWN:
+            out.append(f"> ... and {len(lines) - RAW_LINES_SHOWN} more")
+    return "\n".join(out)
+
+
 @dataclass(frozen=True)
 class Findings:
     """What a scan precondition found, handed to the run it triggered.
 
     `PromptSchedule.build_prompt` appends it to the prompt, so the agent starts
-    from what the check already read instead of reading it again.
+    from what the check already read instead of reading it again. `issues` are
+    what the scan couldn't read; the agent must pass them on, not guess around them.
+    `raw` holds the lines behind each issue, so the agent can quote them.
     """
     source: str
     text: str
+    issues: tuple = ()
+    raw: tuple = field(default=(), compare=False)
 
     def as_block(self) -> str:
-        return f'<findings source="{self.source}">\n{self.text.strip()}\n</findings>'
+        body = self.text.strip()
+        if self.issues:
+            body += (
+                "\n\nThe scan couldn't read everything; tell the user what's missing in one line "
+                f"and don't fill the gap with a guess:\n{listed_issues(self.issues, self.raw)}"
+            )
+        return f'<findings source="{self.source}">\n{body}\n</findings>'
+
+
+@dataclass(frozen=True)
+class Problems:
+    """Why a scan couldn't decide, posted in its agent's channel (once per issue per day).
+
+    A scan that skipped quietly because a file it reads changed shape would hide
+    the problem; the runner posts these instead (`ScheduleRunner._post_problems`).
+    `raw` holds the lines behind each issue: the notice quotes the first ones, so
+    a reply asking which line needs no second look.
+    """
+    source: str
+    issues: tuple
+    raw: tuple = field(default=(), compare=False)
+
+    def message(self, description: str = "") -> str:
+        what = description or f"The {self.source} scan"
+        return f"⚠️ {what} couldn't run normally:\n{listed_issues(self.issues, self.raw)}\nReply here and I'll help fix it."
 
 
 @dataclass

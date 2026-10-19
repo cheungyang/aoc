@@ -9,7 +9,7 @@ and the account it pushes as are both declared there:
   "slug": "cheungyang/aoc",
   "default_branch": "main",
   "visibility": "private",
-  "push_identity": "cheungyang-bot"   // omit to use ambient git/gh credentials
+  "push_identity": "owner-bot"        // omit to use ambient git/gh credentials
 }
 ```
 

@@ -2,7 +2,9 @@
 import copy
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -11,8 +13,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.tools_loader import ToolsLoader
-from tools.home_assistant import home_assistant, READ_ACTIONS, WRITE_ACTIONS
-from tests.helpers import make_context, execution_context
+from core.util.config import Config
+from agents.home_steward.tools.home_assistant import home_assistant, READ_ACTIONS, WRITE_ACTIONS
+from tests.helpers import envelope, make_context, execution_context
 
 
 class TestButlerAgentConfig(unittest.TestCase):
@@ -43,6 +46,7 @@ class TestButlerAgentConfig(unittest.TestCase):
             "ha_inventory": {"preload": "core"},
             "ha_automation_authoring": {},
             "ha_config_audit": {"preload": "core"},
+            "tool_audit": {},
         })
         expected_skills = list(declared_skills)
 
@@ -142,6 +146,15 @@ class TestButlerPermissionEnforcement(unittest.TestCase):
             self.tools_loader.check_permission(self.ctx, "home_assistant", "delete_automation", "automation.sunset")
         )
 
+    def test_device_list_writes_its_file_which_the_agent_may_only_read(self):
+        repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        devices = os.path.join(repo, "pkm", "wallet", "home", "DEVICES.md")
+        self.assertTrue(self.tools_loader.check_permission(self.ctx, "device_list"))
+        self.assertTrue(self.tools_loader.check_permission(self.ctx, "device_list", "write", devices))
+        self.assertTrue(self.tools_loader.check_permission(self.ctx, "filesystem", "read", devices))
+        for action in ("write", "overwrite", "append", "delete"):
+            self.assertFalse(self.tools_loader.check_permission(self.ctx, "filesystem", action, devices), action)
+
 
 class TestButlerProposeConfirmApplyWorkflow(unittest.TestCase):
     """End-to-end propose -> confirm -> apply execution test in Butler's ExecutionContext."""
@@ -150,9 +163,14 @@ class TestButlerProposeConfirmApplyWorkflow(unittest.TestCase):
         AgentsLoader._instance = None
         ToolsLoader._instance = None
         self.ctx = make_context(agent_id="home-steward")
+        # Applying a write saves a snapshot under <pkm>/agents/home-steward/: keep it out of the real PKM.
+        pkm = tempfile.mkdtemp()
+        Config().pkm_dir = pkm
+        self.addCleanup(setattr, Config(), "pkm_dir", None)
+        self.addCleanup(shutil.rmtree, pkm, ignore_errors=True)
 
-    @patch("core.integrations.homeassistant.client.HomeAssistantClient.post")
-    @patch("core.integrations.homeassistant.client.HomeAssistantClient.get")
+    @patch("agents.home_steward.lib.homeassistant.client.HomeAssistantClient.post")
+    @patch("agents.home_steward.lib.homeassistant.client.HomeAssistantClient.get")
     @patch.dict(os.environ, {"HA_WRITE_ENABLED": "true"})
     def test_end_to_end_automation_lifecycle(self, mock_get, mock_post):
         # Mock GET to simulate existing check_config, error_log, and no existing automation
@@ -191,6 +209,7 @@ class TestButlerProposeConfirmApplyWorkflow(unittest.TestCase):
         }
         with execution_context(agent_id="home-steward"):
             proposal_result = home_assistant.invoke(proposal_input)
+            self.assertEqual(envelope(proposal_result)["status"], "ok")
             self.assertIn("<confirmation_required", proposal_result)
             self.assertIn("<confirm_token>", proposal_result)
 
@@ -213,7 +232,8 @@ class TestButlerProposeConfirmApplyWorkflow(unittest.TestCase):
             apply_result = home_assistant.invoke(apply_input)
             self.assertIn("<instruction_result", apply_result)
             self.assertIn("applied", apply_result)
-            self.assertNotIn("<instruction_error", apply_result)
+            self.assertEqual(envelope(apply_result)["status"], "ok")
+            self.assertEqual(envelope(apply_result)["issues"], "None")
 
 
 if __name__ == "__main__":

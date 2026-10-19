@@ -2,12 +2,14 @@
 
 Tools no longer accept a model-supplied `agent_id`; identity is derived from the ambient
 ExecutionContext. Tests that exercise a tool therefore need to run inside one.
+`envelope` reads an agent tool's reply (core/tooling/report.py) into its parts.
 
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
 token-usage-handler and logging-util tests, `GOLDEN_INPUT`, the structured reply
 shared by the missing-speech and speech-coverage tests, and `FakeTTS` for voice
 tests that speak.
 """
+import re
 from contextlib import contextmanager
 
 from core.runtime.execution_context import current_execution_context
@@ -40,6 +42,26 @@ def execution_context(agent_id="test-agent", graph_id=None, source="job", channe
         yield ctx
     finally:
         current_execution_context.reset(token)
+
+
+def envelope(response: str) -> dict:
+    """An @agent_tool reply as {"status", "issues", "payload", "errors"}, plus "explain" when present.
+
+    The payload is everything between its tags, so it may hold any text.
+    """
+    head, found, rest = response.partition("<payload>")
+    payload, _, tail = rest.rpartition("</payload>")
+    parts = {}
+    for tag in ("status", "issues", "explain"):
+        match = re.search(rf"<{tag}>(.*?)</{tag}>", head, re.DOTALL)
+        if match:
+            parts[tag] = match.group(1)
+    if found:
+        parts["payload"] = payload
+    match = re.search(r"<errors>(.*?)</errors>", tail, re.DOTALL)
+    if match:
+        parts["errors"] = match.group(1)
+    return parts
 
 
 LLM_USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}

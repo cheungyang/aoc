@@ -1,9 +1,10 @@
 {
   "skill_id": "market_data",
   "name": "Market Data Fetcher",
-  "description": "Screens stock tickers with the yfinance tool and applies the Threshold Rule (price move, upcoming earnings, volume spike) to decide which need deep research.",
+  "description": "Screens the portfolio and watchlist with market_screen (the numbers, and which RULES.md thresholds each ticker crossed: price move, upcoming earnings, volume spike), decides each ticker's verdict, and researches only the triggered ones.",
   "emoji": "📈",
   "tools": {
+    "market_screen": {},
     "yfinance": {}
   }
 }

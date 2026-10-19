@@ -3,13 +3,12 @@ name: ha_automation_authoring
 description: Designs, modifies, and validates Home Assistant automations, scripts, and scenes using the propose-confirm-verify protocol.
 ---
 
-## Overview
+## Core
 This skill handles the authoring, modification, and auditing of Home Assistant automations, scripts, and scenes.
 Every change goes through the `home_assistant` tool's confirmation protocol (see its description): propose, get the user's approval, apply, then verify.
 
-## Workflows
-
 ### 1. Research & Design
+- Designing the change is the heavy step: call `set_thinking("high")` in the same step as the research calls below, so the call that designs and proposes it reasons deeply (voice turns cap it at medium).
 - Inspect existing automations with `{"action": "list_automations"}` and `{"action": "get_automation", "id": "<id>"}`.
 - Design the automation structure:
   - `alias`: Clear, human-readable title.

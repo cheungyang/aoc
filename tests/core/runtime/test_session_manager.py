@@ -50,13 +50,13 @@ class TestSessionManager(unittest.TestCase):
     def test_get_session_tool_thread(self):
         import discord
         mock_thread = MagicMock(spec=discord.Thread)
-        mock_thread.id = 1541110915540324533
+        mock_thread.id = 123456789012345678
         mock_thread.name = "AI thread"
         mock_thread.parent = MagicMock(spec=discord.TextChannel)
         mock_thread.parent.name = "topic-research"
         
         session = SessionManager.get_session("topic-researcher", "tool", mock_thread)
-        self.assertEqual(session.session_id, "topic-researcher:tool:topic-research:1541110915540324533")
+        self.assertEqual(session.session_id, "topic-researcher:tool:topic-research:123456789012345678")
 
     @patch('core.runtime.session_manager.SqliteSessionStore')
     def test_clear_session(self, mock_store_class):

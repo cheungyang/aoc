@@ -54,8 +54,8 @@
       "id": "num-money",
       "agent": "receipt-processor",
       "category": "numbers",
-      "text": "Your Costco receipt came to $1,234.56, including $87.20 in tax.",
-      "terms": ["Costco"]
+      "text": "Your Corner Market receipt came to $1,234.56, including $87.20 in tax.",
+      "terms": ["Corner Market"]
     },
     {
       "id": "num-time",
@@ -75,8 +75,8 @@
       "id": "num-market",
       "agent": "market-scout",
       "category": "numbers",
-      "text": "NVDA is down 6.2% today, on volume 2.3 times its 20-day average.",
-      "terms": ["NVDA"]
+      "text": "XOM is down 6.2% today, on volume 2.3 times its 20-day average.",
+      "terms": ["XOM"]
     },
     {
       "id": "num-points",
@@ -89,8 +89,8 @@
       "id": "num-date",
       "agent": "reward-travel",
       "category": "numbers",
-      "text": "Your Sapphire Reserve renews on March 15th, 2027, and the $300 travel credit resets on January 1st.",
-      "terms": ["Sapphire Reserve"]
+      "text": "Your Example Rewards card renews on March 15th, 2027, and the $300 travel credit resets on January 1st.",
+      "terms": ["Example Rewards"]
     },
     {
       "id": "names-agents",
@@ -152,8 +152,8 @@
       "id": "names-property",
       "agent": "property-scout",
       "category": "names",
-      "text": "One listing passed your criteria: a three-bedroom in Sunnyvale near Las Palmas Park, asking $1.65 million.",
-      "terms": ["Sunnyvale", "Las Palmas Park"]
+      "text": "One listing passed your criteria: a three-bedroom in Shelbyville near Lakeside Park, asking $1.65 million.",
+      "terms": ["Shelbyville", "Lakeside Park"]
     },
     {
       "id": "names-research",
@@ -194,12 +194,12 @@
       "id": "long-briefing",
       "agent": "day-planner",
       "category": "long",
-      "text": "Good morning. Here's your plan for today. You slept seven hours and ten minutes, and your energy looks steady, so this is a good day for deep work. Your urgent item is the quarterly tax estimate, which is due on Friday and should take about forty-five minutes. Your most important project task is reviewing the voice-first proposal, and I'd block nine thirty to eleven for it. In your inbox, three emails need attention: a contractor quote for the bathroom remodel, a reminder from the pediatrician, and a note from Chase about your Sapphire card renewal. For chores, the furnace filter is two weeks overdue, and the recycling goes out tonight. Which of these do you want to commit to today?",
-      "terms": ["pediatrician", "Sapphire"]
+      "text": "Good morning. Here's your plan for today. You slept seven hours and ten minutes, and your energy looks steady, so this is a good day for deep work. Your urgent item is the quarterly tax estimate, which is due on Friday and should take about forty-five minutes. Your most important project task is reviewing the voice-first proposal, and I'd block nine thirty to eleven for it. In your inbox, three emails need attention: a contractor quote for the bathroom remodel, a reminder from the optometrist, and a note from the bank about your Example Rewards card renewal. For chores, the furnace filter is two weeks overdue, and the recycling goes out tonight. Which of these do you want to commit to today?",
+      "terms": ["optometrist", "Example Rewards"]
     }
   ],
   "term_alternates": {
-    "NVDA": ["Nvidia", "N V D A"],
+    "XOM": ["Exxon", "X O M"],
     "CKA": ["C K A"],
     "gai lan": ["kai lan"],
     "kung pao chicken": ["gong bao chicken"],

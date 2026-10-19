@@ -145,9 +145,9 @@ class TestMemoryIntegration(unittest.TestCase):
         Delegated subagent checkpoints for channel and thread must remain completely isolated.
         """
         main_sess = "main:discord:topic-research"
-        thread_sess = "main:discord:topic-research:1541110915540324533"
+        thread_sess = "main:discord:topic-research:123456789012345678"
         tool_main_sess = "topic-researcher:tool:topic-research"
-        tool_thread_sess = "topic-researcher:tool:topic-research:1541110915540324533"
+        tool_thread_sess = "topic-researcher:tool:topic-research:123456789012345678"
 
         # 1. Main thread A: A1, A2
         self.store.append_message(main_sess, "user", "A1: Introduce cognitive load theory")

@@ -2,28 +2,13 @@
 
 ## 1. Receipt Processing Workflow
 When you receive a receipt image (via attachment):
-1. **Analyze and Extract**: Extract Date, Vendor Name, Itemized Purchases, Cost/Total (Original Currency), Cost/Total (USD), Payment Method, and Category (Restaurant, Personal Care, Travel, Entertainment, etc.).
-2. **Save Immediately**: Append the extracted data to the monthly ledger (`pkm/wallet/finance/YYYY-MM.md`).
-    - Always use `append` (it creates the file in a new month).
+1. **Analyze and Extract**: Extract Date, Vendor Name, Itemized Purchases (discounts, coupons and returns as negative amounts), taxes and fees, tip, the printed Total, Currency, Payment Method, and Category (Restaurant, Personal Care, Travel, Entertainment, etc.).
+2. **Save Immediately**: In the same step, call `ledger_append` with those fields. It converts to USD at the receipt date, checks the total, and appends the block to the monthly ledger (`pkm/wallet/finance/YYYY-MM.md`).
+    - If it says the lines don't add up, re-read the receipt and call it again.
 3. **Notify & Ask**: Reply to the user in the channel showing the exact data block that was saved.
 4. **Follow Up (If needed)**: If critical data (Payment Method, Date, Category) was missing and saved as "Unknown (Pending Review)", explicitly ask the user for the missing information.
 
-## 2. Ledger Format Requirements
-Your appended data block MUST match this exact format:
-
-```markdown
-### YYYY-MM-DD: Vendor Name
-**Category:** [Category] | **Payment Method:** [Payment Method]
-
-| Item | Original Price ([Currency]) | USD Price |
-| :--- | :--- | :--- |
-| [Item 1] | [Original Price] | [USD Price] |
-| **Total** | **[Original Total]** | **[USD Total]** |
-```
-
-## 3. Data Correction Workflow
+## 2. Data Correction Workflow
 If the user replies with missing information (e.g., "It was Visa" or "Category is Travel"):
-1. Read the current month's ledger file using `filesystem`'s `read` action.
-2. Locate the specific entry that says "Unknown (Pending Review)".
-3. Update the entry with the new information.
-4. Overwrite the file using the `filesystem`'s `overwrite` action.
+1. Locate the entry that says "Unknown (Pending Review)": in the block you saved, or with `filesystem`'s `read` of the current month's ledger.
+2. Update it with one `filesystem` `replace_block`, putting the entry's `### date: vendor` header line in `old_block` so it matches only that entry.

@@ -16,7 +16,8 @@ Rules every precondition here follows:
   connection never turns into a paid agent turn.
   The scans (`Scan` subclasses: `market_screen`, `ha_audit`, ...) may make
   the same read-only calls the agent's own first step would; they also fail
-  closed, and pass what they found into the prompt.
+  closed, pass what they found into the prompt, and post what they couldn't
+  read in the agent's channel.
 - **Deterministic.** The same state gives the same answer.
 - **Validated at load.** A misspelt type or a missing parameter rejects the
   schedule when it is loaded, not at 3am when it would have fired.
@@ -29,9 +30,15 @@ Modules:
     stores.py   task_list_non_empty, project_list_non_empty
     sleep.py    sleep_logged_today
     scan.py     Scan, the base of the domain scans
-    <type>.py   one module per scan, named after its type
+
+The scans themselves are agent-specific, so they live with their agent:
+`agents/<agent_id>/preconditions/<type>.py` (see core/loaders/agent_code.py).
+A schedule may use the types here plus its own agent's scans.
 """
-from typing import Any
+import importlib
+import inspect
+import sys
+from typing import Any, Dict, Optional
 
 from core.scheduler.preconditions.base import Always, Precondition, PreconditionError
 from core.scheduler.preconditions.files import (
@@ -47,12 +54,6 @@ from core.scheduler.preconditions.files import (
 from core.scheduler.preconditions.scan import Scan
 from core.scheduler.preconditions.sleep import SleepLoggedToday
 from core.scheduler.preconditions.stores import ProjectListNonEmpty, TaskListNonEmpty, is_untriaged
-from core.scheduler.preconditions.market_screen import MarketScreen
-from core.scheduler.preconditions.property_screen import PropertyScreen
-from core.scheduler.preconditions.credit_windows import CreditWindows
-from core.scheduler.preconditions.ha_audit import HaAudit
-from core.scheduler.preconditions.morning_briefing import MorningBriefing
-from core.scheduler.preconditions.projects_attention import ProjectsAttention
 
 REGISTRY = {
     cls.type_name: cls
@@ -65,26 +66,56 @@ REGISTRY = {
         TaskListNonEmpty,
         ProjectListNonEmpty,
         SleepLoggedToday,
-        MarketScreen,
-        PropertyScreen,
-        CreditWindows,
-        HaAudit,
-        MorningBriefing,
-        ProjectsAttention,
     )
 }
 
 
-def build_precondition(config: Any) -> Precondition:
-    """Builds a precondition from its `agent.json` declaration, or raises."""
+_agent_types: Dict[str, Dict[str, type]] = {}
+
+
+def agent_preconditions(agent_id: str) -> Dict[str, type]:
+    """The agent's own precondition types: its scans in `agents/<agent_id>/preconditions/`.
+
+    A module that fails to import is logged and skipped, so one broken scan
+    rejects only the schedules that use it ("unknown precondition type").
+    """
+    from core.loaders.agent_code import modules
+
+    if agent_id not in _agent_types:
+        found: Dict[str, type] = {}
+        for path in modules(agent_id, "preconditions").values():
+            try:
+                module = importlib.import_module(path)
+            except Exception as e:
+                print(f"[Preconditions] could not import {path}: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+            for value in vars(module).values():
+                if (isinstance(value, type) and issubclass(value, Precondition) and value.__module__ == path
+                        and value.type_name and not inspect.isabstract(value)):
+                    found[value.type_name] = value
+        _agent_types[agent_id] = found
+    return _agent_types[agent_id]
+
+
+def clear_agent_cache() -> None:
+    """Forgets discovered scans. For tests and hot reload."""
+    _agent_types.clear()
+
+
+def build_precondition(config: Any, agent_id: Optional[str] = None) -> Precondition:
+    """Builds a precondition from its `agent.json` declaration, or raises.
+
+    `agent_id` adds that agent's own scans to the types it may use.
+    """
     if not isinstance(config, dict):
         raise PreconditionError("'precondition' must be an object like {\"type\": ...}")
     type_name = config.get("type")
     if not type_name:
         raise PreconditionError("'precondition' is missing 'type'")
-    cls = REGISTRY.get(type_name)
+    own = agent_preconditions(agent_id) if agent_id else {}
+    cls = REGISTRY.get(type_name) or own.get(type_name)
     if cls is None:
         raise PreconditionError(
-            f"unknown precondition type '{type_name}' (known: {', '.join(sorted(REGISTRY))})"
+            f"unknown precondition type '{type_name}' (known: {', '.join(sorted(set(REGISTRY) | set(own)))})"
         )
     return cls(config)

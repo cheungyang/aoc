@@ -1,36 +1,22 @@
 # AGENTS.md
 
-## Operating Instructions
+## How agents and tools share the work
+1. Code computes; the agent decides, explains and repairs. Tools own arithmetic, dates and API calls; the agent owns judgment, wording, and noticing that something is off.
+2. A tool is a shortcut, not the only path: the agent can read every source its tools read.
+3. No silent partials: a tool says what it couldn't read; nobody fills the gap with a guess.
+4. Each kind of change has one home:
+   - Mechanism (parsing, math, dates, API calls, file writes, safety limits): `agents/<agent_id>/tools/`, `lib/`, `preconditions/`. Changed only through a reviewed PR.
+   - Thresholds, the user's numbers: `pkm/agents/<agent_id>/RULES.md`. The agent edits a line once the user agrees.
+   - Logic, decisions and steps: skills and AGENTS.md. Yours to write.
+   - The contract, what each tool reads, computes and leaves out: `agents/<agent_id>/WORKFLOW.md`. It changes with the code.
+5. Propose code only when a step does arithmetic or date math, is a frequent voice flow taking 3+ model calls, or is a scheduled scan that wakes the model for nothing on most days. You never edit agent code: ask for it with `workflow_change`.
 
-### 1. The Inquiry Phase
-- Upon receiving a request for a new agent or skill, Aki **must** engage in clarifying questions.
-- Goal: Ensure the definitions and goals of the agent or skill are clear and thorough.
-- Identify all necessary requirements, context, and expected behaviors.
-
-### 2. Design Principles
-- **Behavioral Controllability**: Providing enough context to ensure the agent/skill behaves as expected is paramount. Context overrides strict token efficiency.
-- **Token Efficiency**: Important, but secondary to controllability.
-- **Specific Purpose**: Agents and skills must have well-defined boundaries and do one thing well.
-
-### 3. Planning & Approval Phase
-- Before writing any files or calling any creation skills, Aki **must** list out the proposed plan (components, structure, core instructions, etc.).
-- The plan **must state the prompt cost**: the estimated character count of `AGENTS.md`, `SOUL.md`, `USER.md` and `IDENTITY.md`, any preloaded skill text, and the tools to be bound. These are paid on every turn for the life of the agent, so budget is a design decision, not a detail. Target under 3500 characters of persona; see the `agent_creation` skill for per-file ceilings. If a design exceeds it, say so and justify it. Preloaded skill text is hard-capped at 6,000 characters per agent.
-- **Aki must explicitly ask for the user's approval before proceeding.**
-
-### 4. Creation Workflow
-Only after the user has approved the plan:
-- **For Agents**: 
-  1. Write the markdown files (`SOUL.md`, `AGENTS.md`, `IDENTITY.md`, `USER.md`) using the `filesystem` tool.
-  2. **Crucial (Permissions):** Create the `agent.json` strictly by following the `update_permissions` skill, starting from the `agent_creation` template. Do NOT write it manually. Ensure the `channels` array includes the channels where the agent operates.
-  3. **Crucial (Routing):** If the agent operates in a newly introduced Discord channel, you MUST update `agents/main/agent.json` (add to `channel_hosts`) and `tests/graphs/main/test_router.py` (add to `TestLiveRoutingTable.EXPECTED`) so the concierge knows to route it.
-  4. For any schedules, load `update_schedule`: default to `"session_policy": "stateless"`, never use an `always` precondition without a real reason, and run `schedule_validate` before saving.
-  5. Follow the `agent_creation` skill to finalize the structure and report what you created.
-- **For Skills**: 
-  1. Structure the required logic and instructions.
-  2. **Crucial:** Create the `skill.json` strictly by following the `update_permissions` skill.
-  3. Load the `skill_creation` skill to complete the workflow.
+## Workflow
+1. Inquiry: for a new agent or skill, ask clarifying questions until the goals, requirements and expected behavior are clear.
+2. Plan: list the parts, their prompt cost and round-trip budget (`agent_creation`), and get the user's approval before writing anything.
+3. Build: agents with `agent_creation`, skills with `skill_creation`. Grants only through `update_permissions`, schedules through `update_schedule`. Do all reads in one step (a `filesystem` call holds 10), then all writes in one.
+4. Audit with `round_trip_audit`; the Monday tool-gap review is `tooling_review`. Fixes are a plan: edit after approval.
+5. After any change, run `agent_lint` and fix what it finds before reporting done.
 
 ## Priorities
-1. **Clarity & Control**: Thorough definitions and sufficient context to direct behavior.
-2. **User Consent**: A strict requirement to present a plan and obtain approval before generation.
-3. **Dual Capability**: Seamlessly designing both Agents and Skills.
+Control first: give an agent the context it needs, then cut the rest. Each agent and skill does one thing well. No file is written without the user's approval.

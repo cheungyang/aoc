@@ -7,7 +7,7 @@ There is no in-graph waiting and no human-in-the-loop interrupt: *"retry" is sim
 The previous interrupt-driven topology was removed because its durable state lived in a LangGraph
 checkpoint keyed to the caller's session, so a halted run could not be resumed from anywhere else
 (C4/C5). Durable state now lives where it can be inspected and hand-edited: the manifest on disk,
-the git repository, and the pull requests on GitHub ([graph.py:L1-L7](file:///Users/alvac/aoc/graphs/coding/graph.py#L1-L7)).
+the git repository, and the pull requests on GitHub ([graph.py:L1-L7](graph.py#L1-L7)).
 
 > [!IMPORTANT]
 > The graph compiles with `checkpointer=None` even when the loader passes one. A checkpoint would
@@ -58,28 +58,28 @@ flowchart TD
 ```
 
 Topology and allowed route sets are declared in
-[create_graph()](file:///Users/alvac/aoc/graphs/coding/graph.py#L23-L92).
+[create_graph()](graph.py#L23-L92).
 
 Four rationale notes are embedded in the edges themselves:
 
 - **`implement` can only go to `push`.** A worker that produced nothing ends the tick rather than
   testing an unchanged tree; the next tick retries within the implement budget
-  ([graph.py:L58-L62](file:///Users/alvac/aoc/graphs/coding/graph.py#L58-L62)).
+  ([graph.py:L58-L62](graph.py#L58-L62)).
 - **Every attempt is pushed before it is tested.** Verification runs against the commit on GitHub,
   not this host's worktree, and the remote branch is what lets another host resume. A failed push
   ends the tick and is retried on the next one, within the push budget
-  ([graph.py:L64-L69](file:///Users/alvac/aoc/graphs/coding/graph.py#L64-L69)).
+  ([graph.py:L64-L69](graph.py#L64-L69)).
 - **`audit` has no path back to the worker.** The audit is advisory, so its verdict rides along to
   the PR and the tick carries on to publish
-  ([graph.py:L75-L79](file:///Users/alvac/aoc/graphs/coding/graph.py#L75-L79)).
+  ([graph.py:L75-L79](graph.py#L75-L79)).
 - **`publish` never loops in-process.** A transient failure is retried by the *next* tick, so one
   tick cannot spin on a GitHub outage
-  ([graph.py:L81-L85](file:///Users/alvac/aoc/graphs/coding/graph.py#L81-L85)).
+  ([graph.py:L81-L85](graph.py#L81-L85)).
 
 ## The Tick Model
 
 Routing is done by a single router factory,
-[`_router(allowed)`](file:///Users/alvac/aoc/graphs/coding/graph.py#L47-L51):
+[`_router(allowed)`](graph.py#L47-L51):
 
 ```python
 def _router(allowed):
@@ -90,7 +90,7 @@ def _router(allowed):
 ```
 
 `route` is a **persistent LangGraph channel**, declared on `CodingState`
-([schemas.py:L159-L162](file:///Users/alvac/aoc/graphs/coding/schemas.py#L159-L162)). Because it is
+([schemas.py:L159-L162](schemas.py#L159-L162)). Because it is
 a channel it survives until a node overwrites it, so every router reads it as an **explicit
 instruction** rather than inferring the next step. If the value is not one of that router's own
 options — including a route nobody set, or a node's `"done"` sentinel — the tick **ends**. A node
@@ -99,7 +99,7 @@ that forgets to set a route stops the tick instead of re-running whatever the la
 > [!NOTE]
 > `route` must be declared as a channel or LangGraph drops it between nodes and *every* conditional
 > edge falls through to `END`. This is precisely what the end-to-end tests in
-> [test_graph.py](file:///Users/alvac/aoc/tests/graphs/coding/test_graph.py#L81-L88) exist to catch;
+> [test_graph.py](../../tests/graphs/coding/test_graph.py#L81-L88) exist to catch;
 > unit tests calling nodes directly cannot.
 
 **What ends a tick:**
@@ -116,7 +116,7 @@ that forgets to set a route stops the tick instead of re-running whatever the la
   (`tick_handled` guarantees one tick cannot work the same task twice).
 
 **What a subsequent tick resumes from:** the task's recorded `stage` in the manifest.
-[`select_task()`](file:///Users/alvac/aoc/graphs/coding/nodes/scheduler.py#L44-L86) maps stage →
+[`select_task()`](nodes/scheduler.py#L44-L86) maps stage →
 route so work already done is not redone: `awaiting_review`/`published` → `sync_review`,
 `verified`/`audited` → `publish`, `pushed` → `verify`, `implemented` → `push`, anything else →
 `implement`. Every node additionally opens with a `stage_at_or_past(...)` guard backed by evidence,
@@ -129,7 +129,7 @@ the same verdict.
 
 ## State
 
-### `CodingState` ([schemas.py:L115-L183](file:///Users/alvac/aoc/graphs/coding/schemas.py#L115-L183))
+### `CodingState` ([schemas.py:L115-L183](schemas.py#L115-L183))
 
 `total=False` TypedDict. Grouped as in the source.
 
@@ -185,7 +185,7 @@ the same verdict.
 | `tick_report` | `List[str]` | Lines the runner posts. Accumulated across the whole tick. |
 | `tick_handled` | `List[str]` | Task ids already touched — one tick cannot work the same task twice. |
 
-### `TaskEnvelope` ([schemas.py:L48-L102](file:///Users/alvac/aoc/graphs/coding/schemas.py#L48-L102))
+### `TaskEnvelope` ([schemas.py:L48-L102](schemas.py#L48-L102))
 
 One queue entry in the manifest.
 
@@ -223,7 +223,7 @@ One queue entry in the manifest.
 | `last_error` | `Optional[TaskError]` | Classified last failure. |
 | `updated_at` | `float` | Set on every manifest write. |
 
-### `TaskError` ([schemas.py:L37-L45](file:///Users/alvac/aoc/graphs/coding/schemas.py#L37-L45))
+### `TaskError` ([schemas.py:L37-L45](schemas.py#L37-L45))
 
 | Field | Type | Description |
 |---|---|---|
@@ -232,7 +232,7 @@ One queue entry in the manifest.
 | `message` | `str` | Human-readable detail. |
 | `at` | `float` | Epoch timestamp. |
 
-### `RepoDescriptor` ([schemas.py:L105-L112](file:///Users/alvac/aoc/graphs/coding/schemas.py#L105-L112))
+### `RepoDescriptor` ([schemas.py:L105-L112](schemas.py#L105-L112))
 
 | Field | Type | Description |
 |---|---|---|
@@ -259,9 +259,9 @@ One queue entry in the manifest.
 
 ### scheduler
 
-[scheduler.py:L89-L282](file:///Users/alvac/aoc/graphs/coding/nodes/scheduler.py#L89-L282) ·
-[`select_task()`](file:///Users/alvac/aoc/graphs/coding/nodes/scheduler.py#L44-L86) ·
-[`_resolve_base_ref()`](file:///Users/alvac/aoc/graphs/coding/nodes/scheduler.py#L286-L299)
+[scheduler.py:L89-L282](nodes/scheduler.py#L89-L282) ·
+[`select_task()`](nodes/scheduler.py#L44-L86) ·
+[`_resolve_base_ref()`](nodes/scheduler.py#L286-L299)
 
 **Responsibility.** The entry node of every tick. It decides *what* to advance, in a fixed order:
 reclaim dead leases, respect the concurrency bound, pick one task, preflight before any token is
@@ -291,7 +291,7 @@ previous task in the same tick cannot stand in for this one's commit), `lease_ow
 
 **Side effects.** Manifest: `reclaim_expired_leases`, `acquire_lease`, `persist_task` (status,
 stage, `run_id`, `branch_name`, `setup_done`, `impl_digest` reset, halts with `last_error`). Git:
-[`provision_worktree`](file:///Users/alvac/aoc/core/util/git_ops.py#L146-L208) (idempotent and
+[`provision_worktree`](../../core/util/git_ops.py#L146-L208) (idempotent and
 **remote-aware**: if `origin/<branch>` exists it is checked out with `worktree add -B`, so a task
 that pushed on another host resumes from its commits; otherwise it starts from the base. Skipped
 for `sync_review` — a review that needs the worker and finds no worktree hands the task back, and
@@ -309,8 +309,8 @@ setup itself, so this host never executes a project's install scripts.
 
 ### implement
 
-[implement.py:L40-L195](file:///Users/alvac/aoc/graphs/coding/nodes/implement.py#L40-L195) ·
-[`_review_feedback()`](file:///Users/alvac/aoc/graphs/coding/nodes/implement.py#L212-L220)
+[implement.py:L40-L195](nodes/implement.py#L40-L195) ·
+[`_review_feedback()`](nodes/implement.py#L212-L220)
 
 **Responsibility.** The **only** node that calls the LLM to write code. It touches nothing outside
 the worktree: no git mutation, no network, no manifest beyond its own bookkeeping. That separation
@@ -338,7 +338,7 @@ the scheduler (e.g. re-provisioning on another host) where the in-memory comment
 | `done` | No `task_id`; implement budget exhausted (`MAX_IMPLEMENT_ATTEMPTS = 3`, task halted); worker modified no files (task yielded back to the queue with no stage advance, so the next tick retries); worker was blocked by a missing permission (halted as `config`). |
 
 **Side effects.** Worker subprocess via
-[`call_worker`](file:///Users/alvac/aoc/graphs/coding/utils/worker.py#L78-L93) →
+[`call_worker`](utils/worker.py#L78-L93) →
 `agent_call` on `graph-worker`. Read-only git: `git status --porcelain` for the true file list, and
 `git diff HEAD` + status for the digest. Manifest: `bump_attempt`, `persist_task` (stage
 `implemented`, `impl_digest`, `review_feedback=None` — the feedback is consumed), `yield_task`.
@@ -355,12 +355,12 @@ changed — the model's own `<modified_files>` list is ignored (§7.6).
 
 ### push
 
-[push.py:L33-L127](file:///Users/alvac/aoc/graphs/coding/nodes/push.py#L33-L127)
+[push.py:L33-L127](nodes/push.py#L33-L127)
 
 **Responsibility.** Commit the worker's change and push it to the task branch, straight after
 implement and before anything tests it. No LLM. The commit message is
 `feat(<project>): <task_id> (attempt n)`; once pushed, the new HEAD is recorded as `head_sha` via
-[`git_ops.rev_parse`](file:///Users/alvac/aoc/core/util/git_ops.py#L211-L216) and the task advances
+[`git_ops.rev_parse`](../../core/util/git_ops.py#L211-L216) and the task advances
 to stage `pushed`.
 
 **Reads:** `build_request_path`, `current_task` (`task_id`, `stage`, `head_sha`, `branch_name`,
@@ -377,7 +377,7 @@ to stage `pushed`.
 | `done` | No `task_id`; branch empty or equal to the default branch (halt, `config` — attempts must never land on the default branch); worktree missing (yield — the uncommitted change is gone, and the scheduler sends the task back to implement); push failed or HEAD could not be resolved (kind `git`, `push` attempt counter bumped, task yielded keeping stage `implemented` so the next tick re-enters here; halts after `MAX_PUSH_ATTEMPTS = 3`). |
 
 **Side effects.** Git/GitHub:
-[`commit_and_push`](file:///Users/alvac/aoc/core/util/git_ops.py#L257-L332) (treats "nothing to
+[`commit_and_push`](../../core/util/git_ops.py#L257-L332) (treats "nothing to
 commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `bump_attempt`
 (`push`), `yield_task`, `persist_task` (stage `pushed`, `head_sha`, halts with `last_error`).
 
@@ -392,9 +392,9 @@ commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `
 
 ### verify
 
-[verify.py:L96-L310](file:///Users/alvac/aoc/graphs/coding/nodes/verify.py#L96-L310) ·
-[`classify_failure()`](file:///Users/alvac/aoc/graphs/coding/nodes/verify.py#L63-L93) ·
-[`_run()`](file:///Users/alvac/aoc/graphs/coding/nodes/verify.py#L324-L348)
+[verify.py:L96-L310](nodes/verify.py#L96-L310) ·
+[`classify_failure()`](nodes/verify.py#L63-L93) ·
+[`_run()`](nodes/verify.py#L324-L348)
 
 **Responsibility.** The only **blocking** quality gate. Runs the task's `verification_command`
 against the pushed `head_sha` with a 600-second timeout, through the runner the manifest's
@@ -420,7 +420,7 @@ and `setup_command`, `repo`, `workspace_path`, `tick_report`.
 | `done` | No `task_id`; no `verification_command` (halt, `config`); no `head_sha` (yield at stage `implemented`, so the next tick re-pushes); workspace missing (yield keeping the stage — the code is on the remote, and the next tick re-provisions from `origin/<branch>`); the **runner** failed (`infra_error`: sandbox did not start, source download failed — `infra` counter bumped, yield at stage `pushed`, halt after `MAX_INFRA_ATTEMPTS = 3`, implement budget untouched); setup failed in the sandbox, or changed tracked files (halt, `environment`); the failure was classified `environment` (halt, implementation left alone); budget exhausted (halt). |
 
 **Side effects.** The verification command via the
-[sandbox](file:///Users/alvac/aoc/graphs/coding/utils/sandbox/__init__.py) runner from
+[sandbox](utils/sandbox/__init__.py) runner from
 `get_runner(environment)`: a host subprocess for `local`, a throwaway E2B sandbox for `e2b`.
 Manifest: `persist_task` / `yield_task` / `bump_attempt` (`infra`).
 
@@ -435,8 +435,8 @@ Manifest: `persist_task` / `yield_task` / `bump_attempt` (`infra`).
 
 ### audit
 
-[audit.py:L27-L74](file:///Users/alvac/aoc/graphs/coding/nodes/audit.py#L27-L74) ·
-[`_run_audit()`](file:///Users/alvac/aoc/graphs/coding/nodes/audit.py#L96-L126)
+[audit.py:L27-L74](nodes/audit.py#L27-L74) ·
+[`_run_audit()`](nodes/audit.py#L96-L126)
 
 **Responsibility.** Advisory anti-pattern review of the diff against the spec — Fake It Trap, Happy
 Path Bias, Silent Failure, Bloated Files. The work is committed by now, so `git diff HEAD` would be
@@ -458,7 +458,7 @@ empty: the diff reviewed is the whole branch against the default branch it was c
 | `done` | Only when `current_task` has no `task_id`. |
 
 **Side effects.** Read-only git:
-[`get_branch_diff(ws, "origin/<default_branch>")`](file:///Users/alvac/aoc/core/util/git_ops.py#L219-L233)
+[`get_branch_diff(ws, "origin/<default_branch>")`](../../core/util/git_ops.py#L219-L233)
 (falls back to the uncommitted diff if the base cannot be resolved). Worker subprocess via
 `call_worker` for the critic verdict. Manifest: `persist_task(stage="audited", audited_sha=head_sha)`.
 
@@ -473,9 +473,9 @@ empty: the diff reviewed is the whole branch against the default branch it was c
 
 ### publish
 
-[publish.py:L36-L134](file:///Users/alvac/aoc/graphs/coding/nodes/publish.py#L36-L134) ·
-[`_retry_or_halt()`](file:///Users/alvac/aoc/graphs/coding/nodes/publish.py#L137-L163) ·
-[`_upsert_pull_request()`](file:///Users/alvac/aoc/graphs/coding/nodes/publish.py#L166-L201)
+[publish.py:L36-L134](nodes/publish.py#L36-L134) ·
+[`_retry_or_halt()`](nodes/publish.py#L137-L163) ·
+[`_upsert_pull_request()`](nodes/publish.py#L166-L201)
 
 **Responsibility.** Upsert the pull request and post the review context onto it. It **no longer
 commits or pushes** — the branch is already on GitHub (`push` sent it straight after implement, and
@@ -518,10 +518,10 @@ exists and is reviewable, and losing a comment must not halt a task or trigger a
 
 ### sync_review
 
-[sync_review.py:L159-L260](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py#L159-L260) ·
-[`evaluate_signals()`](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py#L56-L116) ·
-[`harvest_comments()`](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py#L119-L156) ·
-[`_finish()`](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py#L263-L318)
+[sync_review.py:L159-L260](nodes/sync_review.py#L159-L260) ·
+[`evaluate_signals()`](nodes/sync_review.py#L56-L116) ·
+[`harvest_comments()`](nodes/sync_review.py#L119-L156) ·
+[`_finish()`](nodes/sync_review.py#L263-L318)
 
 **Responsibility.** Read the human decision off GitHub and act on it. **GitHub is the only approval
 surface**: there is no interrupt, no chat approval and no keyword classification.
@@ -560,7 +560,7 @@ added after a "request changes" does not override it. A `CLOSED` PR is an abort.
 `commit_url`), `yield_task` (missing worktree), `release_lease`.
 
 > [!NOTE]
-> [`first_line_command()`](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py#L36-L46)
+> [`first_line_command()`](nodes/sync_review.py#L36-L46)
 > matches the first line **exactly**. Prose cannot trigger it, a quoted `/approve` cannot, and a
 > code block mentioning it cannot — this is the direct fix for the gate that read "ok" inside
 > "looks broken" and defaulted to *approved* when it found nothing (E1, E2). Comment harvesting
@@ -573,7 +573,7 @@ added after a "request changes" does not override it. A `CLOSED` PR is an abort.
 
 There is no checkpointer. Everything a later tick needs is on disk or on GitHub.
 
-**The manifest — [utils/manifest.py](file:///Users/alvac/aoc/graphs/coding/utils/manifest.py)** is
+**The manifest — [utils/manifest.py](utils/manifest.py)** is
 the system of record, one `build_request.json` per project. Three properties make that safe:
 
 1. **Atomic writes** — temp file in the same directory, then `os.replace`, so a crash mid-write
@@ -588,10 +588,10 @@ the system of record, one `build_request.json` per project. Three properties mak
 
 The manifest **is the API**: hand-editing the JSON and running another tick is a supported
 operation, and that is exactly what
-[utils/control.py](file:///Users/alvac/aoc/graphs/coding/utils/control.py) does — nothing in the
+[utils/control.py](utils/control.py) does — nothing in the
 control plane runs the pipeline, it only makes a task runnable and lets the next tick pick it up.
 
-**The git repo — [utils/repo.py](file:///Users/alvac/aoc/graphs/coding/utils/repo.py)** holds the
+**The git repo — [utils/repo.py](utils/repo.py)** holds the
 actual work. The worktree under `workspaces/runs/<run_id>` carries an attempt only between
 implement and push; from then on the task branch carries it. The checkout itself is resolved from `repo.mode`: `self` (this
 process's own repository, rooted by walking up to the `.git` marker — never `os.getcwd()`),
@@ -602,14 +602,14 @@ process's own repository, rooted by walking up to the `.git` marker — never `o
 `push.py` writes the branch — every attempt is a commit on it, never on the default branch, and
 the PR squash-merges the history away. Verification fetches that commit (it will run remotely, on
 E2B, and never sees this host's disk), and the remote branch is the source of truth, so a tick on a
-*different host* can resume: [`provision_worktree`](file:///Users/alvac/aoc/core/util/git_ops.py#L146-L208)
+*different host* can resume: [`provision_worktree`](../../core/util/git_ops.py#L146-L208)
 checks out `origin/<branch>` (`worktree add -B`) when it exists and only starts from the base
 otherwise. `publish.py` writes the PR and review-context comment; `sync_review.py` reads it back
 (PR state, review decision, labels, issue comments, unresolved inline threads). Approval exists
 nowhere else — a nudge in chat reopens the polling window and is passed to the worker as feedback,
 but it is not an approval.
 
-**The DAG — [utils/dag.py](file:///Users/alvac/aoc/graphs/coding/utils/dag.py)** is the queue
+**The DAG — [utils/dag.py](utils/dag.py)** is the queue
 itself. `get_runnable_tasks()` evaluates topological dependencies over the manifest: status
 `queued`/`pending`, all dependencies *completed*, not currently leased. Dependencies gate on
 completion rather than on the prerequisite's branch existing, so a dependent cannot start against a
@@ -632,24 +632,24 @@ on the host it ran on.
 
 | Module | Purpose |
 |---|---|
-| [dag.py](file:///Users/alvac/aoc/graphs/coding/utils/dag.py) | Manifest path resolution (one per project under `pkm/wiki/software/<slug>/`), project-slug normalisation, manifest discovery, and topological selection of runnable tasks. |
-| [manifest.py](file:///Users/alvac/aoc/graphs/coding/utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, and the `stage_at_or_past` guard every node opens with. |
-| [control.py](file:///Users/alvac/aoc/graphs/coding/utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](file:///Users/alvac/aoc/graphs/coding/utils/control.py#L31-L49); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
-| [host.py](file:///Users/alvac/aoc/graphs/coding/utils/host.py) | Which host is ticking: host-tagged lease owners, the local pause file, `CODING_TICK_ENABLED`, and an immediate pkm sync. See [Moving between hosts](#moving-between-hosts-nas--dev-box). |
-| [repo.py](file:///Users/alvac/aoc/graphs/coding/utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection, and the `self`/`existing`/`create` repository modes. |
-| [worker.py](file:///Users/alvac/aoc/graphs/coding/utils/worker.py) | The single place the graph reaches `graph-worker`, so the call always carries this graph's binding. `graph_id` is the authority field that decides the worker's tool roster. |
-| [shell.py](file:///Users/alvac/aoc/graphs/coding/utils/shell.py) | One implementation of "run a command in a worktree", returning `(exit_code, stdout, stderr)` and never raising. Shared by setup and verify so they cannot disagree on what a failure means. |
-| [sandbox/](file:///Users/alvac/aoc/graphs/coding/utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](file:///Users/alvac/aoc/graphs/coding/utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |
-| [digest.py](file:///Users/alvac/aoc/graphs/coding/utils/digest.py) | SHA-256 over `git diff HEAD` plus sorted `git status --porcelain`, so "already implemented" is a claim with evidence. Only meaningful between implement and push — once committed, the diff is empty; past `pushed`, the commit SHA is the evidence. `None` means *no evidence* and must be treated as a cache miss. |
-| [preflight.py](file:///Users/alvac/aoc/graphs/coding/utils/preflight.py) | Checks, before any token is spent, that the worker really receives the tools `graph.json` grants it and that the push identity can push. Resolves the roster through the same `worker_session` factory the real call uses. |
-| [token_opt.py](file:///Users/alvac/aoc/graphs/coding/utils/token_opt.py) | Truncates tracebacks (head + tail) and diffs before they enter a prompt — the failing case produces the longest output and is exactly when the spec risks being crowded out. |
-| [xml_parsers.py](file:///Users/alvac/aoc/graphs/coding/utils/xml_parsers.py) | Parses the `<worker_handoff>`, `<critic_verdict>` and `<spec_validation_result>` blocks. Verdicts match **exactly**, never as substrings, so an echoed placeholder reads as FAIL/REJECT. |
+| [dag.py](utils/dag.py) | Manifest path resolution (one per project under `pkm/wiki/software/<slug>/`), project-slug normalisation, manifest discovery, and topological selection of runnable tasks. |
+| [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, and the `stage_at_or_past` guard every node opens with. |
+| [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L31-L49); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
+| [host.py](utils/host.py) | Which host is ticking: host-tagged lease owners, the local pause file, `CODING_TICK_ENABLED`, and an immediate pkm sync. See [Moving between hosts](#moving-between-hosts-nas--dev-box). |
+| [repo.py](utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection, and the `self`/`existing`/`create` repository modes. |
+| [worker.py](utils/worker.py) | The single place the graph reaches `graph-worker`, so the call always carries this graph's binding. `graph_id` is the authority field that decides the worker's tool roster. |
+| [shell.py](utils/shell.py) | One implementation of "run a command in a worktree", returning `(exit_code, stdout, stderr)` and never raising. Shared by setup and verify so they cannot disagree on what a failure means. |
+| [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |
+| [digest.py](utils/digest.py) | SHA-256 over `git diff HEAD` plus sorted `git status --porcelain`, so "already implemented" is a claim with evidence. Only meaningful between implement and push — once committed, the diff is empty; past `pushed`, the commit SHA is the evidence. `None` means *no evidence* and must be treated as a cache miss. |
+| [preflight.py](utils/preflight.py) | Checks, before any token is spent, that the worker really receives the tools `graph.json` grants it and that the push identity can push. Resolves the roster through the same `worker_session` factory the real call uses. |
+| [token_opt.py](utils/token_opt.py) | Truncates tracebacks (head + tail) and diffs before they enter a prompt — the failing case produces the longest output and is exactly when the spec risks being crowded out. |
+| [xml_parsers.py](utils/xml_parsers.py) | Parses the `<worker_handoff>`, `<critic_verdict>` and `<spec_validation_result>` blocks. Verdicts match **exactly**, never as substrings, so an echoed placeholder reads as FAIL/REJECT. |
 
 ## Entry & Exit
 
 ### `prepare_input()`
 
-[adapters.py:L8-L114](file:///Users/alvac/aoc/graphs/coding/adapters.py#L8-L114)
+[adapters.py:L8-L114](adapters.py#L8-L114)
 
 Translates an incoming text query plus kwargs into the initial `CodingState`. It:
 
@@ -672,8 +672,8 @@ Translates an incoming text query plus kwargs into the initial `CodingState`. It
 
 ### `format_output()`
 
-[adapters.py:L164-L177](file:///Users/alvac/aoc/graphs/coding/adapters.py#L164-L177), delegating to
-[`format_tick_report()`](file:///Users/alvac/aoc/graphs/coding/adapters.py#L151-L161)
+[adapters.py:L164-L177](adapters.py#L164-L177), delegating to
+[`format_tick_report()`](adapters.py#L151-L161)
 
 Renders `error_message` as `🛑 Coding tick error: …` if set, otherwise joins the non-empty
 `tick_report` lines.
@@ -684,28 +684,28 @@ Renders `error_message` as `🛑 Coding tick error: …` if set, otherwise joins
 
 ### `create_graph(checkpointer=None, **kwargs)`
 
-[graph.py:L23-L92](file:///Users/alvac/aoc/graphs/coding/graph.py#L23-L92)
+[graph.py:L23-L92](graph.py#L23-L92)
 
 The loader hands every graph a checkpointer
-([graph_builder.py:L137-L144](file:///Users/alvac/aoc/core/agent/graph_builder.py#L137-L144)), so
+([graph_builder.py:L137-L144](../../core/agent/graph_builder.py#L137-L144)), so
 the parameter is accepted — but it is **deliberately ignored**, and the workflow always compiles
 with `checkpointer=None`. It is not silently honoured, because a checkpoint would key durable state
 to the caller's session again, which is exactly the resume problem this design removed. Durable
 state lives in the manifest, git and GitHub instead.
-[test_graph.py:L19-L44](file:///Users/alvac/aoc/tests/graphs/coding/test_graph.py#L19-L44) asserts
+[test_graph.py:L19-L44](../../tests/graphs/coding/test_graph.py#L19-L44) asserts
 both that `graph.checkpointer is None` and that a supplied `MemorySaver` is refused.
 
 ### How a tick is driven
 
-- **Scheduled:** [scripts/coding_tick.py](file:///Users/alvac/aoc/scripts/coding_tick.py) is run by
+- **Scheduled:** [scripts/coding_tick.py](../../scripts/coding_tick.py) is run by
   the `script-executor` cron every five minutes. It discovers every project manifest, calls
   `create_graph().ainvoke(prepare_input(...))` once per `--max-tasks`, and prints only the tick
   report — the runtime's own chatter is captured and discarded so it does not become the message.
-- **Interactive:** [tools/graph_call.py](file:///Users/alvac/aoc/tools/graph_call.py) invokes the
+- **Interactive:** [tools/graph_call.py](../../tools/graph_call.py) invokes the
   graph through the loader's registered `prepare_input`. The `coding` graph belongs to
-  `software-planner` ([agents/main/AGENTS.md](file:///Users/alvac/aoc/agents/main/AGENTS.md#L31)).
-- **Operator:** [scripts/coding_admin.py](file:///Users/alvac/aoc/scripts/coding_admin.py) and
-  [tools/graph_status.py](file:///Users/alvac/aoc/tools/graph_status.py) go through
+  `software-planner` ([agents/main/AGENTS.md](../../agents/main/AGENTS.md#L31)).
+- **Operator:** [scripts/coding_admin.py](../../scripts/coding_admin.py) and
+  [tools/graph_status.py](../../tools/graph_status.py) go through
   `utils/control.py` — manifest writes only, never an execution path of their own.
 
 ### Moving between hosts (NAS ↔ dev box)
@@ -714,12 +714,12 @@ The task's code lives on its `origin/<branch>` from the first attempt, and the m
 the pkm repo, so any host can pick a task up. Only **one host may tick at a time**: two would each
 commit their own copy of the manifest, and the pkm sync keeps one. Which host runs the scheduled
 tick is already decided by Discord agent ownership — the tick is a `script-executor` schedule, and
-[schedule_runner.py](file:///Users/alvac/aoc/core/scheduler/schedule_runner.py#L234-L244) only runs
+[schedule_runner.py](../../core/scheduler/schedule_runner.py#L234-L244) only runs
 an agent's schedules on the host that owns it. What ownership cannot do is carry state across the
 switch, so the switch has three steps:
 
 1. **Old host:** `scripts/coding_admin.py handoff` —
-   [`control.handoff()`](file:///Users/alvac/aoc/graphs/coding/utils/control.py) pauses ticking
+   [`control.handoff()`](utils/control.py) pauses ticking
    here, waits for ticks still running here (exit 3 and nothing synced if any are; re-run later),
    pushes any task stuck at `implemented` (its work exists only on this disk), then syncs the pkm
    repo immediately instead of at the hourly sync.
@@ -729,7 +729,7 @@ switch, so the switch has three steps:
    still holds a live lease (`--force` overrides), then unpauses.
 
 Every step is idempotent. The moving parts live in
-[utils/host.py](file:///Users/alvac/aoc/graphs/coding/utils/host.py):
+[utils/host.py](utils/host.py):
 
 | Piece | What it does |
 |---|---|
@@ -744,27 +744,27 @@ the scheduler does not even spawn it; `--dry-run` still works for checking a han
 
 | Path | Description |
 |---|---|
-| [graph.py](file:///Users/alvac/aoc/graphs/coding/graph.py) | The topology: seven nodes, the `_router` factory, and `create_graph()` compiling without a checkpointer. |
-| [schemas.py](file:///Users/alvac/aoc/graphs/coding/schemas.py) | `CodingState`, `TaskEnvelope`, `TaskError`, `RepoDescriptor`, and the status/stage vocabularies. |
-| [adapters.py](file:///Users/alvac/aoc/graphs/coding/adapters.py) | `prepare_input()`, `format_tick_report()`, `format_output()`, and the `graph.json`/manifest settings readers. |
-| [graph.json](file:///Users/alvac/aoc/graphs/coding/graph.json) | Graph id, description, and the `tools` grant (`bash` and `filesystem`, scoped to `workspaces/runs` and `pkm/wiki/software`) that preflight asserts against. |
-| [__init__.py](file:///Users/alvac/aoc/graphs/coding/__init__.py) | Package marker. |
-| [nodes/](file:///Users/alvac/aoc/graphs/coding/nodes/__init__.py) | The seven stages of a tick, re-exported in execution order. |
-| [nodes/scheduler.py](file:///Users/alvac/aoc/graphs/coding/nodes/scheduler.py) | Reclaim, preflight, select, claim, provision (remote-aware), set up, and route by stage. |
-| [nodes/implement.py](file:///Users/alvac/aoc/graphs/coding/nodes/implement.py) | The only node that calls the LLM to write code. |
-| [nodes/push.py](file:///Users/alvac/aoc/graphs/coding/nodes/push.py) | Commits each attempt and pushes it to the task branch; records `head_sha`. No LLM. |
-| [nodes/verify.py](file:///Users/alvac/aoc/graphs/coding/nodes/verify.py) | Runs the verification command against `head_sha`; classifies environment vs. verification failure. |
-| [nodes/audit.py](file:///Users/alvac/aoc/graphs/coding/nodes/audit.py) | Advisory anti-pattern review of the branch diff; always continues to publish. |
-| [nodes/publish.py](file:///Users/alvac/aoc/graphs/coding/nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`. Deterministic, idempotent, no LLM. |
-| [nodes/sync_review.py](file:///Users/alvac/aoc/graphs/coding/nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down. |
-| [utils/](file:///Users/alvac/aoc/graphs/coding/utils/__init__.py) | Support modules — see [Utilities](#utilities). |
-| [prompts/](file:///Users/alvac/aoc/graphs/coding/prompts/__init__.py) | Prompt builders for the Goldfish workers. |
-| [prompts/coder_prompt.py](file:///Users/alvac/aoc/graphs/coding/prompts/coder_prompt.py) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, plus targeted retry blocks for test output, critic feedback and human feedback. |
-| [prompts/critic_prompt.py](file:///Users/alvac/aoc/graphs/coding/prompts/critic_prompt.py) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
-| [prompts/spec_validator_prompt.py](file:///Users/alvac/aoc/graphs/coding/prompts/spec_validator_prompt.py) | Spec validator prompt. Not used by any node — consumed by [tools/spec_validator.py](file:///Users/alvac/aoc/tools/spec_validator.py) before a task is queued. |
+| [graph.py](graph.py) | The topology: seven nodes, the `_router` factory, and `create_graph()` compiling without a checkpointer. |
+| [schemas.py](schemas.py) | `CodingState`, `TaskEnvelope`, `TaskError`, `RepoDescriptor`, and the status/stage vocabularies. |
+| [adapters.py](adapters.py) | `prepare_input()`, `format_tick_report()`, `format_output()`, and the `graph.json`/manifest settings readers. |
+| [graph.json](graph.json) | Graph id, description, and the `tools` grant (`bash` and `filesystem`, scoped to `workspaces/runs` and `pkm/wiki/software`) that preflight asserts against. |
+| [__init__.py](__init__.py) | Package marker. |
+| [nodes/](nodes/__init__.py) | The seven stages of a tick, re-exported in execution order. |
+| [nodes/scheduler.py](nodes/scheduler.py) | Reclaim, preflight, select, claim, provision (remote-aware), set up, and route by stage. |
+| [nodes/implement.py](nodes/implement.py) | The only node that calls the LLM to write code. |
+| [nodes/push.py](nodes/push.py) | Commits each attempt and pushes it to the task branch; records `head_sha`. No LLM. |
+| [nodes/verify.py](nodes/verify.py) | Runs the verification command against `head_sha`; classifies environment vs. verification failure. |
+| [nodes/audit.py](nodes/audit.py) | Advisory anti-pattern review of the branch diff; always continues to publish. |
+| [nodes/publish.py](nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`. Deterministic, idempotent, no LLM. |
+| [nodes/sync_review.py](nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down. |
+| [utils/](utils/__init__.py) | Support modules — see [Utilities](#utilities). |
+| [prompts/](prompts/__init__.py) | Prompt builders for the Goldfish workers. |
+| [prompts/coder_prompt.py](prompts/coder_prompt.py) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, plus targeted retry blocks for test output, critic feedback and human feedback. |
+| [prompts/critic_prompt.py](prompts/critic_prompt.py) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
+| [prompts/spec_validator_prompt.py](prompts/spec_validator_prompt.py) | Spec validator prompt. Not used by any node — consumed by [tools/spec_validator.py](../../tools/spec_validator.py) before a task is queued. |
 
-Tests live in [tests/graphs/coding/](file:///Users/alvac/aoc/tests/graphs/coding/) — one module per
+Tests live in [tests/graphs/coding/](../../tests/graphs/coding/) — one module per
 node and per utility, plus
-[test_graph.py](file:///Users/alvac/aoc/tests/graphs/coding/test_graph.py), which drives the
+[test_graph.py](../../tests/graphs/coding/test_graph.py), which drives the
 *compiled* graph end to end. Only a compiled run catches a route that no declared channel carries,
 and it also enforces that no node both calls the LLM and mutates a remote.

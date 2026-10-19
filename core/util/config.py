@@ -106,9 +106,10 @@ class Config:
     @property
     def control_thread_id(self) -> str:
         """Discord thread where dev instances claim agents from prod; see
-        core/channel/discord/ownership.py. `CONTROL_THREAD_ID` overrides the
-        "control" thread under #general."""
-        return (os.getenv("CONTROL_THREAD_ID") or "1555004109415915540").strip()
+        core/channel/discord/ownership.py. `CONTROL_THREAD_ID`, e.g. the
+        "control" thread under #general; empty when unset, which turns that
+        coordination off."""
+        return (os.getenv("CONTROL_THREAD_ID") or "").strip()
 
     # -------------------------------------------------------------------------
     # LangSmith / Observability settings

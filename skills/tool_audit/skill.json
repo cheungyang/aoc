@@ -1,0 +1,13 @@
+{
+  "skill_id": "tool_audit",
+  "name": "Tool Audit",
+  "description": "Checks one of your own tools against its raw sources: calls it with explain=true, recomputes a sample by hand from WORKFLOW.md and RULES.md, and reports any mismatch.",
+  "emoji": "🧮",
+  "tools": {
+    "set_thinking": {},
+    "filesystem": {
+      "agents/<agent_id>/WORKFLOW.md": ["@read"],
+      "pkm/agents/<agent_id>/RULES.md": ["@read"]
+    }
+  }
+}

@@ -1,13 +1,26 @@
 import datetime
+import io
+import os
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.channel.discord import ownership as own
 from core.channel.discord.ownership import DEV, MANUAL, PROD, Event, Ownership, parse
-from core.util.config import Config
 
 T0 = datetime.datetime(2026, 9, 30, 12, 0, tzinfo=datetime.timezone.utc)
-CONTROL = Config().control_thread_id
+# Made up, and set for every test here: config.py loads .env at import, so
+# reading the real value would make these tests depend on the machine.
+CONTROL = "123456789012345678"
+_control_env = patch.dict(os.environ, {"CONTROL_THREAD_ID": CONTROL})
+
+
+def setUpModule():
+    _control_env.start()
+
+
+def tearDownModule():
+    _control_env.stop()
 
 
 def msg(content, id_, created=T0, bot=False, channel_id=CONTROL):
@@ -270,6 +283,44 @@ class TestRunnerIntegration(unittest.IsolatedAsyncioTestCase):
         command = msg("[status]", 4)
         await self.runner.on_message(command)
         command.channel.send.assert_awaited_once()
+
+
+class TestCoordinationOff(unittest.IsolatedAsyncioTestCase):
+    """CONTROL_THREAD_ID unset: there is no thread to read or to post to."""
+
+    def setUp(self):
+        off = patch.dict(os.environ, {"CONTROL_THREAD_ID": ""})
+        off.start()
+        self.addCleanup(off.stop)
+
+    async def test_rebuild_reads_nothing_and_says_so_once(self):
+        o = fresh(PROD, ready=False)
+        bot = MagicMock()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            await o.rebuild(bot)
+            await o.rebuild(bot, force=True)
+        bot.get_channel.assert_not_called()
+        bot.fetch_channel.assert_not_called()
+        self.assertTrue(o.is_ready())
+        self.assertTrue(o.is_mine("a"))
+        self.assertEqual(out.getvalue().count("CONTROL_THREAD_ID is not set"), 1)
+
+    async def test_dev_claims_and_releases_nothing(self):
+        o = fresh(DEV, host="laptop")
+        bot = MagicMock()
+        await o.claim(bot, "a")
+        bot.get_channel.assert_not_called()
+        self.assertFalse(o.is_mine("a"))
+        o.holds["a"] = own.Hold("laptop")  # even a stale hold posts nothing
+        with patch("aiohttp.ClientSession") as session:
+            await o.release_all_mine({"a": "tok-a"})
+        session.assert_not_called()
+
+    def test_no_channel_is_the_control_thread(self):
+        o = fresh(PROD)
+        self.assertFalse(o.is_control_channel(MagicMock(id="")))
+        self.assertFalse(o.is_control_channel(object()))
 
 
 if __name__ == "__main__":

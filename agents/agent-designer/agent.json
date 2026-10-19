@@ -12,26 +12,38 @@
   "emoji": "🧠",
   "model": "PRO",
   "name": "Aki",
+  "memory_topics": ["tooling"],
   "skills": {
     "agent_creation": {
       "preload": "core"
     },
+    "round_trip_audit": {},
     "skill_creation": {},
+    "tooling_review": {},
     "update_permissions": {
       "preload": "core"
     },
-    "update_schedule": {}
+    "update_schedule": {},
+    "workflow_change": {}
+  },
+  "thinking": {
+    "text": "low"
   },
   "tools": {
     "web_search": {},
     "filesystem": {
       "pkm": ["@manage"],
       "agents/": ["@manage"],
+      "!agents/*/tools/": ["@change"],
+      "!agents/*/preconditions/": ["@change"],
+      "!agents/*/lib/": ["@change"],
+      "!agents/*/WORKFLOW.md": ["@change"],
       "skills/": ["@manage"],
       "graphs/": ["@manage"],
       "tests/": [
         "@manage"
-      ]
+      ],
+      "!tests/agents/": ["@change"]
     },
     "project_query": {},
     "task_query": {}
@@ -44,5 +56,21 @@
     "auto_join": true,
     "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
     "post_transcript_to_chat": true
-  }
+  },
+  "schedules": [
+    {
+      "id": "tooling-review",
+      "kind": "prompt",
+      "channel": "agent-management",
+      "cron": "0 9 * * 1",
+      "precondition": {
+        "type": "files_changed_since",
+        "paths": ["pkm/wiki/memory/topics/tooling.md"]
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Monday tooling review: follow the tooling_review skill for this week's entries in pkm/wiki/memory/topics/tooling.md."
+      ]
+    }
+  ]
 }

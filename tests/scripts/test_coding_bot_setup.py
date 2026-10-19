@@ -42,6 +42,7 @@ class BotSetupTestCase(unittest.IsolatedAsyncioTestCase):
         self.descriptor = {"slug": "owner/repo", "push_identity": "build-bot"}
 
         self.module.resolve_manifest_path = MagicMock(return_value="/tmp/build_request.json")
+        self.module.discover_manifests = MagicMock(return_value=["/tmp/build_request.json"])
         self.module.load_manifest = MagicMock(return_value={})
         self.module.get_repo_descriptor = MagicMock(side_effect=lambda m: dict(self.descriptor))
         self.module.resolve_push_identity = MagicMock(return_value=(self.identity, ""))

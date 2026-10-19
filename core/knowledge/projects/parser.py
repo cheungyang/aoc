@@ -237,13 +237,15 @@ def extract_status(
             normalized = STATUS_MAP.get(st_text, st_text)
             return normalized, raw_st
 
-    # 2. Check frontmatter status
+    # 2. Check frontmatter status. A property may hold the tag's form too
+    # (`status: s/✊Executing`): it's read the same way, and raw_status keeps it as written.
     fm_st = fm.get("status")
     if fm_st:
         if isinstance(fm_st, list) and fm_st:
             fm_st = fm_st[0]
         raw_st = str(fm_st).strip()
-        clean_st = raw_st.lower()
+        m = STATUS_TAG_REGEX.match(raw_st.lstrip("#").strip())
+        clean_st = (m.group(2) if m else raw_st).strip().lower()
         normalized = STATUS_MAP.get(clean_st, clean_st)
         return normalized, raw_st
 

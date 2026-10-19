@@ -15,7 +15,7 @@ You must write a highly rigorous Markdown file. You must use the `filesystem` to
 **Path:** `pkm/wiki/software/<project-slug>/specs/[Feature_Name]_v[Version].md`
 
 `<project-slug>` is the project name in lowercase with hyphens for spaces and
-underscores — `French Learning Cards` → `french-learning-cards`. Everything
+underscores — `Recipe Box` → `recipe-box`. Everything
 belonging to a project lives in that one folder.
 
 **The Required Document Template:**

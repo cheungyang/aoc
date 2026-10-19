@@ -47,7 +47,7 @@ Only the dream standup runs this skill: it inlines the Core section above into e
   <status>Dreamed</status>
   <ops>
     <add tag="food">Avoiding dairy; oat milk is fine.</add>
-    <add tag="family" until="2026-12-05">Parents visiting until early December.</add>
+    <add tag="family" until="2026-11-20">Guests visiting until late November.</add>
     <confirm id="e7"/>
     <update id="e3">Runs 3x/week, mornings.</update>
     <retire id="e9" reason="trip ended"/>

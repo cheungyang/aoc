@@ -3,7 +3,7 @@
 A stored line carries everything code needs to route, rank and expire it:
 
     - [food] Avoiding dairy; oat milk OK. (src: meal-planner · first 2026-09-02 · seen 2026-09-18 · x3)
-    - [family] Parents visiting. (src: main · first 2026-09-10 · seen 2026-09-10 · x1 · until 2026-12-05)
+    - [family] Guests visiting. (src: main · first 2026-09-10 · seen 2026-09-10 · x1 · until 2026-11-20)
 
 The prompt sees only `- Avoiding dairy; oat milk OK.`; budgets count that
 rendered form. A line that doesn't parse is kept verbatim and reported, so a

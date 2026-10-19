@@ -6,10 +6,10 @@
   "tools": {
     "task_query": [],
     "project_query": [],
+    "write_weekly_review": {},
     "filesystem": {
       "pkm/vault": ["@read"],
-      "pkm/vault/journals/weekly": ["@write", "delete"],
-      "pkm/templates": ["@read"]
+      "pkm/templates/": ["@read"]
     }
   }
 }

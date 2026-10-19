@@ -142,18 +142,18 @@ class TestSpeechContract:
 
     def test_labels_headings_and_greetings_are_not_names(self):
         reply = ("## Chores this week\n"
-                 "Good morning Alva! Here they are:\n"
-                 "- **Pay the Comcast bill**\n"
+                 "Good morning Sam! Here they are:\n"
+                 "- **Pay the internet bill**\n"
                  "  - **Due Date**: Oct 21\n"
-                 "  - **Context**: Scheduled for next week, with Sarah.\n"
+                 "  - **Context**: Scheduled for next week, with Pat.\n"
                  "- **Renew the passport**\n"
                  "  - **Due Date**: Nov 2\n"
                  "  - **Context**: Takes six weeks *(Added last month)*.\n")
-        assert replay._required_names(reply) == ["Pay the Comcast bill", "Sarah", "Renew the passport"]
+        assert replay._required_names(reply) == ["Pay the internet bill", "Pat", "Renew the passport"]
 
     def test_a_one_off_label_names_its_item(self):
-        reply = "* **Amex Gold Dining Credit:** **$10** (Grubhub, Five Guys, Goldbelly)"
-        assert replay._required_names(reply) == ["Amex Gold Dining Credit", "Five Guys", "Goldbelly"]
+        reply = "* **Card A Dining Credit:** **$10** (Pizzeria, Sample Diner, Teahouse)"
+        assert replay._required_names(reply) == ["Card A Dining Credit", "Sample Diner", "Teahouse"]
 
     def test_a_name_said_in_another_form_counts(self):
         reply = "- 🌼 Daisy (Day Planner) and 🚀 Grace (Project Coach)"
@@ -402,6 +402,8 @@ def test_write_guard_refuses_writes_and_lets_reads_through(monkeypatch):
     assert loader.check_permission(ctx, "home_assistant", "call_service", "light.kitchen") is False
     assert loader.check_permission(ctx, "yfinance", "quote") is True
     assert original.call_count == 2, "only reads and unguarded tools reach the real check"
+    assert loader.check_permission(ctx, "home_assistant", "call_service", "light.kitchen", probe=True) is True
+    assert original.call_count == 3, "a probe (the entity index asking) passes through and isn't a write"
 
     refused = tools.gog.subprocess.run(["gog", "calendar", "create", "primary", "--summary", "x"])
     assert refused.returncode == 1 and "read-only" in refused.stderr
@@ -410,18 +412,21 @@ def test_write_guard_refuses_writes_and_lets_reads_through(monkeypatch):
 
 
 def test_every_tool_that_declares_read_actions_is_guarded():
-    """A new write tool declares READ_ACTIONS and is covered without editing the replay."""
+    """A new write tool, in tools/ or an agent's own tools/, declares READ_ACTIONS and is covered."""
     import importlib
+    import importlib.util
     import re as regex
 
-    tools_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools")
+    from core.loaders.tools_loader import ToolsLoader
+
+    loader = ToolsLoader()
     allowed = replay.read_only_actions()
     declared = []
-    for filename in sorted(os.listdir(tools_dir)):
-        if filename.endswith(".py") and not filename.startswith("_"):
-            with open(os.path.join(tools_dir, filename), encoding="utf-8") as f:
-                if regex.search(r"^READ_ACTIONS\b", f.read(), regex.MULTILINE):
-                    declared.append(filename[:-3])
+    for tool in sorted(set(loader._discover_tools()) | set(loader._agent_tools())):
+        origin = importlib.util.find_spec(loader.module_path(tool)).origin
+        with open(origin, encoding="utf-8") as f:
+            if regex.search(r"^READ_ACTIONS\b", f.read(), regex.MULTILINE):
+                declared.append(tool)
     assert "google_health" in declared
     for tool in declared:
-        assert allowed[tool] == set(importlib.import_module(f"tools.{tool}").READ_ACTIONS), tool
+        assert allowed[tool] == set(importlib.import_module(loader.module_path(tool)).READ_ACTIONS), tool

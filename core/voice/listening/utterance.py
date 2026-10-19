@@ -10,7 +10,6 @@ side: the audio thread writes `pcm` and `speech_end_at`; the loop writes
 """
 import io
 import itertools
-import os
 import time
 import wave
 from dataclasses import dataclass
@@ -86,13 +85,4 @@ def pcm_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
         wav_file.setsampwidth(2)
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(audio.astype(np.int16).tobytes())
-    wav_bytes = buffer.getvalue()
-
-    if os.environ.get("DEBUG_VOICE"):
-        try:
-            os.makedirs("assets/sounds", exist_ok=True)
-            with open("assets/sounds/debug_last_input.wav", "wb") as f:
-                f.write(wav_bytes)
-        except Exception:
-            pass
-    return wav_bytes
+    return buffer.getvalue()

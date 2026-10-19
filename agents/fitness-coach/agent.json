@@ -11,15 +11,6 @@
     "filesystem": {
       "pkm/wallet/exercise/": [
         "@read"
-      ],
-      "pkm/wallet/exercise/workout_history.jsonl": [
-        "@write"
-      ],
-      "pkm/wallet/exercise/progression.jsonl": [
-        "@write"
-      ],
-      "pkm/wallet/exercise/muscle_recovery.json": [
-        "@write"
       ]
     },
     "google_health": {
@@ -27,13 +18,16 @@
         "@observe"
       ],
       "exercise": [
-        "@observe",
-        "@log"
+        "@observe"
       ]
-    }
+    },
+    "workout_setup": {},
+    "log_workout_session": {},
+    "set_thinking": {}
   },
   "skills": {
-    "coach_home_workout": { "preload": "full" }
+    "coach_home_workout": { "preload": "full" },
+    "tool_audit": {}
   },
   "voice": { "name": "en-US-Chirp3-HD-Pulcherrima" },
   "schedules": [
@@ -48,9 +42,9 @@
       },
       "session_policy": "stateless",
       "prompt": [
-        "Run the Setup Phase from your coach_home_workout skill: check muscle recovery,",
-        "equipment and library, factor in last night's sleep, and propose today's",
-        "~30 min workout plan with the [💪 Let's Go] poll."
+        "Run the Setup Phase from your coach_home_workout skill: workout_setup gives",
+        "recovery, last night's sleep and the candidates in one call. Pick and propose",
+        "today's ~30 min workout plan with the [💪 Let's Go] poll."
       ]
     }
   ]

@@ -1,7 +1,7 @@
 # Main Graph
 
 `graphs/main` is the default LangGraph workflow for **every** agent in the
-system: [`GraphBuilder.build_graph`](file:///Users/alvac/aoc/core/agent/graph_builder.py#L129-L144)
+system: [`GraphBuilder.build_graph`](../../core/agent/graph_builder.py#L129-L144)
 reads `config.get("graph", "main")` and no `agent.json` currently overrides it.
 The graph puts a deterministic router in front of the conversational ReAct
 agent, so a turn whose answer is already fixed by configuration — a channel in
@@ -10,13 +10,13 @@ model call, while a turn with a real decision in it still reaches the
 concierge (the ReAct agent) as before. It runs on every message an agent
 handles: Discord messages, scheduled jobs, `agent_call` delegations, and
 `graph_call` invocations all execute through the compiled graph returned by
-[create_graph](file:///Users/alvac/aoc/graphs/main/graph.py#L51-L154).
+[create_graph](graph.py#L51-L154).
 
 > [!IMPORTANT]
 > Because this graph is shared by all agents, the router must stay **inert**
 > for specialists. Any change here has to keep an agent that does not hold
 > `agent_call`, or does not host the channel, on the concierge path — see
-> [routing_enabled](file:///Users/alvac/aoc/graphs/main/router.py#L134-L152).
+> [routing_enabled](router.py#L134-L152).
 
 ## Workflow
 
@@ -32,7 +32,7 @@ flowchart TD
 The conditional edge is
 `lambda state: state.get("route") or CONCIERGE`, mapped to
 `{DIRECT_CALL: DIRECT_CALL, CONCIERGE: CONCIERGE}`
-([graph.py:L146-L150](file:///Users/alvac/aoc/graphs/main/graph.py#L146-L150)),
+([graph.py:L146-L150](graph.py#L146-L150)),
 so a missing or empty `route` falls back to `concierge`.
 
 The `concierge` node wraps an inner `create_react_agent(llm, tools, prompt=prompt)`
@@ -42,7 +42,7 @@ nodes of this graph.
 ## State
 
 The state schema is `RouterState`, a subclass of `MessagesState`
-([graph.py:L135-L138](file:///Users/alvac/aoc/graphs/main/graph.py#L135-L138)).
+([graph.py:L135-L138](graph.py#L135-L138)).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -55,16 +55,16 @@ The state schema is `RouterState`, a subclass of `MessagesState`
 
 ### `route`
 
-[_decide](file:///Users/alvac/aoc/graphs/main/graph.py#L58-L91) — resolves the
+[_decide](graph.py#L58-L91) — resolves the
 route and stashes it for the conditional edge. Synchronous and model-free.
 
 - **Inputs from state:** `messages` (only the last message's `content` is
   inspected, as `latest`).
 - **Other inputs:** the ambient
-  [`ExecutionContext`](file:///Users/alvac/aoc/core/agent/execution_context.py#L40-L57)
+  [`ExecutionContext`](../../core/agent/execution_context.py#L40-L57)
   via `try_context()` (for `agent_id` and `channel_name`), the agent config
   captured at build time, and a fresh
-  [`AgentsLoader`](file:///Users/alvac/aoc/core/loaders/agents_loader.py#L77-L124)
+  [`AgentsLoader`](../../core/loaders/agents_loader.py#L77-L124)
   as the routing-table source. When there is no active context it falls back to
   `owner_agent_id` (from `agent_id`/`config["agent_id"]`/`config["id"]`) and an
   empty channel name — which makes `routing_enabled` false, i.e. concierge.
@@ -79,7 +79,7 @@ route and stashes it for the conditional edge. Synchronous and model-free.
 
 ### `direct_call`
 
-[_direct_call](file:///Users/alvac/aoc/graphs/main/graph.py#L93-L126) — hands
+[_direct_call](graph.py#L93-L126) — hands
 the turn to the one agent allowed to answer in this channel. Async.
 
 - **Inputs from state:** `messages[-1].content` as the user prompt,
@@ -87,21 +87,21 @@ the turn to the one agent allowed to answer in this channel. Async.
 - **Other inputs:** the ambient context for `channel_name` and the calling
   `agent_id` (falling back to `owner_agent_id`).
 - **Behavior:** awaits
-  [stream_delegate](file:///Users/alvac/aoc/core/agent/delegation.py#L114-L254),
+  [stream_delegate](../../core/agent/delegation.py#L114-L254),
   the single shared delegation path (also used by the `agent_call` tool), so
   the streamed header, custom events, channel-permission check and `<caller>`
   prefix are identical on both paths.
   - On failure it does **not** raise: it logs to stderr and returns
     `AIMessage("Could not reach \`<target>\`: <error>")`, because a
     misconfigured channel should say so in the channel rather than crash the
-    graph ([graph.py:L109-L113](file:///Users/alvac/aoc/graphs/main/graph.py#L109-L113)).
+    graph ([graph.py:L109-L113](graph.py#L109-L113)).
   - On success the reply text is prefixed with
-    [agent_header](file:///Users/alvac/aoc/core/agent/delegation.py#L107-L111)
+    [agent_header](../../core/agent/delegation.py#L107-L111)
     (`emoji Name: `). Attribution matters: this text becomes part of the
     orchestrator's own history, and an unattributed reply would later read as
     something the orchestrator itself said and reasoned its way to.
   - When a context is active it calls
-    [_record_turn](file:///Users/alvac/aoc/graphs/main/graph.py#L30-L48), which
+    [_record_turn](graph.py#L30-L48), which
     appends the `user` and `ai` messages to `SqliteSessionStore`. This is
     needed because the session log is populated by `LoggingHandler`'s *LLM*
     callbacks, and a routed turn never calls a model — without it the
@@ -112,7 +112,7 @@ the turn to the one agent allowed to answer in this channel. Async.
 
 ### `concierge`
 
-[_concierge](file:///Users/alvac/aoc/graphs/main/graph.py#L128-L133) — the
+[_concierge](graph.py#L128-L133) — the
 existing ReAct behaviour, for turns with a real decision in them. Async.
 
 - **Inputs from state:** `messages` (the full list, including any prompt
@@ -128,13 +128,13 @@ existing ReAct behaviour, for turns with a real decision in them. Async.
 
 ## Routing
 
-All routing logic lives in [router.py](file:///Users/alvac/aoc/graphs/main/router.py)
+All routing logic lives in [router.py](router.py)
 and is deliberately pure: `decide()` is a function of
 `(prompt, agent_id, channel_name, agent_config, loader)` and performs no work
 and no network I/O, so the routing table is something a test can pin.
 
-[decide](file:///Users/alvac/aoc/graphs/main/router.py#L155-L178) returns a
-frozen [RouteDecision](file:///Users/alvac/aoc/graphs/main/router.py#L42-L57)
+[decide](router.py#L155-L178) returns a
+frozen [RouteDecision](router.py#L42-L57)
 (`target`, `agent_id`, `prompt`, `reason`; `is_direct` is a convenience
 property). `reason` exists for logs and tests: when routing is wrong, the
 useful question is *which rule fired*.
@@ -150,14 +150,14 @@ useful question is *which rule fired*.
 
 ### `routing_enabled`
 
-[routing_enabled](file:///Users/alvac/aoc/graphs/main/router.py#L134-L152)
+[routing_enabled](router.py#L134-L152)
 requires all three:
 
 1. a non-empty `agent_id` **and** non-empty `channel_name`;
 2. `"agent_call"` present in `agent_config["tools"]`;
 3. `loader.hosts_channel(agent_id, channel_name)` — i.e. the channel is listed
    in the agent's `channel_hosts`
-   ([agents_loader.py:L77-L85](file:///Users/alvac/aoc/core/loaders/agents_loader.py#L77-L85)).
+   ([agents_loader.py:L77-L85](../../core/loaders/agents_loader.py#L77-L85)).
 
 This is *derived rather than declared* on purpose: because `graphs/main` is the
 default graph for every agent, a flag in one agent's config would not have
@@ -171,15 +171,15 @@ has no other eligible agent in it anyway.
 
 The openers that mean "don't route this, answer it here" are read from the
 agent's config under
-[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](file:///Users/alvac/aoc/graphs/main/router.py#L39),
+[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](router.py#L39),
 not hard-coded, because which phrases belong there depends on which tools that
 agent holds (`kill` earns its place only because `main` has `job_kill`) — and
 that is config, not logic.
-[concierge_prefixes](file:///Users/alvac/aoc/graphs/main/router.py#L94-L99)
+[concierge_prefixes](router.py#L94-L99)
 accepts a list or a single string and drops blanks and non-strings.
 
 Two forms, matched by
-[match_concierge_prefix](file:///Users/alvac/aoc/graphs/main/router.py#L107-L131)
+[match_concierge_prefix](router.py#L107-L131)
 (case-insensitive, in declaration order, first match wins):
 
 | Form | Example | Anchoring | Prompt handed to the concierge |
@@ -193,15 +193,15 @@ silently steals ordinary messages from the specialist, which is worse than
 missing a few.
 
 Prompt handling is multimodal-safe:
-[leading_text](file:///Users/alvac/aoc/graphs/main/router.py#L60-L74) reads only
+[leading_text](router.py#L60-L74) reads only
 the leading text part of a content-part list, and
-[_replace_leading_text](file:///Users/alvac/aoc/graphs/main/router.py#L77-L91)
+[_replace_leading_text](router.py#L77-L91)
 rewrites that part while preserving attachments.
 
 ### Resolving the target agent
 
 When routing is enabled and no prefix matched, the target comes from
-[eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)](file:///Users/alvac/aoc/core/loaders/agents_loader.py#L87-L114):
+[eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)](../../core/loaders/agents_loader.py#L87-L114):
 agents whose `channels` list contains the channel, **excluding** the caller
 itself and **excluding** agents declaring `channels: ["*"]` (a wildcard is a
 statement about reachability, not ownership — counting `graph-worker` would
@@ -211,17 +211,17 @@ choice is real and the concierge decides.
 
 > [!NOTE]
 > `direct_call` delegation is still permission-checked downstream:
-> [channel_permits](file:///Users/alvac/aoc/core/agent/delegation.py#L101-L104)
+> [channel_permits](../../core/agent/delegation.py#L101-L104)
 > inside `stream_delegate` rejects a target whose `channels` grant does not
 > cover the channel, and the node reports that as the turn's reply.
 
 ## Entry & Exit
 
 Both helpers are picked up by name by
-[GraphsLoader](file:///Users/alvac/aoc/core/loaders/graphs_loader.py#L80-L97)
-and used by the [`graph_call`](file:///Users/alvac/aoc/tools/graph_call.py#L40-L42)
+[GraphsLoader](../../core/loaders/graphs_loader.py#L80-L97)
+and used by the [`graph_call`](../../tools/graph_call.py#L40-L42)
 tool when this graph is invoked as a subgraph. (The normal agent path in
-[`Agent._prepare_execution`](file:///Users/alvac/aoc/core/agent/agent.py#L113)
+[`Agent._prepare_execution`](../../core/agent/agent.py#L113)
 builds `{"messages": [...]}` itself and does not call them.)
 
 ```python
@@ -232,7 +232,7 @@ Returns `{"messages": [{"role": "user", "content": formatted_query}]}`. When
 `caller` is given and the query does not already contain `<caller>`, the query
 is prefixed with `<caller>{caller}</caller>\n`; the guard makes it idempotent
 so a re-entering prompt is not double-tagged
-([graph.py:L157-L165](file:///Users/alvac/aoc/graphs/main/graph.py#L157-L165)).
+([graph.py:L157-L165](graph.py#L157-L165)).
 
 ```python
 def format_output(state: Dict[str, Any]) -> str
@@ -240,7 +240,7 @@ def format_output(state: Dict[str, Any]) -> str
 
 Returns `state["messages"][-1].content` when `state` is a dict with a non-empty
 `messages`; otherwise falls back to `str(state)`
-([graph.py:L168-L172](file:///Users/alvac/aoc/graphs/main/graph.py#L168-L172)).
+([graph.py:L168-L172](graph.py#L168-L172)).
 
 ### Checkpointer ownership
 
@@ -254,9 +254,9 @@ return workflow.compile(checkpointer=checkpointer)                # outer graph 
 > The checkpointer belongs to this **outer** graph. The inner ReAct agent is
 > compiled without one — otherwise the two would write the same thread from two
 > levels. `GraphBuilder` passes a
-> [`SqliteCheckpointer`](file:///Users/alvac/aoc/core/agent/graph_builder.py#L125)
+> [`SqliteCheckpointer`](../../core/agent/graph_builder.py#L125)
 > in, and the thread id comes from
-> [`ExecutionContext.get_session_thread_id()`](file:///Users/alvac/aoc/core/agent/execution_context.py#L218-L230).
+> [`ExecutionContext.get_session_thread_id()`](../../core/agent/execution_context.py#L218-L230).
 
 A consequence of this design is that the `direct_call` node has to write the
 human-readable session log itself (`_record_turn`), since the checkpoint is
@@ -267,13 +267,13 @@ populated by LLM callbacks that a routed turn never triggers.
 
 | File | Description |
 | --- | --- |
-| [graph.py](file:///Users/alvac/aoc/graphs/main/graph.py) | Builds and compiles the workflow: the `route`, `direct_call` and `concierge` nodes, `RouterState`, plus `prepare_input`/`format_output`. |
-| [router.py](file:///Users/alvac/aoc/graphs/main/router.py) | Pure routing logic: `decide()`, `routing_enabled()`, escape-prefix matching, and the `RouteDecision` dataclass. |
-| [graph.json](file:///Users/alvac/aoc/graphs/main/graph.json) | Graph metadata consumed by `GraphsLoader`: `graph_id`/`name` `main`, description, emoji 🧭, no extra tool grants, `dream` skill. |
+| [graph.py](graph.py) | Builds and compiles the workflow: the `route`, `direct_call` and `concierge` nodes, `RouterState`, plus `prepare_input`/`format_output`. |
+| [router.py](router.py) | Pure routing logic: `decide()`, `routing_enabled()`, escape-prefix matching, and the `RouteDecision` dataclass. |
+| [graph.json](graph.json) | Graph metadata consumed by `GraphsLoader`: `graph_id`/`name` `main`, description, emoji 🧭, no extra tool grants, `dream` skill. |
 
 ### Tests
 
 | File | Description |
 | --- | --- |
-| [test_main_graph.py](file:///Users/alvac/aoc/tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, ambiguous channel → concierge, prefix stripping, turn recording, failed delegation, and that specialists never route. |
-| [test_router.py](file:///Users/alvac/aoc/tests/graphs/main/test_router.py) | Unit-tests `decide()`, `routing_enabled()` and prefix matching, and pins the live routing table against the real `agents/` configs. |
+| [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, ambiguous channel → concierge, prefix stripping, turn recording, failed delegation, and that specialists never route. |
+| [test_router.py](../../tests/graphs/main/test_router.py) | Unit-tests `decide()`, `routing_enabled()` and prefix matching, and pins the live routing table against the real `agents/` configs. |

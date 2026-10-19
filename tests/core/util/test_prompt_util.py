@@ -17,6 +17,7 @@ from core.util.prompt_util import (
     get_voice_mode_prompt,
     get_agent_memory_prompt,
     get_agent_static_prompt,
+    get_tool_rules_prompt,
 )
 
 
@@ -228,9 +229,9 @@ class TestAgentPrompts(unittest.TestCase):
     def test_agent_static_and_memory_prompts(self):
         for name in ("AGENTS", "INSTRUCTIONS", "IDENTITY", "SOUL"):
             self.write(f"{name}.md", f"# {name}.md\n\n{name.lower()} content")
-        self.write("USER.md", "user content")
+        self.write("agents/test-agent/USER.md", "user content", self.pkm)
         self.write("wiki/memory/TAGS.md", "## food\nDiet.\n## travel\nTrips.\n", self.pkm)
-        self.write("wiki/memory/PROFILE.md", "# Profile\n\n" + self.entry("profile", "Lives in San Jose."), self.pkm)
+        self.write("wiki/memory/PROFILE.md", "# Profile\n\n" + self.entry("profile", "Lives in Springfield."), self.pkm)
         self.write("wiki/memory/topics/food.md", self.entry("food", "Oat milk OK."), self.pkm)
         self.write("wiki/memory/topics/travel.md", self.entry("travel", "Not subscribed."), self.pkm)
         self.write("agents/test-agent/MEMORY.md", self.entry("private", "memory content"), self.pkm)
@@ -242,7 +243,7 @@ class TestAgentPrompts(unittest.TestCase):
         self.assertIn("<description>Your purpose, specialization and workflow</description>", static)
         self.assertIn("<content>agents content\n\ninstructions content</content>", static)
         self.assertIn("<content>identity content\n\nsoul content</content>", static)
-        self.assertIn("<content>user content\n\n- Lives in San Jose.</content>", memory)
+        self.assertIn("<content>user content\n\n- Lives in Springfield.</content>", memory)
         self.assertIn("<SHARED_MEMORY>", memory)
         self.assertIn("### food\n- Oat milk OK.", memory)
         self.assertNotIn("Not subscribed", memory)
@@ -251,15 +252,15 @@ class TestAgentPrompts(unittest.TestCase):
         self.assertNotIn("src:", memory)
 
     def test_stateless_agents_get_no_shared_memory(self):
-        self.write("USER.md", "user content")
+        self.write("agents/test-agent/USER.md", "user content", self.pkm)
         self.write("wiki/memory/TAGS.md", "## food\nDiet.\n", self.pkm)
-        self.write("wiki/memory/PROFILE.md", self.entry("profile", "Lives in San Jose."), self.pkm)
+        self.write("wiki/memory/PROFILE.md", self.entry("profile", "Lives in Springfield."), self.pkm)
         self.write("wiki/memory/topics/food.md", self.entry("food", "Oat milk OK."), self.pkm)
 
         memory = get_agent_memory_prompt("test-agent", {"stateless": True, "memory_topics": ["food"]})
 
         self.assertIn("<content>user content</content>", memory)
-        self.assertNotIn("San Jose", memory)
+        self.assertNotIn("Springfield", memory)
         self.assertNotIn("SHARED_MEMORY", memory)
 
     def test_agent_prompts_with_only_instructions(self):
@@ -272,6 +273,25 @@ class TestAgentPrompts(unittest.TestCase):
         self.assertIn("<content>identity content</content>", prompt)
         self.assertNotIn("<HUMAN_CONTEXT>", prompt)
         self.assertEqual(get_agent_memory_prompt("test-agent", {}), "")
+
+    def test_every_agent_gets_the_tool_rules(self):
+        prompt = get_tool_rules_prompt("test-agent")
+        self.assertTrue(prompt.startswith("<TOOL_RULES>"))
+        self.assertIn(
+            "When a tool says partial or failed, tell the user in one line what's missing. "
+            "Don't fill the gap with a guess. Offer the fix.", prompt)
+        self.assertIn("`[MEMORY] Tool gap: <tool>, <file>: <what was missing or asked for>.`", prompt)
+        self.assertNotIn("WORKFLOW.md", prompt)
+        self.assertNotIn("RULES.md", prompt)
+
+    def test_an_agent_with_a_workflow_and_rules_is_pointed_to_them(self):
+        self.write("WORKFLOW.md", "# test-agent\n")
+        self.write("lib/rules.py", "RULES = ()\n")
+        self.write("agents/test-agent/RULES.md", "- move_pct: 3\n", self.pkm)
+        prompt = get_tool_rules_prompt("test-agent")
+        self.assertIn("agents/test-agent/WORKFLOW.md", prompt)
+        self.assertIn("pkm/agents/test-agent/RULES.md", prompt)
+        self.assertNotIn("move_pct", prompt)  # the PKM is never read: the block stays static
 
 if __name__ == "__main__":
     unittest.main()

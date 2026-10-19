@@ -1,10 +1,108 @@
+"""The gog tool, and the gog CLI helpers calendar code shares.
+
+`gog` relays gog's text to the model. Code that computes with the result
+(`calendar_add`, excursion-planner's `weekend_availability`) calls `run_json`,
+`list_events` or `create_event` instead: they parse gog's JSON and raise
+`GogError` on failure. Both paths find the binary and set the keyring
+environment the same way (`gog_binary`, `gog_env`).
+"""
+import json
 import os
-import subprocess
 import shlex
+import subprocess
+from datetime import datetime
+from typing import Any, List
+
 from langchain_core.tools import tool
-from core.loaders.agents_loader import AgentsLoader
+
 from core.util import format_tool_response
 from core.util.config import Config
+from core.util.local_time import utc_text
+
+TIMEOUT_SECONDS = 30.0
+_WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BINARY_PATHS = (os.path.join(_WORKSPACE_ROOT, "bin", "gog"), "/usr/local/bin/gog")
+_KEYRING_FAILURE = "aes.KeyUnwrap(): integrity check failed"
+_KEYRING_HINT = (
+    "Keyring decryption failed: check that GOG_KEYRING_PASSWORD in .env matches the "
+    "passphrase gogcli was initialized with."
+)
+
+
+class GogError(RuntimeError):
+    """gog is missing, failed, or printed something other than JSON."""
+
+
+def gog_binary() -> str:
+    for path in BINARY_PATHS:
+        if os.path.exists(path):
+            return path
+    raise GogError(f"gog binary not found at {' or '.join(BINARY_PATHS)}")
+
+
+def gog_env() -> dict:
+    env = os.environ.copy()
+    config = Config()
+    env["GOG_KEYRING_BACKEND"] = config.gog_keyring_backend or env.get("GOG_KEYRING_BACKEND", "file")
+    password = config.gog_keyring_password or env.get("GOG_KEYRING_PASSWORD", "")
+    if password:
+        env["GOG_KEYRING_PASSWORD"] = password
+    return env
+
+
+def run_json(args: List[str]) -> Any:
+    """Runs `gog <args> --json` and returns the parsed output, or raises GogError."""
+    command = " ".join(args[:2])
+    try:
+        result = subprocess.run(
+            [gog_binary(), *args, "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            env=gog_env(),
+        )
+    except subprocess.TimeoutExpired:
+        raise GogError(
+            f"gog {command} timed out after {TIMEOUT_SECONDS:.0f} s; check that gog is "
+            "authenticated and never waits for input"
+        ) from None
+    output = (result.stdout or "").strip()
+    if result.returncode != 0:
+        detail = (result.stderr or output or f"exit code {result.returncode}").strip()
+        if _KEYRING_FAILURE in detail:
+            detail = f"{detail} ({_KEYRING_HINT})"
+        raise GogError(f"gog {command} failed: {detail[-500:]}")
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        raise GogError(f"gog {command} printed no JSON: {output[:200]!r}") from None
+
+
+def list_events(start: datetime, end: datetime, calendar: str = "primary", max_results: int = 250) -> Any:
+    """The events overlapping [start, end) on one calendar, as gog's JSON."""
+    return run_json([
+        "calendar", "events", calendar,
+        "--from", utc_text(start), "--to", utc_text(end), "--max", str(max_results),
+    ])
+
+
+def create_event(
+    calendar: str, title: str, start: str, end: str, *,
+    all_day: bool = False, location: str = "", description: str = "",
+) -> Any:
+    """Creates one event and returns gog's JSON ({"event": {...}}). `start` and `end`
+    are UTC RFC3339, or dates with an exclusive end when `all_day`."""
+    args = ["calendar", "create", calendar, "--summary", title, "--from", start, "--to", end]
+    if all_day:
+        args.append("--all-day")
+    if location:
+        args += ["--location", location]
+    if description:
+        args += ["--description", description]
+    return run_json(args)
+
 
 @tool
 def gog(command: str) -> str:
@@ -30,40 +128,25 @@ def gog(command: str) -> str:
     - gmail thread get <threadId> --sanitize-content --json (Get email thread content by ID)
     - gmail settings filters export | list | create | delete (Manage Gmail filters)
     """
-    # Resolve path to gog binary
-    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    gog_bin_workspace = os.path.join(workspace_root, "bin", "gog")
-    gog_bin_usr_local = "/usr/local/bin/gog"
-
-    if os.path.exists(gog_bin_workspace):
-        gog_bin = gog_bin_workspace
-    elif os.path.exists(gog_bin_usr_local):
-        gog_bin = gog_bin_usr_local
-    else:
-        return format_tool_response("gog", payload="", errors=f"Error: gog binary not found at {gog_bin_workspace} or {gog_bin_usr_local}. Please ensure it is installed.")
+    try:
+        gog_bin = gog_binary()
+    except GogError:
+        return format_tool_response(
+            "gog", payload="",
+            errors=f"Error: gog binary not found at {BINARY_PATHS[0]} or {BINARY_PATHS[1]}. Please ensure it is installed.",
+        )
 
     try:
         # Split command safely
         args = shlex.split(command)
-        cmd = [gog_bin] + args
-
-        # Prepare environment ensuring keyring settings are passed
-        env = os.environ.copy()
-        config = Config()
-
-        env["GOG_KEYRING_BACKEND"] = config.gog_keyring_backend or env.get("GOG_KEYRING_BACKEND", "file")
-        keyring_password = config.gog_keyring_password or env.get("GOG_KEYRING_PASSWORD", "")
-        if keyring_password:
-            env["GOG_KEYRING_PASSWORD"] = keyring_password
-
         result = subprocess.run(
-            cmd,
+            [gog_bin] + args,
             capture_output=True,
             text=True,
             check=False,
-            timeout=30.0,
+            timeout=TIMEOUT_SECONDS,
             stdin=subprocess.DEVNULL,
-            env=env
+            env=gog_env(),
         )
 
         output = []
@@ -73,7 +156,7 @@ def gog(command: str) -> str:
             output.append(result.stderr)
 
         output_str = "\n".join(output)
-        if "aes.KeyUnwrap(): integrity check failed" in output_str:
+        if _KEYRING_FAILURE in output_str:
             output_str += (
                 "\n[Gog Tool Hint]: Keyring decryption failed. Please verify that "
                 "GOG_KEYRING_PASSWORD in .env matches the keyring passphrase used "

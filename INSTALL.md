@@ -116,7 +116,7 @@ matrix multiply per query).
 
 > [!IMPORTANT]
 > LanceDB's published wheels are compiled for AVX2. On an older CPU — the Intel
-> Celeron J4025 in a Synology DS220+, for instance — `import lancedb` does not
+> Celeron in a low-power NAS, for instance — `import lancedb` does not
 > raise `ImportError`. It executes an illegal instruction and the kernel kills
 > the process with SIGILL, which no `try`/`except` can catch. That is why the
 > default is `auto`: it attempts the import in a **child** process and reads the
@@ -272,7 +272,7 @@ Deleting the `provider` key moves the agent back to Gemini.
   `LOCAL_LLM_BASE_URL` to `host.docker.internal` and declares the
   `host-gateway` alias. The server must then bind `0.0.0.0` rather than
   `127.0.0.1` — which also exposes it to the LAN, so add a firewall rule.
-  Note the deployment NAS (Synology DS220+) cannot host a model of this size;
+  Note the deployment NAS (a low-power NAS) cannot host a model of this size;
   that deployment stays on Gemini.
 
 ---
@@ -283,7 +283,7 @@ AOC integrates directly with Home Assistant to provide safe, agentic smart home 
 
 ### 1. Architecture & Security Rails
 
-- **Single-Tool Facade (`home_assistant`)**: All agents interact via a single structured tool that routes internally between REST (states, configs, services), WebSocket (entity/device/area registries), and internal MCP (live Assist context snapshot).
+- **Single-Tool Facade (`home_assistant`)**: home-steward interacts via a single structured tool (`agents/home-steward/tools/home_assistant.py`) that routes internally between REST (states, configs, services) and WebSocket (entity/device/area registries).
 - **Physical Safety Deny-List**: Hardcoded in `guards.py`. Critical security domains (`lock`, `alarm_control_panel`, `cover`, `garage_door`, `valve`, `water_heater`) are blocked outright in code and cannot be controlled or embedded in automations.
 - **Climate Safety Band**: Target temperatures outside 12.0°C – 28.0°C are rejected.
 - **Propose → Confirm → Apply Protocol**: Any configuration modification (`upsert_automation`, `upsert_script`, `upsert_scene`, `reload`) or opaque trigger (`script.turn_on`, `automation.trigger`) generates a rendered diff and a single-use SHA-256 bound confirmation token. The agent must obtain explicit user approval before applying.
@@ -298,12 +298,12 @@ AOC integrates directly with Home Assistant to provide safe, agentic smart home 
      install -m 600 /dev/null ./home_assistant_token
      pbpaste > ./home_assistant_token
      ```
-   - *Note*: Both `.gitignore` and `.dockerignore` exclude `home_assistant_token`. The file is passed into the container via the `.:/app` volume mount.
+   - *Note*: Both `.gitignore` and `.dockerignore` exclude `home_assistant_token`. The file is passed into the container via the `.:/app` volume mount, and `entrypoint.sh` re-locks it to `600` on every start. The client refuses to read it if other users can.
 
 2. **Configure Environment in `.env`**:
    ```bash
    # Base URL without trailing slash
-   HA_BASE_URL=https://ha.yngnas220.synology.me
+   HA_BASE_URL=https://homeassistant.example.com
 
    # Path to token inside container (default: /app/home_assistant_token)
    # HA_TOKEN_FILE=/app/home_assistant_token
@@ -398,8 +398,10 @@ docker compose exec app python -m pytest
 
 Prod and a dev instance (e.g. on a laptop, for local LLMs or heavier work) can
 run at the same time without both replying. Dev connects every agent bot but
-only answers for agents it has claimed in the Discord control thread (the
-"control" thread under #general; override with `CONTROL_THREAD_ID`):
+only answers for agents it has claimed in the Discord control thread, whose id
+`CONTROL_THREAD_ID` holds on both machines (e.g. a "control" thread under
+#general). Without it there is no coordination: prod answers for every agent,
+dev for none, and the log says so once. To start dev:
 
 ```bash
 python main.py --dev --agents day-planner   # dev takes day-planner; prod keeps the rest

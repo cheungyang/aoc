@@ -442,8 +442,8 @@ class TestHITLMultiTurnIntegration(unittest.IsolatedAsyncioTestCase):
             )
 
             plot_text = "# Apple Plot"
-            copy_v1_dict = {"caption": "Learn Apple in Cantonese!", "hashtags": ["#Apple"], "markdown_content": "# Apple Copy v1"}
-            copy_v2_dict = {"caption": "Learn Apple in Cantonese with Ayla!", "hashtags": ["#Apple", "#ToddlerLearning"], "markdown_content": "# Apple Copy v2"}
+            copy_v1_dict = {"caption": "Learn Apple in Spanish!", "hashtags": ["#Apple"], "markdown_content": "# Apple Copy v1"}
+            copy_v2_dict = {"caption": "Learn Apple in Spanish with Kiki!", "hashtags": ["#Apple", "#ToddlerLearning"], "markdown_content": "# Apple Copy v2"}
 
             with patch("graphs.content_creation.nodes.ideation.generate_image.generate_image") as mock_img, \
                  patch("graphs.content_creation.nodes.production.render_plate.generate_animation_veo3") as mock_veo, \

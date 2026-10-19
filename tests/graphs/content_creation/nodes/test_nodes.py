@@ -75,7 +75,7 @@ class TestAudioNodes(unittest.IsolatedAsyncioTestCase):
     async def test_receive_audio_from_raw_discord_url(self, mock_session_cls):
         mock_session_cls.return_value = MockSession(MockResponse(data=b"RAW_URL_AUDIO_BYTES"))
 
-        raw_url = "https://cdn.discordapp.com/attachments/1537392166207356968/1538895661733257318/Cat_1.m4a?ex=6a8457c5&is=6a830645&hm=b6748b1f15746e9855e68ba9166d92ef8f753cbd4aabae54d1b25e902586497d&"
+        raw_url = "https://cdn.discordapp.com/attachments/123456789012345678/234567890123456789/Cat_1.m4a?ex=1a2b3c4d&is=1a2b3c4d&hm=0123456789abcdef0123456789abcdef&"
         state = {
             "topic": "cat",
             "project_path": self.project_path,

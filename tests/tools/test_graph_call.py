@@ -224,7 +224,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
                 "metadata": {"name": "content_creation"}
             }
 
-            feedback = "i am looking for ayla in a full fish mascot outfit, instead of wearing a jacket with fish icons."
+            feedback = "i am looking for kiki in a full fish mascot outfit, instead of wearing a jacket with fish icons."
             result = await graph_call.ainvoke({"graph_name": "content_creation", "query": feedback})
 
             mock_graph.aupdate_state.assert_called_once()
@@ -283,7 +283,7 @@ class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
         }
 
         mock_thread = MagicMock(spec=discord.Thread)
-        mock_thread.id = 1541110915540324533
+        mock_thread.id = 123456789012345678
         mock_thread.name = "sub-feature"
         mock_thread.parent = MagicMock(spec=discord.TextChannel)
         mock_thread.parent.name = "software-dev"

@@ -102,6 +102,7 @@ class TestSeatsAeroTool(unittest.TestCase):
                     "Cabin": "business",
                     "MileageCost": 75000,
                     "TotalTaxes": 5620,
+                    "TaxesCurrency": "USD",
                     "TaxesCurrencySymbol": "$",
                     "TotalDuration": 680,
                     "Stops": 0,
@@ -144,7 +145,8 @@ class TestSeatsAeroTool(unittest.TestCase):
         )
         self.assertIn("trip_abc", result)
         self.assertIn("NH107", result)
-        self.assertIn("$56.20", result)
+        self.assertIn('"total_taxes": "56.20 USD"', result)
+        self.assertNotIn("$56.20", result)
         self.assertIn("11h 20m", result)
 
     @patch.dict(os.environ, {"SEATS_AERO_API_KEY": "test_api_key"})
@@ -296,6 +298,40 @@ class TestSeatsAeroTool(unittest.TestCase):
         })
         self.assertIn("live_trip_1", result)
         self.assertIn("UA837", result)
+
+
+class TestTaxesLabel(unittest.TestCase):
+    """Trip taxes carry their ISO currency code (money in tool output, D8)."""
+
+    def taxes(self, **fields):
+        from tools.seats_aero import _format_trips_list
+        return _format_trips_list([{"ID": "t1", **fields}])[0]["total_taxes"]
+
+    def test_the_iso_code_from_seats_aero(self):
+        self.assertEqual(self.taxes(TotalTaxes=5620, TaxesCurrency="USD", TaxesCurrencySymbol="$"), "56.20 USD")
+        self.assertEqual(self.taxes(TotalTaxes=12345, TaxesCurrency="cad", TaxesCurrencySymbol="$"), "123.45 CAD")
+        self.assertEqual(self.taxes(TotalTaxes=890, TaxesCurrency="AUD", TaxesCurrencySymbol="$"), "8.90 AUD")
+
+    def test_a_symbol_alone_leaves_the_currency_open(self):
+        self.assertEqual(self.taxes(TotalTaxes=5620, TaxesCurrencySymbol="$"), "56.20 (currency not given, shown as '$')")
+        self.assertEqual(self.taxes(TotalTaxes=5620, TaxesCurrency=""), "56.20 (currency not given)")
+
+    def test_no_taxes(self):
+        self.assertEqual(self.taxes(TaxesCurrency="USD"), "N/A")
+
+    @patch.dict(os.environ, {"SEATS_AERO_API_KEY": "test_api_key"})
+    @patch("tools.seats_aero.requests.get")
+    def test_search_with_trips_labels_them_too(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"data": [{
+            "ID": "avail_1", "Route": {"OriginAirport": "YVR", "DestinationAirport": "NRT"}, "Date": "2026-11-10",
+            "AvailabilityTrips": [{"ID": "trip_1", "TotalTaxes": 9810, "TaxesCurrency": "CAD", "TaxesCurrencySymbol": "$"}],
+        }], "hasMore": False}
+        mock_get.return_value = mock_response
+        result = seats_aero.invoke({"action": "search", "origin_airport": "YVR", "destination_airport": "NRT",
+                                    "include_trips": True})
+        self.assertIn('"total_taxes": "98.10 CAD"', result)
 
 
 if __name__ == '__main__':

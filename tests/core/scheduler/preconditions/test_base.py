@@ -44,15 +44,26 @@ class TestBuild(unittest.TestCase):
                 build_precondition(bad)
 
     def test_registry_is_complete(self):
+        """The core types; scans belong to their agents' own code."""
         self.assertEqual(
             set(pre.REGISTRY),
             {
                 "always", "files_changed_since", "files_exist", "file_matches",
                 "json_non_empty", "task_list_non_empty", "project_list_non_empty",
-                "sleep_logged_today", "market_screen", "property_screen",
-                "credit_windows", "ha_audit", "morning_briefing", "projects_attention",
+                "sleep_logged_today",
             },
         )
+
+    def test_a_scan_resolves_only_for_its_own_agent(self):
+        scans = {agent: pre.agent_preconditions(agent) for agent in ("market-scout", "day-planner")}
+        self.assertIn("market_screen", scans["market-scout"])
+        self.assertIsInstance(build_precondition({"type": "market_screen"}, agent_id="market-scout"),
+                              scans["market-scout"]["market_screen"])
+        with self.assertRaises(PreconditionError) as cm:
+            build_precondition({"type": "market_screen"}, agent_id="day-planner")
+        self.assertIn("unknown precondition type 'market_screen'", str(cm.exception))
+        with self.assertRaises(PreconditionError):
+            build_precondition({"type": "market_screen"})
 
 
 if __name__ == "__main__":

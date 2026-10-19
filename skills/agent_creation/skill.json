@@ -1,12 +1,17 @@
 {
   "skill_id": "agent_creation",
   "name": "Agent Creation",
-  "description": "Skill for creating new agents with required files and vault structures.",
+  "description": "Designs and creates a new agent from a worksheet that classifies each step of its workflow (config, skill, RULES.md, tool or scan, memory, schedule), ending with the classification table for the user to confirm.",
   "emoji": "🤖",
   "tools": {
     "filesystem": {
       "agents": ["@manage"],
-      "pkm/agents": ["@manage"]
-    }
+      "pkm/agents": ["@manage"],
+      "pkm/wiki/memory/TAGS.md": ["@read"],
+      "core/util/models.py": ["@read"],
+      "core/voice/settings.py": ["@read"]
+    },
+    "set_thinking": {},
+    "agent_lint": {}
   }
 }

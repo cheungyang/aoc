@@ -1,38 +1,40 @@
 ---
 name: coach_project
-description: Analyzes project metadata and tasks, connects knowledge via wiki_query, and maintains a strategic coaching dossier to facilitate proactive user coaching sessions.
+description: Picks the project to coach from a ranking, prepares from one context read (details, task velocity, coaching history), connects knowledge via wiki_query, and maintains a strategic coaching dossier to facilitate proactive user coaching sessions.
 ---
 
-## Overview
-Your preparation pipeline for project coaching: pull the project's metadata and tasks from the DB, check the wiki for related concepts, and keep an internal "Coaching Dossier" that serves as your memory and strategy guide for proactive coaching sessions.
-
 ## Boundaries & Guardrails
-- **Zero Filesystem Discovery:** You MUST NOT use `filesystem` search to find tasks or project states. Rely purely on the JSON returned by `task_query` and `project_query`.
+- **Tools First:** Get project states, tasks and coaching history from `projects_needing_attention` and `project_context`, and relay their numbers (velocity, days since last coached) as given; never recompute them. Only when one says partial or failed, check what it names with `project_query`, `task_query` or `filesystem`.
 - **Anti-Fluff Guardrail (Task Appending):** You have permission to append new tasks directly to the user's raw files in `pkm/vault/projects/`. However, you MUST NEVER write generic, fluffy tasks (e.g., "Research topic", "Think about next steps"). Tasks must be hyper-specific and verifiable. You MUST explicitly ask the user for permission before writing tasks to their vault.
 - **Dossier Isolation:** All coaching dossiers MUST be saved strictly to `pkm/wiki/project-coaching/`. Do not pollute the main `projects` folder.
 
 ## Workflow
+A session's first turn is two model calls: Phase 1 in one step, then your opener (Phases 2 and 4). Read and write no files in that turn; `project_context` already carries your dossier notes.
 
-### Phase 1: DB-Driven Ingest
-1. Use `project_query` (`action="get"`) to retrieve the structured JSON metadata for the target project.
-2. Extract the project's `status`, `priority`, `commitment_year`, `category`, and the `alias` tag (e.g., `#p/my-project`) from the JSON payload.
-3. Use `task_query` (`action="search"`) to retrieve tasks associated with this project. Use the `tags` array parameter to search for the project's alias (e.g., `tags=["p/<alias>"]`).
+### Phase 1: Choose & Ingest (one step)
+1. Coach the project the user names; otherwise the first in the ranking (a scheduled run's findings, or `projects_needing_attention`), and say why it's first. The findings carry the first one's `project_context`; for any other project, call `project_context`.
+2. In that same step, follow the `wiki_query` skill to ask: *"What do we already know about [Entity/Concept] in relation to this project domain?"* for the Entities and Concepts critical to the project's success. Skip it when your dossier notes already cover them.
 
 ### Phase 2: Contextualization & Velocity
-4. Analyze the returned metadata and tasks. Identify key Entities and Concepts critical to the project's success.
-5. Follow the `wiki_query` skill to ask: *"What do we already know about [Entity/Concept] in relation to this project domain?"* to ground your coaching in the user's existing knowledge graph.
-6. Evaluate task velocity by comparing completed vs. uncompleted tasks from your DB pull to identify bottlenecks.
+3. Find the bottlenecks: the velocity trend, days since the last completion, overdue or stalled tasks, and the milestones agreed in the last session.
+4. Coach to the ranking's reasons:
+   - never coached: Intention, Ambition, Readiness;
+   - stalled: find the blocker, shrink the next step;
+   - no open tasks: propose next steps;
+   - overdue tasks: re-plan or drop them, with the user;
+   - committed for a past year: recommit for this year, pause or close?
+5. Ground your coaching in the user's existing knowledge graph from Phase 1.
 
-### Phase 3: The Coaching Dossier
-7. Use the `filesystem` tool (`write` or `overwrite` action) to create/update your strategy file at `pkm/wiki/project-coaching/<project_name>.md`.
-8. Use the following strict template for your dossier:
+### Phase 3: The Coaching Dossier (before a scheduled outreach, or when a session ends)
+6. `overwrite` your strategy file at the `coaching.dossier` path from `project_context` (this creates a new one). On a scheduled outreach, write it before your message; in a session the user started, write it only when the session ends, in the same step as the vault write, never in the first turn.
+7. Use the following strict template for your dossier:
    ```markdown
    ---
    project_name: <Name>
    last_coached: YYYY-MM-DD
    ---
    **Status:** <status> | **Priority:** <priority> | **Year:** <commitment_year> | **Category:** <category>
-   
+
    ## Coaching Strategy
    <Your internal notes on how to push the user forward. What are the blockers? What hard questions do you need to ask them next?>
 
@@ -41,9 +43,8 @@ Your preparation pipeline for project coaching: pull the project's metadata and 
    ```
 
 ### Phase 4: Proactive Outreach (Agent Output)
-9. Output a conversational message to the user initiating the coaching session based on your updated dossier.
-10. **The Final Output:** Do NOT output an XML block for this skill. End your execution by speaking directly to the user, asking them your strategic questions to unblock the project.
+8. Output a conversational message to the user initiating the coaching session based on your coaching strategy.
+9. **The Final Output:** Do NOT output an XML block for this skill. End your execution by speaking directly to the user, asking them your strategic questions to unblock the project.
 
-## Required Tools
-- `project_query` & `task_query`: Required for instant, structured data ingestion.
-- `filesystem`: Required to write your dossier to `pkm/wiki/project-coaching/` and to append user-approved tasks to `pkm/vault/projects/`.
+## Changing the Ranking
+Its weights and day thresholds are keys in `pkm/agents/goal-setter/RULES.md`; a key it doesn't set has the default in `agents/goal-setter/WORKFLOW.md`. "Weigh stalled projects more": read both, propose "stalled 2 → 3?", and only after a yes, `filesystem` `replace_block` that line, or `append` it (`- stalled: 3`) if it's missing.

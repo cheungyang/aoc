@@ -12,13 +12,13 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "output_path": temp_dir,
-                "latest_human_feedback": "revise image: Ayla wears a dinosaur costume",
+                "latest_human_feedback": "revise image: Kiki wears a dinosaur costume",
             }
             res = await process_gate1_node(state)
             self.assertEqual(res["gate1_decision"], "revise_image")
             # The instruction is narrowed to the part after the colon, so the
             # generator is not also handed the word "revise".
-            self.assertEqual(res["latest_human_feedback"], "Ayla wears a dinosaur costume")
+            self.assertEqual(res["latest_human_feedback"], "Kiki wears a dinosaur costume")
             self.assertEqual(res["pending_notice"], "")
 
     async def test_process_gate1_node_approves_on_an_exact_token(self):
@@ -34,7 +34,7 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
     async def test_free_text_parks_at_the_gate_instead_of_regenerating(self):
         """The behaviour this whole change exists for.
 
-        'Please have Ayla wear a dinosaur costume' used to classify as
+        'Please have Kiki wear a dinosaur costume' used to classify as
         `revise_image` and pay for a new image immediately. It now produces a
         clarification card and no decision to act on.
         """
@@ -42,7 +42,7 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "output_path": temp_dir,
-                "latest_human_feedback": "Please have Ayla wear a dinosaur costume instead.",
+                "latest_human_feedback": "Please have Kiki wear a dinosaur costume instead.",
             }
             res = await process_gate1_node(state)
             self.assertEqual(res["gate1_decision"], "unclear")
@@ -50,7 +50,7 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
             # The wording is preserved so answering "1" still works.
             self.assertEqual(
                 res["pending_feedback"],
-                "Please have Ayla wear a dinosaur costume instead.",
+                "Please have Kiki wear a dinosaur costume instead.",
             )
 
     async def test_ordinal_reply_uses_the_preserved_wording(self):
@@ -58,13 +58,13 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "output_path": temp_dir,
-                "pending_feedback": "Ayla wears a dinosaur costume",
+                "pending_feedback": "Kiki wears a dinosaur costume",
                 "pending_notice": "…previous clarification card…",
                 "latest_human_feedback": "1",
             }
             res = await process_gate1_node(state)
             self.assertEqual(res["gate1_decision"], "revise_image")
-            self.assertEqual(res["latest_human_feedback"], "Ayla wears a dinosaur costume")
+            self.assertEqual(res["latest_human_feedback"], "Kiki wears a dinosaur costume")
             self.assertEqual(res["pending_notice"], "")
             self.assertEqual(res["pending_feedback"], "")
 
@@ -94,7 +94,7 @@ class TestGateNodes(unittest.IsolatedAsyncioTestCase):
             state = {
                 "topic": "cat",
                 "output_path": temp_dir,
-                "latest_human_feedback": "revise copy: mention the 粵語 pronunciation",
+                "latest_human_feedback": "revise copy: mention the 西班牙語 pronunciation",
             }
             res = await process_gate2_node(state)
             self.assertEqual(res["gate2_decision"], "revise_copy")

@@ -24,7 +24,7 @@ def mock_bot_runner():
 
 def _spoken(text, user=None, speech_end_at=None):
     """An utterance whose transcript is already final, as the live transcriber leaves it."""
-    utterance = Utterance(user=user if user is not None else MagicMock(display_name="Alva", bot=False))
+    utterance = Utterance(user=user if user is not None else MagicMock(display_name="Sam", bot=False))
     utterance.transcript = Transcript(text, "gemini_live")
     utterance.speech_end_at = speech_end_at
     return utterance
@@ -320,7 +320,7 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     vm.connection.voice_client = mock_vc
     
     async def fake_stream_1(*args, **kwargs):
-        raw = _spoken_reply("Alva, I tried to reach Daisy...")
+        raw = _spoken_reply("Sam, I tried to reach Daisy...")
         yield {"type": "token", "content": raw}
         yield _final(raw)
 
@@ -333,7 +333,7 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     mock_agent.execute_stream = MagicMock(side_effect=[fake_stream_1(), fake_stream_2()])
     
     vm.reply.tts = FakeTTS()
-    user = MagicMock(display_name="Alva", bot=False)
+    user = MagicMock(display_name="Sam", bot=False)
 
     with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
          patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
@@ -663,7 +663,7 @@ async def test_transcript_mirror_does_not_delay_the_agent(mock_bot_runner, tmp_p
         await vm._current_task
 
     # ...and the channel still shows the transcript above the reply.
-    assert sent[0].startswith("🎤 **Alva (Voice):**")
+    assert sent[0].startswith("🎤 **Sam (Voice):**")
     assert "Done, the lights are off." in sent[1]
 
 
@@ -776,7 +776,7 @@ def _room_fixture(mock_bot_runner, tmp_path):
     loader.get_agent_config.side_effect = lambda agent_id: {"day-planner": {"name": "Daisy"}}.get(agent_id)
     loader.sole_eligible_agent.side_effect = lambda ch, exclude_agent_id=None: {"day-planning": "day-planner"}.get(ch)
 
-    user = MagicMock(display_name="Alva", bot=False)
+    user = MagicMock(display_name="Sam", bot=False)
     return vm, agent, user, loader, day
 
 
@@ -917,7 +917,7 @@ async def test_a_split_utterance_keeps_both_halves(mock_bot_runner, tmp_path):
         await vm._current_task
 
     assert prompts == ["Add milk to the shopping list.", "Add milk to the shopping list. And eggs."]
-    assert "🎤 **Alva (Voice):** Add milk to the shopping list. And eggs." in _mirrored(text_channel)
+    assert "🎤 **Sam (Voice):** Add milk to the shopping list. And eggs." in _mirrored(text_channel)
     assert vm.floor.unanswered() == []
 
 

@@ -33,7 +33,7 @@ Keep a session list of skipped task ids (initially empty).
         ```sql
         SELECT j.value AS tag, COUNT(*) AS n FROM tasks, json_each(tasks.tags) AS j WHERE tasks.source = '<SOURCE>' AND j.value LIKE 'p/%' GROUP BY j.value ORDER BY n DESC
         ```
-     b. *Keyword match* — for 1–3 distinctive nouns in the task title, call `project_query` with `action="search"`, `query="<noun>"`, `status="all"`, `limit=5`. Use the returned `name`/`category`/`tags` for semantic context (e.g. `[#p/glm : "Global Logistics Module"]`).
+     b. *Keyword match* — for 1–3 distinctive nouns in the task title, call `project_query` with `action="search"`, `query="<noun>"`, `status="all"`, `limit=5`. Use the returned `name`/`category`/`tags` for semantic context (e.g. `[#p/alpha : "Project Alpha"]`).
      c. *Existence check* — before proposing any `p/` tag that did not come from (a) or (b), confirm it is in use (`task_query`, `action="sql"`, `limit=1`):
         ```sql
         SELECT j.value AS tag, COUNT(*) AS n FROM tasks, json_each(tasks.tags) AS j WHERE j.value = '<TAG>' GROUP BY j.value

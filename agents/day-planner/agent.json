@@ -15,6 +15,11 @@
         "work"
     ],
     "name": "Daisy",
+    "tools": {
+        "day_briefing": {},
+        "set_thinking": {},
+        "task_query": {}
+    },
     "schedules": [
         {
             "id": "morning-plan",
@@ -22,12 +27,12 @@
             "channel": "day-planning",
             "cron": "0 6 * * *",
             "precondition": {
-                "type": "always",
-                "reason": "The daily plan is a fresh morning briefing; every day needs one."
+                "type": "morning_briefing"
             },
             "session_policy": "stateless",
             "prompt": [
-                "Ask day-planner to execute morning routine to generate the daily plan."
+                "Start today's morning routine with Phase 1.",
+                "The morning briefing below has yesterday's note, this week's focus and every date and day count already computed: work from it instead of reading those files, and don't recompute its numbers."
             ]
         },
         {
@@ -58,7 +63,8 @@
         "weekly_review": {},
         "highlight_actionable_emails": {
             "preload": "full"
-        }
+        },
+        "tool_audit": {}
     },
     "voice": {
         "name": "en-US-Chirp3-HD-Zephyr"

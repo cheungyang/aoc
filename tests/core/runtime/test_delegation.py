@@ -225,7 +225,7 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_thread = MagicMock(spec=discord.Thread)
-        mock_thread.id = 1541110915540324533
+        mock_thread.id = 123456789012345678
         mock_thread.name = "AI thread"
         mock_thread.parent = MagicMock(spec=discord.TextChannel)
         mock_thread.parent.name = "topic-research"
@@ -247,7 +247,7 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         session = capture["session"]
         self.assertEqual(session.agent_id, "topic-researcher")
         self.assertEqual(session.channel_name, "topic-research")
-        self.assertEqual(session.discord_thread_id, "1541110915540324533")
+        self.assertEqual(session.discord_thread_id, "123456789012345678")
         self.assertEqual(session.channel_obj, mock_thread)
         self.assertEqual(result.text, "agent thread response")
 

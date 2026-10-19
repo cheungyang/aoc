@@ -1,7 +1,7 @@
 """Vector store built from numpy, parquet and tantivy.
 
 Exists because LanceDB's x86_64 wheels assume an AVX2-era CPU and the deployment
-NAS (Celeron J4025, Goldmont Plus) has only SSE4.2 -- importing lancedb there
+NAS (a low-power Celeron) has only SSE4.2 -- importing lancedb there
 raises SIGILL. Every dependency used here dispatches on CPU features at runtime,
 so this backend runs anywhere Python does.
 

@@ -6,9 +6,6 @@ import discord
 import base64
 from collections import OrderedDict
 from discord.ext import commands
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from langchain_mcp_adapters.tools import load_mcp_tools
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler

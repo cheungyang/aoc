@@ -13,7 +13,7 @@ PKM folder instead of `['bash', 'filesystem']` scoped to the worktree, and every
 call it made came back:
 
     Error: Agent graph-worker does not have permission to perform 'ls' on
-    path /Users/alvac/aoc/workspaces/runs/run_21B6
+    path /path/to/aoc/workspaces/runs/run_21B6
 
 It reported `FAILED`, changed nothing, and the tick recorded that as an `llm`
 failure — so a permission problem no model can fix spent the entire implement

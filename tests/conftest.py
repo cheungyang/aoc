@@ -13,6 +13,7 @@ Strategy:
   * An autouse function-scoped fixture then repoints the defaults at the
     test's own `tmp_path` and resets the JobManager singleton before and after
     each test, so tests are isolated from each other too.
+  * Text-to-speech never reaches the network, in any test (`_no_tts_network`).
 """
 import os
 import shutil
@@ -114,3 +115,27 @@ def _ownership_prod_ready():
     Ownership().mark_ready()
     yield
     Ownership.reset()
+
+
+@pytest.fixture(autouse=True)
+def _no_tts_network(monkeypatch):
+    """Per-test: text-to-speech never reaches the network. Chirp counts as
+    unavailable without running its gRPC check, and a real Chirp or edge-tts
+    request fails; tests that speak use `FakeTTS` (tests/helpers.py).
+
+    Suite-wide, not just under tests/core/voice/: building a Discord runner
+    builds the voice stack, and its TTS engine starts Chirp's live check -- a
+    gRPC probe and a Cloud TTS call with the .env key. The gRPC channel that
+    leaves behind also writes a log line into the next child process's stderr.
+    """
+    from core.voice.engines import chirp_tts, edge_tts_stream, tts
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("tests must not reach a TTS service")
+
+    async def refuse_async(*_args, **_kwargs):
+        refuse()
+
+    monkeypatch.setattr(tts, "_check", tts.ChirpCheck("disabled in tests", run=False))
+    monkeypatch.setattr(chirp_tts, "client", refuse)
+    monkeypatch.setattr(edge_tts_stream, "synthesize", refuse_async)

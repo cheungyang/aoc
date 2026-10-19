@@ -55,7 +55,7 @@ class PushIdentity:
 
     @property
     def author(self) -> str:
-        """Git author string, e.g. ``cheungyang-bot <...@users.noreply.github.com>``."""
+        """Git author string, e.g. ``owner-bot <...@users.noreply.github.com>``."""
         return f"{self.login} <{self.email}>"
 
 

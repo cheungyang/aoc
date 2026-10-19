@@ -382,14 +382,16 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertEqual(formatted[-2], input_messages[0])
           self.assertEqual(formatted[-1], input_messages[1])
 
+     @patch('core.runtime.graph_builder.get_tool_rules_prompt')
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.get_knowledge_prompt')
      @patch('core.runtime.graph_builder.get_channel_prompt')
      @patch('core.runtime.graph_builder.get_formatting_prompt')
-     def test_prompt_template_ordering_for_caching(self, mock_formatting, mock_channel, mock_knowledge, mock_skills_loader_class, mock_agent):
+     def test_prompt_template_ordering_for_caching(self, mock_formatting, mock_channel, mock_knowledge, mock_skills_loader_class, mock_agent, mock_tool_rules):
           mock_formatting.return_value = "FORMATTING_RULES"
           mock_agent.return_value = "AGENT_PERSONA"
+          mock_tool_rules.return_value = "TOOL_RULES"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
           mock_skills_loader.get_skills_overview.return_value = "SKILLS_OVERVIEW"
@@ -408,12 +410,14 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertEqual(system_contents, [
               "FORMATTING_RULES",
               "AGENT_PERSONA",
+              "TOOL_RULES",
               "SKILLS_OVERVIEW",
               "SUBGRAPHS_OVERVIEW",
               "KNOWLEDGE_CONTEXT",
               "AGENT_MEMORY",
               "CHANNEL_CONTEXT"
           ])
+          mock_tool_rules.assert_called_with("main")
 
 if __name__ == "__main__":
     unittest.main()
