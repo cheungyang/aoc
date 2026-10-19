@@ -1,13 +1,22 @@
 {
-  "_comment": "Copy to /app/browser_personal_info.json on the NAS (project root; gitignored, locked to 600 by entrypoint.sh). The browser agent types these values into forms, but the LLM only sees the key names as placeholders. Leave a value empty to omit it. Never put payment card numbers here. allowed_domains is optional: when present, the agent can only navigate to those sites.",
+  "_comment": "Copy to /app/browser_personal_info.json on the NAS (project root; gitignored, locked to 600 by entrypoint.sh). The agent fills every form field that matches one of these, leaves optional fields it has no value for empty, and asks you in Discord for required ones. It never guesses. The LLM only sees the key names as placeholders; the values are typed by the browser library. Empty values are ignored. Never put card numbers, CVVs or passwords here. allowed_domains is optional: when present, the agent can only navigate to those sites (add a restaurant's own domain if you book there directly).",
   "fields": {
     "full_name": "",
     "first_name": "",
     "last_name": "",
     "email": "",
     "phone": "",
+    "address_line1": "",
+    "address_line2": "",
+    "city": "",
+    "state": "",
+    "postal_code": "",
+    "country": "",
     "default_party_size": "2",
-    "dietary_notes": ""
+    "dietary_notes": "",
+    "accessibility_notes": "",
+    "occasion_notes": "",
+    "loyalty_ids": ""
   },
   "allowed_domains": [
     "*.resy.com",

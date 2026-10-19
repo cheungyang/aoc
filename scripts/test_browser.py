@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Check that the NAS can reach the desktop Agent Chrome, then optionally run a task.
 
-    docker exec -it aoc python scripts/test_browser.py           # connectivity only
+    docker exec -it aoc python scripts/test_browser.py           # status only
     docker exec -it aoc python scripts/test_browser.py --run     # + a harmless task
 
-Connectivity reads BROWSER_CDP_URL_FILE and BROWSER_PERSONAL_INFO_FILE exactly as
-tools/browser.py does, so a pass here means the tool will connect.
+Uses the same files and checks as tools/browser.py, so the status printed here
+(ONLINE / DESKTOP_OFFLINE / NOT_CONFIGURED) is what the agent will see.
 """
 import argparse
 import os
@@ -27,14 +27,15 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        url = browser_mod._endpoint()
-        fields, domains = browser_mod._personal_info()
-    except browser_mod.BrowserConfigError as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
+        print(browser_mod._check())
+        _, domains = browser_mod._personal_info()
+    except browser_mod.BrowserStatusError as exc:
+        print(f"Status: {exc.status}. {exc}", file=sys.stderr)
+        if exc.status == browser_mod.DESKTOP_OFFLINE:
+            print("\nOn the desktop: open 'Agent Chrome (AOC)'. If it is open, check the port proxy and "
+                  "firewall rule (re-run Install-AgentChrome.ps1) and that the network is Private.",
+                  file=sys.stderr)
         return 1
-    print(f"OK: Agent Chrome reachable at {url}")
-    print(f"Personal fields: {', '.join(sorted(fields)) or '(none configured)'}")
-    print(f"Allowed domains: {', '.join(domains) if domains else '(unrestricted)'}")
 
     if args.run:
         if domains and not any("example.com" in d for d in domains):

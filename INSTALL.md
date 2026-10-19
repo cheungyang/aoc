@@ -364,42 +364,52 @@ The `google_health` tool (`tools/google_health.py`) reads active minutes, exerci
 
 ## Agent Browser (desktop Chrome)
 
-The `browser` tool (`tools/browser.py`, `web_browsing` skill) stages bookings such as restaurant tables and event seats. It drives an **"Agent Chrome" window on your desktop**, not a browser on the NAS, so you can watch it, type what it can't (2FA codes, choices), and make the final click yourself. No browser is installed in the container.
+The `browser` tool (`tools/browser.py`, `web_browsing` skill) stages bookings such as restaurant tables and event seats. It drives an **"Agent Chrome" window on your Windows desktop**, not a browser on the NAS, so you can watch it, type what it can't (2FA codes, choices), and make the final click yourself. No browser is installed in the container.
 
 ### 1. Safety Rails
 
 - **Final Click**: the agent stops before Reserve/Book/Pay/Purchase; you click it. This is enforced in the skill and in the system prompt the tool adds.
 - **Never closes your browser**: sessions connect with `keep_alive` and only disconnect.
-- **Personal details stay out of the LLM**: values from `browser_personal_info.json` are passed as browser-use `sensitive_data`. The model sees only placeholder names. No card numbers.
-- **Separate profile**: Agent Chrome has its own cookies and logins, so the agent cannot see your everyday browsing. (Chrome 136+ refuses remote control of the default profile anyway.)
-- **NAS-only port**: Chrome's control port has no authentication and listens on `127.0.0.1` only. `cdp_forwarder.py` relays it to the LAN but **drops every source except the NAS IP**.
+- **Personal details stay out of the LLM**: values from `browser_personal_info.json` are passed as browser-use `sensitive_data`. The model sees only placeholder names. It fills every matching field, leaves optional unknowns empty, asks for required ones, and never guesses. No card numbers.
+- **Separate profile**: Agent Chrome has its own cookies and logins, so the agent cannot see your everyday browsing.
+- **NAS-only port**: Chrome's control port has no authentication and listens on `127.0.0.1` only. A Windows port proxy exposes it on the LAN, and a firewall rule **admits only the NAS IP**.
 - **One task at a time**, a step budget (25, max 60), and a 10-minute wall clock per call. browser-use telemetry is off (`ANONYMIZED_TELEMETRY=false`).
 
-### 2. Desktop Setup (macOS, once)
+### 2. The desktop is often off, and that's expected
 
-1. **Fixed IPs**: give the desktop and the NAS DHCP reservations on your router. The NAS IP is the forwarder's allow-list, and the desktop IP goes in the URL file.
-2. **Start Agent Chrome at login** (from the repo checkout on the desktop):
-   ```bash
-   sed -e "s#__REPO__#$PWD#g" -e "s#__NAS_IP__#192.168.1.10#g" \
-       scripts/desktop_agent_chrome/com.aoc.agent-chrome.plist \
-       > ~/Library/LaunchAgents/com.aoc.agent-chrome.plist
-   launchctl load ~/Library/LaunchAgents/com.aoc.agent-chrome.plist
+Opening the **"Agent Chrome (AOC)"** shortcut is the on switch; closing the window (or shutting down / sleeping the PC) turns it off. The tool reports one of these statuses, and the agent acts on it:
+
+| Status | Agent behaviour |
+|---|---|
+| `DESKTOP_OFFLINE` | Says so plainly, restates the booking, asks you to open Agent Chrome, and **waits**. No retries, no polling |
+| `DESKTOP_DISCONNECTED` | Same, plus how far it got. Nothing was submitted. It resumes on that page once you're back |
+| `NOT_CONFIGURED` | Quotes the setup problem |
+| `ONLINE` | From `check_only=True`, which the agent calls when you say "ready" |
+
+### 3. Windows Setup (once)
+
+1. **Fixed IPs**: give the PC and the NAS DHCP reservations on your router.
+2. **Network profile**: your home network must be **Private** (Settings → Network & internet → your connection). The firewall rule applies only to Private networks, and on a Public one the agent will just see the desktop as offline.
+3. **Install** (the repo's `scripts/desktop_agent_chrome/windows/` folder, copied to the PC). From an **elevated** PowerShell:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\Install-AgentChrome.ps1 -NasIp 192.168.1.10
    ```
-   Or run it by hand: `NAS_IP=192.168.1.10 scripts/desktop_agent_chrome/start_agent_chrome.sh`. Allow incoming connections for `python3` if the macOS firewall asks. Logs: `/tmp/aoc-agent-chrome.log`.
-3. **Log in** to your booking sites (Resy, OpenTable, Tock, Ticketmaster, …) in the Agent Chrome window. The agent reuses those sessions; when one expires, just log in again there.
-4. **Keep the desktop awake** while you want the agent to book (System Settings → Battery/Energy → prevent automatic sleeping when the display is off).
+   This creates the desktop shortcut, a port proxy (`0.0.0.0:9223 → 127.0.0.1:9222`) and the NAS-only firewall rule, then prints the address to use on the NAS.
+   - `-AutoStartAtLogon` also starts Agent Chrome at sign-in (off by default).
+   - `-Uninstall` removes everything; add `-RemoveProfile` to also delete its logins.
+4. **Log in** to your booking sites (Resy, OpenTable, Tock, Ticketmaster, …) inside the Agent Chrome window. The agent reuses those sessions; when one expires, just log in again there.
 
-### 3. NAS Setup
+### 4. NAS Setup
 
 1. **Endpoint file** (project root, gitignored and dockerignored, locked to `600` by `entrypoint.sh`):
    ```bash
-   echo "http://192.168.1.20:9223" > browser_cdp_url   # the desktop's LAN IP
+   echo "http://192.168.1.20:9223" > browser_cdp_url   # the PC's LAN IP, as printed by the installer
    ```
    A hostname also works if the container can resolve it: the tool resolves it to an IP, because Chrome rejects non-IP Host headers.
-2. **Personal details** (optional): copy `scripts/desktop_agent_chrome/browser_personal_info.example.json` to `./browser_personal_info.json` and fill it in. Empty values are skipped. `allowed_domains` is optional; when present, the agent can only navigate to those sites, so add a restaurant's own domain if you book there directly.
-3. **Check** (after `docker compose up -d`):
+2. **Personal details** (optional): copy `scripts/desktop_agent_chrome/browser_personal_info.example.json` to `./browser_personal_info.json` and fill in what you're happy for the agent to type. Empty values are skipped. `allowed_domains` is optional; when present, the agent can only navigate to those sites, so add a restaurant's own domain if you book there directly, or delete the list.
+3. **Check** (after `docker compose up -d`, with Agent Chrome open):
    ```bash
-   docker exec -it aoc python scripts/test_browser.py         # connectivity
+   docker exec -it aoc python scripts/test_browser.py         # prints ONLINE / DESKTOP_OFFLINE / NOT_CONFIGURED
    docker exec -it aoc python scripts/test_browser.py --run   # + a harmless task you can watch
    ```
 
