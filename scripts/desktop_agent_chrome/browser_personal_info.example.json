@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy to /app/browser_personal_info.json on the NAS (project root; gitignored, locked to 600 by entrypoint.sh). The browser agent types these values into forms, but the LLM only sees the key names as placeholders. Leave a value empty to omit it. Never put payment card numbers here. allowed_domains is optional: when present, the agent can only navigate to those sites.",
+  "fields": {
+    "full_name": "",
+    "first_name": "",
+    "last_name": "",
+    "email": "",
+    "phone": "",
+    "default_party_size": "2",
+    "dietary_notes": ""
+  },
+  "allowed_domains": [
+    "*.resy.com",
+    "*.opentable.com",
+    "*.exploretock.com",
+    "*.sevenrooms.com",
+    "*.yelp.com",
+    "*.ticketmaster.com",
+    "*.livenation.com",
+    "*.axs.com",
+    "*.seatgeek.com",
+    "*.eventbrite.com",
+    "*.google.com"
+  ]
+}

@@ -10,7 +10,7 @@ This guide explains how to set up and run the LangGraph system in a Docker conta
 ## Files Created
 
 - `docker-compose.yml`: Docker Compose configuration for launching the system as a managed service.
-- `Dockerfile`: Defines the container environment (Python 3.11, Node.js 22 + npm/corepack, Chromium, Playwright, gogcli, gh CLI, nlm).
+- `Dockerfile`: Defines the container environment (Python 3.11, Node.js 22 + npm/corepack, gogcli, gh CLI, nlm).
 - `.dockerignore`: Excludes local caches, `.venv`, and artifacts from the build context.
 - `entrypoint.sh`: Handles copying SSH keys and setting permissions inside the container.
 - `install.sh`: A helper script to run the container directly with `docker run`.
@@ -359,6 +359,51 @@ The `google_health` tool (`tools/google_health.py`) reads active minutes, exerci
    GOOGLE_HEALTH_WRITE_ENABLED=false
    GOOGLE_HEALTH_REQUEST_TIMEOUT=20
    ```
+
+---
+
+## Agent Browser (desktop Chrome)
+
+The `browser` tool (`tools/browser.py`, `web_browsing` skill) stages bookings such as restaurant tables and event seats. It drives an **"Agent Chrome" window on your desktop**, not a browser on the NAS, so you can watch it, type what it can't (2FA codes, choices), and make the final click yourself. No browser is installed in the container.
+
+### 1. Safety Rails
+
+- **Final Click**: the agent stops before Reserve/Book/Pay/Purchase; you click it. This is enforced in the skill and in the system prompt the tool adds.
+- **Never closes your browser**: sessions connect with `keep_alive` and only disconnect.
+- **Personal details stay out of the LLM**: values from `browser_personal_info.json` are passed as browser-use `sensitive_data`. The model sees only placeholder names. No card numbers.
+- **Separate profile**: Agent Chrome has its own cookies and logins, so the agent cannot see your everyday browsing. (Chrome 136+ refuses remote control of the default profile anyway.)
+- **NAS-only port**: Chrome's control port has no authentication and listens on `127.0.0.1` only. `cdp_forwarder.py` relays it to the LAN but **drops every source except the NAS IP**.
+- **One task at a time**, a step budget (25, max 60), and a 10-minute wall clock per call. browser-use telemetry is off (`ANONYMIZED_TELEMETRY=false`).
+
+### 2. Desktop Setup (macOS, once)
+
+1. **Fixed IPs**: give the desktop and the NAS DHCP reservations on your router. The NAS IP is the forwarder's allow-list, and the desktop IP goes in the URL file.
+2. **Start Agent Chrome at login** (from the repo checkout on the desktop):
+   ```bash
+   sed -e "s#__REPO__#$PWD#g" -e "s#__NAS_IP__#192.168.1.10#g" \
+       scripts/desktop_agent_chrome/com.aoc.agent-chrome.plist \
+       > ~/Library/LaunchAgents/com.aoc.agent-chrome.plist
+   launchctl load ~/Library/LaunchAgents/com.aoc.agent-chrome.plist
+   ```
+   Or run it by hand: `NAS_IP=192.168.1.10 scripts/desktop_agent_chrome/start_agent_chrome.sh`. Allow incoming connections for `python3` if the macOS firewall asks. Logs: `/tmp/aoc-agent-chrome.log`.
+3. **Log in** to your booking sites (Resy, OpenTable, Tock, Ticketmaster, …) in the Agent Chrome window. The agent reuses those sessions; when one expires, just log in again there.
+4. **Keep the desktop awake** while you want the agent to book (System Settings → Battery/Energy → prevent automatic sleeping when the display is off).
+
+### 3. NAS Setup
+
+1. **Endpoint file** (project root, gitignored and dockerignored, locked to `600` by `entrypoint.sh`):
+   ```bash
+   echo "http://192.168.1.20:9223" > browser_cdp_url   # the desktop's LAN IP
+   ```
+   A hostname also works if the container can resolve it: the tool resolves it to an IP, because Chrome rejects non-IP Host headers.
+2. **Personal details** (optional): copy `scripts/desktop_agent_chrome/browser_personal_info.example.json` to `./browser_personal_info.json` and fill it in. Empty values are skipped. `allowed_domains` is optional; when present, the agent can only navigate to those sites, so add a restaurant's own domain if you book there directly.
+3. **Check** (after `docker compose up -d`):
+   ```bash
+   docker exec -it aoc python scripts/test_browser.py         # connectivity
+   docker exec -it aoc python scripts/test_browser.py --run   # + a harmless task you can watch
+   ```
+
+The skill is granted to `reward-travel` (restaurants) and `excursion-planner` (event seats). Add `"web_browsing": {}` to another agent's `skills` to extend it.
 
 ---
 

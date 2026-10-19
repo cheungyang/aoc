@@ -1,7 +1,8 @@
 {
   "skill_id": "web_browsing",
   "name": "Web Browsing",
-  "description": "Skill for automating repetitive visual web interactions via an existing user Chrome instance.",
+  "description": "Stage bookings (restaurant tables, event seats) in the user's desktop Agent Chrome under supervision; the user makes the final click.",
+  "emoji": "🧭",
   "tools": {
     "browser": []
   }

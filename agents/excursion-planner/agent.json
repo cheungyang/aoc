@@ -34,6 +34,7 @@
     },
     "skills": {
         "research": { "preload": "core" },
+        "web_browsing": {},
         "tool_audit": {}
     },
     "voice": { "name": "en-US-Chirp3-HD-Puck" }

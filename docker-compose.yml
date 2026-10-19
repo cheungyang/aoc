@@ -56,9 +56,18 @@ services:
       - GOOGLE_HEALTH_WRITE_ENABLED=${GOOGLE_HEALTH_WRITE_ENABLED:-false}
       - GOOGLE_HEALTH_REQUEST_TIMEOUT=${GOOGLE_HEALTH_REQUEST_TIMEOUT:-20}
       # Resource and stability tuning for NAS and multi-core hosts
-      - AOC_ENABLE_BROWSER=${AOC_ENABLE_BROWSER:-0}
       - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
       - AOC_SCRIPT_TIMEOUT=${AOC_SCRIPT_TIMEOUT:-300}
+      # Browser tool (tools/browser.py) drives the "Agent Chrome" on the user's
+      # desktop (scripts/desktop_agent_chrome/); no browser runs in here. Both
+      # are paths, same pattern as HA_TOKEN_FILE, and both files are 600.
+      #   BROWSER_CDP_URL_FILE        one line: http://<desktop LAN IP>:9223
+      #   BROWSER_PERSONAL_INFO_FILE  form fields the agent may type; the LLM
+      #                               only ever sees their placeholder names
+      - BROWSER_CDP_URL_FILE=${BROWSER_CDP_URL_FILE:-/app/browser_cdp_url}
+      - BROWSER_PERSONAL_INFO_FILE=${BROWSER_PERSONAL_INFO_FILE:-/app/browser_personal_info.json}
+      # browser-use phones home by default; bookings carry personal details.
+      - ANONYMIZED_TELEMETRY=false
       # One cap on concurrent model-driven executions (schedules, dream fan-out)
       - AOC_MAX_CONCURRENCY=${AOC_MAX_CONCURRENCY:-3}
       # On-device LLM, for agents setting "provider": "local". localhost would
@@ -98,9 +107,6 @@ services:
       # NOTE: /opt/aoc-seed is deliberately NOT mounted -- it must track the
       # image, since Docker only seeds a volume while that volume is empty.
       - aoc-assets:/opt/aoc
-    ports:
-      # Chrome remote debugging port for visual AI browser automation (scoped to localhost)
-      - "127.0.0.1:9222:9222"
     healthcheck:
       test: ["CMD-SHELL", "python3 -c 'import time, os, sys; p=\"/tmp/bot_heartbeat\"; sys.exit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 180 else 1)'"]
       interval: 30s

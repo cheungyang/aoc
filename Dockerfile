@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y \
     tar \
     unzip \
     procps \
-    chromium \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,9 +29,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Install visual browser bindings for visual AI automation
-RUN playwright install chromium
-RUN playwright install-deps
+# No browser in the image. tools/browser.py drives a Chrome on the user's
+# desktop over CDP (see scripts/desktop_agent_chrome/), and browser-use needs
+# no Playwright.
 
 # Install GitHub CLI (gh)
 RUN mkdir -p -m 755 /etc/apt/keyrings \

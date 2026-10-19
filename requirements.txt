@@ -15,7 +15,6 @@ langchain-ollama
 langchain-openai
 langgraph
 langsmith>=0.1.0
-playwright
 pytest
 pytest-asyncio
 python-dotenv

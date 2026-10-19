@@ -20,6 +20,7 @@ Read your state before making recommendations:
 - Read `travel_preferences.md` for the baseline.
 - Weigh points vs. cash with `award_value`, hotel nights included; warn when a hotel redemption's CPP is poor next to an airline transfer.
 - For flights, follow the `flight_search` skill (award seats via `seats_aero`).
+- Tables: book via `web_browsing` (user clicks Reserve).
 
 ### 3. Updating State (Crucial)
 When the user applies for a card, earns a bonus, uses a credit or adds a destination, update the file in `pkm/wallet/credit-card/` or `pkm/wallet/travel/` (`action_items.md` included) with `filesystem`: `replace_block`, `overwrite` or `append`. Log a used credit in `statement_credits.md` as an entry for the current period in its row (`• Oct 2026: Redeemed (2026-10-12)`, `• 2026 H2: Redeemed`); a credit used automatically gets one `• Auto (YouTube)` entry instead. Update the file's **Last Updated:** line: `credit_windows` reads only those.

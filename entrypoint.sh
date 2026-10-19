@@ -19,6 +19,8 @@ fi
 # excluded from the match.
 AOC_SECRET_NAMES=(
     '*bot_token*'
+    'browser_cdp_url'
+    'browser_personal_info.json'
     'client_secret_*'
     '.env'
     '.env.*'
@@ -222,15 +224,6 @@ fi
 if [ "${AOC_PROVISION_RUNTIME:-1}" = "1" ] && [ -f /app/scripts/provision_assets.py ]; then
     runuser -u appuser -- python3 /app/scripts/provision_assets.py --stage runtime || \
         echo "Warning: runtime asset provisioning reported errors; continuing startup."
-fi
-
-# Start Chromium in the background as appuser for visual AI browser automation if enabled.
-# Disabled by default (0) to conserve CPU cores and RAM on NAS hosts.
-if [ "${AOC_ENABLE_BROWSER:-0}" = "1" ]; then
-    echo "Starting headless Chromium on port 9222..."
-    runuser -u appuser -- chromium --headless --no-sandbox --disable-gpu --remote-debugging-port=9222 &
-else
-    echo "Headless Chromium disabled (set AOC_ENABLE_BROWSER=1 in .env to enable)."
 fi
 
 # Execute the command passed to docker run as appuser

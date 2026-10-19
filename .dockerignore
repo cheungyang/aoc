@@ -17,6 +17,8 @@ client_secret_*
 debug_log.log
 e2b_api_key
 home_assistant_token
+browser_cdp_url
+browser_personal_info.json
 google_health_credentials.json
 pkm
 scratch/

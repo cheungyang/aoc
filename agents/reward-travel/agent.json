@@ -20,6 +20,7 @@
   },
   "skills": {
     "flight_search": { "preload": "core" },
+    "web_browsing": {},
     "tool_audit": {}
   },
   "voice": { "name": "en-US-Chirp3-HD-Algieba" },

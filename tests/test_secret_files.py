@@ -29,6 +29,8 @@ ENTRYPOINT = ROOT / "entrypoint.sh"
 SECRETS = [
     ".env",
     ".env.local",
+    "browser_cdp_url",
+    "browser_personal_info.json",
     "client_secret_1234-abcd.apps.googleusercontent.com.json",
     "e2b_api_key",
     "github_bot_token",

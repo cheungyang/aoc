@@ -24,4 +24,5 @@ Await the user's critique. If options are rejected, process the "why" and genera
 
 ### Phase 6: Execution & Memory
 Once an option is approved, book it into its free window with `calendar_add`, in local time; never create events with `gog`.
+If it needs tickets, seats or a reservation, offer to stage them following the `web_browsing` skill: the user makes the final purchase click in their Agent Chrome. Add the calendar event once they confirm the booking.
 **CRITICAL:** Upon completion, ALWAYS append a `<system_memory_log>` block recording the user's feedback and preferences, to continually refine future recommendations.
