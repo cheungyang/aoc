@@ -10,10 +10,13 @@ thirty minutes. It also refuses to open a PR for a commit verify did not pass.
 import time
 from unittest.mock import AsyncMock, patch
 
-from graphs.coding.nodes.publish import MAX_PUBLISH_ATTEMPTS, publish_node
+from core.util.privacy_guard import NotesMissing
+from graphs.coding.nodes.publish import MAX_PUBLISH_ATTEMPTS, NOT_CHECKED, WITHHELD, publish_node
 from tests.graphs.coding.fixtures import ManifestFixture, _task as _base_task
 
 PR_URL = "https://github.com/org/repo/pull/7"
+SUMMARY = "Added the parser; its tests use made up words that stand in for a copied line."
+AUDIT = "- [Happy Path Bias] core/a.py: no test for an empty file"
 
 
 def _task(**overrides):
@@ -26,12 +29,18 @@ def _task(**overrides):
 class TestPublishNode(ManifestFixture):
     def setUp(self):
         super().setUp()
+        self.review_context = AsyncMock()
+        # The PR text check reads the notes; here it is stubbed clean unless a
+        # test says otherwise.
+        self.guard = patch("graphs.coding.nodes.publish.privacy_guard.check", return_value=[])
         for p in (
             patch("graphs.coding.nodes.publish.get_push_identity", return_value=None),
-            patch("graphs.coding.nodes.publish._post_review_context", AsyncMock()),
+            patch("graphs.coding.nodes.publish._post_review_context", self.review_context),
         ):
             p.start()
             self.addCleanup(p.stop)
+        self.guard_check = self.guard.start()
+        self.addCleanup(self.guard.stop)
 
     def _pr(self, find=("", None), create=(True, PR_URL, 7)):
         return (
@@ -153,3 +162,80 @@ class TestPublishNode(ManifestFixture):
             await publish_node(self.base_state(task))
 
         self.assertEqual(self.stored()["status"], "halted")
+
+    # -- The PR text an LLM wrote ------------------------------------------------
+
+    def _state(self, task, **text):
+        return self.base_state(task, implementation_summary=SUMMARY, audit_feedback=AUDIT, **text)
+
+    async def test_only_the_text_an_llm_wrote_is_checked(self):
+        task = _task()
+        self.write_manifest([task])
+
+        find, create = self._pr()
+        with find, create:
+            await publish_node(self._state(task))
+
+        texts = list(self.guard_check.call_args.args[0])
+        self.assertEqual(texts, [("PR summary", SUMMARY), ("audit comment", AUDIT)])
+
+    async def test_clean_text_is_posted_as_written(self):
+        task = _task()
+        self.write_manifest([task])
+
+        find, create = self._pr()
+        with find, create as mock_create:
+            result = await publish_node(self._state(task))
+
+        self.assertIn(SUMMARY, mock_create.call_args.kwargs["body"])
+        self.assertEqual(self.review_context.call_args.kwargs["state"]["audit_feedback"], AUDIT)
+        self.assertNotIn("🔒", "\n".join(result["tick_report"]))
+
+    async def test_a_summary_that_looks_personal_is_withheld_and_the_pr_still_opens(self):
+        self.guard_check.return_value = [
+            ("PR summary", 1, "\u201cmade up words that stand in for a copied line\u201d")
+        ]
+        task = _task()
+        self.write_manifest([task])
+
+        find, create = self._pr()
+        with find, create as mock_create:
+            result = await publish_node(self._state(task))
+
+        body = mock_create.call_args.kwargs["body"]
+        self.assertIn(WITHHELD, body)
+        self.assertNotIn("stand in for", body)
+        # The audit text was clean, so it is posted as written.
+        self.assertEqual(self.review_context.call_args.kwargs["state"]["audit_feedback"], AUDIT)
+        self.assertEqual(self.stored()["status"], "awaiting_review")
+        # The words are yours to see in the report, never on GitHub.
+        report = "\n".join(result["tick_report"])
+        self.assertIn("🔒 `T1`: withheld the PR summary", report)
+        self.assertIn("stand in for", report)
+
+    async def test_audit_text_that_looks_personal_is_withheld_from_the_comment(self):
+        self.guard_check.return_value = [("audit comment", 1, "email pat@example.com")]
+        task = _task()
+        self.write_manifest([task])
+
+        find, create = self._pr()
+        with find, create as mock_create:
+            await publish_node(self._state(task))
+
+        self.assertEqual(self.review_context.call_args.kwargs["state"]["audit_feedback"], WITHHELD)
+        self.assertIn(SUMMARY, mock_create.call_args.kwargs["body"])
+
+    async def test_without_notes_the_text_is_withheld_not_posted_unchecked(self):
+        self.guard_check.side_effect = NotesMissing("no personal notes under /nowhere")
+        task = _task()
+        self.write_manifest([task])
+
+        find, create = self._pr()
+        with find, create as mock_create:
+            result = await publish_node(self._state(task))
+
+        self.assertIn(NOT_CHECKED, mock_create.call_args.kwargs["body"])
+        self.assertNotIn(SUMMARY, mock_create.call_args.kwargs["body"])
+        self.assertEqual(self.review_context.call_args.kwargs["state"]["audit_feedback"], NOT_CHECKED)
+        self.assertEqual(self.stored()["status"], "awaiting_review")
+        self.assertIn("can't find your notes", "\n".join(result["tick_report"]))

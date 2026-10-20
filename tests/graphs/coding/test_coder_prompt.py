@@ -21,6 +21,7 @@ from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 TRACEBACK_TAG = "<test_failure_traceback>"
 CRITIC_TAG = "<critic_anti_pattern_feedback>"
 HUMAN_TAG = "<human_reviewer_feedback>"
+PRIVACY_TAG = "<privacy_findings>"
 
 
 def _build(**overrides):
@@ -178,6 +179,35 @@ class CoderPromptRetryDeltaTestCase(unittest.TestCase):
         stderr = "Traceback (most recent call last):\n  File \"a.py\", line 3\nValueError: nope"
         prompt = _build(test_stderr=stderr)
         self.assertIn(stderr, prompt)
+
+    def test_privacy_findings_produce_only_the_privacy_block(self):
+        """A push the privacy check stopped: where and what kind, and don't repeat it."""
+        findings = "- app/settings.py:7: an email address"
+        prompt = _build(privacy_findings=findings)
+        self.assertIn(PRIVACY_TAG, prompt)
+        self.assertIn("</privacy_findings>", prompt)
+        self.assertIn(findings, prompt)
+        self.assertIn("Don't quote the original anywhere, including your implementation summary.", prompt)
+        self.assertNotIn(TRACEBACK_TAG, prompt)
+        self.assertNotIn(CRITIC_TAG, prompt)
+        self.assertNotIn(HUMAN_TAG, prompt)
+
+    def test_no_findings_means_no_privacy_block(self):
+        for empty in (None, ""):
+            with self.subTest(privacy_findings=empty):
+                self.assertNotIn(PRIVACY_TAG, _build(privacy_findings=empty))
+
+    def test_the_privacy_block_stays_separate_from_the_others(self):
+        prompt = _build(test_stderr="boom", privacy_findings="- a.py:1: a phone number")
+        self.assertIn("</test_failure_traceback>\n\n" + PRIVACY_TAG, prompt)
+
+
+class CoderPromptTestDataRuleTestCase(unittest.TestCase):
+    def test_every_attempt_is_told_to_make_test_data_up(self):
+        """The cheapest privacy hit is the one never written."""
+        prompt = _build()
+        self.assertIn("make test data up and never copy it from the user's files or notes", prompt)
+        self.assertIn("example.com emails and 555-01xx phone numbers", prompt)
 
 
 class CoderPromptOutputContractTestCase(unittest.TestCase):

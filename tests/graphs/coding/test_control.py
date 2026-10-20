@@ -468,6 +468,22 @@ class TestHandoff(HostSwitchTestCase):
         self.assertTrue(done)
         self.assertIn("re-implemented", report)
 
+    async def test_a_push_the_privacy_check_stopped_is_reported_not_fatal(self):
+        """Nothing left this disk; the next host re-implements the task."""
+        self.write([_task("A", stage="implemented", run_id="run_A", branch_name="feat/proj/a")])
+
+        async def stopped_push(state):
+            return {"route": "implement", "tick_report": ["🔒 `A`: not pushed."], "error_message": ""}
+
+        with patch("graphs.coding.utils.control._worktree_path", return_value=self.tmpdir), \
+             patch("graphs.coding.nodes.push.push_node", AsyncMock(side_effect=stopped_push)):
+            done, report = await control.handoff([self.path], sync=self.sync)
+
+        self.assertTrue(done)
+        self.sync.assert_called_once()
+        self.assertIn("`A`: not pushed, the privacy check flagged it", report)
+        self.assertIn("re-implemented", report)
+
     async def test_a_failed_sync_leaves_the_handoff_incomplete(self):
         self.write([])
         self.sync.return_value = (False, "pkm sync failed: conflict")

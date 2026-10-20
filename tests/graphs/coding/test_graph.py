@@ -12,6 +12,7 @@ import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from graphs.coding.utils.outgoing import OutgoingCheck
 from graphs.coding.utils.sandbox import RunResult
 from tests.graphs.coding.fixtures import ManifestFixture, _task
 
@@ -78,6 +79,22 @@ class TestNodeSeparation(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
+    def test_only_the_push_node_pushes(self):
+        """Every route to GitHub must pass the privacy check, and push is where it runs.
+
+        `handoff` and `retry` already go through the push node; a second caller
+        of `commit_and_push` would be a way out that skips the check.
+        """
+        import pathlib
+
+        callers = sorted(
+            path.as_posix()
+            for root in ("core", "graphs", "tools", "agents", "scripts")
+            for path in pathlib.Path(root).rglob("*.py")
+            if "commit_and_push(" in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(callers, ["core/util/git_ops.py", "graphs/coding/nodes/push.py"])
+
 
 class TestTickEndToEnd(ManifestFixture):
     """Drives the compiled graph, so state that never crosses a node boundary fails here.
@@ -130,6 +147,11 @@ class TestTickEndToEnd(ManifestFixture):
         patch("graphs.coding.nodes.publish._post_review_context", AsyncMock()).start()
         patch("graphs.coding.nodes.publish._find_open_pr",
               AsyncMock(return_value=("", None))).start()
+        # Worktrees here are plain folders, so the privacy checks are stubbed
+        # clean; tests that need a hit set `self.privacy_check`.
+        self.privacy_check = AsyncMock(return_value=OutgoingCheck())
+        patch("graphs.coding.nodes.push.outgoing.check_outgoing", self.privacy_check).start()
+        patch("graphs.coding.nodes.publish.privacy_guard.check", return_value=[]).start()
         self.addCleanup(patch.stopall)
 
         self.agent = patch("tools.agent_call.agent_call").start()
@@ -268,6 +290,32 @@ class TestTickEndToEnd(ManifestFixture):
         self.assertEqual(pr_status.await_count, 1)
         self.assertEqual(state["tick_report"], [])
 
+    async def test_a_privacy_hit_goes_back_to_the_worker_and_is_never_pushed(self):
+        """The check stops attempt 1; the worker fixes it within the same tick.
+
+        `digest_matches` is stubbed true here, so this also proves push hands
+        implement the rewound task: with the old one, implement would skip the
+        worker and the two would loop until the step limit.
+        """
+        hit = ("tests/test_demo.py", 3, "\u201cmade up words that stand in for a copied line\u201d")
+        self.privacy_check.side_effect = [OutgoingCheck(hits=[hit]), OutgoingCheck()]
+        self.write_manifest([_task(stage="queued")])
+
+        with patch("graphs.coding.nodes.publish.git_ops.create_pull_request",
+                   AsyncMock(return_value=(True, "https://github.com/org/repo/pull/7", 7))):
+            state = await self.run_tick()
+
+        self.assertEqual(self.agent.ainvoke.await_count, 2)
+        self.assertEqual(self.pushes.await_count, 1, "only the clean attempt is pushed")
+        self.assertEqual(self.stored()["status"], "awaiting_review")
+        # The findings crossed the node boundary: where and what, never the words.
+        first, second = (call.args[0]["prompt"] for call in self.agent.ainvoke.await_args_list)
+        self.assertNotIn("<privacy_findings>", first)
+        self.assertIn("<privacy_findings>", second)
+        self.assertIn("tests/test_demo.py:3: 8 words in a row from the user's notes", second)
+        self.assertNotIn("stand in for", second)
+        self.assertIn("🔒", "\n".join(state["tick_report"]))
+
 
 class TestTheImplementVerifyLoopTerminates(TestTickEndToEnd):
     """The budget has to hold *within* one tick, not only across ticks.
@@ -322,6 +370,22 @@ class TestTheImplementVerifyLoopTerminates(TestTickEndToEnd):
         self.assertEqual(self.agent.ainvoke.await_count, 1)
         self.assertEqual(self.stored()["status"], "halted")
         self.assertEqual(self.stored()["last_error"]["kind"], "environment")
+
+    async def test_a_line_the_worker_never_fixes_stops_at_the_budget(self):
+        """push → implement spends the implement budget too, so it ends, and nothing is pushed."""
+        from graphs.coding.nodes.implement import MAX_IMPLEMENT_ATTEMPTS
+
+        hit = ("tests/test_demo.py", 3, "\u201cmade up words that stand in for a copied line\u201d")
+        self.privacy_check.return_value = OutgoingCheck(hits=[hit])
+        self.write_manifest([_task(stage="queued")])
+
+        await self.run_tick()
+
+        self.assertEqual(self.agent.ainvoke.await_count, MAX_IMPLEMENT_ATTEMPTS)
+        self.pushes.assert_not_awaited()
+        self.assertEqual(self.stored()["status"], "halted")
+        self.assertEqual(self.stored()["last_error"]["kind"], "privacy")
+        self.assertEqual(self.stored()["stage"], "implemented")
 
 
 if __name__ == "__main__":

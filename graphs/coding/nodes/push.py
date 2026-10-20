@@ -16,18 +16,33 @@ failed attempt stays in the branch history, and the PR squash-merges it away.
 
 No LLM call here, so a push that fails because GitHub is down is retried on the
 next tick without spending tokens.
+
+That also makes this the last point where a line copied from the user's notes
+can be stopped: a task branch is public the moment it lands, and verify only
+runs after. So nothing is committed until the privacy guard has checked what
+the push would send (utils/outgoing.py). A hit is never pushed. Like a failed
+test, it goes back to the worker within the implement budget, with where and
+what kind but never the words, and the task halts as `privacy` once the budget
+is spent.
 """
 import os
 import time
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, List
 
+from graphs.coding.nodes.implement import MAX_IMPLEMENT_ATTEMPTS
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
+from graphs.coding.utils import outgoing
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
-from core.util import git_ops
+from core.util import git_ops, privacy_guard
+from core.util.config import Config
 
 MAX_PUSH_ATTEMPTS = 3
+# Hits listed in the tick report; the manifest and the worker get up to
+# privacy_guard.MAX_LINES.
+REPORT_HITS = 5
 
 
 async def push_node(state: CodingState) -> Dict[str, Any]:
@@ -80,6 +95,35 @@ async def push_node(state: CodingState) -> Dict[str, Any]:
         report.append(f"⚠️ {message}")
         return {"route": "done", "tick_report": report, "error_message": message}
 
+    # Nothing leaves this host before the privacy guard has seen it.
+    try:
+        checked = await outgoing.check_outgoing(
+            workspace_path, branch_name, default_branch, Path(Config().pkm_dir)
+        )
+    except privacy_guard.NotesMissing as e:
+        # Missing notes mean a misconfigured host, and pushing with half a check
+        # is the leak this exists to stop. Retrying can't fix it, so halt.
+        message = (
+            f"`{task_id}`: not pushed, because the privacy check can't find your notes ({e}). "
+            f"Point PKM_DIR at them on this host, then `retry {task_id}`."
+        )
+        manifest_store.persist_task(
+            manifest_path, task_id,
+            status="halted",
+            last_error={"stage": "push", "kind": "config", "message": message, "at": time.time()},
+            lease_owner=None, lease_expires_at=None
+        )
+        report.append(f"⚠️ {message}")
+        return {"route": "done", "tick_report": report, "error_message": message}
+
+    if checked.error:
+        return _retry_or_halt(
+            manifest_path, task_id, report,
+            f"The privacy check could not list what `{task_id}` would push: {checked.error}. Nothing was pushed."
+        )
+    if checked.hits:
+        return _privacy_hit(manifest_path, current_task, report, checked.hits)
+
     attempt = int((current_task.get("attempts") or {}).get("implement", 0)) or 1
     push_identity = get_push_identity(state)
     commit_msg = (
@@ -96,25 +140,11 @@ async def push_node(state: CodingState) -> Dict[str, Any]:
     new_sha = await git_ops.rev_parse(workspace_path) if push_ok else ""
 
     if not push_ok or not new_sha:
-        message = (
+        return _retry_or_halt(
+            manifest_path, task_id, report,
             f"Push failed for `{task_id}`: {push_log or 'could not resolve HEAD'} "
             f"The change is committed locally on `{branch_name}` at `{workspace_path}`."
         )
-        attempts = manifest_store.bump_attempt(manifest_path, task_id, "push")
-        error = {"stage": "push", "kind": "git", "message": message, "at": time.time()}
-        if attempts < MAX_PUSH_ATTEMPTS:
-            # Stage stays `implemented`: the next tick re-enters here, and
-            # `commit_and_push` treats "nothing to commit" as success.
-            manifest_store.yield_task(manifest_path, task_id, last_error=error)
-            report.append(f"↻ {message} Retrying on the next tick ({attempts}/{MAX_PUSH_ATTEMPTS}).")
-        else:
-            manifest_store.persist_task(
-                manifest_path, task_id,
-                status="halted", last_error=error,
-                lease_owner=None, lease_expires_at=None
-            )
-            report.append(f"⚠️ {message} Halted after {attempts} attempts — reply `retry {task_id}` when fixed.")
-        return {"route": "done", "tick_report": report, "error_message": message}
 
     stored = manifest_store.persist_task(
         manifest_path, task_id,
@@ -129,3 +159,95 @@ async def push_node(state: CodingState) -> Dict[str, Any]:
         "tick_report": report,
         "error_message": ""
     }
+
+
+def _retry_or_halt(manifest_path: str, task_id: str, report: List[str], message: str) -> Dict[str, Any]:
+    """A push that did not happen retries within the push budget, never the LLM's."""
+    attempts = manifest_store.bump_attempt(manifest_path, task_id, "push")
+    error = {"stage": "push", "kind": "git", "message": message, "at": time.time()}
+    if attempts < MAX_PUSH_ATTEMPTS:
+        # Stage stays `implemented`: the next tick re-enters here, and
+        # `commit_and_push` treats "nothing to commit" as success.
+        manifest_store.yield_task(manifest_path, task_id, last_error=error)
+        report.append(f"↻ {message} Retrying on the next tick ({attempts}/{MAX_PUSH_ATTEMPTS}).")
+    else:
+        manifest_store.persist_task(
+            manifest_path, task_id,
+            status="halted", last_error=error,
+            lease_owner=None, lease_expires_at=None
+        )
+        report.append(f"⚠️ {message} Halted after {attempts} attempts — reply `retry {task_id}` when fixed.")
+    return {"route": "done", "tick_report": report, "error_message": message}
+
+
+def _privacy_hit(
+    manifest_path: str,
+    current_task: Dict[str, Any],
+    report: List[str],
+    hits: List[privacy_guard.Hit]
+) -> Dict[str, Any]:
+    """Nothing was pushed. The worker fixes it within the implement budget, like a failed test."""
+    task_id = current_task["task_id"]
+    attempts = int((current_task.get("attempts") or {}).get("implement", 0))
+    # The matched words are shown only where your notes already go: the tick
+    # report and the manifest. Never on GitHub, never to the worker.
+    count = f"{len(hits)} line{'s look' if len(hits) != 1 else ' looks'} personal"
+    last_error = {
+        "stage": "push", "kind": "privacy",
+        "message": f"Not pushed: {count}: {_listing(hits, privacy_guard.MAX_LINES)}.",
+        "at": time.time(),
+    }
+
+    if attempts < MAX_IMPLEMENT_ATTEMPTS:
+        stored = manifest_store.persist_task(
+            manifest_path, task_id,
+            stage="provisioned", impl_digest=None, last_error=last_error
+        )
+        report.append(
+            f"🔒 `{task_id}`: not pushed. {count}: {_listing(hits, REPORT_HITS)}. "
+            f"Back to the worker (attempt {attempts + 1}/{MAX_IMPLEMENT_ATTEMPTS})."
+        )
+        return {
+            # The stage and the cleared digest travel with the task, as they do
+            # from verify. Without them implement sees the same tree, skips the
+            # worker and sends the task straight back here, until the tick hits
+            # its step limit.
+            "current_task": stored or {**current_task, "stage": "provisioned", "impl_digest": None},
+            "stage": "provisioned",
+            "impl_digest": None,
+            "privacy_findings": _findings_for_worker(hits),
+            "route": "implement",
+            "tick_report": report,
+            "error_message": ""
+        }
+
+    # The stage stays `implemented`, so `retry` re-enters here: a fixed file is
+    # pushed, a hit goes back to the worker with a fresh budget.
+    stored = manifest_store.persist_task(
+        manifest_path, task_id,
+        status="halted", last_error=last_error,
+        lease_owner=None, lease_expires_at=None
+    )
+    message = (
+        f"`{task_id}`: not pushed after {attempts} implement attempts. {count}: "
+        f"{_listing(hits, REPORT_HITS)}. Fix the spec or the file, then `retry {task_id}`."
+    )
+    report.append(f"⚠️ {message}")
+    return {"current_task": stored or current_task, "route": "done", "tick_report": report,
+            "error_message": message}
+
+
+def _listing(hits: List[privacy_guard.Hit], limit: int) -> str:
+    shown = "; ".join(f"`{path}:{line}` {what}" for path, line, what in hits[:limit])
+    more = len(hits) - limit
+    return shown + (f"; and {more} more" if more > 0 else "")
+
+
+def _findings_for_worker(hits: List[privacy_guard.Hit]) -> str:
+    """Where and what kind, never the words: the worker's summary becomes the PR body."""
+    limit = privacy_guard.MAX_LINES
+    lines = [f"- {path}:{line}: {privacy_guard.describe((path, line, what))}"
+             for path, line, what in hits[:limit]]
+    if len(hits) > limit:
+        lines.append(f"- and {len(hits) - limit} more; the next check lists them")
+    return "\n".join(lines)

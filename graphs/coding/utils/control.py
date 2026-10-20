@@ -313,7 +313,8 @@ async def _push_unpushed(manifest_path: str, manifest: Dict[str, Any], task: Dic
     """Pushes an `implemented` task's worktree, so the other host does not redo it.
 
     `implemented` is the one stage whose work exists only on this disk. Going
-    through the push node keeps one code path — and its default-branch guard.
+    through the push node keeps one code path — and its default-branch guard
+    and privacy check.
     """
     from graphs.coding.nodes.push import push_node
 
@@ -331,6 +332,10 @@ async def _push_unpushed(manifest_path: str, manifest: Dict[str, Any], task: Dic
     })
     if result.get("route") == "verify":
         return f"`{task['task_id']}`: pushed `{(result.get('head_sha') or '')[:7]}`."
+    if result.get("route") == "implement":
+        # The privacy check stopped it, so nothing left this disk. The worker
+        # runs on a tick, not here: the next host re-implements the task.
+        return f"`{task['task_id']}`: not pushed, the privacy check flagged it; it will be re-implemented."
     return f"`{task['task_id']}`: could not push ({result.get('error_message')}); it will be re-implemented."
 
 

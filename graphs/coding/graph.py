@@ -61,11 +61,14 @@ def create_graph(checkpointer=None, **kwargs):
         "implement", _router({"push"}), ["push", END]
     )
 
-    # Every attempt is pushed before it is tested: verification runs against
-    # the commit on GitHub, not this host's worktree. A failed push ends the
-    # tick and is retried on the next one, within the push budget.
+    # Every attempt is checked for personal data, then pushed, then tested:
+    # verification runs against the commit on GitHub, not this host's
+    # worktree, and a branch on GitHub is public the moment it lands. A privacy
+    # hit is never pushed; like a failed test it goes back to the worker,
+    # within the implement budget. A failed push ends the tick and is retried
+    # on the next one, within the push budget.
     workflow.add_conditional_edges(
-        "push", _router({"verify"}), ["verify", END]
+        "push", _router({"verify", "implement"}), ["verify", "implement", END]
     )
 
     workflow.add_conditional_edges(

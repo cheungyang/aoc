@@ -109,3 +109,20 @@ class TestImplementNode(ManifestFixture):
         self.assertIn("rename it", mock_prompt.call_args.kwargs["human_feedback"])
         # Consumed: the next attempt must not be re-prompted with it.
         self.assertIsNone(self.stored()["review_feedback"])
+
+    async def test_privacy_findings_reach_the_worker_once(self):
+        """What a stopped push found goes to the worker, then is cleared."""
+        task = _task(stage="provisioned")
+        self.write_manifest([task])
+        findings = "- app/settings.py:7: an email address"
+
+        with patch("graphs.coding.nodes.implement._modified_files", AsyncMock(return_value=["a.py"])), \
+             patch("graphs.coding.nodes.implement.compute_worktree_digest", AsyncMock(return_value="d")), \
+             patch("graphs.coding.nodes.implement.build_coder_prompt", return_value="p") as mock_prompt, \
+             patch("tools.agent_call.agent_call") as mock_agent:
+            mock_agent.ainvoke = AsyncMock(return_value="<worker_handoff></worker_handoff>")
+            result = await implement_node(self.base_state(task, privacy_findings=findings))
+
+        self.assertEqual(mock_prompt.call_args.kwargs["privacy_findings"], findings)
+        self.assertEqual(result["privacy_findings"], "")
+        self.assertEqual(result["route"], "push")

@@ -39,6 +39,7 @@ flowchart TD
     implement -->|"route = done (or unset)"| END
 
     push -->|"route = verify"| verify
+    push -->|"route = implement (privacy hit)"| implement
     push -->|"route = done (or unset)"| END
 
     verify -->|"route = audit"| audit
@@ -58,23 +59,25 @@ flowchart TD
 ```
 
 Topology and allowed route sets are declared in
-[create_graph()](graph.py#L23-L92).
+[create_graph()](graph.py#L23-L95).
 
 Four rationale notes are embedded in the edges themselves:
 
 - **`implement` can only go to `push`.** A worker that produced nothing ends the tick rather than
   testing an unchanged tree; the next tick retries within the implement budget
   ([graph.py:L58-L62](graph.py#L58-L62)).
-- **Every attempt is pushed before it is tested.** Verification runs against the commit on GitHub,
-  not this host's worktree, and the remote branch is what lets another host resume. A failed push
-  ends the tick and is retried on the next one, within the push budget
-  ([graph.py:L64-L69](graph.py#L64-L69)).
+- **Every attempt is checked for personal data, then pushed, then tested.** Verification runs
+  against the commit on GitHub, not this host's worktree, and the remote branch is what lets
+  another host resume — so a branch on GitHub is public before verify ever runs. A privacy hit is
+  never pushed; like a failed test it goes back to the worker, within the implement budget. A
+  failed push ends the tick and is retried on the next one, within the push budget
+  ([graph.py:L64-L72](graph.py#L64-L72)).
 - **`audit` has no path back to the worker.** The audit is advisory, so its verdict rides along to
   the PR and the tick carries on to publish
-  ([graph.py:L75-L79](graph.py#L75-L79)).
+  ([graph.py:L78-L82](graph.py#L78-L82)).
 - **`publish` never loops in-process.** A transient failure is retried by the *next* tick, so one
   tick cannot spin on a GitHub outage
-  ([graph.py:L81-L85](graph.py#L81-L85)).
+  ([graph.py:L84-L88](graph.py#L84-L88)).
 
 ## The Tick Model
 
@@ -90,7 +93,7 @@ def _router(allowed):
 ```
 
 `route` is a **persistent LangGraph channel**, declared on `CodingState`
-([schemas.py:L159-L162](schemas.py#L159-L162)). Because it is
+([schemas.py:L163-L166](schemas.py#L163-L166)). Because it is
 a channel it survives until a node overwrites it, so every router reads it as an **explicit
 instruction** rather than inferring the next step. If the value is not one of that router's own
 options — including a route nobody set, or a node's `"done"` sentinel — the tick **ends**. A node
@@ -99,7 +102,7 @@ that forgets to set a route stops the tick instead of re-running whatever the la
 > [!NOTE]
 > `route` must be declared as a channel or LangGraph drops it between nodes and *every* conditional
 > edge falls through to `END`. This is precisely what the end-to-end tests in
-> [test_graph.py](../../tests/graphs/coding/test_graph.py#L81-L88) exist to catch;
+> [test_graph.py](../../tests/graphs/coding/test_graph.py#L99-L106) exist to catch;
 > unit tests calling nodes directly cannot.
 
 **What ends a tick:**
@@ -109,7 +112,8 @@ that forgets to set a route stops the tick instead of re-running whatever the la
 - a missing `build_request_path`, a failed preflight, a repo that cannot be resolved, a lost lease
   race, a failed worktree provision, or a failed setup command;
 - any node that halts or yields a task (`route: "done"`): exhausted implement budget, a worker that
-  modified no files, a push failure or a push refused for the default branch, a missing
+  modified no files, a push failure or a push refused for the default branch, a push the privacy
+  check stopped with the implement budget spent, notes the privacy check can't find, a missing
   `verification_command`, a missing `head_sha`, an environment-class verification failure, an
   unverified `head_sha` at publish, a PR failure;
 - `publish` and `sync_review` routing back to `scheduler`, which then finds no *unhandled* task
@@ -129,7 +133,7 @@ the same verdict.
 
 ## State
 
-### `CodingState` ([schemas.py:L115-L183](schemas.py#L115-L183))
+### `CodingState` ([schemas.py:L116-L187](schemas.py#L116-L187))
 
 `total=False` TypedDict. Grouped as in the source.
 
@@ -160,6 +164,7 @@ the same verdict.
 | `test_stderr` | `str` | Sanitized failure output, fed back to the worker on retry. |
 | `modified_files` | `List[str]` | From `git status --porcelain` — never the model's own file list. |
 | `diff_summary` | `str` | Sanitized diff the audit reviewed. |
+| `privacy_findings` | `str` | What the privacy check found in a push it stopped, for the worker: path, line and kind, never the matched words. Cleared once implement uses it. |
 | `pr_url` | `str` | PR URL, only ever set from a `gh`-confirmed response. |
 | `pr_number` | `Optional[int]` | PR number. |
 | `latest_human_feedback` | `str` | Chat nudge passed to the worker as feedback (never an approval). |
@@ -185,7 +190,7 @@ the same verdict.
 | `tick_report` | `List[str]` | Lines the runner posts. Accumulated across the whole tick. |
 | `tick_handled` | `List[str]` | Task ids already touched — one tick cannot work the same task twice. |
 
-### `TaskEnvelope` ([schemas.py:L48-L102](schemas.py#L48-L102))
+### `TaskEnvelope` ([schemas.py:L49-L103](schemas.py#L49-L103))
 
 One queue entry in the manifest.
 
@@ -223,16 +228,16 @@ One queue entry in the manifest.
 | `last_error` | `Optional[TaskError]` | Classified last failure. |
 | `updated_at` | `float` | Set on every manifest write. |
 
-### `TaskError` ([schemas.py:L37-L45](schemas.py#L37-L45))
+### `TaskError` ([schemas.py:L37-L46](schemas.py#L37-L46))
 
 | Field | Type | Description |
 |---|---|---|
 | `stage` | `str` | Where it failed (`provision`, `setup`, `implement`, `push`, `verify`, `publish`, `merge`, `control`, …). |
-| `kind` | `str` | `llm` \| `verification` \| `git` \| `github` \| `config` \| `environment` \| `operator` \| `unknown`. Infrastructure failures must not consume the LLM budget. |
+| `kind` | `str` | `llm` \| `verification` \| `git` \| `github` \| `config` \| `environment` \| `operator` \| `privacy` \| `unknown`. Infrastructure failures must not consume the LLM budget. `privacy` is a push the privacy check stopped: nothing was pushed, and the message lists the lines. |
 | `message` | `str` | Human-readable detail. |
 | `at` | `float` | Epoch timestamp. |
 
-### `RepoDescriptor` ([schemas.py:L105-L112](schemas.py#L105-L112))
+### `RepoDescriptor` ([schemas.py:L106-L113](schemas.py#L106-L113))
 
 | Field | Type | Description |
 |---|---|---|
@@ -309,8 +314,8 @@ setup itself, so this host never executes a project's install scripts.
 
 ### implement
 
-[implement.py:L40-L195](nodes/implement.py#L40-L195) ·
-[`_review_feedback()`](nodes/implement.py#L212-L220)
+[implement.py:L40-L197](nodes/implement.py#L40-L197) ·
+[`_review_feedback()`](nodes/implement.py#L214-L222)
 
 **Responsibility.** The **only** node that calls the LLM to write code. It touches nothing outside
 the worktree: no git mutation, no network, no manifest beyond its own bookkeeping. That separation
@@ -321,14 +326,14 @@ progress is tracked by commit SHA and this node is not consulted again.
 **Reads:** `build_request_path`, `current_task` (`task_id`, `stage`, `impl_digest`, `attempts`,
 `spec_path`, `allowed_files`, `acceptance_criteria`, `verification_command`, `review_feedback`),
 `workspace_path`, `spec_path`, `test_stderr`, `audit_feedback`, `github_pr_comments`,
-`latest_human_feedback`, `graph_id`, `channel`, `tick_report`. Reviewer comments come from state
+`latest_human_feedback`, `privacy_findings`, `graph_id`, `channel`, `tick_report`. Reviewer comments come from state
 `github_pr_comments` **or** the task's durable `review_feedback`, which covers a hand-off through
 the scheduler (e.g. re-provisioning on another host) where the in-memory comments did not survive.
 
 **Writes:** `current_task` (refreshed from the manifest write, including the new attempt count),
 `stage`, `route`, `impl_digest`, `modified_files`, `implementation_summary`, `tick_report`,
 `error_message`; and clears the consumed feedback channels `test_stderr`, `audit_feedback`,
-`latest_human_feedback`, `github_pr_comments`.
+`latest_human_feedback`, `github_pr_comments`, `privacy_findings`.
 
 **Routes:**
 
@@ -355,31 +360,41 @@ changed — the model's own `<modified_files>` list is ignored (§7.6).
 
 ### push
 
-[push.py:L33-L127](nodes/push.py#L33-L127)
+[push.py:L48-L161](nodes/push.py#L48-L161) ·
+[`_privacy_hit()`](nodes/push.py#L183-L237) ·
+[utils/outgoing.py](utils/outgoing.py)
 
-**Responsibility.** Commit the worker's change and push it to the task branch, straight after
-implement and before anything tests it. No LLM. The commit message is
-`feat(<project>): <task_id> (attempt n)`; once pushed, the new HEAD is recorded as `head_sha` via
-[`git_ops.rev_parse`](../../core/util/git_ops.py#L211-L216) and the task advances
-to stage `pushed`.
+**Responsibility.** Check the worker's change for personal data, then commit it and push it to the
+task branch, straight after implement and before anything tests it. No LLM. A task branch is public
+the moment it lands, so this is the last point where a line copied from the user's notes can still
+be stopped: nothing is committed until the privacy guard has checked what the push would send. The
+commit message is `feat(<project>): <task_id> (attempt n)`; once pushed, the new HEAD is recorded
+as `head_sha` via [`git_ops.rev_parse`](../../core/util/git_ops.py#L211-L216) and the task
+advances to stage `pushed`.
 
 **Reads:** `build_request_path`, `current_task` (`task_id`, `stage`, `head_sha`, `branch_name`,
-`attempts`), `workspace_path`, `branch_name`, `repo`, `project_name`, `tick_report`.
+`attempts`), `workspace_path`, `branch_name`, `repo`, `project_name`, `tick_report`; and the user's
+notes under `PKM_DIR`, for the privacy check.
 
-**Writes:** `current_task` (refreshed from the manifest write), `stage` (`pushed`), `head_sha`,
-`route`, `tick_report`, `error_message`.
+**Writes:** `current_task` (refreshed from the manifest write), `stage` (`pushed`, or `provisioned`
+after a privacy hit), `head_sha`, `impl_digest` (cleared after a hit), `privacy_findings`, `route`,
+`tick_report`, `error_message`.
 
 **Routes:**
 
 | Route | Meaning |
 |---|---|
-| `verify` | The attempt was committed and pushed, and HEAD resolved; or the guard matched (stage at or past `pushed` and the task already has a `head_sha`). |
-| `done` | No `task_id`; branch empty or equal to the default branch (halt, `config` — attempts must never land on the default branch); worktree missing (yield — the uncommitted change is gone, and the scheduler sends the task back to implement); push failed or HEAD could not be resolved (kind `git`, `push` attempt counter bumped, task yielded keeping stage `implemented` so the next tick re-enters here; halts after `MAX_PUSH_ATTEMPTS = 3`). |
+| `verify` | The privacy check passed, the attempt was committed and pushed, and HEAD resolved; or the guard matched (stage at or past `pushed` and the task already has a `head_sha` — it is on GitHub already, so it is not checked again). |
+| `implement` | The privacy check found lines that look personal, and the implement budget has attempts left. Nothing was committed or pushed. Like a failed test: stage back to `provisioned`, digest cleared, `last_error` kind `privacy`, and `privacy_findings` — path, line and kind, never the words — handed to the worker. |
+| `done` | No `task_id`; branch empty or equal to the default branch (halt, `config` — attempts must never land on the default branch); worktree missing (yield — the uncommitted change is gone, and the scheduler sends the task back to implement); the user's notes not found (halt, `config` — nothing is pushed with half a check); a privacy hit with the implement budget spent (halt, `privacy`, stage kept at `implemented` so `retry` re-enters here and checks again); git could not list what would be sent, the push failed, or HEAD could not be resolved (kind `git`, `push` attempt counter bumped, task yielded keeping stage `implemented` so the next tick re-enters here; halts after `MAX_PUSH_ATTEMPTS = 3`). |
 
-**Side effects.** Git/GitHub:
-[`commit_and_push`](../../core/util/git_ops.py#L257-L332) (treats "nothing to
+**Side effects.** The privacy check ([`check_outgoing`](utils/outgoing.py)) reads the notes and
+folds commits GitHub doesn't have back into the worktree (`git reset --soft` to the task branch on
+GitHub, else to where it left the default branch), so the one commit pushed is exactly what was
+checked. Git/GitHub: [`commit_and_push`](../../core/util/git_ops.py#L282-L363) (treats "nothing to
 commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `bump_attempt`
-(`push`), `yield_task`, `persist_task` (stage `pushed`, `head_sha`, halts with `last_error`).
+(`push`), `yield_task`, `persist_task` (stage `pushed` and `head_sha`, or stage `provisioned` after
+a hit; halts with `last_error`).
 
 > [!NOTE]
 > Why push moved here from publish: verification will run remotely (E2B) and fetches the commit
@@ -389,6 +404,19 @@ commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `
 > at, so their guards compare SHAs instead of digesting a tree that may not exist on this host.
 > Every attempt is a commit on the task branch only; failed attempts stay in the branch history and
 > the PR squash-merges them away. Push failures retry within their own budget, never the LLM's.
+
+> [!IMPORTANT]
+> **The privacy check sits in front of the push, because nothing can sit in front of it later.**
+> Verify can't come first — E2B downloads the commit from GitHub, and another host resumes from
+> `origin/<branch>` — and the check can't live at the end of implement, because `retry` at
+> `implemented` and `handoff` go straight to push. Only push pushes
+> ([test_graph.py](../../tests/graphs/coding/test_graph.py) enforces it), so every route to GitHub
+> passes the check. It reads only the files the push changes: an old line already on GitHub can't
+> be unpublished by blocking every task. The worker hears where and what kind, never the words,
+> because its summary becomes the public PR body; the words go to the tick report and the manifest
+> only. A hit costs an implement attempt like a failed test, and push hands implement the rewound
+> task in `current_task`, as verify does — otherwise implement would see the same tree, skip the
+> worker and route straight back, until the tick hit its step limit.
 
 ### verify
 
@@ -473,9 +501,10 @@ empty: the diff reviewed is the whole branch against the default branch it was c
 
 ### publish
 
-[publish.py:L36-L134](nodes/publish.py#L36-L134) ·
-[`_retry_or_halt()`](nodes/publish.py#L137-L163) ·
-[`_upsert_pull_request()`](nodes/publish.py#L166-L201)
+[publish.py:L43-L147](nodes/publish.py#L43-L147) ·
+[`_retry_or_halt()`](nodes/publish.py#L150-L176) ·
+[`_upsert_pull_request()`](nodes/publish.py#L179-L214) ·
+[`_screen_pr_text()`](nodes/publish.py#L260-L289)
 
 **Responsibility.** Upsert the pull request and post the review context onto it. It **no longer
 commits or pushes** — the branch is already on GitHub (`push` sent it straight after implement, and
@@ -499,7 +528,8 @@ re-enters with the same code and spends no tokens.
 | `scheduler` | The PR is open and the task is now `awaiting_review`. Control returns to the scheduler, which may pick up a *different* task in the same tick (`tick_handled` prevents re-picking this one). |
 | `done` | No `task_id`; no branch; no `head_sha` (task yielded at stage `implemented`, so the next tick re-pushes); `verified_sha != head_sha` (task yielded at stage `pushed`, so the next tick re-verifies before any PR is opened); PR could not be opened (retries within the publish budget, `MAX_PUBLISH_ATTEMPTS = 3`, on later ticks, then halts). |
 
-**Side effects.** GitHub: `gh pr list` / `get_pull_request_status` / `create_pull_request`,
+**Side effects.** Privacy guard over the summary and audit text (reads the notes). GitHub:
+`gh pr list` / `get_pull_request_status` / `create_pull_request`,
 `comment_pull_request`. Manifest: `bump_attempt`, `yield_task`, `persist_task` (status
 `awaiting_review`, `pr_url`, `pr_number`, `head_sha`, `poll_until = now + 1h`, lease released).
 
@@ -515,6 +545,15 @@ Publishing failures retry within their own budget, never the LLM's, and the leas
 rather than held: holding it over a transient `gh` failure would keep the task invisible until the
 lease expired. A failure to post the review-context comment is logged and never fatal — the PR
 exists and is reviewable, and losing a comment must not halt a task or trigger a retry.
+
+**The PR text an LLM wrote is privacy-checked before it is posted**
+([`_screen_pr_text()`](nodes/publish.py#L260-L289)). The code passed the check at `push`, but the
+PR also carries the worker's `implementation_summary` (the body) and the audit's
+`audit_feedback` (the comment), both written after reading a spec that is written from the user's
+files. A text that hits is replaced by `(withheld: it matched the privacy check)`; when the notes
+can't be found, both are replaced by `(withheld: the privacy check couldn't run)`. The PR still
+opens either way, and a 🔒 line in the tick report says what was withheld — with the matched
+words, which go only there, never onto GitHub. Titles and the rest of the body are fixed text.
 
 ### sync_review
 
@@ -599,7 +638,8 @@ process's own repository, rooted by walking up to the `.git` marker — never `o
 `create` (`gh repo create`, then behave as `existing`).
 
 **GitHub** holds the task branch from the **first attempt** and the review state after publish.
-`push.py` writes the branch — every attempt is a commit on it, never on the default branch, and
+`push.py` writes the branch, and only after the privacy check has passed what it would send —
+every attempt is a commit on it, never on the default branch, and
 the PR squash-merges the history away. Verification fetches that commit (it will run remotely, on
 E2B, and never sees this host's disk), and the remote branch is the source of truth, so a tick on a
 *different host* can resume: [`provision_worktree`](../../core/util/git_ops.py#L146-L208)
@@ -642,6 +682,7 @@ on the host it ran on.
 | [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |
 | [digest.py](utils/digest.py) | SHA-256 over `git diff HEAD` plus sorted `git status --porcelain`, so "already implemented" is a claim with evidence. Only meaningful between implement and push — once committed, the diff is empty; past `pushed`, the commit SHA is the evidence. `None` means *no evidence* and must be treated as a cache miss. |
 | [preflight.py](utils/preflight.py) | Checks, before any token is spent, that the worker really receives the tools `graph.json` grants it and that the push identity can push. Resolves the roster through the same `worker_session` factory the real call uses. |
+| [outgoing.py](utils/outgoing.py) | What a push would send, checked before it leaves. Finds what GitHub already has (the task branch, else where it left the default branch), folds commits GitHub doesn't have back into the worktree so the one pushed commit is exactly what was checked, and runs the privacy guard — [core/util/privacy_guard.py](../../core/util/privacy_guard.py), the same checks as [tests/test_repo_privacy.py](../../tests/test_repo_privacy.py) — over every file the push changes. Raises `NotesMissing` rather than passing when the notes aren't there, and reports a git failure rather than guessing. |
 | [token_opt.py](utils/token_opt.py) | Truncates tracebacks (head + tail) and diffs before they enter a prompt — the failing case produces the longest output and is exactly when the spec risks being crowded out. |
 | [xml_parsers.py](utils/xml_parsers.py) | Parses the `<worker_handoff>`, `<critic_verdict>` and `<spec_validation_result>` blocks. Verdicts match **exactly**, never as substrings, so an echoed placeholder reads as FAIL/REJECT. |
 
@@ -684,7 +725,7 @@ Renders `error_message` as `🛑 Coding tick error: …` if set, otherwise joins
 
 ### `create_graph(checkpointer=None, **kwargs)`
 
-[graph.py:L23-L92](graph.py#L23-L92)
+[graph.py:L23-L95](graph.py#L23-L95)
 
 The loader hands every graph a checkpointer
 ([graph_builder.py:L137-L144](../../core/agent/graph_builder.py#L137-L144)), so
@@ -692,7 +733,7 @@ the parameter is accepted — but it is **deliberately ignored**, and the workfl
 with `checkpointer=None`. It is not silently honoured, because a checkpoint would key durable state
 to the caller's session again, which is exactly the resume problem this design removed. Durable
 state lives in the manifest, git and GitHub instead.
-[test_graph.py:L19-L44](../../tests/graphs/coding/test_graph.py#L19-L44) asserts
+[test_graph.py:L20-L46](../../tests/graphs/coding/test_graph.py#L20-L46) asserts
 both that `graph.checkpointer is None` and that a supplied `MemorySaver` is refused.
 
 ### How a tick is driven
@@ -752,14 +793,14 @@ the scheduler does not even spawn it; `--dry-run` still works for checking a han
 | [nodes/](nodes/__init__.py) | The seven stages of a tick, re-exported in execution order. |
 | [nodes/scheduler.py](nodes/scheduler.py) | Reclaim, preflight, select, claim, provision (remote-aware), set up, and route by stage. |
 | [nodes/implement.py](nodes/implement.py) | The only node that calls the LLM to write code. |
-| [nodes/push.py](nodes/push.py) | Commits each attempt and pushes it to the task branch; records `head_sha`. No LLM. |
+| [nodes/push.py](nodes/push.py) | Checks each attempt for personal data, then commits it and pushes it to the task branch; records `head_sha`. No LLM. |
 | [nodes/verify.py](nodes/verify.py) | Runs the verification command against `head_sha`; classifies environment vs. verification failure. |
 | [nodes/audit.py](nodes/audit.py) | Advisory anti-pattern review of the branch diff; always continues to publish. |
-| [nodes/publish.py](nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`. Deterministic, idempotent, no LLM. |
+| [nodes/publish.py](nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`, with the LLM-written text privacy-checked first. Deterministic, idempotent, no LLM. |
 | [nodes/sync_review.py](nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down. |
 | [utils/](utils/__init__.py) | Support modules — see [Utilities](#utilities). |
 | [prompts/](prompts/__init__.py) | Prompt builders for the Goldfish workers. |
-| [prompts/coder_prompt.py](prompts/coder_prompt.py) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, plus targeted retry blocks for test output, critic feedback and human feedback. |
+| [prompts/coder_prompt.py](prompts/coder_prompt.py) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, the made-up test data rule, plus targeted retry blocks for test output, critic feedback, human feedback and privacy findings. |
 | [prompts/critic_prompt.py](prompts/critic_prompt.py) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
 | [prompts/spec_validator_prompt.py](prompts/spec_validator_prompt.py) | Spec validator prompt. Not used by any node — consumed by [tools/spec_validator.py](../../tools/spec_validator.py) before a task is queued. |
 
@@ -767,4 +808,6 @@ Tests live in [tests/graphs/coding/](../../tests/graphs/coding/) — one module 
 node and per utility, plus
 [test_graph.py](../../tests/graphs/coding/test_graph.py), which drives the
 *compiled* graph end to end. Only a compiled run catches a route that no declared channel carries,
-and it also enforces that no node both calls the LLM and mutates a remote.
+and it also enforces that no node both calls the LLM and mutates a remote, and that only `push`
+pushes. [test_outgoing.py](../../tests/graphs/coding/test_outgoing.py) runs the privacy check
+against real git and a local bare remote.

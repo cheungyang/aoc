@@ -16,16 +16,23 @@ Two rules from §6.3 hold throughout:
 - **A pushed branch is never thrown away.** If the PR call fails, the task
   halts with a compare URL you can click, and the next tick adopts the PR you
   open from it.
+
+The PR also carries two texts an LLM wrote: the worker's summary and the
+audit's findings. The privacy guard checks both before they are posted, and a
+text that looks personal is withheld. The PR still opens.
 """
+import asyncio
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
-from core.util import git_ops
+from core.util import git_ops, privacy_guard
+from core.util.config import Config
 from core.util.push_identity import subprocess_env
 
 MAX_PUBLISH_ATTEMPTS = 3
@@ -73,6 +80,12 @@ async def publish_node(state: CodingState) -> Dict[str, Any]:
     push_identity = get_push_identity(state)
     default_branch = repo_descriptor.get("default_branch") or "main"
     base_branch = (state.get("base_branch") or default_branch).replace("origin/", "")
+
+    # The summary and the audit's findings are written by an LLM that read the
+    # spec, and the spec is written from the user's files. Both go public with
+    # the PR, so they get the same privacy check as the code.
+    state, withheld = await _screen_pr_text(state)
+    report.extend(f"🔒 `{task_id}`: {line}" for line in withheld)
 
     # 1. PR upsert. Always look before creating, so a PR you opened by hand from
     #    the compare URL is adopted instead of duplicated.
@@ -235,6 +248,45 @@ def _compare_url(target_repo: Optional[str], branch_name: str) -> str:
     if not target_repo:
         return ""
     return f"https://github.com/{target_repo}/compare/{branch_name}?expand=1"
+
+
+# What an LLM wrote for the PR, and its name in the tick report. The rest of the
+# PR is fixed text: the title, the task id, the spec path.
+_LLM_TEXT = (("implementation_summary", "PR summary"), ("audit_feedback", "audit comment"))
+WITHHELD = "(withheld: it matched the privacy check)"
+NOT_CHECKED = "(withheld: the privacy check couldn't run)"
+
+
+async def _screen_pr_text(state: CodingState) -> Tuple[CodingState, List[str]]:
+    """The state with any LLM-written PR text that looks personal withheld, and a line per text withheld.
+
+    Withholding never stops the PR: the code is what gets reviewed, and it has
+    already passed the same check at push. The matched words go only into the
+    tick report, never onto GitHub.
+    """
+    texts = [(label, str(state.get(key))) for key, label in _LLM_TEXT if state.get(key)]
+    if not texts:
+        return state, []
+    try:
+        hits = await asyncio.to_thread(privacy_guard.check, texts, Path(Config().pkm_dir))
+    except privacy_guard.NotesMissing as e:
+        # Can't check, so don't post.
+        withheld = {key: NOT_CHECKED for key, _ in _LLM_TEXT if state.get(key)}
+        return {**state, **withheld}, [
+            f"withheld the {label} from the PR: the privacy check can't find your notes ({e})."
+            for label, _ in texts
+        ]
+
+    found: Dict[str, List[str]] = {}
+    for label, line, what in hits:
+        found.setdefault(label, []).append(f"line {line} {what}")
+    if not found:
+        return state, []
+    withheld = {key: WITHHELD for key, label in _LLM_TEXT if label in found}
+    return {**state, **withheld}, [
+        f"withheld the {label} from the PR: it matched the privacy check ({'; '.join(found[label][:5])})."
+        for _, label in _LLM_TEXT if label in found
+    ]
 
 
 def _pr_body(state: CodingState, current_task: Dict[str, Any], push_identity) -> str:

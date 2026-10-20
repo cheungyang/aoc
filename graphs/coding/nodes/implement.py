@@ -83,7 +83,8 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         spec_content=spec_content,
         test_stderr=_clean(state.get("test_stderr")),
         critic_feedback=state.get("audit_feedback"),
-        human_feedback=_review_feedback(state, current_task)
+        human_feedback=_review_feedback(state, current_task),
+        privacy_findings=state.get("privacy_findings")
     )
 
     # The count has to travel in state, not just to disk. `current_task` is the
@@ -190,6 +191,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         "audit_feedback": "",
         "latest_human_feedback": "",
         "github_pr_comments": [],
+        "privacy_findings": "",
         "tick_report": report,
         "error_message": ""
     }

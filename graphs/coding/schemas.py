@@ -37,9 +37,10 @@ STAGE_ORDER: List[str] = [
 class TaskError(TypedDict, total=False):
     """The last failure, classified so retries can target the right stage."""
     stage: str
-    # "llm" | "verification" | "git" | "github" | "config" | "unknown".
+    # "llm" | "verification" | "git" | "github" | "config" | "privacy" | "unknown".
     # Infrastructure failures must not consume the LLM budget, so the manifest
-    # counts attempts per stage rather than once per task (B1).
+    # counts attempts per stage rather than once per task (B1). "privacy" is a
+    # push the privacy guard stopped: nothing was pushed.
     kind: str
     message: str
     at: float
@@ -143,6 +144,9 @@ class CodingState(TypedDict, total=False):
     test_stderr: str
     modified_files: List[str]
     diff_summary: str
+    # What the privacy check found in a push it stopped, for the worker: where
+    # and what kind, never the words, since the worker's summary is public.
+    privacy_findings: str
 
     # 4. Review
     pr_url: str
