@@ -143,6 +143,28 @@ async def test_join_channel_pre_cleans_existing_guild_vc(mock_bot_runner):
 
 
 @pytest.mark.asyncio
+async def test_join_warns_when_libopus_cannot_load(mock_bot_runner, capsys):
+    """Without libopus, voice_recv's reader dies on the first packet of speech
+    and the bot sits in the room deaf (the Docker image lost it with chromium)."""
+    connection = _connection(mock_bot_runner)
+    _guild_with_room(mock_bot_runner, AsyncMock(return_value=MagicMock()))
+
+    with patch.object(discord.opus.Decoder, "get_opus_version", side_effect=discord.opus.OpusNotLoaded()):
+        assert await connection.join("general-voice") is True
+    assert "libopus could not be loaded" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_join_says_nothing_about_libopus_when_it_loads(mock_bot_runner, capsys):
+    connection = _connection(mock_bot_runner)
+    _guild_with_room(mock_bot_runner, AsyncMock(return_value=MagicMock()))
+
+    with patch.object(discord.opus.Decoder, "get_opus_version", return_value="libopus 1.5.2"):
+        assert await connection.join("general-voice") is True
+    assert "libopus" not in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
 async def test_leave_channel(mock_bot_runner):
     connection = _connection(mock_bot_runner)
     mock_vc = MagicMock()

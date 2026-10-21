@@ -1,6 +1,13 @@
 FROM python:3.11-slim
 
 # Install system dependencies
+#
+# libopus0: Discord voice decodes what the bot hears and encodes what it says
+# with libopus, which discord.py loads through ctypes. Nothing in pip provides
+# it here (PyAV bundles a copy, but Linux loads that RTLD_LOCAL, out of
+# discord.py's reach), and it used to arrive only as a dependency of chromium.
+# Without it the receive thread dies on the first packet of speech
+# (OpusNotLoaded) and the bot sits in the room deaf and mute.
 RUN apt-get update && apt-get install -y \
     git \
     openssh-client \
@@ -11,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     procps \
     tzdata \
+    libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure Git safe.directory and system defaults for mounted repositories

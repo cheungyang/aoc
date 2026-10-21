@@ -188,6 +188,7 @@ class VoiceConnection:
                 return False
 
             self.sink = self._make_sink()
+            self._warn_if_no_opus()
             self.voice_client.listen(self.sink)
 
             resolved_text = self.resolve_text_channel(target_channel)
@@ -212,6 +213,21 @@ class VoiceConnection:
         await self._disconnect()
         if vc:
             print(f"[VoiceManager:{self.agent_id}] Disconnected from voice channel.")
+
+    def _warn_if_no_opus(self) -> None:
+        """Says so if libopus can't be loaded. Without it the receive thread
+        dies on the first packet of speech (OpusNotLoaded, logged once by
+        voice_recv) and the bot sits in the room deaf; playback fails too.
+
+        Checked after the sink is made, because that is what imports PyAV,
+        whose bundled libopus discord.py can see on macOS (not on Linux).
+        The check is the one `Decoder()` makes on the first packet.
+        """
+        try:
+            discord.opus.Decoder.get_opus_version()
+        except discord.opus.OpusNotLoaded:
+            print(f"[VoiceManager:{self.agent_id}] ⚠️ libopus could not be loaded: the bot will neither "
+                  "hear nor speak in voice. Install it (Debian/Docker: libopus0, macOS: brew install opus).")
 
     async def _disconnect(self, target_channel=None):
         """Stops listening and drops the voice client -- or, if there is none,

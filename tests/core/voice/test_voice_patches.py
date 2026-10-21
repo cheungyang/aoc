@@ -103,3 +103,12 @@ def test_load_libopus():
     import discord.opus
     _load_libopus()
     assert discord.opus.is_loaded() is True
+
+def test_docker_image_installs_libopus():
+    """On Linux the system libopus is the only one discord.py can load: PyAV's
+    bundled copy is loaded RTLD_LOCAL there. It used to come in only as a
+    dependency of chromium, and voice went deaf when the browser left the image."""
+    import re
+    from pathlib import Path
+    dockerfile = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text()
+    assert re.search(r"^\s*libopus0\b", dockerfile, re.MULTILINE)
