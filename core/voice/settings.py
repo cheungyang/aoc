@@ -62,6 +62,52 @@ BARGE_IN_MIN_WORDS = 2
 # unless it is older than this.
 UNANSWERED_MAX_AGE_S = 90
 
+# --- Hearing only you (Part 4) ---------------------------------------------
+# The voiceprint gate (core/voice/listening/speaker_gate.py) scores how much
+# an utterance sounds like your enrolled voice. `voice_config.speaker_gate`
+# picks the mode per voice session: "off", "shadow" (score and record every
+# utterance, change nothing) or "enforce" (not built yet: until the thresholds
+# below are set from your drives, it behaves as "shadow").
+SPEAKER_GATE_MODES = ("off", "shadow", "enforce")
+# A WeSpeaker model trained on VoxCeleb, as exported by sherpa-onnx. CAM++ is
+# about twice as fast as ResNet34 for the same separation; time both on the NAS
+# with scripts/speaker_gate_bench.py.
+SPEAKER_MODEL_FILE = os.getenv("AOC_SPEAKER_MODEL", "wespeaker_en_voxceleb_CAM++.onnx")
+SPEAKER_MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+# Cosine similarity to your voiceprint: at or above ACCEPT it's you, at or
+# below REJECT it isn't, in between the gate keeps listening. Provisional, from
+# synthetic voices; they're replaced by values set from your drives (phase 4.4).
+SPEAKER_ACCEPT = 0.60
+SPEAKER_REJECT = 0.40
+# The first verdict is on this much audio, then again every step until decided.
+SPEAKER_FIRST_S = 1.0
+SPEAKER_STEP_S = 0.5
+# A score this close to a threshold is "borderline": its audio is kept for review.
+SPEAKER_BORDERLINE = 0.10
+# The audio of would-be rejections is kept this long, for `!gate review`.
+GATE_AUDIO_KEEP_DAYS = 14
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def speaker_model_path() -> Optional[str]:
+    """Where the speaker model is: the image's asset cache, else the dev cache
+    under sessions/models (scripts/provision_assets.py fills both). None if absent."""
+    candidates = [
+        os.path.join(os.environ.get("AOC_ASSET_ROOT", "/opt/aoc"), "models", SPEAKER_MODEL_FILE),
+        os.path.join(_PROJECT_ROOT, "sessions", "models", SPEAKER_MODEL_FILE),
+    ]
+    return next((path for path in candidates if os.path.isfile(path)), None)
+
+
+def voice_data_dir() -> str:
+    """Your voiceprint and the kept clips: beside memory.db, on this machine only
+    (sessions/ is never committed or put in an image). Looked up at call time,
+    so anything that repoints the session store (the test suite) repoints this."""
+    from core.knowledge.memory import sqlite_session_store
+    return os.environ.get("AOC_VOICE_DATA_DIR") or os.path.join(
+        os.path.dirname(sqlite_session_store.DEFAULT_DB_PATH), "voice")
+
 # --- Text to speech --------------------------------------------------------
 # "chirp3_hd": Cloud Text-to-Speech, streamed. Each stretch of speech is one
 # bidirectional stream, fed a sentence at a time as the agent writes it and

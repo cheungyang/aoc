@@ -22,14 +22,14 @@ This guide explains how to set up and run the LangGraph system in a Docker conta
 
 Several things the app needs at run time are excluded by `.gitignore` and therefore
 absent from a fresh clone or a fresh image: the faster-whisper STT weights, the
-generated audio cues, the LanceDB vector index, and the ignored working
-directories (`sessions/`, `workspaces/`, `.gogcli/`). `scripts/provision_assets.py`
-provisions all of them in two stages.
+voiceprint gate's speaker model, the generated audio cues, the LanceDB vector
+index, and the ignored working directories (`sessions/`, `workspaces/`,
+`.gogcli/`). `scripts/provision_assets.py` provisions all of them in two stages.
 
 | Stage | Runs from | Does |
 | --- | --- | --- |
-| `build` | `Dockerfile` | Downloads the faster-whisper model, verifies the Silero VAD graph, stages audio cues (generating any that are missing via edge-tts) |
-| `runtime` | `entrypoint.sh` | Re-fetches the model if the volume lacks it, restores staged files the bind mount hides, creates ignored directories, warns on a missing `.env`, bootstraps the vector index |
+| `build` | `Dockerfile` | Downloads the faster-whisper model and the speaker model, verifies the Silero VAD graph, stages audio cues (generating any that are missing via edge-tts) |
+| `runtime` | `entrypoint.sh` | Re-fetches either model if the volume lacks it, restores staged files the bind mount hides, creates ignored directories, warns on a missing `.env`, bootstraps the vector index |
 
 ### Where assets live, and why
 
@@ -39,7 +39,7 @@ and the distinction between them matters.
 
 | Path | Mapped to | Holds | Why there |
 | --- | --- | --- | --- |
-| `/opt/aoc` | named volume `aoc-assets` | faster-whisper weights (~150MB) under `hf/` | Persists across image rebuilds and `docker compose down`, so the download happens once |
+| `/opt/aoc` | named volume `aoc-assets` | faster-whisper weights (~150MB) under `hf/`, the speaker model (~30MB) under `models/` | Persists across image rebuilds and `docker compose down`, so the download happens once |
 | `/opt/aoc-seed` | image layer only | audio cues destined for `/app` | Must track the image — see below |
 
 > [!WARNING]

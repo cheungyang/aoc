@@ -3,10 +3,11 @@
 The VAD sink creates an `Utterance` on the audio thread when speech starts and
 keeps appending its PCM; the live transcriber fills in its text on the event
 loop. The two sides meet only through plain attributes, each written by one
-side: the audio thread writes `pcm` and `speech_end_at`; the loop writes
-`segments`, `interim` and the rest. The audio thread reads the text through
-`text_so_far()` (for end-of-turn timing); the loop reads the PCM through
-`wav()` only after the turn has ended (for the Whisper fallback).
+side: the audio thread writes `pcm`, `speech_start`, `speech_end` and
+`speech_end_at`; the loop writes `segments`, `interim` and the rest. The audio
+thread reads the text through `text_so_far()` (for end-of-turn timing); the
+loop reads the PCM through `wav()` and `speech_pcm()` only after the turn has
+ended (for the Whisper fallback, and the voiceprint gate).
 """
 import io
 import itertools
@@ -40,6 +41,11 @@ class Utterance:
         # time.monotonic() when the turn ended (the end-of-turn silence elapsed).
         self.finished_at: Optional[float] = None
         self.pcm = bytearray()  # 16 kHz 16-bit mono, onset through end of turn
+        # Where the speech itself is in `pcm`, in bytes: from the VAD's onset run,
+        # past the pre-roll, to the last voiced window, before the end-of-turn
+        # silence. What the voiceprint gate scores.
+        self.speech_start = 0
+        self.speech_end: Optional[int] = None
 
         # Filled in on the event loop by the live transcriber.
         self.segments: List[str] = []  # finalized text, one per speech segment
@@ -52,6 +58,9 @@ class Utterance:
         self.confirmed = False  # its words confirmed an interruption
         self.ducked = False     # it lowered the agent's volume when it began
 
+        # The voiceprint gate's Assessment (speaker_gate.py), once it's scored.
+        self.gate = None
+
     def text_so_far(self) -> str:
         parts = list(self.segments)
         if self.interim:
@@ -60,6 +69,15 @@ class Utterance:
 
     def duration_ms(self) -> float:
         return len(self.pcm) / BYTES_PER_MS
+
+    def speech_pcm(self) -> bytes:
+        """The speech, without the pre-roll or the end-of-turn silence."""
+        end = len(self.pcm) if self.speech_end is None else self.speech_end
+        return bytes(self.pcm[self.speech_start:end])
+
+    def speech_ms(self) -> float:
+        end = len(self.pcm) if self.speech_end is None else self.speech_end
+        return max(0, end - self.speech_start) / BYTES_PER_MS
 
     def wav(self) -> bytes:
         return pcm_to_wav(bytes(self.pcm))

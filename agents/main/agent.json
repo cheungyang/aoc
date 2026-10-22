@@ -54,6 +54,7 @@
     "auto_join": true,
     "voice_channel": "aoc-voice",
     "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
-    "post_transcript_to_chat": true
+    "post_transcript_to_chat": true,
+    "speaker_gate": "shadow"
   }
 }

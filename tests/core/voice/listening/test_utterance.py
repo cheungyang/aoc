@@ -50,3 +50,13 @@ def test_pcm_to_wav_boosts_quiet_speech_up_to_8x():
 def test_pcm_to_wav_of_nothing_is_empty():
     assert pcm_to_wav(b"") == b""
     assert Utterance().wav() == b""
+
+
+def test_the_speech_is_the_audio_between_the_onset_and_the_last_voiced_window():
+    utterance = Utterance()
+    utterance.pcm += bytes(BYTES_PER_MS * 300) + b"\x01\x00" * (16 * 1000) + bytes(BYTES_PER_MS * 900)
+    assert utterance.speech_pcm() == bytes(utterance.pcm), "no bounds known: all of it"
+    utterance.speech_start = BYTES_PER_MS * 300
+    utterance.speech_end = BYTES_PER_MS * 1300
+    assert utterance.speech_pcm() == b"\x01\x00" * (16 * 1000)
+    assert utterance.speech_ms() == 1000

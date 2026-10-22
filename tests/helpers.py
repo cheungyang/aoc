@@ -6,8 +6,8 @@ ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
 token-usage-handler and logging-util tests, `GOLDEN_INPUT`, the structured reply
-shared by the missing-speech and speech-coverage tests, and `FakeTTS` for voice
-tests that speak.
+shared by the missing-speech and speech-coverage tests, `FakeTTS` for voice
+tests that speak, and `FakeSpeakerModel` for tests of the voiceprint gate.
 """
 import re
 from contextlib import contextmanager
@@ -136,3 +136,37 @@ class FakeTTSStream:
     def cancel(self):
         self.cancelled = True
         self.speaker.finish()
+
+
+class FakeSpeakerModel:
+    """Stands in for the voiceprint gate's network (speaker_gate.SpeakerModel).
+
+    Its embedding of N ms of audio has similarity `score_at(N)` to the
+    voiceprint [1, 0] (`FAKE_VOICEPRINT`); audio too short to embed gives None,
+    as the real model's does. Records the length of every call.
+    """
+
+    name = "fake.onnx"
+
+    def __init__(self, score_at=lambda ms: 0.9):
+        self.score_at = score_at
+        self.embedded = []
+        self.loaded = False
+
+    def _load(self):
+        self.loaded = True
+
+    def embed(self, pcm):
+        import numpy as np
+        from core.voice.listening.speaker_gate import MIN_EMBED_MS
+        from core.voice.listening.utterance import BYTES_PER_MS
+
+        ms = len(pcm) // BYTES_PER_MS
+        self.embedded.append(ms)
+        if ms < MIN_EMBED_MS:
+            return None
+        score = float(self.score_at(ms))
+        return np.array([score, np.sqrt(max(0.0, 1 - score * score))])
+
+
+FAKE_VOICEPRINT = [1.0, 0.0]

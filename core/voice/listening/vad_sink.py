@@ -3,7 +3,7 @@ import os
 import threading
 import time
 from collections import deque
-from typing import Optional, Union
+from typing import Callable, Optional, Set, Union
 
 import numpy as np
 import onnxruntime as ort
@@ -15,6 +15,7 @@ from core.voice.listening.utterance import Utterance
 
 WINDOW_SAMPLES = 576  # 36 ms at 16 kHz: Silero VAD v6's window
 WINDOW_MS = 36
+WINDOW_BYTES = WINDOW_SAMPLES * 2  # as 16-bit PCM
 PRE_SPEECH_CHUNKS = 25  # 25 * 36 ms = 900 ms pre-roll audio (includes the 180 ms onset run)
 PACKET_GAP_RESET_S = 0.5
 
@@ -69,10 +70,14 @@ class VADSink(voice_recv.AudioSink):
     packet reader). How long a silence ends the turn is adaptive: it depends on
     the words transcribed so far (core/voice/listening/turn_taking.py).
 
-    `config` is the agent's voice_config, for its VAD thresholds.
+    `config` is the agent's voice_config, for its VAD thresholds. `owners`, if
+    given, returns the Discord user ids (as strings) whose audio is heard: the
+    owner filter of Part 4 (L1). Anyone else's packets are dropped before the
+    VAD; an empty set, or a speaker Discord can't name, is heard as before.
     """
 
-    def __init__(self, floor, loop=None, config: Optional[dict] = None, min_speech_ms=250):
+    def __init__(self, floor, loop=None, config: Optional[dict] = None, min_speech_ms=250,
+                 owners: Optional[Callable[[], Set[str]]] = None):
         self._voice_client = None
         self.user_states: dict[Union[int, str], UserVADState] = {}
         super().__init__()
@@ -93,6 +98,8 @@ class VADSink(voice_recv.AudioSink):
         self.continue_prob = float(voice_config.get("vad_continue_prob", 0.35))
         early_end = voice_config.get("vad_early_end_ms", STT_EARLY_END_MS)
         self.early_end_ms = int(early_end) if early_end else None
+        self.owners = owners
+        self._not_owners: Set[str] = set()  # accounts already logged as not heard
         # `write` runs on Discord's packet thread and the watchdog on the event
         # loop; both can end the same turn, so state changes happen under this.
         self._lock = threading.Lock()
@@ -131,15 +138,36 @@ class VADSink(voice_recv.AudioSink):
         preroll = b"".join(state.pre_speech_chunks)
         state.pre_speech_chunks.clear()
         utterance.pcm += preroll
+        # The pre-roll ends with the onset run (every speech window but the one
+        # that confirmed it): the speech starts there, not at the pre-roll's start.
+        utterance.speech_start = max(0, len(preroll) - max(state.speech_chunks - 1, 0) * WINDOW_BYTES)
         state.utterance = utterance
         print(f"[VADSink] 🗣️ User {user_name} is speaking (prob={speech_prob:.2f}, rms={rms:.3f})...")
         self._post(self.floor.utterance_opened, utterance)
         if preroll:
             self._post(self.floor.utterance_audio, utterance, preroll)
 
-    def _append(self, state: UserVADState, chunk: bytes):
+    def _append(self, state: UserVADState, chunk: bytes, voiced: bool = False):
         state.utterance.pcm += chunk
+        if voiced:
+            state.utterance.speech_end = len(state.utterance.pcm)
         self._post(self.floor.utterance_audio, state.utterance, chunk)
+
+    def _from_owner(self, user, user_name: str) -> bool:
+        """The owner filter (L1): whether `user`'s audio is heard at all."""
+        try:
+            owners = self.owners() if self.owners is not None else None
+        except Exception as e:
+            print(f"[VADSink] Owner filter failed, hearing everyone: {type(e).__name__}: {e}")
+            return True
+        user_id = getattr(user, "id", None)
+        if not owners or user_id is None or str(user_id) in owners:
+            return True
+        if str(user_id) not in self._not_owners:
+            self._not_owners.add(str(user_id))
+            print(f"[VADSink] 🙉 Not listening to {user_name}: only your account is heard "
+                  f"(voice_config.owner_user_ids, or the account your voiceprint was enrolled from).")
+        return False
 
     def _on_silence(self, state: UserVADState, silence_ms: float, user_name: str):
         """Ends the open segment early (if enabled), then the turn once the silence is long enough."""
@@ -219,6 +247,10 @@ class VADSink(voice_recv.AudioSink):
         user_key = ssrc if ssrc else (user_id if isinstance(user_id, (int, str)) else "default")
         user_name = getattr(user, "display_name", str(user)) if user else (f"Speaker-{ssrc}" if ssrc else "Speaker")
 
+        # Only your account is heard (Part 4, L1).
+        if user is not None and not self._from_owner(user, user_name):
+            return
+
         with self._lock:
             if user_key not in self.user_states:
                 self.user_states[user_key] = UserVADState(user=user, ssrc=ssrc)
@@ -291,7 +323,7 @@ class VADSink(voice_recv.AudioSink):
                             # Back to talking before the turn ended: same utterance.
                             state.paused = False
                             self._post(self.floor.utterance_resumed, state.utterance)
-                        self._append(state, chunk_int16)
+                        self._append(state, chunk_int16, voiced=True)
                     else:
                         state.pre_speech_chunks.append(chunk_int16)
 

@@ -2,8 +2,9 @@
 """Provision the runtime assets that are deliberately absent from git.
 
 Several things this app needs at runtime are never committed (see `.gitignore`):
-the faster-whisper STT weights, generated audio cues, the LanceDB vector index,
-and the various runtime directories. A developer machine accumulates them
+the faster-whisper STT weights, the speaker-embedding model of the voiceprint
+gate, generated audio cues, the LanceDB vector index, and the various runtime
+directories. A developer machine accumulates them
 organically; a freshly built container has none of them, so the first request
 that touches voice or vault search either stalls on a multi-hundred-megabyte
 download or silently degrades.
@@ -52,6 +53,13 @@ HF_CACHE = os.environ.get("HF_HOME", os.path.join(ASSET_ROOT, "hf"))
 # the volume would be frozen at the first image that ever populated it and no
 # later build could correct it.
 SEED_DIR = os.environ.get("AOC_SEED_DIR", "/opt/aoc-seed")
+
+# The voiceprint gate's speaker-embedding model (core/voice/listening/speaker_gate.py).
+# Mirrors SPEAKER_MODEL_FILE / SPEAKER_MODEL_URL in core/voice/settings.py, which
+# this standalone script doesn't import.
+SPEAKER_MODEL = os.environ.get("AOC_SPEAKER_MODEL", "wespeaker_en_voxceleb_CAM++.onnx")
+SPEAKER_MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+MODELS_DIR = os.path.join(ASSET_ROOT, "models")
 
 # Audio cues played back by BlurpGenerator. Tracked in git today, but a wheel
 # of a fresh clone can still be missing them, and TTS regeneration is cheap.
@@ -162,6 +170,35 @@ def task_vad_model(rep):
         rep.record("vad_model", FAIL, str(e))
 
 
+def _fetch_speaker_model(dest_dir):
+    """Downloads the speaker model into `dest_dir` unless it's there. Returns its path."""
+    import urllib.parse
+    import urllib.request
+
+    dest = os.path.join(dest_dir, SPEAKER_MODEL)
+    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+        return dest, False
+    os.makedirs(dest_dir, exist_ok=True)
+    partial = dest + ".part"
+    url = SPEAKER_MODEL_URL + urllib.parse.quote(SPEAKER_MODEL)
+    with urllib.request.urlopen(url, timeout=120) as response, open(partial, "wb") as out:
+        shutil.copyfileobj(response, out)
+    os.replace(partial, dest)
+    return dest, True
+
+
+def task_speaker_model(rep):
+    """Bakes the voiceprint gate's speaker model (~30MB) into the image."""
+    if rep.dry_run:
+        rep.record("speaker_model", SKIP, f"would download '{SPEAKER_MODEL}' into {MODELS_DIR}")
+        return
+    try:
+        path, fetched = _fetch_speaker_model(MODELS_DIR)
+        rep.record("speaker_model", OK, f"{'downloaded' if fetched else 'present'} at {path}")
+    except Exception as e:
+        rep.record("speaker_model", FAIL, f"could not fetch '{SPEAKER_MODEL}': {e}")
+
+
 def _synthesize(text, dest):
     """Renders `text` to a wav at `dest` using edge-tts (already a dependency)."""
     import asyncio
@@ -259,6 +296,27 @@ def task_stt_cache(rep):
         rep.record("stt_cache", OK, f"'{model}' downloaded into {path}")
     except Exception as e:
         rep.record("stt_cache", FAIL, f"could not fetch '{model}': {e}")
+
+
+def task_speaker_cache(rep):
+    """Fetches the speaker model when the mapped volume predates it.
+
+    Like the STT weights, ASSET_ROOT is a named volume that only receives the
+    image's files while empty. Without the model the gate stays off and says
+    so; this turns that into a slower start instead.
+    """
+    path = os.path.join(MODELS_DIR, SPEAKER_MODEL)
+    if os.path.isfile(path):
+        rep.record("speaker_cache", OK, f"present at {path}")
+        return
+    if rep.dry_run:
+        rep.record("speaker_cache", SKIP, f"would download '{SPEAKER_MODEL}' into {MODELS_DIR}")
+        return
+    try:
+        path, _ = _fetch_speaker_model(MODELS_DIR)
+        rep.record("speaker_cache", OK, f"downloaded into {path}")
+    except Exception as e:
+        rep.record("speaker_cache", FAIL, f"could not fetch '{SPEAKER_MODEL}': {e}")
 
 
 def task_restore_seed(rep):
@@ -396,11 +454,13 @@ def task_vector_index(rep):
 BUILD_TASKS = {
     "stt": task_stt_model,
     "vad": task_vad_model,
+    "speaker": task_speaker_model,
     "audio": task_seed_audio,
 }
 
 RUNTIME_TASKS = {
     "stt": task_stt_cache,
+    "speaker": task_speaker_cache,
     "seed": task_restore_seed,
     "dirs": task_runtime_dirs,
     "env": task_env_file,

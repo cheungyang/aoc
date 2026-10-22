@@ -25,6 +25,9 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
         mock_bot.event.assert_any_call(runner.on_voice_state_update)
+        # Voice commands, the inbox's, and the voiceprint gate's (Part 4).
+        names = {c.kwargs.get("name") for c in mock_bot.command.call_args_list}
+        self.assertEqual(names, {"join", "leave", "inbox", "enroll", "voiceprint", "gate"})
 
     def _voice_runner(self, mock_loader_class, joined=True):
         """A runner whose agent hosts the one voice channel, aoc-voice."""
@@ -778,6 +781,28 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
             await runner.on_raw_reaction_add(payload)
         not_voice, _ = self._runner(mock_bot_class, mock_loader_class, voice=False)
         await not_voice.on_raw_reaction_add(MagicMock(emoji="✅", member=MagicMock(bot=False), message_id=1))
+        mark_read.assert_not_called()
+
+    async def test_a_mark_on_a_gate_review_post_labels_the_utterance_not_the_inbox(self, mock_bot_class,
+                                                                                  mock_loader_class, mark_read,
+                                                                                  record_reply):
+        from core.voice.listening.gate_log import GateRecord, Label, Mode
+        runner, message = self._runner(mock_bot_class, mock_loader_class)
+        runner.bot.get_channel.return_value = message.channel
+        log = runner.voice_manager.speaker_gate.log
+        record_id = log.add(GateRecord(at=1.0, mode=Mode.SHADOW, model="m.onnx", duration_ms=1500,
+                                       verdict="NOT_YOU", score=0.3))
+        log.set_review_message(record_id, 31337)
+
+        await runner.on_raw_reaction_add(MagicMock(emoji="✅", member=MagicMock(bot=False), message_id=31337))
+        self.assertIs(log.get(record_id).label, Label.YOU)
+        await runner.on_raw_reaction_add(MagicMock(emoji="❌", member=MagicMock(bot=False), message_id=31337))
+        self.assertIs(log.get(record_id).label, Label.NOT_YOU)
+        mark_read.assert_not_called()
+
+        # ❌ anywhere else means nothing.
+        await runner.on_raw_reaction_add(MagicMock(emoji="❌", member=MagicMock(bot=False), channel_id=77,
+                                                   message_id=31338))
         mark_read.assert_not_called()
 
 

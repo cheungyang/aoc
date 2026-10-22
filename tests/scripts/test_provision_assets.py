@@ -18,11 +18,21 @@ class TestProvisionAssetsStages(unittest.TestCase):
         # Build-stage work must never touch mounted state, and runtime work must
         # be safe to repeat on every boot, so the two registries stay separate.
         self.assertEqual(
-            set(provision_assets.BUILD_TASKS), {"stt", "vad", "audio"}
+            set(provision_assets.BUILD_TASKS), {"stt", "vad", "speaker", "audio"}
         )
         self.assertEqual(
-            set(provision_assets.RUNTIME_TASKS), {"stt", "seed", "dirs", "env", "index"}
+            set(provision_assets.RUNTIME_TASKS), {"stt", "speaker", "seed", "dirs", "env", "index"}
         )
+
+    def test_the_speaker_model_lives_in_the_mapped_volume(self):
+        # Like the STT weights: a download worth keeping across rebuilds.
+        self.assertTrue(provision_assets.MODELS_DIR.startswith(provision_assets.ASSET_ROOT))
+
+    def test_the_speaker_model_matches_the_voice_settings(self):
+        # The script can't import core.voice.settings, so it mirrors it.
+        from core.voice import settings
+        self.assertEqual(provision_assets.SPEAKER_MODEL, settings.SPEAKER_MODEL_FILE)
+        self.assertEqual(provision_assets.SPEAKER_MODEL_URL, settings.SPEAKER_MODEL_URL)
 
     def test_seed_dir_is_outside_the_mapped_volume(self):
         # docker-compose maps a named volume at ASSET_ROOT. Docker only copies
@@ -99,6 +109,81 @@ class TestSttCacheSelfHeal(unittest.TestCase):
         with patch.object(provision_assets, "_fetch_stt_model", side_effect=fake_fetch):
             rep = provision_assets.run_stage("runtime", only=["stt"], dry_run=True)
         self.assertFalse(rep.failed)
+
+
+class TestSpeakerModel(unittest.TestCase):
+    """The voiceprint gate's model: baked at build, re-fetched for a stale volume."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.models = os.path.join(self.tmp, "models")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, stage, dry_run=False, fetch=None):
+        fetch = fetch or (lambda dest_dir: (os.path.join(dest_dir, provision_assets.SPEAKER_MODEL), True))
+        with patch.object(provision_assets, "MODELS_DIR", self.models), \
+             patch.object(provision_assets, "_fetch_speaker_model", side_effect=fetch) as mock_fetch:
+            rep = provision_assets.run_stage(stage, only=["speaker"], dry_run=dry_run)
+        return rep, mock_fetch
+
+    def test_build_downloads_it(self):
+        rep, mock_fetch = self._run("build")
+        mock_fetch.assert_called_once_with(self.models)
+        self.assertFalse(rep.failed)
+
+    def test_runtime_leaves_a_present_model_alone(self):
+        os.makedirs(self.models)
+        open(os.path.join(self.models, provision_assets.SPEAKER_MODEL), "wb").close()
+        rep, mock_fetch = self._run("runtime")
+        mock_fetch.assert_not_called()
+        self.assertFalse(rep.failed)
+
+    def test_runtime_fetches_a_missing_model(self):
+        rep, mock_fetch = self._run("runtime")
+        mock_fetch.assert_called_once_with(self.models)
+        self.assertFalse(rep.failed)
+
+    def test_dry_runs_never_download(self):
+        for stage in ("build", "runtime"):
+            rep, mock_fetch = self._run(stage, dry_run=True)
+            mock_fetch.assert_not_called()
+            self.assertFalse(rep.failed)
+
+    def test_a_failed_download_is_reported(self):
+        def offline(dest_dir):
+            raise OSError("offline")
+        for stage in ("build", "runtime"):
+            rep, _ = self._run(stage, fetch=offline)
+            self.assertTrue(rep.failed, stage)
+
+    def test_fetch_writes_the_file_whole_and_skips_one_already_there(self):
+        payload = b"onnx" * 100
+
+        class Response:
+            def __init__(self):
+                self.data = [payload, b""]
+
+            def read(self, *_args):
+                return self.data.pop(0) if self.data else b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=Response()) as urlopen:
+            path, fetched = provision_assets._fetch_speaker_model(self.models)
+            self.assertTrue(fetched)
+            self.assertEqual(open(path, "rb").read(), payload)
+            self.assertIn("%2B%2B", urlopen.call_args.args[0], "CAM++ is URL-encoded")
+            self.assertEqual(os.listdir(self.models), [provision_assets.SPEAKER_MODEL], "no .part left behind")
+
+            again, fetched = provision_assets._fetch_speaker_model(self.models)
+        self.assertEqual((again, fetched), (path, False))
+        urlopen.assert_called_once()
 
 
 class TestSeedRestore(unittest.TestCase):

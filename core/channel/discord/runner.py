@@ -15,6 +15,7 @@ from core.inbox.model import Via
 from core.inbox.voice_briefing import VoiceBriefing
 from core.inbox.writer import mark_read, record_reply
 from core.util import format_error_message, safe_chunks
+from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS, mark_from_reaction
 from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
 
@@ -110,6 +111,31 @@ class BotRunner:
             for chunk in safe_chunks(handle_inbox_command(args, channel_name(ctx.channel))):
                 await ctx.send(chunk)
 
+        # The voiceprint gate (Part 4: core/voice/listening/speaker_gate.py),
+        # answered by the voice host's bot only, like `!inbox`.
+        @self.bot.command(name="enroll")
+        async def cmd_enroll(ctx, *, args: str = ""):
+            # Your voiceprint: typed while you're in the voice channel.
+            if not self._is_voice_host():
+                return
+            for chunk in safe_chunks(await self.voice_manager.enroll(args, ctx.channel)):
+                await ctx.send(chunk)
+
+        @self.bot.command(name="voiceprint")
+        async def cmd_voiceprint(ctx, *, args: str = ""):
+            if not self._is_voice_host():
+                return
+            from core.voice.listening.gate_commands import voiceprint_command
+            for chunk in safe_chunks(voiceprint_command(self.voice_manager.speaker_gate, args)):
+                await ctx.send(chunk)
+
+        @self.bot.command(name="gate")
+        async def cmd_gate(ctx, *, args: str = ""):
+            if not self._is_voice_host():
+                return
+            from core.voice.listening.gate_commands import gate_command
+            await gate_command(self.voice_manager.speaker_gate, args, ctx.channel)
+
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
         self._shutdown_requested = True
@@ -135,19 +161,27 @@ class BotRunner:
 
     def _is_voice_host(self) -> bool:
         """Whether this bot speaks in the voice room (Concierge's). It keeps the
-        channel inbox's ✅ signal and answers `!inbox`."""
+        channel inbox's ✅ signal, answers `!inbox`, and keeps the voiceprint
+        gate (`!enroll`, `!voiceprint`, `!gate`)."""
         agent = AgentsLoader().get_agent(self.agent_id)
         voice = agent.config.get("voice_config") if agent else None
         return isinstance(voice, dict) and bool(voice.get("enabled"))
 
     async def on_raw_reaction_add(self, payload):
-        """✅ on a post finishes its channel's inbox row (core/inbox)."""
-        if str(getattr(payload, "emoji", "")) != "✅":
+        """✅ or ❌ on a `!gate review` post marks that utterance as yours or
+        not (core/voice/listening/gate_commands.py). ✅ on any other post
+        finishes its channel's inbox row (core/inbox)."""
+        emoji = str(getattr(payload, "emoji", ""))
+        if emoji not in GATE_REACTIONS:
             return
         member = getattr(payload, "member", None)
         if member is None or getattr(member, "bot", False):
             return  # a DM, or a bot's own reaction
         if not Ownership().is_mine(self.agent_id) or not self._is_voice_host():
+            return
+        if mark_from_reaction(self.voice_manager.speaker_gate, payload.message_id, emoji):
+            return
+        if emoji != "✅":
             return
         channel = self.bot.get_channel(payload.channel_id)
         if channel is None:

@@ -354,3 +354,59 @@ async def test_cleanup_discards_the_open_utterance(make_sink, vad):
     await drain()
     assert floor.kinds() == ["opened", "discarded"]
     assert sink.user_states == {}
+
+
+# --- Part 4: only your account is heard (L1), and where the speech is ---------------
+
+@pytest.mark.asyncio
+async def test_only_the_owners_audio_is_heard(make_sink, vad, capsys):
+    sink, floor = make_sink(owners=lambda: {"8"})
+    vad.upcoming.extend([0.9] * 10)
+    for _ in range(20):  # USER is id 7
+        sink.write(USER, MagicMock(pcm=FRAME))
+    await drain()
+    assert floor.kinds() == [] and sink.user_states == {}, "dropped before the VAD"
+    assert vad.calls == 0
+    assert capsys.readouterr().out.count("Not listening to Sam") == 1, "said once, not per packet"
+    vad.upcoming.clear()
+
+    owner = MagicMock(id=8, display_name="You", bot=False)
+    feed(sink, vad, user=owner, speech=10)
+    await drain()
+    assert floor.kinds() == ["opened"]
+
+
+@pytest.mark.asyncio
+async def test_everyone_is_heard_when_no_owner_is_known_or_the_filter_fails(make_sink, vad):
+    sink, floor = make_sink(owners=lambda: set())
+    feed(sink, vad, speech=10)
+    await drain()
+    assert floor.kinds() == ["opened"]
+
+    def broken():
+        raise RuntimeError("no voiceprint store")
+
+    sink, floor = make_sink(owners=broken)
+    feed(sink, vad, speech=10)
+    await drain()
+    assert floor.kinds() == ["opened"]
+
+
+def test_a_speaker_discord_cannot_name_is_heard():
+    with patch("onnxruntime.InferenceSession"):
+        sink = VADSink(RecordingFloor(), owners=lambda: {"8"})
+    sink.write(None, MagicMock(pcm=b"\x00\x00\x00\x00", packet=MagicMock(ssrc=0)))
+    assert list(sink.user_states) == ["default"]
+
+
+@pytest.mark.asyncio
+async def test_the_utterance_marks_where_the_speech_is(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, silence=8)               # pre-roll: background before you speak
+    feed(sink, vad, speech=10, silence=3)    # the onset run opens it on its 5th window
+    await drain()
+    utterance = floor.utterances()[0]
+    assert utterance.speech_start == 8 * WINDOW_BYTES, "past the pre-roll, at the onset run"
+    assert utterance.speech_end == (8 + 10) * WINDOW_BYTES, "the last voiced window"
+    assert len(utterance.pcm) == (8 + 10 + 3) * WINDOW_BYTES
+    assert utterance.speech_ms() == 10 * WINDOW_MS

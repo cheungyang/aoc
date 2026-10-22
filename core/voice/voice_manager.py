@@ -2,7 +2,9 @@
 
     listening/  the user's side: the VAD cuts their speech into utterances, and
                 the floor decides what each one means -- a turn, an interruption
-                or listening noise -- and which words are still unanswered
+                or listening noise -- and which words are still unanswered. The
+                voiceprint gate scores whether each one sounds like you (Part 4:
+                `voice_config.speaker_gate`, `!enroll`)
     engines/    speech-to-text and text-to-speech
     speech/     the agent's answer, to the text channel and the speaker
     room/       joining the voice room, and the focus: which agent and text
@@ -25,9 +27,12 @@ import discord
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.runtime.turn_trace import start_turn_trace
+from . import settings
 from .engines.stt import SpeechRecognizer, agent_vocabulary
 from .hooks import VoiceHook
+from .listening.enrollment import Enrollment, saved_message
 from .listening.floor import Floor
+from .listening.speaker_gate import SpeakerGate
 from .listening.turn_taking import bare_stop, merge_transcripts
 from .listening.utterance import Utterance
 from .listening.vad_sink import VADSink
@@ -67,8 +72,10 @@ class VoiceManager:
         self.connection = VoiceConnection(bot_runner, make_sink=self._make_sink, on_joined=self._on_joined)
         self.audio_queue = AudioStreamQueue(self.connection, loop=getattr(bot_runner.bot, "loop", None))
         self.stt = SpeechRecognizer(vocabulary=self._stt_vocabulary())
+        # Does it sound like you? Off until a join reads voice_config.speaker_gate.
+        self.speaker_gate = SpeakerGate(transcribe=self.stt.transcribe)
         self.reply = ReplyStreamer(self.agent_id, self.config, self.audio_queue, self.connection)
-        self.floor = Floor(self.stt, self.audio_queue, self.connection, turns=self)
+        self.floor = Floor(self.stt, self.audio_queue, self.connection, turns=self, gate=self.speaker_gate)
         self.switcher = FocusSwitcher(self, self.agent_id)
 
         self._lock = asyncio.Lock()
@@ -85,7 +92,8 @@ class VoiceManager:
         print(f"[VoiceManager:{self.agent_id}] {message}")
 
     def _make_sink(self) -> VADSink:
-        return VADSink(self.floor, loop=self.connection.bot.loop, config=self.config)
+        return VADSink(self.floor, loop=self.connection.bot.loop, config=self.config,
+                       owners=self.speaker_gate.owner_ids)
 
     def _stt_vocabulary(self) -> List[str]:
         try:
@@ -111,6 +119,7 @@ class VoiceManager:
     async def leave(self) -> None:
         await self.connection.leave()
         self._reset_focus()
+        self.speaker_gate.enrollment = None
         self._call_hooks("left")
 
     async def welcome(self) -> None:
@@ -119,6 +128,8 @@ class VoiceManager:
         inbox's digest)."""
         directory = self.directory()
         self._reset_focus()
+        self._configure_gate()
+        self.speaker_gate.enrollment = None
         self._focus = directory.lobby
         greetings = [line for line in self._call_hooks("joined") if line]
         await self.reply.say(greetings[0] if greetings else directory.greeting(directory.lobby), self.agent_id)
@@ -126,6 +137,18 @@ class VoiceManager:
     def _on_joined(self, room) -> None:
         """The bot joined a room: nothing from the last voice session carries over."""
         self._reset_focus()
+        self._configure_gate()
+        self.speaker_gate.enrollment = None
+
+    def _configure_gate(self) -> None:
+        """The voiceprint gate's settings, read afresh from voice_config on every
+        join: switching `speaker_gate` takes effect on your next join."""
+        try:
+            agent = AgentsLoader().get_agent(self.agent_id)
+            config = agent.config.get("voice_config") if agent else None
+        except Exception:
+            config = None
+        self.speaker_gate.configure(config if isinstance(config, dict) else self.config)
 
     def _reset_focus(self) -> None:
         """Back to the lobby (on first use), with nothing left unanswered."""
@@ -281,6 +304,85 @@ class VoiceManager:
         self._side_tasks.add(task)
         task.add_done_callback(self._side_tasks.discard)
 
+    # --- your voiceprint: `!enroll` -----------------------------------------------
+
+    async def enroll(self, args: str = "", channel=None) -> str:
+        """`!enroll`, typed in `channel`: starts taking your voiceprint; with
+        "cancel", stops. Returns what to post back."""
+        gate, action = self.speaker_gate, (args or "").strip().lower()
+        if action in ("cancel", "stop"):
+            if gate.enrollment is None:
+                return "No enrollment is in progress."
+            gate.enrollment = None
+            return "Enrollment cancelled."
+        if action:
+            return "Type `!enroll` to take your voiceprint, or `!enroll cancel` to stop."
+        if not self.connection.is_connected() or not self.someone_listening():
+            return "Join the voice channel first, then type `!enroll` again."
+        if gate.model is None:
+            return (f"The speaker model `{settings.SPEAKER_MODEL_FILE}` isn't installed: run "
+                    f"`scripts/provision_assets.py --stage runtime --only speaker`.")
+        enrollment = Enrollment(channel)
+        gate.enrollment = enrollment
+        if self.busy():
+            self.interrupt("voiceprint enrollment")
+        self.floor.clear()
+        self._log("🎙️ Voiceprint enrollment started.")
+        self._spawn(self.reply.say(enrollment.opening_line(), self.agent_id))
+        return enrollment.instructions()
+
+    def _enrolling(self) -> Optional[Enrollment]:
+        """The enrollment in progress, unless it has timed out."""
+        enrollment = self.speaker_gate.enrollment
+        if enrollment is not None and enrollment.expired():
+            self._log("🎙️ Voiceprint enrollment timed out.")
+            self.speaker_gate.enrollment = enrollment = None
+        return enrollment
+
+    async def _take_readings(self, enrollment: Enrollment, utterances: List[Utterance]) -> None:
+        """What you said during `!enroll`: readings for your voiceprint, not requests.
+        They're taken before anything is awaited, so a reading that interrupts
+        the bot's "Got it" still counts."""
+        if not any([enrollment.take(u) for u in utterances]):
+            # Too short for a reading: "cancel", "wait", a word or two, or noise.
+            text = (await self.stt.transcribe(utterances[-1])).text.strip()
+            stop = bare_stop(text)
+            if stop == "cancel":
+                self.speaker_gate.enrollment = None
+                self._log("🎙️ Voiceprint enrollment cancelled.")
+                await self._post(enrollment.channel, "Enrollment cancelled.")
+                await self.reply.say("Okay, enrollment cancelled.", self.agent_id)
+            elif text and stop is None:
+                await self.reply.say(enrollment.retry_line(), self.agent_id)
+            return
+        if not enrollment.done:
+            await self.reply.say(enrollment.progress_line(), self.agent_id)
+            return
+        self.speaker_gate.enrollment = None
+        # Not part of the turn, which the next thing you say cancels.
+        self._spawn(self._save_voiceprint(enrollment))
+
+    async def _save_voiceprint(self, enrollment: Enrollment) -> None:
+        try:
+            voiceprint = await self.speaker_gate.enroll(enrollment.readings)
+        except Exception as e:
+            self._log(f"🎙️ Could not make the voiceprint: {type(e).__name__}: {e}")
+            await self._post(enrollment.channel, f"⚠️ I couldn't make your voiceprint ({e}). "
+                                                 f"Type `!enroll` to try again.")
+            await self.reply.say("Sorry, I couldn't make your voiceprint. Type enroll to try again.", self.agent_id)
+            return
+        self._log(f"🎙️ Voiceprint saved: {voiceprint.readings} readings, consistency {voiceprint.consistency:.2f}.")
+        await self._post(enrollment.channel, saved_message(voiceprint, self.speaker_gate.mode))
+        await self.reply.say("Done. Your voiceprint is saved.", self.agent_id)
+
+    async def _post(self, channel, text: str) -> None:
+        if channel is None:
+            return
+        try:
+            await channel.send(text)
+        except Exception as e:
+            self._log(f"Could not post in #{getattr(channel, 'name', channel)}: {e}")
+
     # --- turns, as the floor starts and stops them -----------------------------
 
     def busy(self) -> bool:
@@ -315,6 +417,11 @@ class VoiceManager:
             utterances = self.floor.unanswered()
             if not utterances:
                 return
+            enrollment = self._enrolling()
+            if enrollment is not None:
+                self.floor.forget(utterances)
+                await self._take_readings(enrollment, utterances)
+                return
             newest = utterances[-1]
             trace = start_turn_trace(self.agent_id, turn_id, speech_end_at=newest.speech_end_at)
             if newest.finished_at is not None:
@@ -340,7 +447,16 @@ class VoiceManager:
                 if turn_id != self._active_turn and not cancelled:
                     trace.meta.setdefault("outcome", "superseded")
                 trace.mark("turn_end")
-                turn.speech.finish_when_heard(lambda: trace.finish(session_id=turn.session_id), cancelled=cancelled)
+
+                def finish_trace():
+                    # The voiceprint gate scores alongside the turn: by the time
+                    # its answer has been heard, each utterance has its verdict.
+                    speaker = [u.gate.summary() for u in utterances if u.gate is not None]
+                    if speaker:
+                        trace.meta["speaker"] = speaker
+                    trace.finish(session_id=turn.session_id)
+
+                turn.speech.finish_when_heard(finish_trace, cancelled=cancelled)
 
     async def _answer(self, turn: _Turn):
         """The turn's transcripts, then a stop, a focus switch or the agent's reply."""
