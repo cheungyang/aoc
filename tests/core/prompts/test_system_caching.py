@@ -16,9 +16,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from core.util import prompt_util
+from core.prompts import system
 from core.util.config import Config
-from core.util.prompt_util import (
+from core.prompts.system import (
     get_agent_memory_prompt,
     get_agent_static_prompt,
     get_tool_rules_prompt,
@@ -72,7 +72,7 @@ class _AgentFiles:
 
 
 # Captured before any patching, so descriptions stay authoritative.
-_REAL_AGENT_PROMPT_FILES = prompt_util._agent_prompt_files
+_REAL_AGENT_PROMPT_FILES = system._agent_prompt_files
 
 
 class TestPromptCacheLayout(unittest.TestCase):
@@ -82,7 +82,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         Config().pkm_dir = self.agent.pkm
         self.addCleanup(setattr, Config(), "pkm_dir", None)
         patchers = [
-            patch.object(prompt_util, "_agent_prompt_files", side_effect=self.agent.files),
+            patch.object(system, "_agent_prompt_files", side_effect=self.agent.files),
             patch("core.runtime.graph_builder.SkillsLoader"),
             patch("core.loaders.graphs_loader.GraphsLoader"),
             patch("core.runtime.graph_builder.get_knowledge_prompt", return_value="KNOWLEDGE"),
@@ -107,7 +107,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertIsInstance(formatted[-1], HumanMessage)
         return [m.content for m in formatted if isinstance(m, SystemMessage)]
 
-    # --- prompt_util split -------------------------------------------------
+    # --- static/memory split ----------------------------------------------
 
     def test_split_puts_each_block_in_the_right_half(self):
         static = get_agent_static_prompt("test-agent")

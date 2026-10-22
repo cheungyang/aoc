@@ -23,7 +23,6 @@ from core.util import format_tool_response
 from core.util.config import Config
 from scripts import dream_standup as ds
 from scripts.dream_standup import (
-    DREAM_TRIGGER,
     build_compaction_prompt,
     build_prompt,
     dream,
@@ -142,11 +141,11 @@ class TestPrompt(unittest.TestCase):
 
     def test_inlines_the_input_and_the_contract(self):
         prompt = build_prompt(dream_ops.DreamInput(xml="<dream_input>X</dream_input>", ids={}))
-        self.assertTrue(prompt.startswith(DREAM_TRIGGER))
+        self.assertTrue(prompt.startswith("Dream: consolidate your memory logs into memory entries"))
         self.assertIn("<dream_input>X</dream_input>", prompt)
         self.assertIn("Do not use any tools", prompt)
         self.assertIn("<system_memory_log>", prompt)
-        self.assertIn(dream_ops.RESPONSE_FORMAT, prompt)
+        self.assertTrue(prompt.endswith("</dream_response>"), "the reply format closes the prompt")
         self.assertNotIn("pkm/", prompt)
         self.assertNotIn("memory_logs/", prompt)
 
@@ -171,7 +170,8 @@ class TestPrompt(unittest.TestCase):
     def test_compaction_prompt(self):
         prompt = build_compaction_prompt(dream_ops.DreamInput(xml="<compaction_input/>", ids={}))
         self.assertIn("<compaction_input/>", prompt)
-        self.assertIn(dream_ops.COMPACTION_FORMAT, prompt)
+        self.assertIn("<merge ids=", prompt)
+        self.assertTrue(prompt.endswith("</dream_response>"), "the reply format closes the prompt")
         self.assertIn("Do not add new facts", prompt)
 
 

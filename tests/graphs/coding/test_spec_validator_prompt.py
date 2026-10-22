@@ -12,8 +12,12 @@ to the default FAIL and blocks planning on a spec that was fine.
 import re
 import unittest
 
-from graphs.coding.prompts.spec_validator_prompt import build_spec_validator_prompt
+from graphs.coding.prompts.spec_validator_prompt import SpecValidatorPrompt
 from graphs.coding.utils.xml_parsers import parse_spec_validation_xml
+
+
+def _validator(spec_text):
+    return SpecValidatorPrompt(spec_text=spec_text).render()
 
 
 def fill_tag(test, template, tag, value):
@@ -35,11 +39,11 @@ class SpecValidatorPromptInputTestCase(unittest.TestCase):
     def test_spec_text_reaches_the_prompt(self):
         """tools.spec_validator reads the file and passes its whole contents as
         the single positional argument."""
-        prompt = build_spec_validator_prompt("SPEC_MARKER: build a widget")
+        prompt = _validator("SPEC_MARKER: build a widget")
         self.assertIn("SPEC_MARKER: build a widget", prompt)
 
     def test_spec_text_is_wrapped_in_the_spec_content_block(self):
-        prompt = build_spec_validator_prompt("SPEC_MARKER")
+        prompt = _validator("SPEC_MARKER")
         block = re.search(r"<spec_content>(.*?)</spec_content>", prompt, re.DOTALL)
         self.assertIsNotNone(block)
         self.assertIn("SPEC_MARKER", block.group(1))
@@ -52,13 +56,13 @@ class SpecValidatorPromptInputTestCase(unittest.TestCase):
             "## Target files\n- core/widget.py\n\n"
             "## Acceptance Criteria\nGiven X, When Y, Then Z\n"
         )
-        prompt = build_spec_validator_prompt(spec)
+        prompt = _validator(spec)
         self.assertIn(spec, prompt)
 
     def test_empty_spec_still_produces_a_well_formed_prompt(self):
         """An unreadable or empty spec must still reach the model as a spec to
         fail, not crash the tool before it can report anything."""
-        prompt = build_spec_validator_prompt("")
+        prompt = _validator("")
         self.assertIn("<spec_content>", prompt)
         self.assertIn("</spec_content>", prompt)
         self.assertIn("<spec_validation_result>", prompt)
@@ -68,12 +72,12 @@ class SpecValidatorPromptRulesTestCase(unittest.TestCase):
     def test_zero_context_failure_stance_is_stated(self):
         """Without this line the model fills gaps with plausible assumptions,
         which is precisely the failure the gate exists to catch."""
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         self.assertIn("NO prior conversational memory", prompt)
         self.assertIn("MUST FAIL", prompt)
 
     def test_all_four_checklist_items_are_present(self):
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         self.assertIn("target file paths", prompt)
         self.assertIn("schemas/types", prompt)
         self.assertIn("Given-When-Then", prompt)
@@ -82,13 +86,13 @@ class SpecValidatorPromptRulesTestCase(unittest.TestCase):
 
 class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
     def test_prompt_asks_for_the_spec_validation_result_block(self):
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         self.assertIn("<output_format>", prompt)
         self.assertIn("<spec_validation_result>", prompt)
         self.assertIn("</spec_validation_result>", prompt)
 
     def test_both_verdict_values_the_parser_understands_are_offered(self):
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         self.assertIn("PASS", prompt)
         self.assertIn("FAIL", prompt)
 
@@ -99,7 +103,7 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         rename here without a rename there would leave the failure branch and
         the success branch speaking different dialects.
         """
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         template = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         )
@@ -126,7 +130,7 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         is actually shown; if only the FAIL path round-tripped, a template that
         could never yield a PASS would look healthy.
         """
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         template = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         ).group(0)
@@ -150,7 +154,7 @@ class SpecValidatorPromptOutputContractTestCase(unittest.TestCase):
         sloppiest response cleared the check. Renaming the placeholder to
         `PASS_OR_FAIL` removes the temptation as well.
         """
-        prompt = build_spec_validator_prompt("spec")
+        prompt = _validator("spec")
         example = re.search(
             r"<spec_validation_result>.*?</spec_validation_result>", prompt, re.DOTALL
         ).group(0)

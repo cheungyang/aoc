@@ -144,6 +144,15 @@ class TestApply(OpsCase):
         self.assertEqual(report.applied, 0)
         self.assertEqual(len(report.rejected), 2)
 
+    def test_the_reply_formats_example_text_is_rejected(self):
+        """A real id with the example text left in must not overwrite the entry."""
+        scope = store.topic_scope("food", self.pkm)
+        self.put(scope, self.entry("food", "Oat milk OK."))
+        _, report = self.dream('<update id="e1">Corrected fact.</update><add tag="food">one-sentence fact</add>'
+                               '<add tag="food">Prefers tighter wording in emails.</add>')
+        self.assertEqual(self.texts(scope), ["Oat milk OK.", "Prefers tighter wording in emails."])
+        self.assertEqual(len(report.rejected), 2)
+
     def test_profile_writes_are_capped(self):
         _, report = self.dream('<add tag="profile">One.</add><add tag="profile">Two.</add><add tag="profile">Three.</add>')
         self.assertEqual(self.texts(store.profile_scope(self.pkm)), ["One.", "Two."])
@@ -233,6 +242,14 @@ class TestCompaction(OpsCase):
         self.put(store.topic_scope("travel", self.pkm), self.entry("travel", "B"))
         _, report = self.dream('<merge ids="e1 e2">AB</merge>', compaction=True, tags=["food", "travel"])
         self.assertEqual(report.applied, 0)
+
+    def test_merge_or_update_with_the_example_text_is_rejected(self):
+        scope = store.topic_scope("food", self.pkm)
+        self.put(scope, self.entry("food", "A"), self.entry("food", "B"))
+        _, report = self.dream('<merge ids="e1 e2">One sentence covering both.</merge>'
+                               '<update id="e1">tighter wording</update>', compaction=True)
+        self.assertEqual(self.texts(scope), ["A", "B"])
+        self.assertEqual(len(report.rejected), 2)
 
     def test_needs_compaction_when_nearly_full(self):
         self.put(store.topic_scope("food", self.pkm), self.entry("food", "x" * 900))

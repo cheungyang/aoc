@@ -13,7 +13,7 @@ continues to publish.
 import os
 from typing import Any, Dict
 
-from graphs.coding.prompts.critic_prompt import build_critic_prompt
+from graphs.coding.prompts.critic_prompt import CriticPrompt
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
@@ -103,10 +103,10 @@ async def _run_audit(spec_content: str, diff: str, channel: str, graph_id: str =
     if not spec_content:
         return {"passed": True, "feedback": ""}
 
-    prompt = build_critic_prompt(
+    prompt = CriticPrompt(
         spec_text=spec_content,
         git_diff_text=diff or "(No git diff changes)"
-    )
+    ).render()
     try:
         result = await call_worker(prompt=prompt, graph_id=graph_id, channel=channel)
         parsed = parse_critic_verdict_xml(result)

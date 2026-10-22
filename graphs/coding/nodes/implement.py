@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Dict, List
 
-from graphs.coding.prompts.coder_prompt import build_coder_prompt
+from graphs.coding.prompts.coder_prompt import CoderPrompt
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
@@ -73,7 +73,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
     spec_path = current_task.get("spec_path", "")
     spec_content = _read_spec(state.get("spec_path") or spec_path)
 
-    prompt = build_coder_prompt(
+    prompt = CoderPrompt(
         workspace_path=workspace_path,
         task_id=task_id,
         spec_path=spec_path,
@@ -85,7 +85,7 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         critic_feedback=state.get("audit_feedback"),
         human_feedback=_review_feedback(state, current_task),
         privacy_findings=state.get("privacy_findings")
-    )
+    ).render()
 
     # The count has to travel in state, not just to disk. `current_task` is the
     # snapshot the scheduler took at the start of the tick, and verify reads the

@@ -1,36 +1,25 @@
-"""Prompt templates: stored as files beside this module, filled in by name.
+"""Every prompt the core sends to a model, and the code that builds it.
 
-A template is `core/prompts/<name>.md`. Its placeholders are `{{name}}`, so
-single braces, JSON and dollar signs in a prompt are plain text:
+Each prompt's text is one template, `templates/<area>/<name>.md`, and one class
+beside the others of its area builds it: the template's name, its inputs as
+dataclass fields, and anything derived from them. `base.py` holds the template
+engine and the two base classes:
 
-    render_prompt("speech_writer", name="Daisy", channel="day-planning", ...)
+    Prompt        renders a template:  KnowledgePrompt(date=..., ...).render()
+    WorkerPrompt  a Prompt that is a whole task, run as is by graph-worker-low:
+                  await SpeechWriterPrompt(name=..., channel=..., post=...).run(channel=...)
 
-Rendering fails loudly on a placeholder that has no value, so a template and
-its caller can't drift apart silently. Values are inserted as they are and
-never scanned for placeholders themselves.
+    system.py     the system prompt every agent turn starts with (templates/system/)
+    voice.py      the <speech> contract, the speech writer, the near-miss resolver
+    memory.py     the context pruner's summary, the nightly dream and compaction
+    browser.py    the rules added to the browser agent's own system prompt
+    scheduler.py  a scan's findings, appended to its scheduled run's prompt
+
+A graph's own prompts stay in the graph, like an agent's tools: in
+graphs/<id>/prompts/, each a Prompt whose `templates_dir` is that folder, so
+they go when the graph goes. Agent and skill definitions (agents/<id>/*.md,
+skills/<id>/SKILL.md) are prompts too, and stay with their agent or skill.
 """
-import re
-from pathlib import Path
+from core.prompts.base import Prompt, WorkerPrompt
 
-PROMPTS_DIR = Path(__file__).resolve().parent
-_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-
-
-def load_prompt(template: str, /) -> str:
-    """The raw text of `template`. Read on each call, so an edit takes effect without a restart."""
-    return (PROMPTS_DIR / f"{template}.md").read_text(encoding="utf-8")
-
-
-def placeholders(template: str, /) -> set:
-    """The placeholder names `template` uses."""
-    return {match.group(1) for match in _PLACEHOLDER.finditer(load_prompt(template))}
-
-
-def render_prompt(template: str, /, **values) -> str:
-    """`template` with every `{{placeholder}}` filled from `values`. Positional-only,
-    so a placeholder may be called anything, `template` included."""
-    text = load_prompt(template)
-    missing = sorted({match.group(1) for match in _PLACEHOLDER.finditer(text)} - set(values))
-    if missing:
-        raise KeyError(f"prompt '{template}' needs a value for: {', '.join(missing)}")
-    return _PLACEHOLDER.sub(lambda match: str(values[match.group(1)]), text)
+__all__ = ["Prompt", "WorkerPrompt"]

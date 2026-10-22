@@ -1,5 +1,6 @@
 """
-Core utility package containing common utilities, message handling, prompts, summarization, error handling, configuration, and git sync.
+Core utility package containing common utilities, message handling, summarization, error handling, configuration, and git sync.
+Prompts are built in core/prompts.
 """
 from core.util.message_util import (
     safe_chunks,
@@ -11,14 +12,6 @@ from core.util.time_util import (
     get_local_timezone,
     get_local_now,
     format_timezone_label,
-)
-from core.util.prompt_util import (
-    get_formatting_prompt,
-    get_channel_prompt,
-    get_voice_mode_prompt,
-    get_knowledge_prompt,
-    get_agent_static_prompt,
-    get_agent_memory_prompt,
 )
 from core.util.summarize_util import (
     compress_image_bytes,
@@ -80,12 +73,6 @@ __all__ = [
     "get_local_timezone",
     "get_local_now",
     "format_timezone_label",
-    "get_formatting_prompt",
-    "get_channel_prompt",
-    "get_voice_mode_prompt",
-    "get_knowledge_prompt",
-    "get_agent_static_prompt",
-    "get_agent_memory_prompt",
     "compress_image_bytes",
     "save_agent_memory_log",
     "build_heuristic_summary",

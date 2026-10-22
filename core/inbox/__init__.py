@@ -9,5 +9,5 @@
     commands.py       `!inbox`: list the rows, and mark one done
 
 The table's schema is core/db/channel_inbox.sql; the speech writer's prompt is
-core/prompts/speech_writer.md.
+SpeechWriterPrompt in core/prompts/voice.py.
 """

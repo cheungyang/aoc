@@ -590,7 +590,7 @@ every gate decision path, and `nodes/` and `utils/` mirror the source layout.
 | [utils/logging.py](utils/logging.py) | Append-only markdown execution log. |
 | [utils/errors.py](utils/errors.py) | Quota/429 detection and the user-facing "pipeline halted" message. |
 | [utils/invariants.py](utils/invariants.py) | `AssetInvariantError` and the per-gate revision invariants. |
-| [prompts/draft_plot_prompt.py](prompts/draft_plot_prompt.py) | Builds the plot-drafting prompt (strict `<payload>` XML schema). |
-| [prompts/audit_plot_prompt.py](prompts/audit_plot_prompt.py) | Builds the brand QC audit prompt (verdict / rejection target / feedback). |
-| [prompts/draft_copy_prompt.py](prompts/draft_copy_prompt.py) | Builds the copywriting prompt (caption / hashtags / vocabulary). |
-| [prompts/__init__.py](prompts/__init__.py) | Re-exports the three prompt builders. |
+| [prompts/draft_plot_prompt.py](prompts/draft_plot_prompt.py), [draft_plot.md](prompts/draft_plot.md) | The plot-drafting prompt (strict `<payload>` XML schema). |
+| [prompts/audit_plot_prompt.py](prompts/audit_plot_prompt.py), [audit_plot.md](prompts/audit_plot.md) | The brand QC audit prompt (verdict / rejection target / feedback). |
+| [prompts/draft_copy_prompt.py](prompts/draft_copy_prompt.py), [draft_copy.md](prompts/draft_copy.md) | The copywriting prompt (caption / hashtags / vocabulary). |
+| [prompts/__init__.py](prompts/__init__.py) | Re-exports the three prompts: each a `core.prompts.Prompt` class, with its text in the `.md` beside it. |

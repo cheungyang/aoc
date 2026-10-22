@@ -1,7 +1,7 @@
 """Splitting the agent's stream into what is said and what is shown.
 
 On a voice turn the agent writes a <speech> block for the ear before its
-normal reply (`<voice_mode>`, core/util/prompt_util.py). The router runs
+normal reply (`<voice_mode>`, core/prompts/voice.py). The router runs
 upstream of the text channel: the speech lane gets what is inside
 <speech>...</speech>, the text lane everything else, so Discord's message
 splitting never touches speech and speech never reaches Discord. A tag split

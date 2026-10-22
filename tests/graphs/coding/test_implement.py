@@ -101,7 +101,7 @@ class TestImplementNode(ManifestFixture):
 
         with patch("graphs.coding.nodes.implement._modified_files", AsyncMock(return_value=["a.py"])), \
              patch("graphs.coding.nodes.implement.compute_worktree_digest", AsyncMock(return_value="d")), \
-             patch("graphs.coding.nodes.implement.build_coder_prompt", return_value="p") as mock_prompt, \
+             patch("graphs.coding.nodes.implement.CoderPrompt") as mock_prompt, \
              patch("tools.agent_call.agent_call") as mock_agent:
             mock_agent.ainvoke = AsyncMock(return_value="<worker_handoff></worker_handoff>")
             await implement_node(self.base_state(task))
@@ -118,7 +118,7 @@ class TestImplementNode(ManifestFixture):
 
         with patch("graphs.coding.nodes.implement._modified_files", AsyncMock(return_value=["a.py"])), \
              patch("graphs.coding.nodes.implement.compute_worktree_digest", AsyncMock(return_value="d")), \
-             patch("graphs.coding.nodes.implement.build_coder_prompt", return_value="p") as mock_prompt, \
+             patch("graphs.coding.nodes.implement.CoderPrompt") as mock_prompt, \
              patch("tools.agent_call.agent_call") as mock_agent:
             mock_agent.ainvoke = AsyncMock(return_value="<worker_handoff></worker_handoff>")
             result = await implement_node(self.base_state(task, privacy_findings=findings))

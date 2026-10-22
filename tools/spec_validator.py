@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 from langchain_core.tools import tool
-from graphs.coding.prompts.spec_validator_prompt import build_spec_validator_prompt
+from graphs.coding.prompts.spec_validator_prompt import SpecValidatorPrompt
 from graphs.coding.utils.dag import resolve_path
 from core.util import format_tool_response
 
@@ -41,7 +41,7 @@ async def spec_validator(
     except Exception as e:
         return format_tool_response("spec_validator", payload="", errors=f"Error reading spec file: {e}")
 
-    prompt = build_spec_validator_prompt(spec_content)
+    prompt = SpecValidatorPrompt(spec_text=spec_content).render()
 
     try:
         from tools.agent_call import agent_call

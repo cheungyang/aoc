@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core.util import prompt_util
+from core.prompts import system
 from core.util.config import Config
-from core.util.prompt_util import get_agent_memory_prompt, user_path
+from core.prompts.system import get_agent_memory_prompt, user_path
 
 
 class TestUserFile(unittest.TestCase):
@@ -17,8 +17,8 @@ class TestUserFile(unittest.TestCase):
         self.agent_dir = os.path.join(tmp.name, "agent")
         self.pkm = os.path.join(tmp.name, "pkm")
         os.makedirs(self.agent_dir)
-        real = prompt_util._agent_prompt_files
-        patcher = patch.object(prompt_util, "_agent_prompt_files", side_effect=lambda a: {
+        real = system._agent_prompt_files
+        patcher = patch.object(system, "_agent_prompt_files", side_effect=lambda a: {
             k: (os.path.join(self.agent_dir, os.path.basename(path)), desc) for k, (path, desc) in real(a).items()
         })
         patcher.start()

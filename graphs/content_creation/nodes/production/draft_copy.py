@@ -3,7 +3,7 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.prompts import build_draft_copy_prompt
+from graphs.content_creation.prompts import DraftCopyPrompt
 
 async def draft_copy_task(state: dict) -> dict:
     """Drafts social copy, vocabulary breakdown, and hashtags, dual-publishing .md and .json."""
@@ -38,7 +38,7 @@ async def draft_copy_task(state: dict) -> dict:
     )
     instructions_text = ctx["project_guidelines"]
 
-    prompt = build_draft_copy_prompt(
+    prompt = DraftCopyPrompt(
         topic=topic,
         project_path=project_path,
         output_path=output_path,
@@ -47,7 +47,7 @@ async def draft_copy_task(state: dict) -> dict:
         instructions_text=instructions_text or "",
         human_feedback=human_feedback or "",
         is_revision=bool(gate2_decision == "revise_copy")
-    )
+    ).render()
 
     try:
         from tools.agent_call import agent_call

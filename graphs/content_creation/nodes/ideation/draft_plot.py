@@ -3,7 +3,7 @@ import re
 import json
 from graphs.content_creation.utils.paths import resolve_task_asset, load_project_context
 from graphs.content_creation.utils.logging import _append_execution_log
-from graphs.content_creation.prompts import build_draft_plot_prompt
+from graphs.content_creation.prompts import DraftPlotPrompt
 
 async def draft_plot_task(state: dict) -> dict:
     """Drafts Video Plot by delegating to LLM with instructions dynamically loaded from project_path."""
@@ -47,7 +47,7 @@ async def draft_plot_task(state: dict) -> dict:
         creator_instructions_path=state.get("creator_instructions_path", "")
     )
     style_str = "3D Animation" if style.lower() == "3d" else ctx["style_normalized"]
-    prompt = build_draft_plot_prompt(
+    prompt = DraftPlotPrompt(
         topic=topic,
         style_str=style_str,
         image_path=image_path,
@@ -60,7 +60,7 @@ async def draft_plot_task(state: dict) -> dict:
         char_guidelines=ctx.get("char_guidelines", ""),
         feedback=feedback or "",
         human_feedback=human_feedback or ""
-    )
+    ).render()
     overlay_text = ""
     video_plot_content = ""
 

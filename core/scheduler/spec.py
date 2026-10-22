@@ -118,13 +118,10 @@ class Findings:
     raw: tuple = field(default=(), compare=False)
 
     def as_block(self) -> str:
-        body = self.text.strip()
-        if self.issues:
-            body += (
-                "\n\nThe scan couldn't read everything; tell the user what's missing in one line "
-                f"and don't fill the gap with a guess:\n{listed_issues(self.issues, self.raw)}"
-            )
-        return f'<findings source="{self.source}">\n{body}\n</findings>'
+        from core.prompts.scheduler import FindingsPrompt
+
+        issues = listed_issues(self.issues, self.raw) if self.issues else ""
+        return FindingsPrompt(source=self.source, body=self.text.strip(), issues=issues).render()
 
 
 @dataclass(frozen=True)

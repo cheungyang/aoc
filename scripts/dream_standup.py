@@ -45,6 +45,7 @@ from core.knowledge.memory import state as mstate
 from core.knowledge.memory.entries import TagsError
 from core.knowledge.memory.inject import memory_topics
 from core.loaders.agents_loader import AgentsLoader
+from core.prompts.memory import CompactionPrompt, DreamPrompt
 from core.runtime.delegation import stream_delegate
 from core.runtime.execution_context import surface_scope
 from core.scheduler.script_runner import default_timeout
@@ -54,8 +55,8 @@ from core.util.time_util import get_local_now
 from tools.agent_call import agent_call
 
 # The dream's rules are inlined from the skill (see `dream_rules`), so the
-# trigger states the task instead of naming a skill for the agent to load.
-DREAM_TRIGGER = "Dream: consolidate your memory logs into memory entries, following these rules."
+# prompt (DreamPrompt, core/prompts/memory.py) states the task instead of
+# naming a skill for the agent to load.
 DREAM_SKILL_PATH = os.path.join(project_root, "skills", "dream", "SKILL.md")
 
 # `script-executor` is a shell runner with no model behind it, so it has no
@@ -90,7 +91,6 @@ DREAM_MODEL_FLOOR = "FLASH"
 COMPACTION_AGENT = "graph-worker"
 COMPACTION_CALLER = "script-executor"
 COMPACTION_CHANNEL = "general"
-COMPACTION_TRIGGER = "Compact these shared memory topics."
 SUGGESTION_WEEKDAY = 6  # Sunday
 
 def memory_logs_root(root=None):
@@ -228,35 +228,14 @@ def build_prompt(dream_input):
 
     The rules come from the dream skill's Core section, so the agent has no
     skill to load: the prompt says not to use tools, and that now holds.
-    The response format is stated here as well as in the skill: this prompt
-    is the contract the parser enforces, and weaker models follow what is in
-    front of them more reliably than a loaded skill.
+    The response format is stated in the prompt (DreamPrompt) as well as in
+    the skill.
     """
-    return (
-        f"{DREAM_TRIGGER}\n"
-        f"<dream_rules>\n{dream_rules()}\n</dream_rules>\n"
-        "Your memory logs and every memory entry you may act on are inlined below. "
-        "Do not use any tools: the files are read and written for you. "
-        "Do not emit a <system_memory_log>.\n"
-        f"{dream_input.xml}\n"
-        "Reply with only this XML. Refer to existing entries by id; use add only for "
-        "a fact no entry already covers. Entries marked stale=\"true\" must be "
-        "confirmed or retired.\n"
-        f"{dream_ops.RESPONSE_FORMAT}"
-    )
+    return DreamPrompt(rules=dream_rules(), dream_input=dream_input.xml).render()
 
 
 def build_compaction_prompt(compaction_input):
-    return (
-        f"{COMPACTION_TRIGGER}\n"
-        "Merge entries that say the same thing, tighten wording, and retire entries "
-        "that are no longer worth their space, so each topic fits well inside its "
-        "budget. Pairs under <flagged> were written as near-duplicates. Do not add "
-        "new facts. Do not use any tools. Do not emit a <system_memory_log>.\n"
-        f"{compaction_input.xml}\n"
-        "Reply with only this XML.\n"
-        f"{dream_ops.COMPACTION_FORMAT}"
-    )
+    return CompactionPrompt(compaction_input=compaction_input.xml).render()
 
 
 def restore_logs(agent_id, snapshot, root=None):

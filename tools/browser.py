@@ -39,6 +39,7 @@ from browser_use import Agent, ChatGoogle
 from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 
+from core.prompts.browser import BrowserHandoffPrompt
 from core.util import format_tool_response, DEFAULT_BROWSER_MODEL
 
 
@@ -61,21 +62,6 @@ WAIT_FOR_USER = (
     "Do not retry. Tell the user plainly, restate the pending request, and wait until they "
     "say Agent Chrome is on (the 'Agent Chrome (AOC)' shortcut on their desktop); then "
     "confirm with check_only=True before running it."
-)
-# Appended to browser-use's system prompt: the agent works in a window the
-# user is watching, and hands back control instead of guessing or committing.
-HANDOFF_RULES = (
-    "You are operating a Chrome window on the user's own desktop while they may be watching. "
-    "Work in the current tab or open a new one; never close other tabs or the window. "
-    "STOP and report, without clicking, before any action that commits money or a booking "
-    "(Reserve, Book, Confirm, Pay, Purchase, Place order) - the user clicks it. "
-    "Also stop and say exactly what you need if you hit a login, 2FA/verification code, CAPTCHA, "
-    "or a choice the task did not specify. "
-    "Filling forms: fill every field that matches one of the provided placeholders. Leave optional "
-    "fields without a matching placeholder empty. If a REQUIRED field has no matching placeholder, "
-    "stop and name the field. Never invent, guess or reuse values across fields; if the site "
-    "pre-filled a value that differs from a placeholder, use the placeholder and report the "
-    "difference. Never enter payment card numbers, CVVs or passwords."
 )
 
 _session_lock = threading.Lock()
@@ -276,7 +262,7 @@ async def _run_browser(goal: str, max_steps: int) -> str:
             llm=llm,
             browser=session,
             sensitive_data=fields or None,
-            extend_system_message=HANDOFF_RULES,
+            extend_system_message=BrowserHandoffPrompt().render(),
         )
         try:
             history = await asyncio.wait_for(

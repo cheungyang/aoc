@@ -1,4 +1,7 @@
-"""Speech versions written once you're in voice: parsing, the prompt, and the writer's tasks."""
+"""Speech versions written once you're in voice: the worker task and the writer's tasks.
+
+The prompt and its reply parsing are SpeechWriterPrompt's (tests/core/prompts/test_voice.py).
+"""
 import asyncio
 import unittest
 from types import SimpleNamespace
@@ -7,50 +10,13 @@ from unittest.mock import AsyncMock, patch
 from core.inbox import writer
 from core.inbox.model import Status
 from core.channel.response_parser import AgentResponse
-from core.inbox.speech_writer import SpeechWriter, build_prompt, parse_speech, write_speech
+from core.inbox.speech_writer import SpeechWriter, write_speech
 from core.inbox.store import InboxStore
-from core.util.prompt_util import QUESTION_RULE, SPEECH_RULES
 from tests.core.inbox import loader
 
 
-class TestParsing(unittest.TestCase):
-
-    def test_the_speech_block_and_its_question(self):
-        speech, question = parse_speech(
-            "<speech>William here. <question>Should the two notes be merged?</question></speech>")
-        self.assertEqual(speech, "William here. Should the two notes be merged?")
-        self.assertEqual(question, "Should the two notes be merged?")
-
-    def test_the_workers_parsed_reply(self):
-        response = AgentResponse.from_string("<speech>Daisy here. <question>Energy, one to ten?</question></speech>")
-        self.assertEqual(parse_speech(response), ("Daisy here. Energy, one to ten?", "Energy, one to ten?"))
-        self.assertEqual(parse_speech(AgentResponse.from_string("<payload>Plain words.</payload>")),
-                         ("Plain words.", None))
-
-    def test_a_reply_without_tags_is_taken_whole(self):
-        self.assertEqual(parse_speech("Ted here. Your syllabus is ready."), ("Ted here. Your syllabus is ready.", None))
-        self.assertEqual(parse_speech([{"type": "text", "text": "<speech>Hi.</speech>"}]), ("Hi.", None))
-        self.assertEqual(parse_speech(""), (None, None))
-        self.assertEqual(parse_speech(None), (None, None))
-
-
-class TestPrompt(unittest.TestCase):
-
-    def test_same_rules_as_voice_mode_question_included(self):
-        row = writer.record_reply("pkm-wiki", "Two notes overlap: {habits} and {routines}. Merge?", asked_at=None,
-                                  agent_id="wiki-gardener", loader=loader())
-        prompt = build_prompt(row, "William")
-        self.assertIn(SPEECH_RULES, prompt)
-        self.assertIn(QUESTION_RULE, prompt)
-        self.assertIn("{habits} and {routines}", prompt, "a post's braces are text, not a template")
-        self.assertIn("Author: William", prompt)
-        self.assertIn("#pkm-wiki", prompt)
-        self.assertIn("<assigned_task>", prompt, "in the worker's playbook format")
-        self.assertNotIn("{{", prompt, "every placeholder filled")
-
-
 class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
-    """One task for the stateless worker, through `ask_worker`."""
+    """One task for the stateless worker: a SpeechWriterPrompt, through `ask_worker`."""
 
     def _row(self):
         return writer.record_reply("pkm-wiki", "Should the two notes on habits be merged?", asked_at=None,
@@ -66,6 +32,7 @@ class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ask.await_args.kwargs["channel"], "pkm-wiki")
         self.assertEqual(ask.await_args.kwargs["caller"], "speech-writer")
         self.assertIn("Should the two notes on habits be merged?", ask.await_args.args[0])
+        self.assertIn("Author: William", ask.await_args.args[0])
 
     async def test_nothing_when_the_worker_fails(self):
         with patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=None)):

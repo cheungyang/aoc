@@ -799,10 +799,10 @@ the scheduler does not even spawn it; `--dry-run` still works for checking a han
 | [nodes/publish.py](nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`, with the LLM-written text privacy-checked first. Deterministic, idempotent, no LLM. |
 | [nodes/sync_review.py](nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down. |
 | [utils/](utils/__init__.py) | Support modules — see [Utilities](#utilities). |
-| [prompts/](prompts/__init__.py) | Prompt builders for the Goldfish workers. |
-| [prompts/coder_prompt.py](prompts/coder_prompt.py) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, the made-up test data rule, plus targeted retry blocks for test output, critic feedback, human feedback and privacy findings. |
-| [prompts/critic_prompt.py](prompts/critic_prompt.py) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
-| [prompts/spec_validator_prompt.py](prompts/spec_validator_prompt.py) | Spec validator prompt. Not used by any node — consumed by [tools/spec_validator.py](../../tools/spec_validator.py) before a task is queued. |
+| [prompts/](prompts/__init__.py) | The Goldfish workers' prompts: each a `core.prompts.Prompt` class, with its text in the `.md` beside it. |
+| [prompts/coder_prompt.py](prompts/coder_prompt.py), [coder.md](prompts/coder.md) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, the made-up test data rule, plus targeted retry blocks for test output, critic feedback, human feedback and privacy findings. |
+| [prompts/critic_prompt.py](prompts/critic_prompt.py), [critic.md](prompts/critic.md) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
+| [prompts/spec_validator_prompt.py](prompts/spec_validator_prompt.py), [spec_validator.md](prompts/spec_validator.md) | Spec validator prompt. Not used by any node — consumed by [tools/spec_validator.py](../../tools/spec_validator.py) before a task is queued. |
 
 Tests live in [tests/graphs/coding/](../../tests/graphs/coding/) — one module per
 node and per utility, plus

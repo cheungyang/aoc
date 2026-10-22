@@ -13,6 +13,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from core.runtime.context_pruner import ContextPruner
+from core.runtime.delegation import DelegationResult
 from core.runtime.session_manager import SessionManager
 from core.util.message_util import (
     estimate_total_tokens,
@@ -281,14 +282,12 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
 
         import asyncio
 
-        async def slow_agent_call(*args, **kwargs):
+        async def slow_delegate(*args, **kwargs):
             await asyncio.sleep(0.5)
-            return "<summary>Delayed summary</summary>"
+            return DelegationResult(agent_id="graph-worker-low", text="<summary>Delayed summary</summary>",
+                                    response=object())
 
-        mock_tool = MagicMock()
-        mock_tool.ainvoke = AsyncMock(side_effect=slow_agent_call)
-
-        with patch('tools.agent_call.agent_call', mock_tool):
+        with patch('core.runtime.delegation.stream_delegate', new=AsyncMock(side_effect=slow_delegate)):
             Config().context_pruning_timeout = 0.05
             pruner = ContextPruner()
             res = pruner._summarize_with_graph_worker(transcript="User: Hello")
@@ -304,14 +303,12 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
     async def test_asummarize_with_graph_worker_timeout_fallback(self):
         import asyncio
 
-        async def slow_agent_call(*args, **kwargs):
+        async def slow_delegate(*args, **kwargs):
             await asyncio.sleep(0.5)
-            return "<summary>Delayed summary</summary>"
+            return DelegationResult(agent_id="graph-worker-low", text="<summary>Delayed summary</summary>",
+                                    response=object())
 
-        mock_tool = MagicMock()
-        mock_tool.ainvoke = AsyncMock(side_effect=slow_agent_call)
-
-        with patch('tools.agent_call.agent_call', mock_tool):
+        with patch('core.runtime.delegation.stream_delegate', new=AsyncMock(side_effect=slow_delegate)):
             Config().context_pruning_timeout = 0.05
             pruner = ContextPruner()
             res = await pruner._asummarize_with_graph_worker(transcript="User: Hello")
@@ -323,11 +320,8 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
     async def test_summarize_with_graph_worker_error_payload_fallback(self):
         self.worker_patcher.stop()
 
-        error_xml = '<tool_response name="agent_call"><payload></payload><errors>Error: Rate limit exceeded</errors></tool_response>'
-        mock_tool = MagicMock()
-        mock_tool.ainvoke = AsyncMock(return_value=error_xml)
-
-        with patch('tools.agent_call.agent_call', mock_tool):
+        failed = DelegationResult(agent_id="graph-worker-low", error="Rate limit exceeded")
+        with patch('core.runtime.delegation.stream_delegate', new=AsyncMock(return_value=failed)):
             pruner = ContextPruner()
             res = await pruner._asummarize_with_graph_worker(transcript="User: Test")
             self.assertEqual(res, "")
@@ -336,6 +330,22 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Test error visibility", fallback_res)
 
         self.mock_worker = self.worker_patcher.start()
+
+    async def test_asummarize_with_graph_worker_runs_the_summary_prompt_on_graph_worker_low(self):
+        done = DelegationResult(agent_id="graph-worker-low", response=object(),
+                                text="<payload><status>success</status><summary>\nUser booked Tokyo.\n</summary></payload>")
+        delegate = AsyncMock(return_value=done)
+        with patch('core.runtime.delegation.stream_delegate', new=delegate):
+            res = await ContextPruner()._asummarize_with_graph_worker(
+                transcript="User: book Tokyo", previous_summary="Earlier: flights.", max_summary_tokens=300,
+                channel="travel")
+
+        self.assertEqual(res, "User booked Tokyo.")
+        kwargs = delegate.await_args.kwargs
+        self.assertEqual((kwargs["agent_id"], kwargs["caller"], kwargs["channel"], kwargs["record_memory"]),
+                         ("graph-worker-low", "context-pruner", "travel", False))
+        self.assertIn("under 300 tokens", kwargs["prompt"])
+        self.assertIn("Earlier: flights.", kwargs["prompt"])
 
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple', side_effect=Exception("Database lock error"))
     async def test_aauto_prune_session_handles_checkpointer_exception(self, mock_get_tuple):

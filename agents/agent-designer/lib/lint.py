@@ -67,7 +67,7 @@ from core.tooling.workflow import DOCSTRING_LINES, WORKFLOW_FILE, contract_probl
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 CHARS_PER_TOKEN = 4  # the estimate PRELOAD_TOKEN_BUDGET and the context pruner use
 
-# The files the system prompt loads from an agent's folder (core/util/prompt_util.py),
+# The files the system prompt loads from an agent's folder (core/prompts/system.py),
 # each with agent_creation's prompt budget: (target, hard ceiling) in characters.
 PERSONA_LIMITS = {
     "AGENTS.md": (1500, 2500),
@@ -885,7 +885,7 @@ def _unreadable_sources(agent_id: str, root: str, tools: List[OwnTool], grants: 
 def _user_path(agent_id: str, root: str) -> str:
     """The agent's USER.md: in the configured PKM for this checkout, else under `<root>/pkm`."""
     if os.path.realpath(root) == os.path.realpath(PROJECT_ROOT):
-        from core.util.prompt_util import user_path
+        from core.prompts.system import user_path
 
         return user_path(agent_id)
     return os.path.join(root, "pkm", "agents", agent_id, USER_FILE)
@@ -893,7 +893,7 @@ def _user_path(agent_id: str, root: str) -> str:
 
 def _budget(agent_id: str, root: str, config: Dict[str, Any], skills: Dict[str, Any], bound: List[str],
             catalog: Catalog, measure_schemas: bool) -> Tuple[Budget, List[Finding]]:
-    from core.util.prompt_util import get_formatting_prompt
+    from core.prompts.system import get_formatting_prompt
 
     budget, findings = Budget(tools=list(bound)), []
     files = [(name, os.path.join(root, "agents", agent_id, name), f"agents/{agent_id}/{name}", ceiling)

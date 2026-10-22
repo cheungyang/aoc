@@ -2,6 +2,7 @@ import os
 from typing import Dict, List, Optional
 
 from core.loaders.hot_reloader import HotReloader
+from core.prompts.system import SkillsListPrompt
 
 # An agent's preloaded skill text is part of every one of its prompts, so it
 # is capped. ~4 characters per token, the same estimate the context pruner uses.
@@ -174,12 +175,7 @@ class SkillsLoader:
 
         self._load_skills(allowed_skills)
         modes = self.preload_modes(ctx)
-        overview = (
-            "<skills_list>\n"
-            "Your skills. Those marked [preloaded] are already in this prompt, below: follow them\n"
-            "directly. To read any other skill, or the Reference section of a skill preloaded as\n"
-            "core, call the `load_skill` tool with the skill id.\n"
-        )
+        lines = []
         preloaded = []
         for skill_id in sorted(allowed_skills):
             info = self._skills_cache.get(skill_id)
@@ -189,10 +185,10 @@ class SkillsLoader:
             skill_id_val = info.get("skill_id", skill_id)
             desc = info.get("description", "")
             mode = modes.get(skill_id)
-            overview += f"- {name} (id:{skill_id_val}): {desc}{' [preloaded]' if mode else ''}\n"
+            lines.append(f"- {name} (id:{skill_id_val}): {desc}{' [preloaded]' if mode else ''}")
             if mode:
                 preloaded.append((skill_id, mode))
-        overview += "</skills_list>"
+        overview = SkillsListPrompt(skills="\n".join(lines)).render()
 
         for skill_id, mode in preloaded:
             text = self.preloaded_text(skill_id, mode)

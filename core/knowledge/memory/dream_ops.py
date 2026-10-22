@@ -12,6 +12,8 @@ and replies with operations on those ids:
 Ids are numbered while the input is built and never written anywhere. Code
 validates each op on its own, routes by tag, dedups, enforces budgets, caps
 Profile writes and records the signals behind tag/subscription suggestions.
+The reply format the model is shown is in core/prompts/templates/memory/
+(dream.md, compaction.md); `parse_reply` is what enforces it.
 """
 import datetime
 import difflib
@@ -35,31 +37,14 @@ PROFILE_WRITE_CAP = 2
 NEAR_DUPLICATE_RATIO = 0.8
 COMPACTION_FILL = 0.8
 
-# A reply that echoes a template back ("[the fact]") instead of filling it in.
+# A reply that echoes a template back instead of filling it in: a bracketed
+# description ("[the fact]"), an ellipsis, or an example text from the reply
+# formats in core/prompts/templates/memory/ (a test fails if they show one
+# that is missing here).
 PLACEHOLDER = re.compile(r"^\[[^\n]*\]$|^\.\.\.$|^…$")
-
-RESPONSE_FORMAT = """<dream_response>
-  <status>Dreamed or No new memories</status>
-  <ops>
-    <add tag="one tag from the list" until="YYYY-MM-DD, only for time-bound facts">one-sentence fact</add>
-    <confirm id="e7"/>
-    <update id="e3">corrected fact</update>
-    <retire id="e9" reason="why"/>
-  </ops>
-  <errors>None</errors>
-  <learnings>one-line highlight for the standup</learnings>
-</dream_response>"""
-
-COMPACTION_FORMAT = """<dream_response>
-  <status>Dreamed or No new memories</status>
-  <ops>
-    <merge ids="e4 e9">one sentence covering both</merge>
-    <update id="e3">tighter wording</update>
-    <retire id="e9" reason="why"/>
-  </ops>
-  <errors>None</errors>
-  <learnings>one-line summary</learnings>
-</dream_response>"""
+EXAMPLE_TEXTS = frozenset(normalise(text) for text in (
+    "one-sentence fact", "corrected fact", "tighter wording", "one sentence covering both",
+))
 
 
 @dataclass
@@ -240,7 +225,7 @@ def build_compaction_input(tags: Sequence[str], flagged: List[Dict], today: date
 
 def _valid_text(text: Optional[str]) -> Optional[str]:
     text = clean_text(text or "")
-    if not text or PLACEHOLDER.match(text):
+    if not text or PLACEHOLDER.match(text) or normalise(text) in EXAMPLE_TEXTS:
         return None
     return text
 

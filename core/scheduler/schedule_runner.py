@@ -53,7 +53,7 @@ from core.scheduler.spec import (
 )
 from core.scheduler.state import ScheduleState
 from core.util import safe_chunks
-from core.util.prompt_util import scheduled_speech_scope
+from core.prompts.voice import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership
 from core.util.time_util import get_local_now
 

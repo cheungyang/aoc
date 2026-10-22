@@ -161,7 +161,7 @@ class AgentResponse:
     # The reply's <speech> blocks, on a voice turn (see <voice_mode>).
     speech: Optional[str] = None
     # The direct question marked inside <speech>, on a scheduled run whose
-    # post may be heard later (see SCHEDULED_VOICE_MODE_PROMPT).
+    # post may be heard later (see core/prompts/templates/voice/scheduled_voice_mode.md).
     question: Optional[str] = None
 
     @classmethod

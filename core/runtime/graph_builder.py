@@ -4,11 +4,19 @@ import json
 from langgraph.prebuilt import create_react_agent
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from core.loaders.tools_loader import ToolsLoader
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, convert_to_messages
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import get_knowledge_prompt, get_formatting_prompt, get_channel_prompt, get_voice_mode_prompt, Config, resolve_model
-from core.util.prompt_util import get_agent_static_prompt, get_agent_memory_prompt, get_tool_rules_prompt
+from core.util import Config, resolve_model
+from core.prompts.system import (
+    get_agent_memory_prompt,
+    get_agent_static_prompt,
+    get_channel_prompt,
+    get_formatting_prompt,
+    get_knowledge_prompt,
+    get_tool_rules_prompt,
+)
+from core.prompts.voice import get_voice_mode_prompt
 from core.util.message_util import cap_tool_output
 from langgraph.types import interrupt
 from core.runtime.job_manager import JobManager
@@ -64,24 +72,22 @@ class GraphBuilder:
             # into another channel) still share the prefix up to and including memory.
             # Voice mode comes last, so a voice turn shares every block before it with
             # a typed turn in the same channel.
-            system_messages = [
-                ("system", formatting_prompt),
-                ("system", agent_static_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", tool_rules_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", skills_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", subgraphs_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", knowledge_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", agent_memory_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", channel_prompt.replace("{", "{{").replace("}", "}}")),
-                ("system", voice_mode_prompt.replace("{", "{{").replace("}", "}}")),
+            # Each block goes in as a message, not a template, so its braces are text.
+            blocks = [
+                formatting_prompt,
+                agent_static_prompt,
+                tool_rules_prompt,
+                skills_prompt,
+                subgraphs_prompt,
+                knowledge_prompt,
+                agent_memory_prompt,
+                channel_prompt,
+                voice_mode_prompt,
             ]
 
             # Filter out empty prompt messages (e.g. when channel_prompt is empty)
-            system_messages = [msg for msg in system_messages if msg[1].strip()]
-            system_messages.append(MessagesPlaceholder(variable_name="messages"))
-
-            prompt = ChatPromptTemplate.from_messages(system_messages)
-            return prompt.format_messages(messages=state.get("messages", []))
+            system_messages = [SystemMessage(content=block) for block in blocks if block.strip()]
+            return system_messages + convert_to_messages(state.get("messages", []))
         return dynamic_prompt
 
     async def build_graph(self, ctx, config):

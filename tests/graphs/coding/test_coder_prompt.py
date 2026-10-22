@@ -15,7 +15,7 @@ parse_worker_handoff_xml actually accepts.
 import re
 import unittest
 
-from graphs.coding.prompts.coder_prompt import build_coder_prompt
+from graphs.coding.prompts.coder_prompt import CoderPrompt
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
 
 TRACEBACK_TAG = "<test_failure_traceback>"
@@ -35,7 +35,7 @@ def _build(**overrides):
         "verification_command": "pytest tests/core/test_a.py -q",
     }
     kwargs.update(overrides)
-    return build_coder_prompt(**kwargs)
+    return CoderPrompt(**kwargs).render()
 
 
 class CoderPromptTaskContextTestCase(unittest.TestCase):

@@ -1,3 +1,4 @@
+"""The system prompt's blocks (core/prompts/system.py)."""
 import unittest
 from unittest.mock import patch
 import os
@@ -9,12 +10,10 @@ from zoneinfo import ZoneInfo
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.util.config import Config
-from core.util.prompt_util import (
-    VOICE_MODE_PROMPT,
+from core.prompts.system import (
     get_knowledge_prompt,
     get_formatting_prompt,
     get_channel_prompt,
-    get_voice_mode_prompt,
     get_agent_memory_prompt,
     get_agent_static_prompt,
     get_tool_rules_prompt,
@@ -64,18 +63,18 @@ class TestPromptUtil(unittest.TestCase):
         tz = ZoneInfo("America/Los_Angeles")
         morning = datetime.datetime(2026, 10, 16, 6, 42, tzinfo=tz)
         evening = datetime.datetime(2026, 10, 16, 21, 5, tzinfo=tz)
-        with patch("core.util.prompt_util.get_local_now", return_value=morning):
+        with patch("core.prompts.system.get_local_now", return_value=morning):
             first = get_knowledge_prompt()
-        with patch("core.util.prompt_util.get_local_now", return_value=evening):
+        with patch("core.prompts.system.get_local_now", return_value=evening):
             second = get_knowledge_prompt()
         self.assertIn("Friday (Weekday), ISO week 2026-W42", first)
         self.assertEqual(first, second, "the time of day must not reach the cached system prompt")
 
     def test_user_messages_carry_the_local_time(self):
-        from core.util.prompt_util import stamp_user_message
+        from core.prompts.system import stamp_user_message
 
         now = datetime.datetime(2026, 10, 16, 6, 42, tzinfo=ZoneInfo("America/Los_Angeles"))
-        with patch("core.util.prompt_util.get_local_now", return_value=now):
+        with patch("core.prompts.system.get_local_now", return_value=now):
             self.assertEqual(stamp_user_message("lights off"), "[Fri 06:42] lights off")
             parts = [{"type": "image_url", "image_url": "x"}]
             self.assertEqual(stamp_user_message(parts), [{"type": "text", "text": "[Fri 06:42]"}, *parts])
@@ -141,83 +140,6 @@ class TestPromptUtil(unittest.TestCase):
             current_execution_context.reset(token)
 
 
-class TestVoiceModePrompt(unittest.TestCase):
-    """<voice_mode> reaches exactly the turns the user hears."""
-
-    def _prompt_in(self, **session_kwargs):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
-        token = current_execution_context.set(SessionManager.get_session(**session_kwargs))
-        try:
-            return get_voice_mode_prompt()
-        finally:
-            current_execution_context.reset(token)
-
-    def test_a_voice_turn_gets_the_block(self):
-        prompt = self._prompt_in(agent_id="main", source="discord", channel="general", surface="voice")
-        self.assertEqual(prompt, VOICE_MODE_PROMPT)
-        self.assertIn("Begin each response with a <speech>...</speech> block", prompt)
-        self.assertIn("Before calling tools, write a one-sentence <speech> block", prompt)
-
-    def test_a_typed_turn_does_not(self):
-        self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general"), "")
-
-    def test_a_delegate_inherits_it_but_a_stateless_worker_never_gets_it(self):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
-        voice_turn = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
-        token = current_execution_context.set(voice_turn)
-        try:
-            delegate = SessionManager.get_session(agent_id="day-planner", source="tool", channel="day-planning")
-            worker = SessionManager.get_session(agent_id="graph-worker-low", source="tool", channel="general",
-                                                stateless=True)
-        finally:
-            current_execution_context.reset(token)
-        self.assertEqual((delegate.get_surface(), worker.get_surface()), ("voice", "voice"))
-        for session, expected in ((delegate, VOICE_MODE_PROMPT), (worker, "")):
-            token = current_execution_context.set(session)
-            try:
-                self.assertEqual(get_voice_mode_prompt(), expected, session.agent_id)
-            finally:
-                current_execution_context.reset(token)
-
-    def test_no_context_no_block(self):
-        from core.runtime.execution_context import current_execution_context
-        token = current_execution_context.set(None)
-        try:
-            self.assertEqual(get_voice_mode_prompt(), "")
-        finally:
-            current_execution_context.reset(token)
-
-    def test_the_formatting_rules_allow_speech_under_voice_mode(self):
-        """Otherwise they forbid the very block <voice_mode> asks for."""
-        self.assertIn("<speech> when <voice_mode> asks for it", get_formatting_prompt())
-
-    def test_a_scheduled_run_gets_the_scheduled_block_only_inside_its_scope(self):
-        from core.util.prompt_util import SCHEDULED_VOICE_MODE_PROMPT, scheduled_speech_scope
-
-        scheduled = dict(agent_id="day-planner", source="scheduled", channel="day-planning")
-        self.assertEqual(self._prompt_in(**scheduled), "", "an IGNORE schedule runs outside the scope")
-        with scheduled_speech_scope("day-planner"):
-            self.assertEqual(self._prompt_in(**scheduled), SCHEDULED_VOICE_MODE_PROMPT)
-            # An agent the run calls writes for its caller, not for the channel.
-            self.assertEqual(self._prompt_in(agent_id="graph-worker", source="scheduled", channel="day-planning"), "")
-            # A live voice turn meanwhile keeps the live block.
-            self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general", surface="voice"),
-                             VOICE_MODE_PROMPT)
-
-    def test_the_scheduled_block_marks_questions_and_has_no_pre_tool_line(self):
-        from core.util.prompt_util import QUESTION_RULE, SCHEDULED_VOICE_MODE_PROMPT, SPEECH_RULES
-
-        self.assertIn(SPEECH_RULES, SCHEDULED_VOICE_MODE_PROMPT)
-        self.assertIn(SPEECH_RULES, VOICE_MODE_PROMPT, "one set of rules for both")
-        self.assertIn(QUESTION_RULE, SCHEDULED_VOICE_MODE_PROMPT)
-        self.assertNotIn("<question>", VOICE_MODE_PROMPT)
-        self.assertNotIn("Before calling tools", SCHEDULED_VOICE_MODE_PROMPT)
-        self.assertIn("Begin your final response with a <speech>", SCHEDULED_VOICE_MODE_PROMPT)
-        self.assertIn("don't introduce yourself", SCHEDULED_VOICE_MODE_PROMPT)
-
-
 class TestAgentPrompts(unittest.TestCase):
     """Static files come from agents/<id>/; memory is Memory v2 under the vault."""
 
@@ -225,14 +147,14 @@ class TestAgentPrompts(unittest.TestCase):
 
     def setUp(self):
         import tempfile
-        from core.util import prompt_util
+        from core.prompts import system
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.agent_dir = os.path.join(tmp.name, "agent")
         self.pkm = os.path.join(tmp.name, "pkm")
         os.makedirs(self.agent_dir)
-        real = prompt_util._agent_prompt_files
-        patcher = patch.object(prompt_util, "_agent_prompt_files", side_effect=lambda a: {
+        real = system._agent_prompt_files
+        patcher = patch.object(system, "_agent_prompt_files", side_effect=lambda a: {
             k: (os.path.join(self.agent_dir, os.path.basename(path)), desc)
             for k, (path, desc) in real(a).items()
         })

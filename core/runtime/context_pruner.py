@@ -60,35 +60,6 @@ def _format_message_for_summary(msg: BaseMessage) -> str:
     return f"Message: {str(msg)}"
 
 
-def _parse_worker_summary_response(tool_res: Any) -> str:
-    """Parses tool output from graph-worker-low, extracting XML summary or logging errors."""
-    if not tool_res:
-        return ""
-    raw_str = str(tool_res)
-    err_m = re.search(r"<errors?>(.*?)</errors?>", raw_str, re.DOTALL | re.IGNORECASE)
-    if err_m and err_m.group(1).strip() and err_m.group(1).strip().lower() != "none":
-        err_text = err_m.group(1).strip()
-        print(f"[ContextPruner] Warning: graph-worker-low returned error: '{err_text}'. Falling back to heuristic summary.", file=sys.stderr)
-        return ""
-
-    m = re.search(r"<summary>(.*?)</summary>", raw_str, re.DOTALL)
-    if m and m.group(1).strip():
-        summary_text = m.group(1).strip()
-        print(f"[ContextPruner] Successfully generated graph-worker-low summary (~{len(summary_text)} chars).")
-        return summary_text
-    payload_m = re.search(r"<payload>(.*?)</payload>", raw_str, re.DOTALL)
-    if payload_m and payload_m.group(1).strip():
-        payload_text = payload_m.group(1).strip()
-        print(f"[ContextPruner] Extracted graph-worker-low payload summary (~{len(payload_text)} chars).")
-        return payload_text
-    if raw_str.strip() and "<tool_response" not in raw_str:
-        print(f"[ContextPruner] Extracted raw graph-worker-low summary (~{len(raw_str.strip())} chars).")
-        return raw_str.strip()
-
-    print("[ContextPruner] Warning: graph-worker-low returned empty or unrecognized response. Falling back to heuristic summary.", file=sys.stderr)
-    return ""
-
-
 class ContextPruner:
     """
     Manages token estimation, tool-call-safe sliding window message slicing,
@@ -184,40 +155,24 @@ class ContextPruner:
         max_summary_tokens: int = 1000,
         channel: str = "general"
     ) -> str:
-        """Asynchronously invokes the graph-worker-low agent via agent_call to produce a stateless, machine-readable summary."""
-        from core.runtime.prompts import build_summarization_prompt
-        prompt = build_summarization_prompt(
+        """Asks graph-worker-low for a stateless, machine-readable summary; "" when it gave none.
+
+        A run that fails or outlasts `context_pruning_timeout` is logged by
+        ask_worker; the caller then falls back to the heuristic summary.
+        """
+        from core.prompts.memory import ContextSummaryPrompt
+
+        prompt = ContextSummaryPrompt(
             transcript=transcript,
             previous_summary=previous_summary,
             max_summary_tokens=max_summary_tokens
         )
-
         try:
-            from tools.agent_call import agent_call
-
-            timeout = self.config.context_pruning_timeout
-
-            try:
-                tool_res = await asyncio.wait_for(
-                    agent_call.ainvoke({
-                        "agent_id": "graph-worker-low",
-                        "prompt": prompt,
-                        "channel": channel,
-                        "caller": "context-pruner"
-                    }),
-                    timeout=timeout
-                )
-            except (asyncio.TimeoutError, TimeoutError):
-                print(f"[ContextPruner] Warning: graph-worker-low async summarization timed out after {timeout}s. Falling back to heuristic summary.", file=sys.stderr)
-                return ""
-            except Exception as e:
-                print(f"[ContextPruner] Error during async graph-worker-low summarization: {e}. Falling back to heuristic summary.", file=sys.stderr)
-                return ""
-
-            return _parse_worker_summary_response(tool_res)
-        except (asyncio.TimeoutError, TimeoutError, Exception) as e:
+            summary = await prompt.run(channel=channel, timeout=self.config.context_pruning_timeout)
+        except Exception as e:
             print(f"[ContextPruner] Unexpected error during async summarization: {e}. Falling back to heuristic summary.", file=sys.stderr)
             return ""
+        return summary or ""
 
     def _summarize_with_graph_worker(
         self,

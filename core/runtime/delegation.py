@@ -12,8 +12,8 @@ Keeping both in one function is the point. The duplicate this replaces was the
 reason a reaction emoji could appear on one path and not the other.
 
 Python code that needs one small model task (a speech version, which agent a
-misheard name means) hands it to the stateless worker through `ask_worker`,
-which runs on the same path.
+misheard name means) runs a `WorkerPrompt` (core/prompts/base.py), which hands
+it to the stateless worker through `ask_worker`, on the same path.
 """
 import asyncio
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from typing import Any, List, Optional, Union
 
 from langchain_core.callbacks import adispatch_custom_event
 
+from core.prompts.base import WORKER_LOW
 from core.runtime.stream_handler import (
     EVENT_ERROR,
     EVENT_FINAL_RESPONSE,
@@ -31,9 +32,6 @@ from core.runtime.stream_handler import (
 )
 
 Prompt = Union[str, list]
-
-# The cheap, stateless worker agent for one-off model tasks from Python code.
-WORKER_LOW = "graph-worker-low"
 
 
 @dataclass

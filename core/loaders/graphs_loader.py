@@ -3,6 +3,7 @@ import json
 import importlib.util
 from typing import Dict, Any, List, Optional
 from core.loaders.hot_reloader import HotReloader
+from core.prompts.system import SubgraphsListPrompt
 
 class GraphsLoader:
     _instance = None
@@ -140,10 +141,7 @@ class GraphsLoader:
             if not ToolsLoader().check_permission(ctx, "graph_call"):
                 return ""
         self.load_graphs()
-        overview = "<subgraphs_list>\n"
-        overview += "The following lists the names and descriptions of the subgraphs that you have access to. "
-        overview += "To execute a graph, use the `graph_call` tool with the graph name and your query.\n"
-        
+        lines = []
         for name in sorted(self._graphs.keys()):
             if name == "main":
                 continue
@@ -151,10 +149,9 @@ class GraphsLoader:
             metadata = info.get("metadata", {})
             desc = metadata.get("description", "No description available.")
             display_name = metadata.get("name", name)
-            overview += f"- {display_name} (id:{name}): {desc}\n"
-            
-        overview += "</subgraphs_list>"
-        return overview
+            lines.append(f"- {display_name} (id:{name}): {desc}")
+
+        return SubgraphsListPrompt(graphs="\n".join(lines)).render()
 
     # Backward compatibility aliases
     load_subgraphs = load_graphs

@@ -331,7 +331,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.get_knowledge_prompt')
-     def test_get_prompt_template_escapes_braces(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_static_prompt):
+     def test_get_prompt_template_keeps_braces_as_text(self, mock_get_knowledge_prompt, mock_skills_loader_class, mock_get_agent_static_prompt):
           mock_get_agent_static_prompt.return_value = "Prompt with braces {} and {variable}"
           mock_skills_loader = MagicMock()
           mock_skills_loader_class.return_value = mock_skills_loader
@@ -353,6 +353,8 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           self.assertTrue(any("Skills with braces {}" in msg.content for msg in messages))
           self.assertTrue(any("Mock Subgraphs" in msg.content for msg in messages))
           self.assertTrue(any("Knowledge with braces {}" in msg.content for msg in messages))
+          # The formatting rules' template holds the very braces the model reads.
+          self.assertTrue(any('<poll allow_multiple="{true_or_false}">' in msg.content for msg in messages))
 
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')

@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.voice.room import near_miss
+from core.prompts.voice import NearMissPrompt
 from core.voice.room.focus import FocusDirectory
 from core.voice.room.near_miss import closest_target, parse_choice, target_lines
 
@@ -82,7 +82,7 @@ class TestClosestTarget(unittest.IsolatedAsyncioTestCase):
         # Asked from the lobby, on the voice budget.
         self.assertEqual(ask.await_args.kwargs["channel"], "general")
         self.assertEqual(ask.await_args.kwargs["caller"], "near-miss")
-        self.assertEqual(ask.await_args.kwargs["timeout"], near_miss.RESOLVE_TIMEOUT_S)
+        self.assertEqual(ask.await_args.kwargs["timeout"], NearMissPrompt.timeout)
 
     async def test_none_when_the_worker_says_none(self):
         with self._worker("<payload>none</payload>"):

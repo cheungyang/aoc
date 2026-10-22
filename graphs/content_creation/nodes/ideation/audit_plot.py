@@ -1,7 +1,7 @@
 import os
 from graphs.content_creation.utils.logging import _append_execution_log
 from graphs.content_creation.schemas import PlotAudit
-from graphs.content_creation.prompts import build_audit_plot_prompt
+from graphs.content_creation.prompts import AuditPlotPrompt
 
 async def audit_plot_task(state: dict) -> dict:
     """Audits the drafted Video Plot against Brand Playbook guidelines."""
@@ -32,7 +32,7 @@ async def audit_plot_task(state: dict) -> dict:
         except Exception:
             pass
 
-    prompt = build_audit_plot_prompt(
+    prompt = AuditPlotPrompt(
         topic=topic,
         image_path=image_path,
         video_plot_path=video_plot_path,
@@ -40,7 +40,7 @@ async def audit_plot_task(state: dict) -> dict:
         output_path=output_path,
         qc_playbook_content=qc_playbook_content,
         plot_content=plot_content
-    )
+    ).render()
 
     try:
         from tools.agent_call import agent_call

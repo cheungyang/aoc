@@ -32,7 +32,7 @@ For each thing in the logs worth keeping:
 
 Check `<entries>` first: confirm or update an existing entry rather than adding a new one.
 
-Reply with status `Dreamed` and at least one operation, or, when nothing in the logs is worth keeping and no entry needs to change, status `No new memories` with an empty `<ops/>` (the logs are still deleted). Write real content, never the bracketed descriptions of a template: an operation whose text is `[...]` is rejected as an echoed placeholder.
+Reply with status `Dreamed` and at least one operation, or, when nothing in the logs is worth keeping and no entry needs to change, status `No new memories` with an empty `<ops/>` (the logs are still deleted). Write real content, never the descriptions shown in the reply format: an operation whose text is one of them (such as `one-sentence fact`) or `[...]` is rejected as an echoed placeholder.
 
 ## Reference
 ### When to Use

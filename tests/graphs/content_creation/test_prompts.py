@@ -1,13 +1,26 @@
 import unittest
 from graphs.content_creation.prompts import (
-    build_draft_plot_prompt,
-    build_audit_plot_prompt,
-    build_draft_copy_prompt,
+    DraftPlotPrompt,
+    AuditPlotPrompt,
+    DraftCopyPrompt,
 )
 
+
+def _draft_plot(*args, **kwargs):
+    return DraftPlotPrompt(*args, **kwargs).render()
+
+
+def _audit_plot(*args, **kwargs):
+    return AuditPlotPrompt(*args, **kwargs).render()
+
+
+def _draft_copy(*args, **kwargs):
+    return DraftCopyPrompt(*args, **kwargs).render()
+
+
 class TestContentCreationPrompts(unittest.TestCase):
-    def test_build_draft_plot_prompt_full_fields_and_path_output(self):
-        prompt = build_draft_plot_prompt(
+    def test_draft_plot_full_fields_and_path_output(self):
+        prompt = _draft_plot(
             topic="cat",
             style_str="3D Animation",
             image_path="cat_image.jpg",
@@ -43,8 +56,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertNotIn("<markdown_content>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
-    def test_build_draft_plot_prompt_minimal_fields(self):
-        prompt = build_draft_plot_prompt(
+    def test_draft_plot_minimal_fields(self):
+        prompt = _draft_plot(
             topic="dog",
             style_str="Ghibli",
             image_path="",
@@ -69,8 +82,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("<video_plot_path>{video_plot_path}</video_plot_path>", prompt)
         self.assertIn("<assigned_task>", prompt)
 
-    def test_build_audit_plot_prompt_full_fields_and_no_markdown_report(self):
-        prompt = build_audit_plot_prompt(
+    def test_audit_plot_full_fields_and_no_markdown_report(self):
+        prompt = _audit_plot(
             topic="cat",
             image_path="cat_image.jpg",
             video_plot_path="cat_video_plot.md",
@@ -97,8 +110,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertNotIn("<markdown_report>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
-    def test_build_audit_plot_prompt_minimal_fields(self):
-        prompt = build_audit_plot_prompt(
+    def test_audit_plot_minimal_fields(self):
+        prompt = _audit_plot(
             topic="bird",
             image_path="bird.jpg",
             video_plot_path="bird_plot.md",
@@ -113,8 +126,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertIn("<status>{success|error}</status>", prompt)
         self.assertIn("<assigned_task>", prompt)
 
-    def test_build_draft_copy_prompt_with_revision_and_path_output(self):
-        prompt = build_draft_copy_prompt(
+    def test_draft_copy_with_revision_and_path_output(self):
+        prompt = _draft_copy(
             topic="puppy",
             project_path="/pkm/wiki/puppy",
             output_path="/pkm/wiki/puppy/output",
@@ -142,8 +155,8 @@ class TestContentCreationPrompts(unittest.TestCase):
         self.assertNotIn("<markdown_content>", prompt)
         self.assertIn("</assigned_task>", prompt)
 
-    def test_build_draft_copy_prompt_non_revision(self):
-        prompt = build_draft_copy_prompt(
+    def test_draft_copy_non_revision(self):
+        prompt = _draft_copy(
             topic="puppy",
             project_path="/pkm/wiki/puppy",
             output_path="/pkm/wiki/puppy/output",
@@ -162,9 +175,9 @@ class TestContentCreationPrompts(unittest.TestCase):
 
     def test_prompt_xml_tag_nesting_and_closure(self):
         prompts = [
-            build_draft_plot_prompt("cat", "3D", "img", "aud", "p", "o", "v", "j"),
-            build_audit_plot_prompt("cat", "img", "v", "p", "o"),
-            build_draft_copy_prompt("cat", "p", "o", "c", "j")
+            _draft_plot("cat", "3D", "img", "aud", "p", "o", "v", "j"),
+            _audit_plot("cat", "img", "v", "p", "o"),
+            _draft_copy("cat", "p", "o", "c", "j")
         ]
         for p in prompts:
             self.assertEqual(p.count("<playbook>"), 1)

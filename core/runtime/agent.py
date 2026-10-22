@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, List, Union
 
 from core.util import Config, format_error_message, save_agent_memory_log
-from core.util.prompt_util import stamp_user_message
+from core.prompts.system import stamp_user_message
 from core.runtime.base_agent import BaseAgent
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import current_execution_context
