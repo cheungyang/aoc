@@ -33,6 +33,8 @@
   "schedules": [
     {
       "id": "morning-workout-push",
+      "priority": "LOW",
+      "label": "today's workout",
       "kind": "prompt",
       "channel": "fitness-coach",
       "cron": "*/20 7-9 * * *",

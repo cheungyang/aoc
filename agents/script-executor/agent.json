@@ -9,6 +9,7 @@
   "schedules": [
     {
       "id": "nightly-sync",
+      "priority": "IGNORE",
       "kind": "script",
       "channel": "general",
       "thread": "cronjobs",
@@ -22,6 +23,7 @@
     },
     {
       "id": "dream-standup",
+      "priority": "IGNORE",
       "kind": "script",
       "channel": "general",
       "thread": "dreams",
@@ -30,6 +32,7 @@
     },
     {
       "id": "hourly-git-sync",
+      "priority": "IGNORE",
       "kind": "script",
       "channel": "general",
       "thread": "cronjobs",
@@ -38,6 +41,8 @@
     },
     {
       "id": "coding-tick",
+      "priority": "LOW",
+      "label": "a coding update",
       "kind": "script",
       "channel": "software-dev",
       "cron": "*/5 * * * *",
@@ -45,6 +50,7 @@
     },
     {
       "id": "job-reaper",
+      "priority": "IGNORE",
       "kind": "script",
       "channel": "general",
       "thread": "cronjobs",

@@ -20,6 +20,8 @@
   "schedules": [
     {
       "id": "workflow-a-inbox",
+      "priority": "LOW",
+      "label": "new inbox articles",
       "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 7 * * *",
@@ -36,6 +38,8 @@
     },
     {
       "id": "workflow-b-lint",
+      "priority": "LOW",
+      "label": "a wiki cleanup plan",
       "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 10 * * 5",
@@ -53,6 +57,8 @@
     },
     {
       "id": "triage-tasks",
+      "priority": "LOW",
+      "label": "tasks to triage",
       "kind": "prompt",
       "channel": "pkm-wiki",
       "cron": "0 17 * * *",

@@ -12,6 +12,8 @@
     "schedules": [
         {
             "id": "weekend-outlook",
+            "priority": "DEFAULT",
+            "label": "weekend ideas",
             "kind": "prompt",
             "channel": "weekend-planning",
             "cron": "0 8 * * 0",

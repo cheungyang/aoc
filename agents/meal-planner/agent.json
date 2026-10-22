@@ -23,6 +23,8 @@
   "schedules": [
     {
       "id": "dinner-checkin",
+      "priority": "DEFAULT",
+      "label": "a dinner check-in",
       "kind": "prompt",
       "channel": "meal-planning",
       "cron": "0 21 * * *",

@@ -22,6 +22,8 @@
   "schedules": [
     {
       "id": "weekly-scout",
+      "priority": "DEFAULT",
+      "label": "this week's listings",
       "kind": "prompt",
       "channel": "real-estate",
       "cron": "0 8 * * 5",

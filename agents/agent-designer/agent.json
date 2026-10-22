@@ -50,6 +50,8 @@
   "schedules": [
     {
       "id": "tooling-review",
+      "priority": "LOW",
+      "label": "the tooling review",
       "kind": "prompt",
       "channel": "agent-management",
       "cron": "0 9 * * 1",

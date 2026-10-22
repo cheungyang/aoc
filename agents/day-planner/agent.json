@@ -23,6 +23,8 @@
     "schedules": [
         {
             "id": "morning-plan",
+            "priority": "DEFAULT",
+            "label": "your morning check-in",
             "kind": "prompt",
             "channel": "day-planning",
             "cron": "0 6 * * *",
@@ -37,6 +39,8 @@
         },
         {
             "id": "weekly-review",
+            "priority": "DEFAULT",
+            "label": "your weekly review",
             "kind": "prompt",
             "channel": "day-planning",
             "cron": "0 15 * * 5",

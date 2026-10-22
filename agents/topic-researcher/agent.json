@@ -27,6 +27,8 @@
   "schedules": [
     {
       "id": "mode-a-queue",
+      "priority": "DEFAULT",
+      "label": "a new syllabus",
       "kind": "prompt",
       "channel": "topic-research",
       "cron": "0 8 * * *",

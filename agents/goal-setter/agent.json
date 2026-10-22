@@ -12,6 +12,8 @@
     "schedules": [
         {
             "id": "coach-executing",
+            "priority": "DEFAULT",
+            "label": "a project check-in",
             "kind": "prompt",
             "channel": "project-planning",
             "cron": "0 9 * * 1,3,5",

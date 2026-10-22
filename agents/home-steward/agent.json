@@ -57,6 +57,8 @@
   "schedules": [
     {
       "id": "daily-audit",
+      "priority": "LOW",
+      "label": "the home audit",
       "kind": "prompt",
       "channel": "home-automation",
       "cron": "0 8 * * *",
@@ -71,6 +73,8 @@
     },
     {
       "id": "weekly-inventory",
+      "priority": "LOW",
+      "label": "the device inventory",
       "kind": "prompt",
       "channel": "home-automation",
       "cron": "0 20 * * 0",

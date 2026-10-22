@@ -25,6 +25,8 @@
   "schedules": [
     {
       "id": "daily-market-scan",
+      "priority": "DEFAULT",
+      "label": "the market scan",
       "kind": "prompt",
       "channel": "market-scout",
       "cron": "30 13 * * 1-5",
