@@ -4,23 +4,24 @@
     "*"
   ],
   "channel_hosts": [
+    "agent-management",
+    "aoc-debug",
     "content-creation",
     "day-planning",
+    "fitness-coach",
     "general",
+    "home-automation",
     "lifestyle-perk",
+    "market-scout",
     "meal-planning",
     "pkm-wiki",
     "project-planning",
+    "real-estate",
     "receipts",
     "software-dev",
     "topic-research",
     "weekend-planning",
-    "weekly-planning",
-    "real-estate",
-    "home-automation",
-    "aoc-debug",
-    "market-scout",
-    "fitness-coach"
+    "weekly-planning"
   ],
   "concierge_prefixes": [
     "[main]",
@@ -45,9 +46,13 @@
     "graph_call": {},
     "graph_status": {}
   },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Aoede"
+  },
   "voice_config": {
     "enabled": true,
     "auto_join": true,
+    "voice_channel": "aoc-voice",
     "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
     "post_transcript_to_chat": true
   }

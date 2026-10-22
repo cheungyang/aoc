@@ -49,6 +49,39 @@ class TestCheckedInConfigs(unittest.TestCase):
                 with self.subTest(agent=name):
                     self.assertIsNotNone(chirp3_voice(config["voice"]["name"]), config["voice"]["name"])
 
+    def test_one_agent_listens_in_one_voice_channel(self):
+        """I5: one voice room for the system; a second bot in it would
+        transcribe and answer the same words. The host names the room, and the
+        lobby is a channel it hosts (#general): the room's chat holds no
+        conversation of its own."""
+        hosts = [(name, config) for name, config in agent_configs()
+                 if (config.get("voice_config") or {}).get("enabled")]
+        self.assertEqual([name for name, _ in hosts], ["main"])
+        main = hosts[0][1]
+        voice_channel = main["voice_config"].get("voice_channel")
+        self.assertTrue(voice_channel, "voice_config.voice_channel names the one voice room")
+        self.assertIn(main["voice_config"].get("lobby_channel") or "general", main["channel_hosts"])
+        self.assertNotIn(voice_channel, main["channel_hosts"])
+
+    def test_only_the_concierge_runs_a_bot(self):
+        """No agent has a bot of its own, Aki included: Concierge hosts every
+        channel and hands each to its agent, typed or spoken."""
+        bots = [name for name, config in agent_configs() if config.get("discord_token_key")]
+        self.assertEqual(bots, ["main"])
+
+    def test_every_agent_you_can_switch_to_has_its_own_voice(self):
+        """D2: in the one voice room, the voice is how you hear who is answering."""
+        from core.loaders.agents_loader import AgentsLoader
+        from core.voice.room.focus import FocusDirectory
+
+        configs = dict(agent_configs())
+        directory = FocusDirectory.build(AgentsLoader(), voice_host="main")
+        for agent_id in sorted({focus.agent_id for focus in directory.targets.values()}):
+            with self.subTest(agent=agent_id):
+                self.assertIn("voice", configs[agent_id], "would speak in the default voice")
+        voices = [config["voice"]["name"] for _, config in agent_configs() if "voice" in config]
+        self.assertEqual(sorted(voices), sorted(set(voices)), "two agents share a voice")
+
     def test_core_preloads_have_a_core_section(self):
         for name, config in agent_configs():
             for skill_id, settings in (config.get("skills") or {}).items():

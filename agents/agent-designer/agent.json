@@ -4,11 +4,7 @@
     "agent-management",
     "general"
   ],
-  "channel_hosts": [
-    "agent-management"
-  ],
   "description": "Agent Architect: designs concise, purpose-driven agents via rigorous inquiry (Why/How/What).",
-  "discord_token_key": "DISCORD_TOKEN_AGENT_DESIGNER",
   "emoji": "🧠",
   "model": "PRO",
   "name": "Aki",
@@ -50,12 +46,6 @@
   },
   "voice": {
     "name": "en-US-Chirp3-HD-Enceladus"
-  },
-  "voice_config": {
-    "enabled": true,
-    "auto_join": true,
-    "audio_blurp": "assets/sounds/blurps/concierge_ping.wav",
-    "post_transcript_to_chat": true
   },
   "schedules": [
     {

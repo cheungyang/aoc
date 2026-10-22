@@ -9,9 +9,6 @@
     "home-automation",
     "general"
   ],
-  "channel_hosts": [
-    "home-automation"
-  ],
   "tools": {
     "home_assistant": {
       "*": [

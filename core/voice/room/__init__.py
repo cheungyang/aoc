@@ -1,4 +1,5 @@
-"""The voice room: joining and leaving it, the text channel it talks into
-(connection.py), and moving the user to another room by voice -- "take me
-to day planning" (room_switch.py).
+"""The voice room: joining and leaving it (connection.py), and the focus --
+which agent and text channel the next turn belongs to (focus.py) -- moved by
+voice with "switch me to Daisy" (room_switch.py), or after "Do you mean
+fitness coach Frankie?" when the name was not exact (near_miss.py).
 """

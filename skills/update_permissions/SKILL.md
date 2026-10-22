@@ -34,7 +34,7 @@ This skill safely modifies `agent.json` or `skill.json` to manage `tools` and `s
 ### agent.json Top-Level Keys
 Validation accepts only: `agent_id`, `id`, `name`, `emoji`, `description`, `model`, `provider`, `graph`, `stateless`, `channels`, `channel_hosts`, `concierge_prefixes`, `discord_token_key`, `memory_topics`, `tools`, `skills`, `schedules`, `thinking`, `voice`, `voice_config`. When updating a file, change only `tools`, `skills` and `channels` (plus the concierge's `channel_hosts`); a new `agent.json` starts from the `agent_creation` template. Schedules belong to `update_schedule`; `thinking` and `voice` come from the approved plan.
 
-*Note on channels:* child agents do not need `channel_hosts` or `discord_token_key` defined if they rely on the concierge.
+*Note on channels:* only the concierge (`main`) has `channel_hosts` and `discord_token_key`: it runs the system's only Discord bot and hosts every channel, and hands each channel to its agent (rule 10). No other agent defines them.
 
 ### Permission Bundles (`@` Syntax)
 Named action bundles prefixed with `@` provide standard, drift-free permission sets for supported tools. Always prefer bundles over verbose action lists. Bundles expand at load time; unknown `@` names fail closed.

@@ -9,7 +9,7 @@ while it's being written: each stretch -- a <speech> block, in the voice of
 the agent that wrote it -- is one TTS stream feeding one speaker in the audio
 queue (engines/tts.py, pcm_speaker.py). A reply without the block gets a
 deterministic fallback and a note under it (missing_speech.py). Fixed lines
-(room switching) go through `say`. Every method that would make a sound takes
+(switching who you're talking to) go through `say`. Every method that would make a sound takes
 an `is_current` check, so a turn that was interrupted or superseded goes
 quiet.
 """
@@ -114,8 +114,8 @@ class ReplyStreamer:
             self._log(f"Error playing static blurp: {e}")
 
     async def say(self, text: str, agent_id: Optional[str] = None, is_current: IsCurrent = lambda: True):
-        """Speaks a fixed line (room switching) outside an agent reply, in
-        `agent_id`'s voice: the room's own by default."""
+        """Speaks a fixed line (a focus switch) outside an agent reply, in
+        `agent_id`'s voice: this bot's own agent by default."""
         line = speakable(text)
         if not line or not is_current() or not self.connection.is_connected():
             return
@@ -135,7 +135,8 @@ class ReplyStreamer:
         return speaker.stream
 
     async def stream(self, agent, transcript: str, author: str, session, channel, speech: TurnSpeech,
-                     is_current: IsCurrent, on_final: Callable[[str], None]) -> bool:
+                     is_current: IsCurrent, on_final: Callable[[str], None],
+                     speaker: Optional[str] = None) -> bool:
         """Streams the agent and fans its events out to a text lane and a speech lane.
 
         Speech and text diverge here, deliberately. The speaker gets the
@@ -145,6 +146,10 @@ class ReplyStreamer:
         Discord edit doesn't delay the next sentence's synthesis, and
         synthesis doesn't delay reading the agent's stream. This loop only
         routes events and never blocks on I/O.
+
+        `speaker` is the agent you're talking to (the focus's): whose voice is
+        heard until a delegate's tokens say otherwise, and who says the error
+        line. Defaults to this bot's own agent.
 
         Returns whether the agent answered: False if a newer turn took over
         first, leaving the words unanswered. `on_final` gets what the user
@@ -175,7 +180,8 @@ class ReplyStreamer:
         self.audio.start()
         text_task = asyncio.create_task(self._run_text_lane(channel, text_buffer, text_lane, mirror_task))
         speech_task = asyncio.create_task(self._run_speech_lane(speech_lane, speech, is_current))
-        speaker = self.agent_id  # whose reply is heard: a delegate's, once it streams
+        you_asked = speaker or self.agent_id  # the agent you're talking to
+        speaker = you_asked  # whose reply is heard: a delegate's, once it streams
         replied, response, final_text, failed = False, None, "", False
         try:
             trace.mark("agent_start")
@@ -222,7 +228,7 @@ class ReplyStreamer:
             route(*router.flush())
             # Only a model's reply is held to <speech>: not a failed run, nor a
             # turn that never reached a model (a system command).
-            closing, said_by = (ERROR_LINE, self.agent_id) if failed else ("", speaker)
+            closing, said_by = (ERROR_LINE, you_asked) if failed else ("", speaker)
             if replied and not failed and self._missing_speech(speaker, response, trace):
                 closing = missing_speech.fallback_speech(final_text)
                 text_lane.put_nowait(("note", missing_speech.alert(speaker)))

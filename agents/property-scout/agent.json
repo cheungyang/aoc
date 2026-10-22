@@ -18,6 +18,7 @@
     "real_estate_scout": { "preload": "full" },
     "tool_audit": {}
   },
+  "voice": { "name": "en-US-Chirp3-HD-Orus" },
   "schedules": [
     {
       "id": "weekly-scout",

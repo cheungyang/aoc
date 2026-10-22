@@ -69,19 +69,22 @@ class BotRunner:
         # Register voice commands
         @self.bot.command(name="join")
         async def cmd_join(ctx, *, channel_name: str = None):
+            # Typed in #day-planning, this joins the voice room and starts you
+            # with Daisy: the channel it was typed in becomes the focus.
             target = channel_name
             if not target and ctx.author.voice:
                 target = str(ctx.author.voice.channel.id)
-            success = await self.voice_manager.connection.join(target, text_channel=ctx.channel)
+            success = await self.voice_manager.join(target, focus_channel=ctx.channel)
             if success:
-                ch_name = getattr(ctx.channel, "name", str(ctx.channel.id))
-                await ctx.send(f"Connected to voice channel: `{self.voice_manager.connection.channel.name}` (linked to #{ch_name}) 🎙️")
+                focus = self.voice_manager.focus()
+                where = "the lobby" if focus.is_lobby else f"#{focus.channel_name}"
+                await ctx.send(f"Connected to voice channel: `{self.voice_manager.connection.channel.name}`, talking in {where} 🎙️")
             else:
                 await ctx.send("Could not join voice channel.")
 
         @self.bot.command(name="leave")
         async def cmd_leave(ctx):
-            await self.voice_manager.connection.leave()
+            await self.voice_manager.leave()
             await ctx.send("Disconnected from voice channel. 👋")
 
     async def stop(self):
@@ -108,7 +111,8 @@ class BotRunner:
         return [f"{ch}-voice" for ch in channel_hosts]
 
     async def on_voice_state_update(self, member, before, after):
-        """Auto-follows human users when they join any voice channel matching the agent's channel_hosts."""
+        """Follows you into the voice channel and greets you there: each time
+        you join is a new voice session, with the concierge in the lobby."""
         if member.bot:
             return
         if not Ownership().is_mine(self.agent_id):
@@ -129,7 +133,11 @@ class BotRunner:
         ):
             if self.voice_manager.connection.channel != after.channel:
                 print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
-                await self.voice_manager.connection.join(after.channel.name)
+                if not await self.voice_manager.connection.join(after.channel.name):
+                    return
+            # You arrived (not a mute or deafen while already in the channel).
+            if before.channel != after.channel:
+                await self.voice_manager.welcome()
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
@@ -195,7 +203,7 @@ class BotRunner:
         if Ownership().is_mine(self.agent_id):
             loop.create_task(self._maybe_auto_join())
         elif self.voice_manager.connection.voice_client:
-            loop.create_task(self.voice_manager.connection.leave())
+            loop.create_task(self.voice_manager.leave())
 
     async def _handle_control_message(self, message):
         """Control-thread messages: claims, releases and user commands.

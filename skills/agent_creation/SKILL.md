@@ -81,7 +81,7 @@ Voice-hot agents target 2–3 model calls per user turn; the plan states each wo
 - `skills`: an object; the list form is rejected. `{"preload": "full"}` for a small skill used on nearly every run, `{"preload": "core"}` for a larger one used often, `{}` for rare ones.
 - `thinking`: usually omitted (defaults: voice `low`, text `medium`, scheduled `high`). Override a surface whose work needs another depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat, or `{"text": "low"}` when most turns are quick and one skill step raises it.
 - `set_thinking` (tool): only for a mixed workload, quick turns plus one heavy step (a plan, a many-constraint choice); that skill names the step and level.
-- `voice`: a user-facing agent whose name suggests a voice gets a Chirp 3 HD voice matching its gender and personality; neutral names (Concierge, Rio) omit it.
+- `voice`: every user-facing agent gets a Chirp 3 HD voice matching its personality (and gender, where the name suggests one), different from every other agent's: there is one voice room, and the voice is how the user hears who is answering. Only internal workers omit it.
 
 ### agent.json Template
 You MUST use this exact JSON structure:
@@ -94,8 +94,6 @@ You MUST use this exact JSON structure:
   "description": "<Short Description>",
   "model": "<Optional Tier: FLASH_LITE | FLASH | PRO>",
   "provider": "<Optional: google (default) | local>",
-  "discord_token_key": "<Optional Discord Token Key>",
-  "channel_hosts": ["<Optional Channel>"],
   "memory_topics": ["<Optional shared topic>"],
   "tools": {
     "<tool_name_1>": {}
@@ -109,8 +107,8 @@ You MUST use this exact JSON structure:
 }
 ```
 *Critical Constraints for agent.json:*
-- Remove every optional key the agent doesn't use rather than leaving a placeholder. `skills`, `thinking` and `voice` show example values: replace them with the agent's own, and drop `thinking` and `voice` unless the plan calls for them.
-- Use only the keys above, plus `schedules`. Validation rejects unknown top-level keys, and an `agent.json` that fails validation is not loaded at all. `stateless`, `graph`, `concierge_prefixes` and `voice_config` are system keys (internal workers, the concierge, the bots that join voice); new agents don't use them.
+- Remove every optional key the agent doesn't use rather than leaving a placeholder. `skills`, `thinking` and `voice` show example values: replace them with the agent's own, and drop `thinking` unless the plan calls for it, and `voice` only for an internal worker.
+- Use only the keys above, plus `schedules`. Validation rejects unknown top-level keys, and an `agent.json` that fails validation is not loaded at all. `stateless`, `graph`, `concierge_prefixes`, `voice_config`, `discord_token_key` and `channel_hosts` are system keys (internal workers, and the concierge, which runs the only bot and hosts every channel); new agents don't use them. A new agent's channel goes in `channels`, and is registered with the concierge as `update_permissions` describes (rule 10).
 - The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
 - Do not explicitly add tools to the `tools` object if they are already inherited via the skills in `skills` (e.g., `web_search` is inherited via the `research` skill).
 - `skills` MUST be an object keyed by skill id. Each value is `{}` (on demand: the agent sees a one-line entry and calls `load_skill`), `{"preload": "full"}` (the whole SKILL.md body is in every prompt) or `{"preload": "core"}` (only its `## Core` section is; `load_skill` returns the rest). Preload only skills the agent uses on most runs, keep the agent's preloaded text within 6,000 characters, and preload as `core` only skills split into `## Core` / `## Reference` (see `skill_creation`).
@@ -118,7 +116,7 @@ You MUST use this exact JSON structure:
 - The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite` or an on-device build id. This holds for every provider. Valid tiers are defined per provider in `core/util/models.py`; omit the field to accept the default.
 - The `provider` field selects where the model runs. Omit it for Gemini. `"local"` routes the agent to the on-device server configured by `LOCAL_LLM_BASE_URL`. Both providers answer the same tier names, so moving an agent on-device is adding this one key and nothing else.
 - `thinking` (optional, rare) overrides the code defaults for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
-- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Agents with neutral names omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
+- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Every agent the user talks to has one, and no two agents share a voice (check the other `agent.json` files); only internal workers omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
 
 *Before setting `"provider": "local"`, know two things:*
 - **The server handles one request at a time.** Local agents queue behind each other, so keep the local roster small and prefer low-volume, single-purpose agents.

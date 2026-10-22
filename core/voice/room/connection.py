@@ -1,13 +1,12 @@
-"""The bot's voice connection: joining and leaving rooms, and which text
-channel a room talks into.
+"""The bot's voice connection: joining and leaving the voice room.
 
-A voice room shares its conversation with a text channel, so spoken and typed
-turns land in the same context (see `resolve_text_channel`).
+Which text channel a turn belongs to is not decided here: that is the focus
+(focus.py), which moves when you ask for another agent, not when the bot
+changes rooms.
 """
 import asyncio
 import re
-import time
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Optional
 
 import discord
 from discord.ext import voice_recv
@@ -25,22 +24,21 @@ def normalize_channel_name(name: str) -> str:
 
 
 class VoiceConnection:
-    """One bot's voice client, the sink listening on it, and its linked text channel.
+    """One bot's voice client and the sink listening on it.
 
     `make_sink` builds the AudioSink to listen with on each join, and
-    `channel_hosts` returns the agent's current channel_hosts (read per call,
-    so an edited agent.json applies without a restart).
+    `on_joined(room)`, if given, is told about every successful join: a new
+    voice session, whose focus starts afresh.
     """
 
     def __init__(self, bot_runner, make_sink: Callable[[], voice_recv.AudioSink],
-                 channel_hosts: Callable[[], Iterable[str]]):
+                 on_joined: Optional[Callable[[Any], None]] = None):
         self._runner = bot_runner
         self.agent_id = bot_runner.agent_id
         self._make_sink = make_sink
-        self._channel_hosts = channel_hosts
+        self._on_joined = on_joined
         self.voice_client = None
         self.sink = None
-        self.linked_text_channel = None  # Explicitly linked text channel (e.g. from !join command)
 
     @property
     def bot(self):
@@ -58,74 +56,6 @@ class VoiceConnection:
     def own_user(self):
         """The bot's own member in voice, which it must never listen to."""
         return getattr(self.voice_client, "user", None) if self.voice_client else None
-
-    # --- text channel ---------------------------------------------------------
-
-    def resolve_text_channel(self, voice_channel) -> discord.abc.Messageable:
-        """
-        Finds the corresponding text channel to share 1:1 conversation context with voice.
-        1. Uses explicitly linked channel if set (e.g. from !join command).
-        2. Matches voice channel name (e.g. 'day-planning-voice' -> 'day-planning')
-           against the agent's channel_hosts and guild text channels.
-        3. Matches any agent channel_host in text channels (e.g. 'general').
-        4. Falls back to first available text channel in guild to unify context with text.
-        5. Last resort fallback to voice channel itself.
-        """
-        if self.linked_text_channel:
-            return self.linked_text_channel
-
-        if not voice_channel or not hasattr(voice_channel, "guild") or not voice_channel.guild:
-            return voice_channel
-
-        vc_normalized = normalize_channel_name(voice_channel.name)
-        channel_hosts = list(self._channel_hosts())
-
-        # 1. Exact normalized name match (e.g. day-planning-voice -> day-planning)
-        for ch in voice_channel.guild.text_channels:
-            if normalize_channel_name(ch.name) == vc_normalized:
-                return ch
-
-        # 2. Match channel_hosts if related
-        for ch in voice_channel.guild.text_channels:
-            ch_norm = normalize_channel_name(ch.name)
-            if (ch.name in channel_hosts or str(ch.id) in channel_hosts) and (ch_norm in vc_normalized or vc_normalized in ch_norm):
-                return ch
-
-        # 3. Match any agent channel_host in text channels (e.g. general)
-        for ch in voice_channel.guild.text_channels:
-            if ch.name in channel_hosts or str(ch.id) in channel_hosts:
-                return ch
-
-        # 4. Fallback to first available text channel in guild to unify context with text
-        if voice_channel.guild.text_channels:
-            return voice_channel.guild.text_channels[0]
-
-        # 5. Last resort fallback to the voice channel itself
-        return voice_channel
-
-    def text_channel(self):
-        """The text channel the current room talks into."""
-        return self.resolve_text_channel(self.channel)
-
-    # --- rooms ----------------------------------------------------------------
-
-    def find_voice_channel(self, room_name: str, guild=None):
-        """A voice channel of the current guild (or `guild`) by exact or normalized name."""
-        guild = getattr(self.channel, "guild", None) or guild
-        wanted = normalize_channel_name(room_name)
-        for vc in getattr(guild, "voice_channels", None) or []:
-            if vc.name == room_name or normalize_channel_name(vc.name) == wanted:
-                return vc
-        return None
-
-    async def wait_for(self, room, timeout: float) -> bool:
-        """Waits until the bot is connected in `room`; False after `timeout` seconds."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if self.is_connected() and getattr(self.channel, "id", None) == room.id:
-                return True
-            await asyncio.sleep(0.1)
-        return False
 
     # --- joining and leaving --------------------------------------------------
 
@@ -146,15 +76,8 @@ class VoiceConnection:
                 return guild.voice_channels[0]
         return None
 
-    async def join(self, channel_name_or_id: str = None, text_channel: discord.TextChannel = None) -> bool:
-        """Joins a Discord voice channel and starts listening.
-
-        `text_channel` links the voice conversation to that text channel (the
-        `!join` command). Any other join -- following the user into a room, a
-        voice room switch -- clears an earlier link, so the new room resolves
-        its own text channel instead of talking into the old one.
-        """
-        self.linked_text_channel = text_channel
+    async def join(self, channel_name_or_id: str = None) -> bool:
+        """Joins a Discord voice channel and starts listening."""
         target_channel = self._find_target(channel_name_or_id)
         if not target_channel:
             available_vcs = [f"'{vc.name}'" for guild in self.bot.guilds for vc in guild.voice_channels]
@@ -191,9 +114,9 @@ class VoiceConnection:
             self._warn_if_no_opus()
             self.voice_client.listen(self.sink)
 
-            resolved_text = self.resolve_text_channel(target_channel)
-            resolved_name = resolved_text.name if hasattr(resolved_text, "name") else str(resolved_text)
-            print(f"[VoiceManager:{self.agent_id}] Connected! Context linked to text channel '#{resolved_name}'. Listening for voice...")
+            print(f"[VoiceManager:{self.agent_id}] Connected to '{channel_name}'. Listening for voice...")
+            if self._on_joined is not None:
+                self._on_joined(target_channel)
             return True
 
         except asyncio.CancelledError:
@@ -207,8 +130,7 @@ class VoiceConnection:
             return False
 
     async def leave(self):
-        """Disconnects from the active voice channel and clears the link."""
-        self.linked_text_channel = None
+        """Disconnects from the active voice channel."""
         vc = self.voice_client
         await self._disconnect()
         if vc:

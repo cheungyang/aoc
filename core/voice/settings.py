@@ -6,9 +6,10 @@ Per-agent choices -- which voice an agent speaks in -- live in that agent's
     "voice": {"name": "en-US-Chirp3-HD-Zephyr", "rate": 1.1}
 
 `name` is required and must be one of `CHIRP3_HD_VOICES` below, with a locale
-prefix. `rate` is optional. An agent with no `voice` block speaks in
-`DEFAULT_VOICE`; that is deliberate for agents whose names carry no voice of
-their own (Concierge, Rio, ...), not an omission.
+prefix. `rate` is optional. Every agent you can talk to has a `voice` block,
+and no two share one: there is one voice room, and the voice is how you hear
+who is answering (tests/core/loaders/test_agent_configs.py checks this). An
+agent with no `voice` block -- an internal worker -- speaks in `DEFAULT_VOICE`.
 
 Everything that is the same for all agents belongs here rather than in any
 agent.json, so it cannot drift between agents. Operational knobs for the voice

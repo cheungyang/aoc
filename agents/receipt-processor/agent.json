@@ -16,5 +16,6 @@
   },
   "skills": {
     "tool_audit": {}
-  }
+  },
+  "voice": { "name": "en-US-Chirp3-HD-Erinome" }
 }

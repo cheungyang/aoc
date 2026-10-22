@@ -753,126 +753,360 @@ async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runne
 
 
 # ---------------------------------------------------------------------------
-# Room switching by voice
+# One voice room: "switch me to Daisy" moves the focus, not the user
 # ---------------------------------------------------------------------------
 
+class _Loader:
+    """What the voice manager and its focus directory ask of AgentsLoader.
+    Concierge hosts every channel, Aki's included: no agent has a bot of its own."""
+
+    CONFIGS = {
+        "main": {"name": "Concierge", "channels": ["*"], "tools": {"agent_call": {}},
+                 "channel_hosts": ["general", "day-planning", "market-scout", "fitness-coach", "agent-management"]},
+        "day-planner": {"name": "Daisy", "channels": ["day-planning", "general"]},
+        "market-scout": {"name": "Marvin", "channels": ["market-scout", "general"]},
+        "fitness-coach": {"name": "Frankie", "channels": ["fitness-coach"],
+                          "description": "Curates and tracks home workouts."},
+        "agent-designer": {"name": "Aki", "channels": ["agent-management", "general"]},
+    }
+
+    def __init__(self, agents):
+        self.agents = agents  # agent id -> agent double
+
+    def list_agent_ids(self):
+        return list(self.CONFIGS)
+
+    def get_agent_config(self, agent_id):
+        return self.CONFIGS.get(agent_id)
+
+    def get_agent(self, agent_id):
+        return self.agents.get(agent_id)
+
+    def hosts_channel(self, agent_id, channel):
+        return channel in (self.CONFIGS.get(agent_id) or {}).get("channel_hosts", [])
+
+    def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
+        return sorted(a for a, c in self.CONFIGS.items()
+                      if a != exclude_agent_id and "*" not in c["channels"] and channel in c["channels"])
+
+
+# The voices the real agent configs give them (agent_voice reads those).
+CONCIERGE_VOICE = "en-US-Chirp3-HD-Aoede"
+DAISY_VOICE = "en-US-Chirp3-HD-Zephyr"
+FRANKIE_VOICE = "en-US-Chirp3-HD-Pulcherrima"
+
+
+def _text_channel(name):
+    channel = MagicMock()
+    channel.name = name
+    message = MagicMock()
+    message.edit = AsyncMock()
+    message.delete = AsyncMock()
+    channel.send = AsyncMock(return_value=message)
+    return channel
+
+
 def _room_fixture(mock_bot_runner, tmp_path):
-    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    """The bot in the one voice room, 'aoc-voice', whose own chat only logs
+    switches. The lobby is #general; the model behind "Do you mean …?" is a
+    mock that finds nothing close unless a test says otherwise."""
+    vm, main_agent, general = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    vm.config.update({"voice_channel": "aoc-voice"})
+    room = vm.connection.voice_client.channel
+    room.name = "aoc-voice"
+    room.send = AsyncMock()
+    channels = {"general": general}
+    for name in ("day-planning", "market-scout", "fitness-coach", "agent-management"):
+        channels[name] = _text_channel(name)
+    room.guild.text_channels = list(channels.values())
+    channels["room"] = room
+    vm.connection.bot.change_presence = AsyncMock()
+    vm.switcher._resolve = AsyncMock(return_value=None)
+    loader = _Loader({"main": main_agent})
+    return vm, main_agent, loader, channels
 
-    general = MagicMock(id=1)
-    general.name = "general-voice"
-    day = MagicMock(id=2)
-    day.name = "day-planning-voice"
-    guild = vm.connection.voice_client.channel.guild
-    guild.voice_channels = [general, day]
-    general.guild = guild
-    day.guild = guild
-    vm.connection.voice_client.channel = general
-    mock_bot_runner.get_hosted_voice_channels = MagicMock(return_value=["general-voice", "day-planning-voice"])
 
-    loader = MagicMock()
-    loader.get_agent.return_value = agent
-    loader.eligible_agents_for_channel.side_effect = lambda ch, exclude_agent_id=None: {"day-planning": ["day-planner"]}.get(ch, [])
-    loader.get_agent_config.side_effect = lambda agent_id: {"day-planner": {"name": "Daisy"}}.get(agent_id)
-    loader.sole_eligible_agent.side_effect = lambda ch, exclude_agent_id=None: {"day-planning": "day-planner"}.get(ch)
+def _capture_sessions(agent, reply="Done."):
+    """The agent answers `reply` every time; returns the (prompt, session) of each call."""
+    calls = []
 
-    user = MagicMock(display_name="Sam", bot=False)
-    return vm, agent, user, loader, day
+    async def stream(prompt, session=None):
+        calls.append((prompt, session))
+        yield {"type": "token", "content": _spoken_reply(reply)}
+        yield _final(_spoken_reply(reply))
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+    return calls
+
+
+async def _turn(vm, text, user=None):
+    _say(vm, text, user=user)
+    await vm._current_task
+    await asyncio.gather(*list(vm._side_tasks))
+
+
+def _voices(vm):
+    return [stream.voice.name for stream in vm.reply.tts.streams]
+
+
+def _focused(loader, *patches):
+    """The patches every focus test runs under."""
+    from contextlib import ExitStack
+    stack = ExitStack()
+    stack.enter_context(patch("core.voice.voice_manager.AgentsLoader", return_value=loader))
+    stack.enter_context(patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None))
+    for extra in patches:
+        stack.enter_context(extra)
+    return stack
 
 
 @pytest.mark.asyncio
-async def test_room_switch_moves_the_user_and_greets_without_a_model_call(mock_bot_runner, tmp_path):
-    vm, agent, user, loader, day = _room_fixture(mock_bot_runner, tmp_path)
+async def test_a_switch_moves_the_focus_and_greets_without_a_model_call(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        assert vm.focus().is_lobby and vm.focus().channel_name == "general", "a voice session starts in #general"
+        await _turn(vm, "Switch me to Daisy.")
 
-    async def move_to(room):
-        vm.connection.voice_client.channel = room  # the runner's voice-state handler follows the user
-
-    user.move_to = AsyncMock(side_effect=move_to)
-    vm.connection.join = AsyncMock()
-    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.AgentsLoader", return_value=loader), \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
-        _say(vm, "Take me to day planning.", user=user)
-        await vm._current_task
-
-    user.move_to.assert_awaited_once_with(day)
-    agent.execute_stream.assert_not_called()
-    vm.connection.join.assert_not_awaited()
+    main_agent.execute_stream.assert_not_called()
+    vm.switcher._resolve.assert_not_awaited()
+    assert vm.focus().key == "day-planning"
     assert vm.reply.tts.said() == ["Daisy here."]
-    assert vm.reply.tts.streams[0].voice.name == "en-US-Chirp3-HD-Zephyr", "greeted in Daisy's own voice"
+    assert _voices(vm) == [DAISY_VOICE], "greeted in Daisy's own voice"
+    channels["room"].send.assert_awaited_once_with("🎧 Now with Daisy · #day-planning")
+    activity = vm.connection.bot.change_presence.await_args.kwargs["activity"]
+    assert activity.name == "Daisy · #day-planning"
 
 
 @pytest.mark.asyncio
-async def test_room_switch_by_agent_name_joins_directly_if_the_bot_does_not_follow(mock_bot_runner, tmp_path):
-    vm, agent, user, loader, day = _room_fixture(mock_bot_runner, tmp_path)
-    user.move_to = AsyncMock()
-    vm.connection.join = AsyncMock()
-    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.ROOM_FOLLOW_TIMEOUT_S", 0.05), \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
-        _say(vm, "Let me talk to Daisy", user=user)
-        await vm._current_task
+async def test_after_a_switch_turns_run_exactly_as_typed_in_the_focus_channel(mock_bot_runner, tmp_path):
+    """I1: Concierge, on #day-planning's discord session; graphs/main then
+    reaches Daisy's own session, as for a typed message."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar tomorrow?")
 
-    user.move_to.assert_awaited_once_with(day)
-    vm.connection.join.assert_awaited_once_with("2")
-    agent.execute_stream.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_a_request_that_mentions_a_room_is_still_a_normal_turn(mock_bot_runner, tmp_path):
-    vm, agent, user, loader, _day = _room_fixture(mock_bot_runner, tmp_path)
-    user.move_to = AsyncMock()
-
-    async def fake_stream(*_args, **_kwargs):
-        yield {"type": "final_response", "text": "Added.", "response": None}
-
-    agent.execute_stream = MagicMock(side_effect=fake_stream)
-    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.AgentsLoader", return_value=loader), \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
-        _say(vm, "Go to day planning and add a dentist task", user=user)
-        await vm._current_task
-
-    user.move_to.assert_not_awaited()
-    agent.execute_stream.assert_called_once()
+    (prompt, session), = calls
+    assert prompt == "What's on my calendar tomorrow?"
+    assert session.session_id == "main:discord:day-planning"
+    assert session.source == "discord" and session.get_surface() == "voice"
+    assert session.channel_obj is channels["day-planning"]
+    channels["day-planning"].send.assert_any_call("🎤 **Sam (Voice):** What's on my calendar tomorrow?")
+    channels["general"].send.assert_not_called()
+    assert _voices(vm)[-1] == DAISY_VOICE, "until a delegate's tokens say otherwise, it's Daisy you hear"
 
 
 @pytest.mark.asyncio
-async def test_room_switch_without_move_permission_says_so(mock_bot_runner, tmp_path):
-    vm, agent, user, loader, _day = _room_fixture(mock_bot_runner, tmp_path)
-    user.move_to = AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "Missing Permissions"))
-    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.AgentsLoader", return_value=loader), \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
-        _say(vm, "Switch to day planning", user=user)
-        await vm._current_task
+async def test_take_me_to_concierge_continues_generals_conversation(mock_bot_runner, tmp_path):
+    """D1: the lobby is #general, not a conversation of the voice room's own."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Take me to Marvin.")
+        await _turn(vm, "Take me to concierge.")
+        await _turn(vm, "What agents do I have?")
 
-    spoken = vm.reply.tts.said()[-1]
-    assert "Move Members" in spoken
-    agent.execute_stream.assert_not_called()
+    assert vm.focus().is_lobby
+    assert vm.reply.tts.said()[:2] == ["Marvin here.", "Concierge here."]
+    assert _voices(vm)[1] == CONCIERGE_VOICE
+    (_prompt, session), = calls
+    assert session.session_id == "main:discord:general"
+    assert session.channel_obj is channels["general"]
+    channels["room"].send.assert_any_await("🎧 Now with the concierge · #general")
 
 
 @pytest.mark.asyncio
-async def test_a_room_request_leaves_an_unanswered_question_behind(mock_bot_runner, tmp_path):
-    """The newest words decide a room switch; what the old room never answered
-    isn't merged into it, or carried to the new room."""
-    vm, agent, user, loader, day = _room_fixture(mock_bot_runner, tmp_path)
-    vm.floor._pending = [_spoken("What's on my calendar?", user=user)]
+async def test_who_are_you_is_answered_by_the_agent_you_are_with(mock_bot_runner, tmp_path):
+    """An ordinary turn in Daisy's channel: she introduces herself as she would there."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent, reply="I'm Daisy, your day planner.")
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Who are you?")
 
-    async def move_to(room):
-        vm.connection.voice_client.channel = room
+    (prompt, session), = calls
+    assert prompt == "Who are you?"
+    assert session.session_id == "main:discord:day-planning"
+    assert vm.reply.tts.said() == ["Daisy here.", "I'm Daisy, your day planner."]
+    vm.switcher._resolve.assert_not_awaited()
 
-    user.move_to = AsyncMock(side_effect=move_to)
-    with patch("core.voice.voice_manager.AgentsLoader", return_value=loader), \
-         patch("core.voice.room.room_switch.AgentsLoader", return_value=loader), \
-         patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
-        _say(vm, "Take me to day planning.", user=user)
-        await vm._current_task
 
-    user.move_to.assert_awaited_once_with(day)
-    agent.execute_stream.assert_not_called()
+@pytest.mark.asyncio
+async def test_aki_is_reached_through_concierge_like_any_agent(mock_bot_runner, tmp_path):
+    """No special case: #agent-management is Concierge's, handed to Aki on
+    the session a message typed there reaches."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent, reply="Sure.")
+    with _focused(loader):
+        await _turn(vm, "Let me talk to Aki.")
+        await _turn(vm, "Design an agent for my reading list.")
+
+    assert vm.reply.tts.said()[0] == "Aki here."
+    (_prompt, session), = calls
+    assert session.session_id == "main:discord:agent-management"
+    assert session.channel_obj is channels["agent-management"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_said_to_one_agent_reaches_the_next(mock_bot_runner, tmp_path):
+    """I3: unanswered words and a closing question belong to the old focus."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        vm.floor._pending = [_spoken("What's on my calendar?")]  # Daisy never answered it
+        vm.floor.set_reply("Want me to book the earlier slot?")
+        await _turn(vm, "Take me to Marvin.")
+        assert vm.floor.unanswered() == [] and vm.floor._reply == ""
+        await _turn(vm, "How is the market today?")
+
+    assert [prompt for prompt, _session in calls] == ["How is the market today?"]
+    assert calls[0][1].session_id == "main:discord:market-scout"
+
+
+@pytest.mark.asyncio
+async def test_a_request_that_mentions_a_channel_is_still_a_normal_turn(mock_bot_runner, tmp_path):
+    """Switching and asking in one sentence is out of scope: no switch, no question."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Go to day planning and add a dentist task")
+
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["Go to day planning and add a dentist task"]
+    vm.switcher._resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_where_am_i_and_already_there_are_answered_without_a_model_call(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Where am I?")
+        await _turn(vm, "Switch me to Daisy.")
+
+    main_agent.execute_stream.assert_not_called()
+    assert vm.reply.tts.said() == ["Daisy here.", "You're in day planning, with Daisy.", "You're already with Daisy."]
+
+
+@pytest.mark.asyncio
+async def test_a_near_miss_asks_do_you_mean_and_yes_switches(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
+    with _focused(loader):
+        await _turn(vm, "Take me to exercise.")
+        assert vm.focus().is_lobby, "only a yes switches"
+        # A lone "yes" said over the question's end counts as an answer.
+        assert vm.floor._reply == "Do you mean fitness coach Frankie?"
+        await _turn(vm, "Yes.")
+
+    main_agent.execute_stream.assert_not_called()
+    assert vm.focus().key == "fitness-coach"
+    assert vm.reply.tts.said() == ["Do you mean fitness coach Frankie?", "Frankie here."]
+    assert _voices(vm) == [CONCIERGE_VOICE, FRANKIE_VOICE], "the concierge asks; Frankie greets"
+
+
+@pytest.mark.asyncio
+async def test_no_to_do_you_mean_keeps_you_where_you_are(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Take me to exercise.")
+        await _turn(vm, "No.")
+
+    main_agent.execute_stream.assert_not_called()
+    assert vm.focus().key == "day-planning"
+    assert vm.reply.tts.said() == ["Daisy here.", "Do you mean fitness coach Frankie?", "Okay, staying with Daisy."]
+
+
+@pytest.mark.asyncio
+async def test_anything_else_drops_the_question_and_runs_as_a_normal_turn(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Take me to exercise.")
+        await _turn(vm, "What's the weather like?")
+        await _turn(vm, "Yes.")  # the question is gone: just a "yes" to the concierge
+
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["What's the weather like?", "Yes."]
+
+
+@pytest.mark.asyncio
+async def test_never_mind_drops_the_question(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Take me to exercise.")
+        await _turn(vm, "Never mind.")
+        await _turn(vm, "Yes.")
+
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["Yes."]
+
+
+@pytest.mark.asyncio
+async def test_nothing_close_makes_it_an_ordinary_request(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Take me to the airport on Friday.")
+
+    vm.switcher._resolve.assert_awaited_once()
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["Take me to the airport on Friday."]
+    assert calls[0][1].session_id == "main:discord:general"
+
+
+@pytest.mark.asyncio
+async def test_a_channel_missing_from_discord_is_reported_not_switched_to(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    channels["room"].guild.text_channels = [channels["general"], channels["day-planning"]]  # #market-scout is gone
+    with _focused(loader):
+        await _turn(vm, "Take me to Marvin.")
+
+    assert vm.focus().is_lobby
+    assert vm.reply.tts.said() == ["I can't reach market scout right now."]
+    main_agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_new_voice_session_starts_in_the_lobby_again(mock_bot_runner, tmp_path):
+    """B20's successor: a join must not keep talking into the last conversation."""
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        vm._on_joined(channels["room"])
+        assert vm.focus().is_lobby
+
+
+@pytest.mark.asyncio
+async def test_joining_the_voice_channel_greets_you_in_the_lobby(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        vm.floor._pending = [_spoken("What's on my calendar?")]
+        await vm.welcome()
+
+    assert vm.focus().is_lobby
     assert vm.floor.unanswered() == []
+    assert vm.reply.tts.said()[-1] == "Concierge here."
+    assert _voices(vm)[-1] == CONCIERGE_VOICE
+
+
+@pytest.mark.asyncio
+async def test_join_typed_in_a_text_channel_starts_there(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.connection.join = AsyncMock(return_value=True)
+    with _focused(loader):
+        assert await vm.join(None, focus_channel=channels["day-planning"]) is True
+
+    vm.connection.join.assert_awaited_once_with("aoc-voice")
+    assert vm.focus().key == "day-planning"
 
 
 # ---------------------------------------------------------------------------

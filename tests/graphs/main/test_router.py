@@ -244,6 +244,7 @@ class TestLiveRoutingTable(unittest.TestCase):
     """Pins the routing table produced by the real agent configs."""
 
     EXPECTED = {
+        "agent-management": "agent-designer",  # Aki: an ordinary specialist, no bot of his own
         "aoc-debug": None,
         "content-creation": None,
         "day-planning": "day-planner",

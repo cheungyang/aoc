@@ -1,4 +1,4 @@
-"""VoiceConnection: joining and leaving rooms, and the text channel a room talks into."""
+"""VoiceConnection: joining and leaving the voice room."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -16,8 +16,8 @@ def mock_bot_runner():
     return runner
 
 
-def _connection(runner, channel_hosts=()):
-    return VoiceConnection(runner, make_sink=MagicMock(), channel_hosts=lambda: list(channel_hosts))
+def _connection(runner, on_joined=None):
+    return VoiceConnection(runner, make_sink=MagicMock(), on_joined=on_joined)
 
 
 def test_normalize_channel_name():
@@ -25,33 +25,6 @@ def test_normalize_channel_name():
     assert normalize_channel_name("voice-software-dev") == "softwaredev"
     assert normalize_channel_name("vc-day-planning") == "dayplanning"
     assert normalize_channel_name("Weekend_Planning_VC") == "weekendplanning"
-
-
-def test_resolve_channel_linked(mock_bot_runner):
-    connection = _connection(mock_bot_runner)
-    linked_ch = MagicMock(name="linked_channel")
-    connection.linked_text_channel = linked_ch
-
-    mock_vc = MagicMock()
-    assert connection.resolve_text_channel(mock_vc) == linked_ch
-
-
-def test_resolve_channel_matched(mock_bot_runner):
-    connection = _connection(mock_bot_runner)
-
-    mock_guild = MagicMock()
-    ch1 = MagicMock()
-    ch1.name = "general"
-    ch2 = MagicMock()
-    ch2.name = "day-planning"
-    mock_guild.text_channels = [ch1, ch2]
-
-    mock_vc = MagicMock()
-    mock_vc.name = "day-planning-voice"
-    mock_vc.guild = mock_guild
-
-    resolved = connection.resolve_text_channel(mock_vc)
-    assert resolved == ch2
 
 
 def _guild_with_room(runner, connect):
@@ -171,23 +144,30 @@ async def test_leave_channel(mock_bot_runner):
     mock_vc.is_connected.return_value = True
     mock_vc.disconnect = AsyncMock()
     connection.voice_client = mock_vc
-    connection.linked_text_channel = MagicMock()
 
     await connection.leave()
     mock_vc.disconnect.assert_awaited_once()
     assert connection.voice_client is None
-    assert connection.linked_text_channel is None
 
 
 @pytest.mark.asyncio
-async def test_joining_without_a_text_channel_clears_a_stale_join_link(mock_bot_runner):
-    """B20: a `!join` link survived room moves, so a new room kept talking into the old channel."""
-    connection = _connection(mock_bot_runner)
-    connection.linked_text_channel = MagicMock(name="old-link")
-    mock_bot_runner.bot.guilds = []  # the target won't be found; the link must be gone regardless
-    await connection.join("day-planning-voice")
-    assert connection.linked_text_channel is None
+async def test_a_successful_join_is_reported_with_its_room(mock_bot_runner):
+    """B20's successor: a new voice session must not keep the last one's
+    conversation, so the voice manager hears about every join."""
+    joined = []
+    connection = _connection(mock_bot_runner, on_joined=joined.append)
+    mock_guild = _guild_with_room(mock_bot_runner, AsyncMock(return_value=MagicMock()))
 
-    explicit = MagicMock(name="explicit")
-    await connection.join("day-planning-voice", text_channel=explicit)
-    assert connection.linked_text_channel is explicit
+    assert await connection.join("general-voice") is True
+    assert joined == [mock_guild.voice_channels[0]]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_join_is_not_reported(mock_bot_runner):
+    joined = []
+    connection = _connection(mock_bot_runner, on_joined=joined.append)
+    _guild_with_room(mock_bot_runner, AsyncMock(side_effect=TimeoutError()))
+
+    assert await connection.join("general-voice") is False
+    assert await connection.join("non_existent_vc") is False
+    assert joined == []

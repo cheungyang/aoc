@@ -115,6 +115,12 @@ class Floor:
         """The reply of the turn in progress, once final ("" when a turn starts)."""
         self._reply = text
 
+    def clear(self):
+        """Forgets what the current conversation left unanswered, and its last
+        reply: the focus moved, and none of it belongs to the new one."""
+        self._pending = []
+        self._reply = ""
+
     # --- deciding -------------------------------------------------------------------
 
     def _ignored_speaker(self, user) -> bool:

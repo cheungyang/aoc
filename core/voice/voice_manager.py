@@ -5,16 +5,20 @@
                 or listening noise -- and which words are still unanswered
     engines/    speech-to-text and text-to-speech
     speech/     the agent's answer, to the text channel and the speaker
-    room/       joining rooms, the text channel a room talks into, and
-                "take me to day planning"
+    room/       joining the voice room, and the focus: which agent and text
+                channel the next turn belongs to ("switch me to Daisy")
 
 The VAD sink hands each utterance to the floor, and the floor starts and
-stops turns here. A turn answers every unanswered utterance as one request.
+stops turns here. A turn answers every unanswered utterance as one request,
+under the current focus: exactly as an untagged message typed in the focus's
+text channel would be answered, so voice and text share each agent's history.
 """
 import asyncio
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, List, Optional
+
+import discord
 
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
@@ -25,7 +29,8 @@ from .listening.turn_taking import bare_stop, merge_transcripts
 from .listening.utterance import Utterance
 from .listening.vad_sink import VADSink
 from .room.connection import VoiceConnection
-from .room.room_switch import RoomSwitcher
+from .room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
+from .room.room_switch import FocusSwitcher
 from .speech.audio_queue import AudioStreamQueue
 from .speech.reply import ReplyStreamer, TurnSpeech
 
@@ -50,16 +55,19 @@ class VoiceManager:
         # A copy: the loader caches agent configs, and this one is per-bot state.
         self.config = dict(agent.config.get("voice_config", {})) if agent else {}
 
-        self.connection = VoiceConnection(bot_runner, make_sink=self._make_sink, channel_hosts=self._channel_hosts)
+        self.connection = VoiceConnection(bot_runner, make_sink=self._make_sink, on_joined=self._on_joined)
         self.audio_queue = AudioStreamQueue(self.connection, loop=getattr(bot_runner.bot, "loop", None))
         self.stt = SpeechRecognizer(vocabulary=self._stt_vocabulary())
         self.reply = ReplyStreamer(self.agent_id, self.config, self.audio_queue, self.connection)
         self.floor = Floor(self.stt, self.audio_queue, self.connection, turns=self)
-        self.rooms = RoomSwitcher(bot_runner, self.connection)
+        self.switcher = FocusSwitcher(self, self.agent_id)
 
         self._lock = asyncio.Lock()
         self._active_turn = 0
         self._current_task = None
+        # Where the next turn goes. None means the lobby (see `focus`).
+        self._focus: Optional[VoiceFocus] = None
+        self._side_tasks = set()
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -67,16 +75,126 @@ class VoiceManager:
     def _make_sink(self) -> VADSink:
         return VADSink(self.floor, loop=self.connection.bot.loop, config=self.config)
 
-    def _channel_hosts(self) -> List[str]:
-        agent = AgentsLoader().get_agent(self.agent_id)
-        return agent.config.get("channel_hosts", []) if agent else []
-
     def _stt_vocabulary(self) -> List[str]:
         try:
             return agent_vocabulary(AgentsLoader())
         except Exception as e:
             self._log(f"Could not list agents for the STT vocabulary: {e}")
             return []
+
+    # --- joining and leaving ------------------------------------------------------
+
+    async def join(self, room: Optional[str] = None, focus_channel=None) -> bool:
+        """Joins `room` (default: the voice room in voice_config) and, given a
+        text channel, starts in its conversation: `!join` typed in
+        #day-planning starts you with Daisy."""
+        if not await self.connection.join(room or self.voice_room()):
+            return False
+        if focus_channel is not None:
+            target = self.directory().for_channel(focus_channel)
+            if target is not None:
+                self.set_focus(target)
+        return True
+
+    async def leave(self) -> None:
+        await self.connection.leave()
+        self._reset_focus()
+
+    async def welcome(self) -> None:
+        """You joined the voice channel: a new voice session, with the concierge."""
+        directory = self.directory()
+        self._reset_focus()
+        self._focus = directory.lobby
+        await self.reply.say(directory.greeting(directory.lobby), self.agent_id)
+
+    def _on_joined(self, room) -> None:
+        """The bot joined a room: nothing from the last voice session carries over."""
+        self._reset_focus()
+
+    def _reset_focus(self) -> None:
+        """Back to the lobby (on first use), with nothing left unanswered or pending."""
+        self._focus = None
+        self.floor.clear()
+        self.switcher.cancel()
+
+    def voice_room(self) -> Optional[str]:
+        """The one voice channel, from voice_config (`voice_channel`), if set."""
+        room = self.config.get("voice_channel")
+        if isinstance(room, str) and room.strip():
+            return room.strip()
+        rooms = self.config.get("voice_channels")
+        if isinstance(rooms, list) and rooms and isinstance(rooms[0], str):
+            return rooms[0]
+        return None
+
+    # --- the focus: which conversation the room is in ------------------------------
+
+    def directory(self) -> FocusDirectory:
+        """Every focus there is, from the agent configs as they are now."""
+        lobby = self.config.get("lobby_channel")
+        return FocusDirectory.build(
+            AgentsLoader(),
+            voice_host=self.agent_id,
+            lobby_channel=lobby if isinstance(lobby, str) and lobby.strip() else DEFAULT_LOBBY_CHANNEL,
+        )
+
+    def focus(self) -> VoiceFocus:
+        """Where the next turn goes: the lobby (#general) until you switch."""
+        if self._focus is None:
+            self._focus = self.directory().lobby
+        return self._focus
+
+    def set_focus(self, focus: VoiceFocus, *, interrupt: bool = True) -> None:
+        """Moves the focus. Nothing said to the old one carries over: a turn in
+        flight is stopped (unless it is the turn asking: `interrupt=False`), and
+        its unanswered words, last reply and any pending question are forgotten."""
+        previous, self._focus = self._focus, focus
+        if interrupt and self.busy():
+            self.interrupt(f"focus moved to {focus.label}")
+        self.floor.clear()
+        self.switcher.cancel()
+        if previous is None or previous.key != focus.key:
+            self._spawn(self._announce_focus(focus))
+
+    def expect_answer(self, question: str) -> None:
+        """A switching question was just asked. The floor treats a lone "yes"
+        over the end of a question as an answer, not a backchannel."""
+        self.floor.set_reply(question)
+
+    def focus_channel(self, focus: VoiceFocus):
+        """The Discord text channel `focus`'s turns are posted in, or None."""
+        guild = getattr(self.connection.channel, "guild", None)
+        for channel in getattr(guild, "text_channels", None) or []:
+            if str(getattr(channel, "name", "")).lower() == focus.channel_name.lower():
+                return channel
+        return None
+
+    async def _announce_focus(self, focus: VoiceFocus) -> None:
+        """Shows where the room is now, for a glance at Discord: a line in the
+        voice channel's own chat (which holds no conversation, only this log),
+        and the bot's status."""
+        status = f"{self.directory().who(focus)} · #{focus.channel_name}"
+        try:
+            room = self.connection.channel
+            if room is not None:
+                await room.send(f"🎧 Now with {status}")
+        except Exception as e:
+            self._log(f"Could not post the focus change in the voice channel's chat: {e}")
+        try:
+            await self.connection.bot.change_presence(
+                activity=discord.Activity(type=discord.ActivityType.listening, name=status))
+        except Exception as e:
+            self._log(f"Could not update the bot's status: {e}")
+
+    def _spawn(self, coro) -> None:
+        """Runs `coro` alongside the turn, keeping a reference until it's done."""
+        try:
+            task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            coro.close()
+            return
+        self._side_tasks.add(task)
+        task.add_done_callback(self._side_tasks.discard)
 
     # --- turns, as the floor starts and stops them -----------------------------
 
@@ -140,7 +258,7 @@ class VoiceManager:
                 turn.speech.finish_when_heard(lambda: trace.finish(session_id=turn.session_id), cancelled=cancelled)
 
     async def _answer(self, turn: _Turn):
-        """The turn's transcripts, then a stop, a room switch or the agent's reply."""
+        """The turn's transcripts, then a stop, a focus switch or the agent's reply."""
         trace, utterances = turn.trace, turn.utterances
 
         def is_current() -> bool:
@@ -179,6 +297,8 @@ class VoiceManager:
             self._log(f"✋ Heard {newest!r}: stopping, "
                       + ("keeping the request for what comes next." if stop == "hold" else "request dropped."))
             trace.meta["outcome"] = f"stop_{stop}"
+            # "Never mind" is also an answer to "Do you mean …?": no switch.
+            self.switcher.cancel()
             if stop == "hold":
                 self.floor.forget(utterances[-1:])
             else:
@@ -190,20 +310,30 @@ class VoiceManager:
         merged = f" ({len(utterances)} utterances merged)" if len(utterances) > 1 else ""
         self._log(f"📝 Transcribed prompt from {author}{merged}: '{transcript}'")
 
-        # 4. "Take me to day planning" moves rooms instead of starting a
-        #    turn, and leaves anything unanswered behind with the old room.
-        if await self.rooms.switch(user, newest, say=partial(self.reply.say, is_current=is_current)):
-            trace.meta["outcome"] = "room_switch"
+        # 4. "Switch me to Daisy" moves the focus instead of starting a turn,
+        #    and leaves anything unanswered behind with the old focus.
+        if await self.switcher.handle(newest, say=partial(self.reply.say, is_current=is_current)):
+            trace.meta["outcome"] = "focus_switch"
             turn.answered = True
             return
 
-        # 5. Execute LangGraph Agent with streaming, in the text channel this
-        #    room talks into, so context is 100% shared with text.
+        # 5. Execute LangGraph Agent with streaming, exactly as an untagged
+        #    message typed in the focus's text channel would run. Concierge
+        #    hosts every channel, so the turn runs as Concierge on that
+        #    channel's session, and the router in graphs/main reaches the
+        #    same specialist session a typed message would: context is 100%
+        #    shared with text, and the voice room keeps none of its own.
+        focus = self.focus()
         agent = AgentsLoader().get_agent(self.agent_id)
         if not agent:
             turn.answered = True  # nothing will ever answer them
             return
-        channel = self.connection.text_channel()
+        channel = self.focus_channel(focus)
+        if channel is None:
+            self._log(f"#{focus.channel_name} can't be found in Discord; the turn has nowhere to go.")
+            await self.reply.say(f"I can't reach {focus.label} right now.", self.agent_id, is_current=is_current)
+            turn.answered = True
+            return
         self._log(f"🤖 Streaming LangGraph agent under #{getattr(channel, 'name', channel)} context...")
 
         # Same session as the text channel (so context is shared), but
@@ -218,5 +348,5 @@ class VoiceManager:
         turn.session_id = session.session_id
         turn.answered = await self.reply.stream(
             agent, transcript, author, session, channel, turn.speech,
-            is_current=is_current, on_final=self.floor.set_reply,
+            is_current=is_current, on_final=self.floor.set_reply, speaker=focus.agent_id,
         )
