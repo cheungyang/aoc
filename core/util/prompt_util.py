@@ -1,4 +1,6 @@
+import contextvars
 import os
+from contextlib import contextmanager
 from typing import Optional
 
 from core.util.time_util import format_timezone_label, get_local_now
@@ -67,16 +69,9 @@ def get_channel_prompt(channel_name: Optional[str] = None) -> str:
     return ""
 
 
-# On a turn the user will hear, appended after the channel block (see
-# `get_voice_mode_prompt`). The voice pipeline speaks the <speech> block and
-# posts everything after it to the text channel (core/voice/speech/reply.py).
-VOICE_MODE_PROMPT = """<voice_mode>
-This turn arrived by voice. The user is listening; your full reply also appears in the text channel.
-
-Begin each response with a <speech>...</speech> block, then write your normal text reply.
-
-In <speech>:
-- Answer in the first sentence.
+# The <speech> rules every voice block shares: live voice turns, scheduled
+# posts, and the speech writer's conversions (core/inbox/speech_writer.py).
+SPEECH_RULES = """- Answer in the first sentence.
 - Condense the wording, never the information: keep every fact, number, name, date, and item
   from your reply. Drop formatting, repetition, and filler.
 - Speak lists in one compact pass, not as a numbered readout.
@@ -87,11 +82,61 @@ In <speech>:
 - Say numbers, times, and units as a person would.
 - Use only English words: the voice can't pronounce other scripts. Replace anything written in another
   script with its English name, without the original.
-- If you offer choices, ask them as a short question; the user will answer by voice.
+- If you offer choices, ask them as a short question; the user will answer by voice."""
+
+# On a turn the user will hear, appended after the channel block (see
+# `get_voice_mode_prompt`). The voice pipeline speaks the <speech> block and
+# posts everything after it to the text channel (core/voice/speech/reply.py).
+VOICE_MODE_PROMPT = """<voice_mode>
+This turn arrived by voice. The user is listening; your full reply also appears in the text channel.
+
+Begin each response with a <speech>...</speech> block, then write your normal text reply.
+
+In <speech>:
+""" + SPEECH_RULES + """
 - Before calling tools, write a one-sentence <speech> block saying what you're checking.
 
 After </speech>, follow your usual formatting rules. The text reply stays complete.
 </voice_mode>"""
+
+# Marks the question a post waits on, so the voice can replay exactly that
+# question later. Only posts that may be heard later need it.
+QUESTION_RULE = """- Mark a direct question with <question>...</question>, where it stands in <speech>, without repeating it.
+  A direct question is one you can't continue without the user's answer, such as "How's your energy, one
+  to ten?" or "Should I merge the two notes?". Don't mark an invitation the user may take up or ignore,
+  such as "Want to go with it, or swap for a walk?", a poll, a proposal, options, or an agenda."""
+
+# On a scheduled run whose post may be heard later (see
+# `scheduled_speech_scope`). The <speech> block is stored with the post's
+# channel inbox row (core/inbox) and never posted; the channel gets the rest.
+SCHEDULED_VOICE_MODE_PROMPT = """<voice_mode>
+This is a scheduled run. Your reply is posted to the text channel; the user may hear it later, by voice, when they switch to you.
+It plays right after a greeting that says who's speaking, so don't introduce yourself.
+
+Begin your final response with a <speech>...</speech> block, then write your normal text reply.
+
+In <speech>:
+""" + SPEECH_RULES + """
+""" + QUESTION_RULE + """
+
+After </speech>, follow your usual formatting rules. The text reply stays complete.
+</voice_mode>"""
+
+# The agent whose scheduled run writes a speech version of its post. Set by
+# the schedule runner (unless the schedule's priority is IGNORE) around the run.
+_scheduled_speech_agent = contextvars.ContextVar("scheduled_speech_agent", default=None)
+
+
+@contextmanager
+def scheduled_speech_scope(agent_id: str):
+    """Within this block, `agent_id`'s scheduled run gets the scheduled
+    <voice_mode> block. Agents it calls don't: what they write goes back to
+    it, not to the channel."""
+    token = _scheduled_speech_agent.set(agent_id)
+    try:
+        yield
+    finally:
+        _scheduled_speech_agent.reset(token)
 
 
 def get_voice_mode_prompt() -> str:
@@ -102,12 +147,20 @@ def get_voice_mode_prompt() -> str:
     Internal workers -- stateless agents such as graph-worker-low -- inherit it
     too, but what they write goes back to their caller, not to the speaker, so
     they never get the block.
+
+    A scheduled run gets the scheduled variant inside `scheduled_speech_scope`:
+    its post may be heard later, from the channel inbox.
     """
     from core.runtime.execution_context import try_context
     sess = try_context()
-    if sess is None or sess.is_stateless() or sess.get_surface() != "voice":
+    if sess is None or sess.is_stateless():
         return ""
-    return VOICE_MODE_PROMPT
+    surface = sess.get_surface()
+    if surface == "voice":
+        return VOICE_MODE_PROMPT
+    if surface == "scheduled" and sess.agent_id and sess.agent_id == _scheduled_speech_agent.get():
+        return SCHEDULED_VOICE_MODE_PROMPT
+    return ""
 
 
 def get_knowledge_prompt() -> str:

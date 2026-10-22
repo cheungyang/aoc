@@ -10,6 +10,10 @@ should not be able to.
 
 Keeping both in one function is the point. The duplicate this replaces was the
 reason a reaction emoji could appear on one path and not the other.
+
+Python code that needs one small model task (a speech version, which agent a
+misheard name means) hands it to the stateless worker through `ask_worker`,
+which runs on the same path.
 """
 import asyncio
 from dataclasses import dataclass
@@ -27,6 +31,9 @@ from core.runtime.stream_handler import (
 )
 
 Prompt = Union[str, list]
+
+# The cheap, stateless worker agent for one-off model tasks from Python code.
+WORKER_LOW = "graph-worker-low"
 
 
 @dataclass
@@ -198,9 +205,14 @@ async def stream_delegate(
         )
 
     if is_stateless:
+        from core.runtime.agent import RESPONSE_HINT
+
         res = await agent.execute(formatted_prompt, session=target_session)
         text = res if isinstance(res, str) else (res.text if hasattr(res, "text") else str(res or ""))
-        return DelegationResult(agent_id=agent_id, text=text, job_id=target_session.job_id)
+        # The parsed reply, as the streaming path returns it. It's left only by
+        # a run that completed: a failed one returns its error as text.
+        response = target_session.turn_hints.get(RESPONSE_HINT)
+        return DelegationResult(agent_id=agent_id, text=text, response=response, job_id=target_session.job_id)
 
     header = agent_header(config, agent_id)
     header_emitted = False
@@ -262,3 +274,30 @@ async def stream_delegate(
         response=subagent_response,
         job_id=target_session.job_id,
     )
+
+
+async def ask_worker(prompt: str, *, channel: str, caller: str, timeout: float,
+                     agent_id: str = WORKER_LOW) -> Optional[DelegationResult]:
+    """One task for a stateless worker agent, from Python code.
+
+    It runs through `stream_delegate`, records nothing to memory, and gets at
+    most `timeout` seconds. Returns the result of a run that completed, with
+    its parsed reply in `response`; None when it failed or ran out of time,
+    and why is logged. `caller` names the code asking, for the logs and the
+    worker's `<caller>` line.
+    """
+    try:
+        result = await asyncio.wait_for(
+            stream_delegate(agent_id=agent_id, prompt=prompt, channel=channel, caller=caller, record_memory=False),
+            timeout,
+        )
+    except asyncio.TimeoutError:
+        print(f"[{caller}] {agent_id} took longer than {timeout:g}s.")
+        return None
+    except Exception as e:
+        print(f"[{caller}] {agent_id} failed: {type(e).__name__}: {e}")
+        return None
+    if not result.ok or result.response is None:
+        print(f"[{caller}] {agent_id} failed: {result.error or result.text or 'no reply'}")
+        return None
+    return result

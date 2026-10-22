@@ -111,6 +111,10 @@ class Floor:
     def forget(self, utterances: List[Utterance]):
         self._pending = [u for u in self._pending if u not in utterances]
 
+    def quiet(self) -> bool:
+        """Nobody is mid-utterance and nothing is waiting to be answered."""
+        return not self._speaking and not self._pending
+
     def set_reply(self, text: str):
         """The reply of the turn in progress, once final ("" when a turn starts)."""
         self._reply = text

@@ -127,6 +127,30 @@ def _extract_speech(text: str) -> tuple[str, Optional[str]]:
     return cleaned_text, speech or None
 
 
+_QUESTION_BLOCK_RE = re.compile(r"<question\s*>(.*?)</question\s*>", re.DOTALL | re.IGNORECASE)
+_QUESTION_TAG_RE = re.compile(r"</?question\s*>", re.IGNORECASE)
+
+
+def split_question(speech: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """A speech version without its <question> tags, and the question they marked.
+
+    The question's words stay where they were in the speech: they're heard in
+    place the first time, and replayed alone while the post waits for an
+    answer (core/inbox). Only <question> inside <speech> is meant here; a
+    poll's <question> lives outside it and is never passed in.
+    """
+    if not speech or not _QUESTION_TAG_RE.search(speech):
+        return speech, None
+    marked = [" ".join(m.group(1).split()) for m in _QUESTION_BLOCK_RE.finditer(speech)]
+    cleaned = _QUESTION_TAG_RE.sub("", speech).strip()
+    for q in filter(None, marked):
+        # A model that marks a copy instead of the question itself says it twice.
+        while f"{q} {q}" in cleaned:
+            cleaned = cleaned.replace(f"{q} {q}", q)
+    question = " ".join(q for q in marked if q)
+    return cleaned or None, question or None
+
+
 @dataclass
 class AgentResponse:
     text: str
@@ -136,11 +160,15 @@ class AgentResponse:
     system_memory_log: Optional[str] = None
     # The reply's <speech> blocks, on a voice turn (see <voice_mode>).
     speech: Optional[str] = None
+    # The direct question marked inside <speech>, on a scheduled run whose
+    # post may be heard later (see SCHEDULED_VOICE_MODE_PROMPT).
+    question: Optional[str] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text = reply_text
         text, speech = _extract_speech(text)
+        speech, question = split_question(speech)
         text, poll_data = _extract_poll(text)
         text, image_paths = _extract_images(text)
         text, video_paths = _extract_videos(text)
@@ -153,4 +181,5 @@ class AgentResponse:
             video_paths=video_paths,
             system_memory_log=system_memory_log,
             speech=speech,
+            question=question,
         )

@@ -194,8 +194,23 @@ class FocusDirectory:
             return f"You're already in {focus.label}."
         return f"You're already with {self.who(focus)}."
 
-    def staying(self, focus: VoiceFocus) -> str:
-        """After "no" to "Do you mean …?"."""
-        if self._answered_by_concierge(focus) and not focus.is_lobby:
-            return f"Okay, staying in {focus.label}."
-        return f"Okay, staying with {self.who(focus)}."
+    def spoken_alias(self, focus: VoiceFocus) -> str:
+        """The name to say for `focus`: its agent's name at the agent's home
+        channel, "concierge" for the lobby, else the channel's own name.
+        Always one that `build_aliases` maps back to `focus`."""
+        from core.voice.room.room_switch import _key, build_aliases
+
+        aliases = build_aliases(self.alias_sources())
+        name = self.names.get(focus.agent_id)
+        candidates = [LOBBY_ALIAS] if focus.is_lobby else []
+        if name and not self._answered_by_concierge(focus) and self.homes.get(focus.agent_id) == focus.key:
+            candidates.append(name)
+        candidates.append(focus.label)
+        for candidate in candidates:
+            if aliases.get(_key(candidate)) == focus.key:
+                return candidate
+        return focus.label
+
+    def words_to_switch(self, focus: VoiceFocus) -> str:
+        """What to say to get to `focus`: \"switch to Frankie\"."""
+        return f"switch to {self.spoken_alias(focus)}"

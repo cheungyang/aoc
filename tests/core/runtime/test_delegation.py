@@ -274,6 +274,58 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         agent.execute_stream.assert_not_called()
         self.assertEqual(result.text, "<worker_handoff>output</worker_handoff>")
 
+    @patch('core.channel.discord.loader.BotsLoader')
+    @patch('core.loaders.agents_loader.AgentsLoader')
+    async def test_a_stateless_agent_returns_its_parsed_reply_too(self, mock_agents_loader, mock_bots_loader):
+        """As the streaming path does: Python callers read `<speech>` from it."""
+        from core.channel.response_parser import AgentResponse
+        from core.runtime.agent import RESPONSE_HINT
+
+        parsed = AgentResponse.from_string("<speech>Ted here.</speech>")
+
+        async def execute(prompt, session=None):
+            session.turn_hints[RESPONSE_HINT] = parsed
+            return parsed.text
+
+        agent = MagicMock()
+        agent.config = {"channels": ["*"], "stateless": True}
+        agent.execute = AsyncMock(side_effect=execute)
+        mock_agents_loader.return_value.get_agent.return_value = agent
+        mock_bots_loader.return_value.find_channel.return_value = None
+
+        result = await stream_delegate("graph-worker-low", "speak this", "topic-research")
+        self.assertIs(result.response, parsed)
+        self.assertEqual(result.response.speech, "Ted here.")
+
+
+class TestAskWorker(unittest.IsolatedAsyncioTestCase):
+    """One task for the stateless worker, from Python code."""
+
+    async def test_runs_on_the_delegation_path_without_memory(self):
+        from core.channel.response_parser import AgentResponse
+        from core.runtime.delegation import DelegationResult, ask_worker
+
+        done = DelegationResult(agent_id="graph-worker-low", text="ok", response=AgentResponse(text="ok"))
+        with patch("core.runtime.delegation.stream_delegate", new=AsyncMock(return_value=done)) as delegate:
+            result = await ask_worker("the task", channel="general", caller="near-miss", timeout=4)
+        self.assertIs(result, done)
+        delegate.assert_awaited_once_with(agent_id="graph-worker-low", prompt="the task", channel="general",
+                                          caller="near-miss", record_memory=False)
+
+    async def test_none_when_it_fails_errors_or_is_too_slow(self):
+        from core.runtime.delegation import DelegationResult, ask_worker
+
+        failed_run = DelegationResult(agent_id="graph-worker-low", text="Error: 503")  # no parsed reply
+        refused = DelegationResult(agent_id="graph-worker-low", error="cannot be called here")
+
+        async def slow(**kwargs):
+            await asyncio.sleep(1)
+
+        for behaviour in (AsyncMock(return_value=failed_run), AsyncMock(return_value=refused),
+                          AsyncMock(side_effect=RuntimeError("boom")), AsyncMock(side_effect=slow)):
+            with self.subTest(behaviour=behaviour), patch("core.runtime.delegation.stream_delegate", new=behaviour):
+                self.assertIsNone(await ask_worker("t", channel="general", caller="test", timeout=0.01))
+
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
     @patch('core.channel.discord.loader.BotsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')

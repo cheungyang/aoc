@@ -138,6 +138,32 @@ class TestCommonRules(RegistryCase):
             build_spec("a", prompt_entry(cron="bad", precondition={"type": "x"}, prompt=[]), self.scripts)
         self.assertGreaterEqual(len(cm.exception.errors), 3)
 
+    def test_priority_is_an_enum_and_defaults_to_default(self):
+        from core.inbox.model import Priority
+
+        self.assertIs(build_spec("a", prompt_entry(), self.scripts).priority, Priority.DEFAULT)
+        for value, expected in (("LOW", Priority.LOW), ("highest", Priority.HIGHEST), ("IGNORE", Priority.IGNORE)):
+            with self.subTest(value=value):
+                self.assertIs(build_spec("a", prompt_entry(priority=value), self.scripts).priority, expected)
+        self.assertRejected(prompt_entry(priority="urgent"), "unknown priority 'urgent'")
+        self.assertRejected(prompt_entry(priority=3), "unknown priority 3")
+
+    def test_label_is_a_short_spoken_phrase(self):
+        self.assertIsNone(build_spec("a", prompt_entry(), self.scripts).label)
+        spec = build_spec("a", prompt_entry(label=" your morning check-in "), self.scripts)
+        self.assertEqual(spec.label, "your morning check-in")
+        self.assertRejected(prompt_entry(label=""), "'label' must be")
+        self.assertRejected(prompt_entry(label="x" * 61), "'label' must be")
+        self.assertRejected(prompt_entry(label=["a"]), "'label' must be")
+
+    def test_scripts_take_priority_and_label_too(self):
+        from core.inbox.model import Priority
+
+        spec = build_spec("a", {"kind": "script", "cron": "0 9 * * *", "script": "ok.py", "channel": "general",
+                                "priority": "LOW", "label": "a coding update"}, self.scripts)
+        self.assertIs(spec.priority, Priority.LOW)
+        self.assertEqual(spec.label, "a coding update")
+
 
 class TestScriptEntries(RegistryCase):
     def script_entry(self, **kw):

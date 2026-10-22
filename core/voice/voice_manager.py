@@ -7,6 +7,8 @@
     speech/     the agent's answer, to the text channel and the speaker
     room/       joining the voice room, and the focus: which agent and text
                 channel the next turn belongs to ("switch me to Daisy")
+    hooks       how features built on the room join in without the voice core
+                knowing them: the inbox's briefings (core/inbox/voice_briefing.py)
 
 The VAD sink hands each utterance to the floor, and the floor starts and
 stops turns here. A turn answers every unanswered utterance as one request,
@@ -16,7 +18,7 @@ text channel would be answered, so voice and text share each agent's history.
 import asyncio
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import discord
 
@@ -24,15 +26,22 @@ from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.runtime.turn_trace import start_turn_trace
 from .engines.stt import SpeechRecognizer, agent_vocabulary
+from .hooks import VoiceHook
 from .listening.floor import Floor
 from .listening.turn_taking import bare_stop, merge_transcripts
 from .listening.utterance import Utterance
 from .listening.vad_sink import VADSink
 from .room.connection import VoiceConnection
 from .room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
-from .room.room_switch import FocusSwitcher
+from .room.room_switch import FocusSwitcher, Say
 from .speech.audio_queue import AudioStreamQueue
 from .speech.reply import ReplyStreamer, TurnSpeech
+
+
+# `say_when_idle` waits for the pipeline to be idle: checked this often, for
+# at most this long.
+IDLE_POLL_S = 0.5
+IDLE_MAX_WAIT_S = 300.0
 
 
 @dataclass
@@ -49,7 +58,7 @@ class _Turn:
 class VoiceManager:
     """Orchestrates one bot's voice: the parts above, and the turns between them."""
 
-    def __init__(self, bot_runner):
+    def __init__(self, bot_runner, hooks: Sequence[VoiceHook] = ()):
         self.agent_id = bot_runner.agent_id
         agent = AgentsLoader().get_agent(self.agent_id)
         # A copy: the loader caches agent configs, and this one is per-bot state.
@@ -68,6 +77,9 @@ class VoiceManager:
         # Where the next turn goes. None means the lobby (see `focus`).
         self._focus: Optional[VoiceFocus] = None
         self._side_tasks = set()
+        # Features built on the room (see hooks.py), called in this order.
+        self.hooks: List[VoiceHook] = list(hooks)
+        self._idle_line: Optional[asyncio.Lock] = None
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -99,23 +111,26 @@ class VoiceManager:
     async def leave(self) -> None:
         await self.connection.leave()
         self._reset_focus()
+        self._call_hooks("left")
 
     async def welcome(self) -> None:
-        """You joined the voice channel: a new voice session, with the concierge."""
+        """You joined the voice channel: a new voice session, with the concierge.
+        A hook may greet you with something other than "Concierge here." (the
+        inbox's digest)."""
         directory = self.directory()
         self._reset_focus()
         self._focus = directory.lobby
-        await self.reply.say(directory.greeting(directory.lobby), self.agent_id)
+        greetings = [line for line in self._call_hooks("joined") if line]
+        await self.reply.say(greetings[0] if greetings else directory.greeting(directory.lobby), self.agent_id)
 
     def _on_joined(self, room) -> None:
         """The bot joined a room: nothing from the last voice session carries over."""
         self._reset_focus()
 
     def _reset_focus(self) -> None:
-        """Back to the lobby (on first use), with nothing left unanswered or pending."""
+        """Back to the lobby (on first use), with nothing left unanswered."""
         self._focus = None
         self.floor.clear()
-        self.switcher.cancel()
 
     def voice_room(self) -> Optional[str]:
         """The one voice channel, from voice_config (`voice_channel`), if set."""
@@ -147,19 +162,34 @@ class VoiceManager:
     def set_focus(self, focus: VoiceFocus, *, interrupt: bool = True) -> None:
         """Moves the focus. Nothing said to the old one carries over: a turn in
         flight is stopped (unless it is the turn asking: `interrupt=False`), and
-        its unanswered words, last reply and any pending question are forgotten."""
+        its unanswered words and last reply are forgotten."""
         previous, self._focus = self._focus, focus
         if interrupt and self.busy():
             self.interrupt(f"focus moved to {focus.label}")
         self.floor.clear()
-        self.switcher.cancel()
         if previous is None or previous.key != focus.key:
             self._spawn(self._announce_focus(focus))
 
-    def expect_answer(self, question: str) -> None:
-        """A switching question was just asked. The floor treats a lone "yes"
-        over the end of a question as an answer, not a backchannel."""
-        self.floor.set_reply(question)
+    async def arrive(self, focus: VoiceFocus, say: Say) -> None:
+        """After a switch's greeting: whatever the hooks have for you there,
+        said in the focus agent's own voice."""
+        async def speak(text: str) -> None:
+            await say(text, focus.agent_id)
+            # A lone "yes" over the end of it is an answer, as after any reply.
+            self.floor.set_reply(text)
+
+        for hook in self.hooks:
+            try:
+                await hook.arrived(self, focus, speak)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._hook_failed(hook, "arrived", e)
+
+    async def switch_to(self, focus: VoiceFocus, say: Say) -> bool:
+        """Moves the focus as "switch to …" would: the greeting, then `arrive`.
+        For hooks; the switcher handles what you say."""
+        return await self.switcher.switch_to(focus, self.directory(), say)
 
     def focus_channel(self, focus: VoiceFocus):
         """The Discord text channel `focus`'s turns are posted in, or None."""
@@ -185,6 +215,61 @@ class VoiceManager:
                 activity=discord.Activity(type=discord.ActivityType.listening, name=status))
         except Exception as e:
             self._log(f"Could not update the bot's status: {e}")
+
+    # --- for hooks: speaking up between turns ---------------------------------------
+
+    def say_when_idle(self, line: str) -> None:
+        """Says a concierge line once nobody is talking and no turn is running."""
+        self._spawn(self._say_when_idle(line))
+
+    async def _say_when_idle(self, line: str) -> None:
+        """One line at a time; dropped if you've left, or after a long wait."""
+        if self._idle_line is None:
+            self._idle_line = asyncio.Lock()
+        async with self._idle_line:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + IDLE_MAX_WAIT_S
+            while self.busy() or not self.floor.quiet():
+                if loop.time() > deadline:
+                    self._log(f"📣 Dropped a line after waiting {IDLE_MAX_WAIT_S:.0f}s: {line!r}")
+                    return
+                await asyncio.sleep(IDLE_POLL_S)
+            if not self.someone_listening():
+                return
+            self._log(f"📣 {line}")
+            await self.reply.say(line, self.agent_id)
+
+    def someone_listening(self) -> bool:
+        """A person, not a bot, is in the voice room."""
+        members = getattr(self.connection.channel, "members", None) or []
+        return any(not getattr(member, "bot", False) for member in members)
+
+    # --- calling hooks ------------------------------------------------------------
+
+    def _call_hooks(self, point: str, *args) -> List[Any]:
+        """Each hook's `point(self, *args)`, in order; one that raises is skipped."""
+        results = []
+        for hook in self.hooks:
+            try:
+                results.append(getattr(hook, point)(self, *args))
+            except Exception as e:
+                self._hook_failed(hook, point, e)
+        return results
+
+    async def _hooks_handle(self, transcript: str, say: Say) -> bool:
+        """Whether a hook answered the utterance; the first that does wins."""
+        for hook in self.hooks:
+            try:
+                if await hook.handle(self, transcript, say):
+                    return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._hook_failed(hook, "handle", e)
+        return False
+
+    def _hook_failed(self, hook: VoiceHook, point: str, error: Exception) -> None:
+        self._log(f"Voice hook {type(hook).__name__}.{point} failed: {type(error).__name__}: {error}")
 
     def _spawn(self, coro) -> None:
         """Runs `coro` alongside the turn, keeping a reference until it's done."""
@@ -297,8 +382,6 @@ class VoiceManager:
             self._log(f"✋ Heard {newest!r}: stopping, "
                       + ("keeping the request for what comes next." if stop == "hold" else "request dropped."))
             trace.meta["outcome"] = f"stop_{stop}"
-            # "Never mind" is also an answer to "Do you mean …?": no switch.
-            self.switcher.cancel()
             if stop == "hold":
                 self.floor.forget(utterances[-1:])
             else:
@@ -310,9 +393,15 @@ class VoiceManager:
         merged = f" ({len(utterances)} utterances merged)" if len(utterances) > 1 else ""
         self._log(f"📝 Transcribed prompt from {author}{merged}: '{transcript}'")
 
-        # 4. "Switch me to Daisy" moves the focus instead of starting a turn,
-        #    and leaves anything unanswered behind with the old focus.
-        if await self.switcher.handle(newest, say=partial(self.reply.say, is_current=is_current)):
+        # 4. A hook's own command ("next agent"), or "switch me to Daisy":
+        #    either moves the focus instead of starting a turn, and leaves
+        #    anything unanswered behind with the old focus.
+        say = partial(self.reply.say, is_current=is_current)
+        if await self._hooks_handle(newest, say):
+            trace.meta["outcome"] = "hook"
+            turn.answered = True
+            return
+        if await self.switcher.handle(newest, say=say):
             trace.meta["outcome"] = "focus_switch"
             turn.answered = True
             return
@@ -335,6 +424,7 @@ class VoiceManager:
             turn.answered = True
             return
         self._log(f"🤖 Streaming LangGraph agent under #{getattr(channel, 'name', channel)} context...")
+        self._call_hooks("turn", focus)
 
         # Same session as the text channel (so context is shared), but
         # tagged as voice so token rows can tell spoken turns from typed

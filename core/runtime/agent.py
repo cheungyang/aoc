@@ -28,6 +28,10 @@ from core.runtime.stream_handler import (
     SUBAGENT_STREAM_FINAL,
 )
 
+# Where `execute` leaves the parsed AgentResponse in `session.turn_hints`, for
+# callers that need more than its text (the schedule runner's speech version).
+RESPONSE_HINT = "agent_response"
+
 
 class Agent(BaseAgent):
     def __init__(self, agent_id: str, config: Dict[str, Any]):
@@ -342,6 +346,9 @@ class Agent(BaseAgent):
 
             reply_message = result["messages"][-1]
             response = self._parse_final_response(reply_message.content, session)
+            # For callers that need more than the text: a scheduled run reads
+            # the speech version and its question from here (schedule_runner).
+            session.turn_hints[RESPONSE_HINT] = response
             await self._dispatch_discord_output(session, response)
             return response.text
         finally:

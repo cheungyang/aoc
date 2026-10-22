@@ -7,18 +7,20 @@ call. Matching is deliberately strict -- the whole remainder after the command
 must be a known name -- so "go to day planning and add a task" is not a move.
 
 A switch phrase that names nothing exactly ("take me to exercise") gets one
-small model call to find the closest agent (near_miss.py), and the switch
-waits for your "yes" to "Do you mean fitness coach Frankie?". If nothing is
-close, the phrase is an ordinary request for the agent you're with ("take me
-to the airport on Friday"). A request that only starts like a switch ("go to
-Daisy and add a task", "talk to me about dinner") is one without asking.
+small model call to find the closest agent (near_miss.py), and an answer that
+tells you the words to use: "Do you mean fitness coach Frankie? Say 'switch to
+Frankie' to get there." Nothing waits for a yes or a no, so there is no mode
+to be in. If nothing is close, the phrase is an ordinary request for the
+agent you're with ("take me to the airport on Friday"). A request that only
+starts like a switch ("go to Daisy and add a task", "talk to me about
+dinner") is one without asking.
 
 The matching is pure functions; `FocusSwitcher` does the rest (asking,
 checking the target can be reached, moving the focus, greeting in the target's
-voice).
+voice). Features built on top switch through `switch_to` too: the inbox's
+"next agent" (core/inbox/voice_briefing.py) arrives the same way.
 """
 import re
-import time
 from typing import Awaitable, Callable, Dict, Iterable, Optional, Protocol, Tuple
 
 from core.voice.room.focus import FocusDirectory, VoiceFocus
@@ -31,7 +33,7 @@ _COMMAND = re.compile(
     r"(?:take me (?:to|into)|bring me (?:to|into)|move me (?:to|into)|switch (?:me )?(?:to|over to)|"
     r"go (?:to|into)|let'?s go (?:to|into)|i want to (?:talk|speak) (?:to|with)|"
     r"let me (?:talk|speak) (?:to|with)|(?:talk|speak) (?:to|with)|"
-    r"(?:go |take me |bring me |head )?back (?:to|into)|return to)\s+"
+    r"(?:go |take me |bring me |head )?back (?:to|into)|return to|start (?:with|from))\s+"
     r"(?P<target>.+)$"
 )
 
@@ -45,13 +47,6 @@ _WHERE = re.compile(
     r"^(?:(?:hey|hi|ok|okay|so|um|uh|concierge)[\s,]+)*"
     r"(?:where am i|where are we|which (?:room|channel) am i in|what (?:room|channel) is this)(?: right now| now)?$"
 )
-
-# Answers to "Do you mean …?", as whole utterances.
-_YES = {"yes", "yeah", "yep", "yup", "sure", "correct", "right", "thats right", "exactly", "yes please",
-        "please do", "do it", "go ahead", "ok", "okay", "yes thats right", "uh huh"}
-_NO = {"no", "nope", "nah", "no thanks", "no thank you", "wrong", "not that", "neither", "thats wrong"}
-# A "Do you mean …?" left unanswered this long is dropped.
-CONFIRM_WINDOW_S = 20.0
 
 # A switch target is a name or a few words about one ("exercise", "my workout
 # coach"). Anything longer is a request that happens to start like a switch,
@@ -91,17 +86,6 @@ def parse_room_request(transcript: str) -> Optional[str]:
 def is_where_am_i(transcript: str) -> bool:
     """Whether `transcript` asks where the focus is."""
     return bool(_WHERE.match(_clean(transcript)))
-
-
-def answer_to_question(transcript: str) -> Optional[bool]:
-    """True for a yes, False for a no, None for anything else."""
-    text = re.sub(r"^(?:(?:um|uh|oh|well|hmm)\s+)+", "", _clean(transcript).replace("'", ""))
-    text = re.sub(r"\s+(?:please|thanks|thank you)$", "", text).strip()
-    if text in _YES:
-        return True
-    if text in _NO:
-        return False
-    return None
 
 
 def build_aliases(sources: Iterable[Tuple[str, Iterable[str]]]) -> Dict[str, str]:
@@ -165,8 +149,8 @@ class Focuser(Protocol):
     def focus_channel(self, focus: VoiceFocus):
         """The Discord channel `focus`'s turns are posted in, or None."""
 
-    def expect_answer(self, question: str) -> None:
-        """A question was just asked: a lone "yes" over it is an answer, not a backchannel."""
+    async def arrive(self, focus: VoiceFocus, say: "Say") -> None:
+        """After the greeting: whatever the voice room's hooks add there."""
 
 
 class FocusSwitcher:
@@ -178,36 +162,19 @@ class FocusSwitcher:
         if resolver is None:
             from core.voice.room.near_miss import closest_target as resolver
         self._resolve = resolver
-        # A "Do you mean …?" awaiting its answer: (focus key, when it lapses).
-        self._pending: Optional[Tuple[str, float]] = None
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
 
-    def cancel(self) -> None:
-        """Drops a pending "Do you mean …?"."""
-        self._pending = None
-
     async def handle(self, transcript: str, say: Say) -> bool:
-        """Answers a switch request, a "Do you mean …?" answer or a where-am-I
-        question. True if `transcript` was one of them.
+        """Answers a switch request or a where-am-I question. True if
+        `transcript` was one of them.
 
         `say(text, agent_id)` speaks a line in `agent_id`'s voice. Arriving is
         announced in the target's own voice; questions about switching are
         asked by the concierge, whose job routing is.
         """
         directory = self.voice.directory()
-        pending, self._pending = self._pending, None
-        if pending is not None and time.monotonic() < pending[1]:
-            answer = answer_to_question(transcript)
-            if answer is not None:
-                target = directory.get(pending[0])
-                if answer and target is not None:
-                    return await self._switch(target, directory, say)
-                await say(directory.staying(self.voice.focus()), directory.voice_host)
-                return True
-            # Anything else drops the question and is taken on its own.
-
         if is_where_am_i(transcript):
             focus = self.voice.focus()
             await say(directory.whereabouts(focus), focus.agent_id)
@@ -219,11 +186,12 @@ class FocusSwitcher:
         aliases = build_aliases(directory.alias_sources())
         target = directory.get(aliases.get(phrase))
         if target is not None:
-            return await self._switch(target, directory, say)
+            return await self.switch_to(target, directory, say)
         if not could_name_a_target(phrase, aliases):
             return False  # a request that starts like a switch
 
-        # A near miss: ask the model which agent is closest, then ask you.
+        # A near miss: ask the model which agent is closest, then tell you the
+        # words that reach it. Nothing waits for an answer.
         key = await self._resolve(phrase, directory)
         target = directory.get(key) if key else None
         if target is None:
@@ -231,16 +199,19 @@ class FocusSwitcher:
         if target.key == self.voice.focus().key:
             await say(directory.already(target), target.agent_id)
             return True
-        question = f"Do you mean {directory.role(target)}?"
-        self._log(f"🤔 {transcript!r} named no one exactly; asking about #{target.channel_name}.")
-        self._pending = (target.key, time.monotonic() + CONFIRM_WINDOW_S)
-        await say(question, directory.voice_host)
-        self.voice.expect_answer(question)
+        self._log(f"🤔 {transcript!r} named no one exactly; suggesting #{target.channel_name}.")
+        await say(f"Do you mean {directory.role(target)}? Say '{directory.words_to_switch(target)}' to get there.",
+                  directory.voice_host)
         return True
 
-    async def _switch(self, target: VoiceFocus, directory: FocusDirectory, say: Say) -> bool:
+    async def switch_to(self, target: VoiceFocus, directory: FocusDirectory, say: Say) -> bool:
+        """Moves the focus to `target` and greets you there, in its voice; then
+        whatever the voice room adds on arriving. True: the request is answered."""
         if target.key == self.voice.focus().key:
             await say(directory.already(target), target.agent_id)
+            # Still, whatever it left you: an announcement about the agent
+            # you're with says to switch to it, and that must play it.
+            await self.voice.arrive(target, say)
             return True
         if self.voice.focus_channel(target) is None:
             self._log(f"Focus switch: #{target.channel_name} can't be found in Discord.")
@@ -252,4 +223,5 @@ class FocusSwitcher:
         # superseded whatever was in flight; it must not cancel itself.
         self.voice.set_focus(target, interrupt=False)
         await say(directory.greeting(target), target.agent_id)
+        await self.voice.arrive(target, say)
         return True

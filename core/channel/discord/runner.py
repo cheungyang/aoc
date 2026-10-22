@@ -1,6 +1,7 @@
 import os
 import inspect
 import asyncio
+import datetime
 import time
 import discord
 import base64
@@ -10,7 +11,10 @@ from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
-from core.util import format_error_message
+from core.inbox.model import Via
+from core.inbox.voice_briefing import VoiceBriefing
+from core.inbox.writer import mark_read, record_reply
+from core.util import format_error_message, safe_chunks
 from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
 
@@ -35,6 +39,12 @@ def format_reply_context(author: str, posted_at, content: str) -> str:
     return f"<replying_to {attrs}>\n{excerpt}\n</replying_to>"
 
 
+def posted_at(message):
+    """When a Discord message was posted, in epoch seconds, or None."""
+    created = getattr(message, "created_at", None)
+    return created.timestamp() if isinstance(created, datetime.datetime) else None
+
+
 def append_reply_context(payload, reply_context: str):
     """Adds the block *after* the user's text: the router matches concierge
     prefixes (`[main]`, `kill`) at the start of the message, so the user's own
@@ -52,7 +62,8 @@ class BotRunner:
         self._processed_message_ids = OrderedDict()
         self.bot = None
         self._init_bot()
-        self.voice_manager = VoiceManager(self)
+        # The voice room, with the inbox's briefings plugged in as a hook.
+        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()])
         Ownership().add_listener(self._on_ownership_change)
 
     def _init_bot(self):
@@ -65,6 +76,7 @@ class BotRunner:
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
         self.bot.event(self.on_voice_state_update)
+        self.bot.event(self.on_raw_reaction_add)
         
         # Register voice commands
         @self.bot.command(name="join")
@@ -86,6 +98,17 @@ class BotRunner:
         async def cmd_leave(ctx):
             await self.voice_manager.leave()
             await ctx.send("Disconnected from voice channel. 👋")
+
+        @self.bot.command(name="inbox")
+        async def cmd_inbox(ctx, *, args: str = ""):
+            # What voice briefings will tell you about (core/inbox). Only the
+            # voice host's bot answers, so one message gets one reply.
+            if not self._is_voice_host():
+                return
+            from core.inbox.commands import handle_inbox_command
+            from core.inbox.writer import channel_name
+            for chunk in safe_chunks(handle_inbox_command(args, channel_name(ctx.channel))):
+                await ctx.send(chunk)
 
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
@@ -109,6 +132,28 @@ class BotRunner:
             
         channel_hosts = agent.config.get("channel_hosts", [])
         return [f"{ch}-voice" for ch in channel_hosts]
+
+    def _is_voice_host(self) -> bool:
+        """Whether this bot speaks in the voice room (Concierge's). It keeps the
+        channel inbox's ✅ signal and answers `!inbox`."""
+        agent = AgentsLoader().get_agent(self.agent_id)
+        voice = agent.config.get("voice_config") if agent else None
+        return isinstance(voice, dict) and bool(voice.get("enabled"))
+
+    async def on_raw_reaction_add(self, payload):
+        """✅ on a post finishes its channel's inbox row (core/inbox)."""
+        if str(getattr(payload, "emoji", "")) != "✅":
+            return
+        member = getattr(payload, "member", None)
+        if member is None or getattr(member, "bot", False):
+            return  # a DM, or a bot's own reaction
+        if not Ownership().is_mine(self.agent_id) or not self._is_voice_host():
+            return
+        channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            return
+        mark_read(channel, Via.REACTION,
+                  message_time=discord.utils.snowflake_time(payload.message_id).timestamp())
 
     async def on_voice_state_update(self, member, before, after):
         """Follows you into the voice channel and greets you there: each time
@@ -320,6 +365,11 @@ class BotRunner:
         normalized_name = normalize_channel_name(channel_name)
         is_host = (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
         
+        # You posted here, typed or by voting in a poll: whatever its agent
+        # left you in this channel is finished (core/inbox).
+        if is_host and mine:
+            mark_read(message.channel, Via.TYPED)
+
         # Check mentions
         tagged_bots = [user for user in message.mentions if user.bot]
         is_self_tagged = self.bot.user in message.mentions
@@ -404,6 +454,7 @@ class BotRunner:
         if reply_context:
             content_payload = append_reply_context(content_payload, reply_context)
 
+        final_text = ""
         try:
             async with message.channel.typing():
                 from core.channel.discord.stream_buffer import DiscordStreamBuffer
@@ -429,8 +480,9 @@ class BotRunner:
                             except Exception as re:
                                 print(f"[BotRunner:{self.agent_id}] Could not add routing reaction: {re}")
                     elif event_type == "final_response":
+                        final_text = event.get("text", "")
                         await stream_buffer.finalize(
-                            final_text=event.get("text", ""),
+                            final_text=final_text,
                             response=event.get("response")
                         )
 
@@ -441,6 +493,13 @@ class BotRunner:
                     await message.channel.send(format_error_message(e))
                 except Exception as se:
                     print(f"Error sending failure message: {se}")
+            return
+
+        # The reply may need you later, if you've left by the time it lands or
+        # it asks you something: a candidate for the channel inbox, judged only
+        # once you join voice. No model call here.
+        if is_host and isinstance(final_text, str) and final_text.strip():
+            record_reply(message.channel, final_text, asked_at=posted_at(message), agent_id=self.agent_id)
 
     def _touch_heartbeat(self):
         try:

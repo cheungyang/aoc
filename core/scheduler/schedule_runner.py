@@ -10,6 +10,11 @@ For every due schedule the runner:
 3. dispatches by kind — a prompt becomes an agent turn, a script a subprocess;
 4. records `last_success_at` only if the run succeeded.
 
+Every post it makes also puts its channel in the channel inbox (core/inbox),
+unless the schedule's priority is IGNORE, so a voice briefing can tell you
+about it. A prompt run that isn't IGNORE also writes the speech version of
+its post (the scheduled <voice_mode> block), stored with that row.
+
 Schedules that fail validation are never registered. Each rejection is logged
 and posted to the channel named in that schedule's own entry (log only if it
 has none). Schedules are re-read whenever an `agent.json` schedules array
@@ -27,6 +32,8 @@ from typing import Any, Dict, List, Optional
 from croniter import croniter
 
 from core.channel.discord.loader import BotsLoader
+from core.inbox.model import Priority
+from core.inbox.writer import record_push
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.channel_context import record_channel_post
@@ -46,6 +53,7 @@ from core.scheduler.spec import (
 )
 from core.scheduler.state import ScheduleState
 from core.util import safe_chunks
+from core.util.prompt_util import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership
 from core.util.time_util import get_local_now
 
@@ -361,14 +369,29 @@ class ScheduleRunner:
             except Exception as e:
                 print(f"ScheduleRunner: could not reset {session.session_id} for a stateless run: {e}")
 
+        from core.runtime.agent import RESPONSE_HINT
+
         agent = self.loader.get_agent(spec.agent_id)
-        reply = await agent.execute(spec.build_prompt(ctx, decision), session=session, role="user")
+        prompt = spec.build_prompt(ctx, decision)
+        if spec.priority is Priority.IGNORE:
+            reply = await agent.execute(prompt, session=session, role="user")
+        else:
+            # The post may be heard later, so the run also writes its speech version.
+            with scheduled_speech_scope(spec.agent_id):
+                reply = await agent.execute(prompt, session=session, role="user")
         ok = self._job_succeeded(getattr(session, "job_id", None))
         # Only a successful run's reply was posted as the schedule's output (a
         # failure posts an error message instead), and only if there was a
         # channel to post it to.
         if ok and channel is not None and isinstance(reply, str):
             record_channel_post(channel, reply, origin=spec.schedule_id, loader=self.loader)
+            response = session.turn_hints.get(RESPONSE_HINT)
+            record_push(
+                channel, reply, schedule_id=spec.schedule_id, agent_id=spec.agent_id,
+                priority=spec.priority, label=spec.label,
+                speech=getattr(response, "speech", None), question=getattr(response, "question", None),
+                loader=self.loader,
+            )
         return ok
 
     async def _run_script(self, spec: ScriptSchedule, ctx: ScheduleContext, steps) -> bool:
@@ -384,6 +407,9 @@ class ScheduleRunner:
                 for chunk in safe_chunks(output):
                     await channel.send(chunk)
                 record_channel_post(channel, output, origin=spec.schedule_id, loader=self.loader)
+                # No speech version yet: it's written if you join voice while it's unfinished.
+                record_push(channel, output, schedule_id=spec.schedule_id, agent_id=spec.agent_id,
+                            priority=spec.priority, label=spec.label, loader=self.loader)
             else:
                 print(f"[{spec.agent_id}] {output}")
         return all(r.ok for r in results)
@@ -462,3 +488,6 @@ class ScheduleRunner:
                 self._record(self.state.release_notice, spec.schedule_id, issue, day)
             return
         record_channel_post(channel, message, origin=spec.schedule_id, loader=self.loader)
+        record_push(channel, message, schedule_id=spec.schedule_id, agent_id=spec.agent_id,
+                    priority=spec.priority, label=f"a problem with {spec.label}" if spec.label else "a problem report",
+                    loader=self.loader)

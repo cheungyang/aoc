@@ -1,13 +1,12 @@
 """Switching by voice: matching "switch me to X" against the known focus
-targets, and the switcher's "Do you mean …?" for a name that isn't exact."""
-import time
+targets, and the switcher's "Do you mean …?" for a name that isn't exact,
+which tells you the words to say and waits for nothing."""
 import unittest
 from unittest.mock import AsyncMock
 
 from core.voice.room.focus import FocusDirectory
 from core.voice.room.room_switch import (
-    CONFIRM_WINDOW_S, FocusSwitcher, answer_to_question, build_aliases, could_name_a_target, is_where_am_i,
-    match_target, parse_room_request,
+    FocusSwitcher, build_aliases, could_name_a_target, is_where_am_i, match_target, parse_room_request,
 )
 
 TARGETS = build_aliases([
@@ -37,6 +36,8 @@ class TestMatching(unittest.TestCase):
             "Take me back to the concierge": "general",
             "go back to day planning": "day-planning",
             "Take me to general": "general",
+            "Start with Daisy.": "day-planning",
+            "start from meal planning": "meal-planning",
         }
         for transcript, target in cases.items():
             with self.subTest(transcript=transcript):
@@ -127,20 +128,6 @@ class TestNearMissCandidates(unittest.TestCase):
                 self.assertFalse(could_name_a_target(parse_room_request(transcript), TARGETS))
 
 
-class TestAnswers(unittest.TestCase):
-
-    def test_yes_no_and_neither(self):
-        for transcript in ("Yes.", "yeah", "Yes please", "That's right!", "um, yes", "okay", "Sure, thanks"):
-            with self.subTest(transcript=transcript):
-                self.assertIs(answer_to_question(transcript), True)
-        for transcript in ("No.", "nope", "no thanks", "No, thank you"):
-            with self.subTest(transcript=transcript):
-                self.assertIs(answer_to_question(transcript), False)
-        for transcript in ("yes but first add a task", "what's the weather", "no idea what you mean", ""):
-            with self.subTest(transcript=transcript):
-                self.assertIsNone(answer_to_question(transcript))
-
-
 class _Loader:
     """Literal agent configs, with the two lookups graphs/main's router makes."""
 
@@ -176,7 +163,7 @@ class _Voice:
     def __init__(self, reachable=True):
         self._focus = DIRECTORY.lobby
         self.reachable = reachable
-        self.moves, self.questions = [], []
+        self.moves, self.arrivals = [], []
 
     def directory(self):
         return DIRECTORY
@@ -191,8 +178,8 @@ class _Voice:
     def focus_channel(self, focus):
         return object() if self.reachable else None
 
-    def expect_answer(self, question):
-        self.questions.append(question)
+    async def arrive(self, focus, say):
+        self.arrivals.append(focus.key)
 
 
 class _Said:
@@ -215,7 +202,13 @@ class TestFocusSwitcher(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.switcher.handle("Switch me to Daisy", self.say))
         self.assertEqual(self.voice.moves, [("day-planning", False)])  # the asking turn isn't cancelled
         self.assertEqual(self.say.lines, [("Daisy here.", "day-planner")])
+        # Then whatever Daisy left you there (the voice owner says it).
+        self.assertEqual(self.voice.arrivals, ["day-planning"])
         self.resolver.assert_not_awaited()
+
+    async def test_start_with_is_a_switch_phrase(self):
+        self.assertTrue(await self.switcher.handle("Start with Daisy", self.say))
+        self.assertEqual(self.voice.moves, [("day-planning", False)])
 
     async def test_take_me_to_concierge_goes_back_to_the_lobby(self):
         self.voice._focus = DIRECTORY.targets["day-planning"]
@@ -224,16 +217,20 @@ class TestFocusSwitcher(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.say.lines, [("Concierge here.", "main")])
 
     async def test_asking_for_where_you_are(self):
+        """Nothing moves, but what Daisy left you still plays: an announcement
+        about the agent you're with says to switch to it."""
         self.voice._focus = DIRECTORY.targets["day-planning"]
         self.assertTrue(await self.switcher.handle("switch me to Daisy", self.say))
         self.assertEqual(self.voice.moves, [])
         self.assertEqual(self.say.lines, [("You're already with Daisy.", "day-planner")])
+        self.assertEqual(self.voice.arrivals, ["day-planning"])
 
     async def test_an_unreachable_channel_is_said_by_the_concierge(self):
         self.voice.reachable = False
         self.assertTrue(await self.switcher.handle("take me to Frankie", self.say))
         self.assertEqual(self.voice.moves, [])
         self.assertEqual(self.say.lines, [("I can't reach fitness coach right now.", "main")])
+        self.assertEqual(self.voice.arrivals, [])
 
     async def test_where_am_i_is_answered_by_whoever_you_are_with(self):
         self.voice._focus = DIRECTORY.targets["day-planning"]
@@ -241,54 +238,39 @@ class TestFocusSwitcher(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.say.lines, [("You're in day planning, with Daisy.", "day-planner")])
         self.resolver.assert_not_awaited()
 
-    async def test_a_near_miss_asks_do_you_mean_then_yes_switches(self):
+    async def test_a_near_miss_tells_you_the_words_and_waits_for_nothing(self):
         self.resolver.return_value = "fitness-coach"
         self.assertTrue(await self.switcher.handle("take me to exercise", self.say))
         self.resolver.assert_awaited_once_with("exercise", DIRECTORY)
-        self.assertEqual(self.say.lines, [("Do you mean fitness coach Frankie?", "main")])
-        self.assertEqual(self.voice.questions, ["Do you mean fitness coach Frankie?"])
+        self.assertEqual(self.say.lines, [
+            ("Do you mean fitness coach Frankie? Say 'switch to Frankie' to get there.", "main"),
+        ])
         self.assertEqual(self.voice.moves, [])
-
-        self.assertTrue(await self.switcher.handle("Yes.", self.say))
+        # No mode: a "yes" is an ordinary request for the agent you're with.
+        self.assertFalse(await self.switcher.handle("Yes.", self.say))
+        self.assertEqual(self.voice.moves, [])
+        # The words it said switch.
+        self.assertTrue(await self.switcher.handle("Switch to Frankie", self.say))
         self.assertEqual(self.voice.moves, [("fitness-coach", False)])
         self.assertEqual(self.say.lines[-1], ("Frankie here.", "fitness-coach"))
 
-    async def test_no_keeps_you_where_you_are(self):
-        self.resolver.return_value = "fitness-coach"
-        await self.switcher.handle("take me to exercise", self.say)
-        self.assertTrue(await self.switcher.handle("no", self.say))
+    async def test_a_near_miss_for_a_channel_the_concierge_answers_names_the_channel(self):
+        self.resolver.return_value = "general"
+        self.voice._focus = DIRECTORY.targets["day-planning"]
+        self.assertTrue(await self.switcher.handle("take me to the front desk", self.say))
+        self.assertEqual(self.say.lines, [("Do you mean the concierge? Say 'switch to concierge' to get there.", "main")])
+
+    async def test_switch_to_is_how_hooks_switch(self):
+        """A hook ("next agent") arrives exactly as a spoken switch does."""
+        self.assertTrue(await self.switcher.switch_to(DIRECTORY.targets["fitness-coach"], DIRECTORY, self.say))
+        self.assertEqual(self.voice.moves, [("fitness-coach", False)])
+        self.assertEqual(self.say.lines, [("Frankie here.", "fitness-coach")])
+        self.assertEqual(self.voice.arrivals, ["fitness-coach"])
+
+    async def test_next_agent_is_not_the_switchers(self):
+        """Without the inbox's hook, "next agent" is just a near miss."""
+        self.assertFalse(await self.switcher.handle("Next agent.", self.say))
         self.assertEqual(self.voice.moves, [])
-        self.assertEqual(self.say.lines[-1], ("Okay, staying with the concierge.", "main"))
-        # The question is answered: a later "yes" is just a "yes".
-        self.assertFalse(await self.switcher.handle("yes", self.say))
-
-    async def test_saying_something_else_drops_the_question(self):
-        self.resolver.return_value = "fitness-coach"
-        await self.switcher.handle("take me to exercise", self.say)
-        self.assertFalse(await self.switcher.handle("what's on my calendar", self.say))
-        self.assertFalse(await self.switcher.handle("yes", self.say))
-        self.assertEqual(self.voice.moves, [])
-
-    async def test_a_new_exact_name_overrides_the_question(self):
-        self.resolver.return_value = "fitness-coach"
-        await self.switcher.handle("take me to exercise", self.say)
-        self.assertTrue(await self.switcher.handle("switch me to Daisy", self.say))
-        self.assertEqual(self.voice.moves, [("day-planning", False)])
-
-    async def test_an_unanswered_question_lapses(self):
-        self.resolver.return_value = "fitness-coach"
-        await self.switcher.handle("take me to exercise", self.say)
-        key, _ = self.switcher._pending
-        self.switcher._pending = (key, time.monotonic() - 1)  # CONFIRM_WINDOW_S has passed
-        self.assertGreater(CONFIRM_WINDOW_S, 0)
-        self.assertFalse(await self.switcher.handle("yes", self.say))
-        self.assertEqual(self.voice.moves, [])
-
-    async def test_cancel_drops_the_question(self):
-        self.resolver.return_value = "fitness-coach"
-        await self.switcher.handle("take me to exercise", self.say)
-        self.switcher.cancel()
-        self.assertFalse(await self.switcher.handle("yes", self.say))
 
     async def test_nothing_close_is_an_ordinary_request(self):
         self.assertFalse(await self.switcher.handle("take me to the airport on Friday", self.say))
@@ -299,7 +281,6 @@ class TestFocusSwitcher(unittest.IsolatedAsyncioTestCase):
         self.resolver.return_value = "general"
         self.assertTrue(await self.switcher.handle("take me to the front desk", self.say))
         self.assertEqual(self.say.lines, [("You're already with the concierge.", "main")])
-        self.assertIsNone(self.switcher._pending)
 
     async def test_a_model_reply_naming_no_target_is_an_ordinary_request(self):
         self.resolver.return_value = "nowhere"

@@ -18,6 +18,10 @@ Prompt schedules may also set `thinking_level` (minimal | low | medium | high)
 for that run's model calls; without it the agent's scheduled level applies
 (see core.runtime.thinking).
 
+Any schedule may set `priority` (IGNORE | LOW | DEFAULT | HIGHEST, default
+DEFAULT) and `label` ("your morning check-in"): how its posts reach you in
+voice briefings (core/inbox). IGNORE posts never enter the channel inbox.
+
 The same validator backs the `schedule_validate` tool, so an agent editing
 `agent.json` can check an entry before it saves it.
 """
@@ -26,6 +30,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from core.inbox.model import Priority
 from core.scheduler.preconditions import PreconditionError, build_precondition
 from core.scheduler.script_runner import check_script, parse_step
 from core.scheduler.spec import (
@@ -40,7 +45,10 @@ from core.util.models import THINKING_LEVELS
 
 KINDS = (KIND_PROMPT, KIND_SCRIPT)
 
-COMMON_KEYS = {"id", "cron", "kind", "enabled", "channel", "thread", "description", "precondition"}
+COMMON_KEYS = {"id", "cron", "kind", "enabled", "channel", "thread", "description", "precondition",
+               "priority", "label"}
+# A label is spoken in the digest ("Marvin has the market scan"), so it stays short.
+MAX_LABEL_CHARS = 60
 PROMPT_KEYS = COMMON_KEYS | {"prompt", "session_policy", "thinking_level"}
 SCRIPT_KEYS = COMMON_KEYS | {"script"}
 
@@ -189,6 +197,17 @@ def build_spec(
             hint = f" ({', '.join(prompt_only)} applies to prompt schedules only)"
         errors.append(f"unknown key(s) for a {kind} schedule: {', '.join(unknown)}{hint}")
 
+    try:
+        priority = Priority.parse(entry.get("priority"))
+    except ValueError as e:
+        errors.append(str(e))
+        priority = Priority.DEFAULT
+
+    label = entry.get("label")
+    if label is not None and not (isinstance(label, str) and label.strip() and len(label.strip()) <= MAX_LABEL_CHARS):
+        errors.append(f"'label' must be a non-empty string of at most {MAX_LABEL_CHARS} characters")
+        label = None
+
     precondition = None
     if "precondition" in entry:
         try:
@@ -209,6 +228,8 @@ def build_spec(
         thread=entry.get("thread"),
         enabled=bool(enabled),
         precondition=precondition,
+        priority=priority,
+        label=label.strip() if isinstance(label, str) else None,
         entry=entry,
     )
 

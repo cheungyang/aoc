@@ -13,7 +13,7 @@ from core.loaders.agents_loader import AgentsLoader
 from core.runtime.channel_context import reply_sessions
 from core.runtime.session_manager import SessionManager
 from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, spoken_label
-from core.voice.room.room_switch import build_aliases
+from core.voice.room.room_switch import _key, build_aliases
 
 
 def _live():
@@ -134,8 +134,18 @@ class TestLiveDirectory(unittest.TestCase):
         self.assertEqual(d.already(t["day-planning"]), "You're already with Daisy.")
         self.assertEqual(d.already(t["aoc-debug"]), "You're already in aoc debug.")
         self.assertEqual(d.already(d.lobby), "You're already with the concierge.")
-        self.assertEqual(d.staying(t["day-planning"]), "Okay, staying with Daisy.")
-        self.assertEqual(d.staying(t["aoc-debug"]), "Okay, staying in aoc debug.")
+        # The words "Do you mean …?" and the digest tell you to say.
+        self.assertEqual(d.words_to_switch(t["fitness-coach"]), "switch to Frankie")
+        self.assertEqual(d.words_to_switch(t["day-planning"]), "switch to Daisy")
+        self.assertEqual(d.words_to_switch(t["aoc-debug"]), "switch to aoc debug")
+        self.assertEqual(d.words_to_switch(d.lobby), "switch to concierge")
+
+    def test_the_words_to_switch_always_lead_back_to_the_same_focus(self):
+        """Every spoken alias is one the switch phrase maps back to its focus."""
+        for key, focus in self.directory.targets.items():
+            with self.subTest(channel=key):
+                alias = self.directory.spoken_alias(focus)
+                self.assertEqual(self.aliases.get(_key(alias)), key, alias)
 
 
 class TestDirectoryRules(unittest.TestCase):

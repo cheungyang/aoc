@@ -236,6 +236,30 @@ class TestAgentResponse(unittest.TestCase):
         self.assertEqual(response.speech, "Want me to book the earlier slot?")
         self.assertEqual(response.text, "Two slots are open.")
         self.assertEqual(response.poll_data["question"], "Which slot?")
+        self.assertIsNone(response.question, "a poll's question is not a marked one")
+
+    def test_a_marked_question_is_stored_and_still_spoken_in_place(self):
+        response = AgentResponse.from_string(
+            "<speech>Yesterday the afternoon slipped away. <question>How's your energy, one to ten?</question>"
+            "</speech>Good morning! Rate your energy 1-10."
+        )
+        self.assertEqual(response.speech, "Yesterday the afternoon slipped away. How's your energy, one to ten?")
+        self.assertEqual(response.question, "How's your energy, one to ten?")
+        self.assertEqual(response.text, "Good morning! Rate your energy 1-10.")
+
+    def test_no_marked_question_no_question(self):
+        response = AgentResponse.from_string("<speech>Want to go with today's workout?</speech>Workout below.")
+        self.assertIsNone(response.question)
+
+    def test_split_question_joins_several_and_tidies_whitespace(self):
+        from core.channel.response_parser import split_question
+
+        self.assertEqual(
+            split_question("<question>Merge the\n notes?</question> And <QUESTION>keep tags?</QUESTION>"),
+            ("Merge the\n notes? And keep tags?", "Merge the notes? keep tags?"),
+        )
+        self.assertEqual(split_question(None), (None, None))
+        self.assertEqual(split_question("Plain."), ("Plain.", None))
 
 
 if __name__ == '__main__':

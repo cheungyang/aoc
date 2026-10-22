@@ -1,8 +1,7 @@
 """The near-miss resolver: one small model call for "take me to exercise"."""
-import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from core.voice.room import near_miss
 from core.voice.room.focus import FocusDirectory
@@ -55,58 +54,43 @@ class TestParseChoice(unittest.TestCase):
 
     def test_a_known_key_however_it_is_wrapped(self):
         for reply in ("fitness-coach", " Fitness-Coach\n", "`fitness-coach`", '"fitness-coach".',
-                      [{"type": "text", "text": "fitness-coach"}]):
+                      [{"type": "text", "text": "fitness-coach"}], "<payload>fitness-coach</payload>",
+                      "<payload>\n  fitness-coach\n</payload>"):
             with self.subTest(reply=reply):
                 self.assertEqual(parse_choice(reply, DIRECTORY), "fitness-coach")
 
     def test_anything_else_is_none(self):
-        for reply in ("none", "None.", "frankie", "I think fitness-coach", "", None, 42):
+        for reply in ("none", "None.", "frankie", "I think fitness-coach", "", None, 42, "<payload>none</payload>"):
             with self.subTest(reply=reply):
                 self.assertIsNone(parse_choice(reply, DIRECTORY))
 
 
 class TestClosestTarget(unittest.IsolatedAsyncioTestCase):
+    """One task for the stateless worker, through `ask_worker`."""
 
-    def _patches(self, ainvoke):
-        llm = MagicMock()
-        llm.ainvoke = ainvoke
-        return (
-            patch("core.runtime.llm_retry.RetryingChatGoogleGenerativeAI", return_value=llm),
-            patch("core.runtime.token_usage_handler.TokenUsageHandler"),
-            patch("core.runtime.session_manager.SessionManager.get_session"),
-        )
+    def _worker(self, text=None, fails=False):
+        result = None if fails else SimpleNamespace(text=text, response=SimpleNamespace(text=text))
+        return patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=result))
 
-    async def test_returns_the_key_the_model_names(self):
-        ainvoke = AsyncMock(return_value=SimpleNamespace(content="fitness-coach"))
-        p1, p2, p3 = self._patches(ainvoke)
-        with p1 as llm_cls, p2, p3 as get_session:
+    async def test_returns_the_key_the_worker_names(self):
+        with self._worker("<payload>fitness-coach</payload>") as ask:
             self.assertEqual(await closest_target("exercise", DIRECTORY), "fitness-coach")
-        prompt = ainvoke.await_args.args[0][0].content
+        prompt = ask.await_args.args[0]
         self.assertIn('"exercise"', prompt)
         self.assertIn("fitness coach Frankie", prompt)
-        # A small model, booked to the voice host's voice work, outside any conversation.
-        self.assertIn("lite", llm_cls.call_args.kwargs["model"])
-        self.assertEqual(get_session.call_args.args[0], "main")
-        self.assertEqual(get_session.call_args.kwargs.get("surface"), "voice")
-        self.assertIs(get_session.call_args.kwargs.get("record_memory"), False)
+        self.assertIn("<assigned_task>", prompt, "in the worker's playbook format")
+        # Asked from the lobby, on the voice budget.
+        self.assertEqual(ask.await_args.kwargs["channel"], "general")
+        self.assertEqual(ask.await_args.kwargs["caller"], "near-miss")
+        self.assertEqual(ask.await_args.kwargs["timeout"], near_miss.RESOLVE_TIMEOUT_S)
 
-    async def test_none_when_the_model_says_none(self):
-        p1, p2, p3 = self._patches(AsyncMock(return_value=SimpleNamespace(content="none")))
-        with p1, p2, p3:
+    async def test_none_when_the_worker_says_none(self):
+        with self._worker("<payload>none</payload>"):
             self.assertIsNone(await closest_target("the airport on friday", DIRECTORY))
 
-    async def test_none_when_the_call_fails(self):
-        p1, p2, p3 = self._patches(AsyncMock(side_effect=RuntimeError("503")))
-        with p1, p2, p3:
-            self.assertIsNone(await closest_target("exercise", DIRECTORY))
-
-    async def test_none_when_the_call_is_too_slow(self):
-        async def slow(*args, **kwargs):
-            await asyncio.sleep(1)
-            return SimpleNamespace(content="fitness-coach")
-
-        p1, p2, p3 = self._patches(slow)
-        with p1, p2, p3, patch.object(near_miss, "RESOLVE_TIMEOUT_S", 0.01):
+    async def test_none_when_the_worker_fails_or_is_too_slow(self):
+        """ask_worker returns None for both, and has logged why."""
+        with self._worker(fails=True):
             self.assertIsNone(await closest_target("exercise", DIRECTORY))
 
 

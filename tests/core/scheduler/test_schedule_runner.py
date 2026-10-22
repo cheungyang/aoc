@@ -79,6 +79,7 @@ class RunnerCase(unittest.IsolatedAsyncioTestCase):
         self.session = MagicMock()
         self.session.session_id = "agent1:scheduled:test-channel"
         self.session.job_id = None
+        self.session.turn_hints = {}
 
         patches = [
             patch.object(runner_mod, "AgentsLoader", return_value=self.loader),
@@ -86,11 +87,13 @@ class RunnerCase(unittest.IsolatedAsyncioTestCase):
             patch.object(runner_mod.SessionManager, "get_session", return_value=self.session),
             patch.object(runner_mod, "reset_conversation", return_value=0),
             patch.object(runner_mod, "record_channel_post", return_value=[]),
+            patch.object(runner_mod, "record_push", return_value=None),
         ]
         self.mocks = [p.start() for p in patches]
         self.get_session = self.mocks[2]
         self.reset = self.mocks[3]
         self.record_post = self.mocks[4]
+        self.record_push = self.mocks[5]
         for p in patches:
             self.addCleanup(p.stop)
 
@@ -262,6 +265,9 @@ class TestPromptDispatch(RunnerCase):
             "Reply here and I'll help fix it."
         ))
         self.record_post.assert_called_once_with(self.channel, posted, origin=spec.schedule_id, loader=self.loader)
+        # The notice enters the channel inbox too, named after the schedule's label.
+        self.assertEqual(self.record_push.call_args.args, (self.channel, posted))
+        self.assertEqual(self.record_push.call_args.kwargs["label"], "a problem report")
 
         # The same issue later that day is not posted again, even after a restart; a new one is.
         await self.make_runner().run_schedule(spec)
@@ -383,6 +389,48 @@ class TestPromptDispatch(RunnerCase):
             jm.return_value.get_job.return_value = MagicMock(status="error")
             await runner.run_schedule(self.prompt_spec())
         self.record_post.assert_not_called()
+        self.record_push.assert_not_called()
+
+    def _execute_with(self, response):
+        """The agent's run leaves `response` where Agent.execute does, and
+        notes which agent the scheduled speech scope named."""
+        from core.runtime.agent import RESPONSE_HINT
+        from core.util.prompt_util import _scheduled_speech_agent
+        seen = {}
+
+        async def execute(prompt, session=None, role="user"):
+            seen["scope"] = _scheduled_speech_agent.get()
+            if response is not None:
+                session.turn_hints[RESPONSE_HINT] = response
+            return "ok"
+
+        self.agent.execute = AsyncMock(side_effect=execute)
+        return seen
+
+    async def test_a_post_enters_the_inbox_with_the_runs_speech_version(self):
+        from core.channel.response_parser import AgentResponse
+        from core.inbox.model import Priority
+
+        seen = self._execute_with(AgentResponse(
+            text="ok", speech="Daisy here. How's your energy, one to ten?", question="How's your energy, one to ten?"))
+        await self.make_runner().run_schedule(self.prompt_spec(priority="DEFAULT", label="your morning check-in"))
+
+        self.assertEqual(seen["scope"], "agent1", "the run gets the scheduled <voice_mode> block")
+        self.record_push.assert_called_once_with(
+            self.channel, "ok", schedule_id="agent1:p", agent_id="agent1", priority=Priority.DEFAULT,
+            label="your morning check-in", speech="Daisy here. How's your energy, one to ten?",
+            question="How's your energy, one to ten?", loader=self.loader,
+        )
+
+    async def test_an_ignore_schedule_writes_no_speech_version(self):
+        from core.inbox.model import Priority
+
+        seen = self._execute_with(None)
+        await self.make_runner().run_schedule(self.prompt_spec(priority="IGNORE"))
+
+        self.assertIsNone(seen["scope"])
+        self.assertIs(self.record_push.call_args.kwargs["priority"], Priority.IGNORE)  # which makes no row
+        self.assertIsNone(self.record_push.call_args.kwargs["speech"])
 
     async def test_nothing_recorded_when_channel_unresolved(self):
         self.bots.get_channel.return_value = None
@@ -415,6 +463,11 @@ class TestScriptDispatch(RunnerCase):
         self.assertEqual(run.call_args[0][0], b)
         self.channel.send.assert_awaited_once_with("did b")
         self.record_post.assert_called_once_with(self.channel, "did b", origin="script-executor:s", loader=self.loader)
+        # Its speech version is written only if you join voice while it's unfinished.
+        self.record_push.assert_called_once_with(
+            self.channel, "did b", schedule_id="script-executor:s", agent_id="script-executor",
+            priority=spec.priority, label=None, loader=self.loader,
+        )
         self.agent.execute.assert_not_called()
         self.get_session.assert_not_called()
 

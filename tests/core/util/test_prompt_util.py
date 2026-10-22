@@ -193,6 +193,30 @@ class TestVoiceModePrompt(unittest.TestCase):
         """Otherwise they forbid the very block <voice_mode> asks for."""
         self.assertIn("<speech> when <voice_mode> asks for it", get_formatting_prompt())
 
+    def test_a_scheduled_run_gets_the_scheduled_block_only_inside_its_scope(self):
+        from core.util.prompt_util import SCHEDULED_VOICE_MODE_PROMPT, scheduled_speech_scope
+
+        scheduled = dict(agent_id="day-planner", source="scheduled", channel="day-planning")
+        self.assertEqual(self._prompt_in(**scheduled), "", "an IGNORE schedule runs outside the scope")
+        with scheduled_speech_scope("day-planner"):
+            self.assertEqual(self._prompt_in(**scheduled), SCHEDULED_VOICE_MODE_PROMPT)
+            # An agent the run calls writes for its caller, not for the channel.
+            self.assertEqual(self._prompt_in(agent_id="graph-worker", source="scheduled", channel="day-planning"), "")
+            # A live voice turn meanwhile keeps the live block.
+            self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general", surface="voice"),
+                             VOICE_MODE_PROMPT)
+
+    def test_the_scheduled_block_marks_questions_and_has_no_pre_tool_line(self):
+        from core.util.prompt_util import QUESTION_RULE, SCHEDULED_VOICE_MODE_PROMPT, SPEECH_RULES
+
+        self.assertIn(SPEECH_RULES, SCHEDULED_VOICE_MODE_PROMPT)
+        self.assertIn(SPEECH_RULES, VOICE_MODE_PROMPT, "one set of rules for both")
+        self.assertIn(QUESTION_RULE, SCHEDULED_VOICE_MODE_PROMPT)
+        self.assertNotIn("<question>", VOICE_MODE_PROMPT)
+        self.assertNotIn("Before calling tools", SCHEDULED_VOICE_MODE_PROMPT)
+        self.assertIn("Begin your final response with a <speech>", SCHEDULED_VOICE_MODE_PROMPT)
+        self.assertIn("don't introduce yourself", SCHEDULED_VOICE_MODE_PROMPT)
+
 
 class TestAgentPrompts(unittest.TestCase):
     """Static files come from agents/<id>/; memory is Memory v2 under the vault."""

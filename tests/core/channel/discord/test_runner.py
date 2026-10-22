@@ -19,8 +19,9 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         runner = BotRunner("test_token", "main")
         
-        # Verify event registration (on_ready, on_message, on_voice_state_update)
-        self.assertEqual(mock_bot.event.call_count, 3)
+        # Verify event registration (on_ready, on_message, on_voice_state_update,
+        # on_raw_reaction_add)
+        self.assertEqual(mock_bot.event.call_count, 4)
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
         mock_bot.event.assert_any_call(runner.on_voice_state_update)
@@ -674,6 +675,111 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Second delivery with same message ID -> dropped
         await runner.on_message(mock_message)
         self.assertEqual(called_count, 1)
+
+
+@patch('core.channel.discord.runner.record_reply')
+@patch('core.channel.discord.runner.mark_read')
+@patch('core.channel.discord.runner.AgentsLoader')
+@patch('core.channel.discord.runner.commands.Bot')
+class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
+    """The runner's part of the channel inbox (core/inbox): posting in a
+    channel or ✅ on a post finishes its row; a reply is a candidate."""
+
+    def _runner(self, mock_bot_class, mock_loader_class, voice=True, hosts=("day-planning",), reply="Good, noted."):
+        import datetime
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        runner = BotRunner("test_token", "main")
+
+        async def fake_stream(*args, **kwargs):
+            yield {"type": "final_response", "text": reply, "response": None}
+
+        agent = MagicMock()
+        agent.config = {"channel_hosts": list(hosts), "voice_config": {"enabled": voice}}
+        agent.execute_stream = fake_stream
+        mock_loader_class.return_value.get_agent.return_value = agent
+
+        message = MagicMock()
+        message.id = 4242
+        message.author = MagicMock(bot=False)
+        message.content = "About a seven."
+        message.mentions = []
+        message.attachments = []
+        message.channel.name = "day-planning"
+        message.channel.id = 77
+        message.created_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=12)
+        typing = MagicMock()
+        typing.__aenter__ = AsyncMock()
+        typing.__aexit__ = AsyncMock()
+        message.channel.typing.return_value = typing
+        return runner, message
+
+    async def test_posting_finishes_the_row_and_the_reply_is_a_candidate(self, mock_bot_class, mock_loader_class,
+                                                                          mark_read, record_reply):
+        from core.inbox.model import Via
+        runner, message = self._runner(mock_bot_class, mock_loader_class)
+        with patch('core.channel.discord.stream_buffer.DiscordStreamBuffer.finalize', new=AsyncMock()):
+            await runner.on_message(message)
+
+        mark_read.assert_called_once_with(message.channel, Via.TYPED)
+        record_reply.assert_called_once()
+        args, kwargs = record_reply.call_args
+        self.assertEqual(args, (message.channel, "Good, noted."))
+        self.assertEqual(kwargs["agent_id"], "main")
+        self.assertAlmostEqual(kwargs["asked_at"], message.created_at.timestamp())
+
+    async def test_a_channel_it_doesnt_host_leaves_the_inbox_alone(self, mock_bot_class, mock_loader_class,
+                                                                    mark_read, record_reply):
+        runner, message = self._runner(mock_bot_class, mock_loader_class, hosts=())
+        message.mentions = [runner.bot.user]  # tagged, so it answers
+        with patch('core.channel.discord.stream_buffer.DiscordStreamBuffer.finalize', new=AsyncMock()):
+            await runner.on_message(message)
+        mark_read.assert_not_called()
+        record_reply.assert_not_called()
+
+    async def test_a_failed_reply_is_no_candidate(self, mock_bot_class, mock_loader_class, mark_read, record_reply):
+        runner, message = self._runner(mock_bot_class, mock_loader_class)
+
+        async def broken_stream(*args, **kwargs):
+            raise RuntimeError("model down")
+            yield  # pragma: no cover
+
+        mock_loader_class.return_value.get_agent.return_value.execute_stream = broken_stream
+        message.channel.send = AsyncMock()
+        await runner.on_message(message)
+        mark_read.assert_called_once()
+        record_reply.assert_not_called()
+
+    async def test_a_check_mark_finishes_the_posts_row(self, mock_bot_class, mock_loader_class, mark_read, record_reply):
+        import datetime
+        import discord
+        from core.inbox.model import Via
+        runner, message = self._runner(mock_bot_class, mock_loader_class)
+        runner.bot.get_channel.return_value = message.channel
+        posted = datetime.datetime(2026, 10, 22, 6, 0, tzinfo=datetime.timezone.utc)
+        payload = MagicMock(emoji="✅", member=MagicMock(bot=False), channel_id=77,
+                            message_id=discord.utils.time_snowflake(posted))
+
+        await runner.on_raw_reaction_add(payload)
+        mark_read.assert_called_once()
+        args, kwargs = mark_read.call_args
+        self.assertEqual(args, (message.channel, Via.REACTION))
+        self.assertAlmostEqual(kwargs["message_time"], posted.timestamp(), places=0)
+
+    async def test_other_reactions_bots_and_other_bots_runners_do_nothing(self, mock_bot_class, mock_loader_class,
+                                                                          mark_read, record_reply):
+        runner, message = self._runner(mock_bot_class, mock_loader_class)
+        runner.bot.get_channel.return_value = message.channel
+        for payload in (MagicMock(emoji="👍", member=MagicMock(bot=False), message_id=1),
+                        MagicMock(emoji="✅", member=MagicMock(bot=True), message_id=1),
+                        MagicMock(emoji="✅", member=None, message_id=1)):
+            await runner.on_raw_reaction_add(payload)
+        not_voice, _ = self._runner(mock_bot_class, mock_loader_class, voice=False)
+        await not_voice.on_raw_reaction_add(MagicMock(emoji="✅", member=MagicMock(bot=False), message_id=1))
+        mark_read.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

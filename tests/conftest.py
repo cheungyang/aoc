@@ -118,6 +118,18 @@ def _ownership_prod_ready():
 
 
 @pytest.fixture(autouse=True)
+def _no_inbox_listeners():
+    """Per-test: nobody listens for new channel inbox rows. A voice manager
+    that welcomed you subscribes for the process's life, so one test's
+    must not hear the rows the next test writes."""
+    from core.inbox import writer
+
+    writer._listeners.clear()
+    yield
+    writer._listeners.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_tts_network(monkeypatch):
     """Per-test: text-to-speech never reaches the network. Chirp counts as
     unavailable without running its gRPC check, and a real Chirp or edge-tts

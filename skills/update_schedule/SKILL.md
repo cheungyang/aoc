@@ -35,6 +35,8 @@ task, or setting up a recurring automated action for an agent.
   "precondition": { "type": "<see table>", "...": "..." },
   "session_policy": "stateless",
   "thinking_level": "<optional: minimal | low | medium | high>",
+  "priority": "<optional: IGNORE | LOW | DEFAULT | HIGHEST>",
+  "label": "<optional: how a voice briefing names a post, e.g. your morning check-in>",
   "prompt": ["<instruction>"]
 }
 ```
@@ -51,6 +53,9 @@ task, or setting up a recurring automated action for an agent.
   have no `minimal`; it is raised to `low`.
 - Do **not** write "if empty, terminate silently" in the prompt. That is what
   the precondition is for; by the time the prompt runs, there is work.
+- Don't ask for a speech version in the prompt either. Unless the priority is
+  `IGNORE`, the run gets the scheduled `<voice_mode>` block and writes one
+  itself, with any direct question marked `<question>`.
 
 **`"kind": "script"`: deterministic Python, no LLM.**
 ```json
@@ -60,6 +65,8 @@ task, or setting up a recurring automated action for an agent.
   "channel": "<target_channel>",
   "thread": "<optional_thread_name>",
   "cron": "<standard_cron_pattern>",
+  "priority": "<optional: IGNORE | LOW | DEFAULT | HIGHEST>",
+  "label": "<optional>",
   "script": ["first.py", "second.py --flag value"]
 }
 ```
@@ -71,6 +78,17 @@ task, or setting up a recurring automated action for an agent.
   and rejects scripts that don't comply.
 - The script's stdout is posted to the channel; empty stdout posts nothing.
 - `session_policy` and `thinking_level` are not allowed on script schedules.
+
+**Voice briefings: `priority` and `label` (any kind).** Each post a schedule
+makes puts its channel in the channel inbox, which voice briefings read when
+the user joins the voice channel.
+- `priority`:
+  - `IGNORE`: never in the inbox (housekeeping: syncs, reapers).
+  - `LOW`: not in the join digest; "next agent" reaches it last.
+  - `DEFAULT`: in the digest. This is the default.
+  - `HIGHEST`: also announced live while the user is in voice. Use it rarely.
+- `label`: a short noun phrase (60 characters at most), spoken after the agent's
+  name: "Marvin has **the market scan**". Without one, the digest says "an update".
 
 ### 3. Pick the Precondition (prompt schedules)
 

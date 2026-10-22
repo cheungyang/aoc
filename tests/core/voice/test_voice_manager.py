@@ -991,52 +991,53 @@ async def test_where_am_i_and_already_there_are_answered_without_a_model_call(mo
 
 
 @pytest.mark.asyncio
-async def test_a_near_miss_asks_do_you_mean_and_yes_switches(mock_bot_runner, tmp_path):
+async def test_a_near_miss_tells_you_the_words_and_they_switch(mock_bot_runner, tmp_path):
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
     vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
     with _focused(loader):
         await _turn(vm, "Take me to exercise.")
-        assert vm.focus().is_lobby, "only a yes switches"
-        # A lone "yes" said over the question's end counts as an answer.
-        assert vm.floor._reply == "Do you mean fitness coach Frankie?"
-        await _turn(vm, "Yes.")
+        assert vm.focus().is_lobby, "nothing switches until you say the words"
+        await _turn(vm, "Switch to Frankie.")
 
     main_agent.execute_stream.assert_not_called()
     assert vm.focus().key == "fitness-coach"
-    assert vm.reply.tts.said() == ["Do you mean fitness coach Frankie?", "Frankie here."]
-    assert _voices(vm) == [CONCIERGE_VOICE, FRANKIE_VOICE], "the concierge asks; Frankie greets"
+    assert vm.reply.tts.said() == ["Do you mean fitness coach Frankie? Say 'switch to Frankie' to get there.",
+                                   "Frankie here."]
+    assert _voices(vm) == [CONCIERGE_VOICE, FRANKIE_VOICE], "the concierge suggests; Frankie greets"
 
 
 @pytest.mark.asyncio
-async def test_no_to_do_you_mean_keeps_you_where_you_are(mock_bot_runner, tmp_path):
+async def test_a_yes_after_do_you_mean_is_an_ordinary_request(mock_bot_runner, tmp_path):
+    """No yes/no mode: nothing waits for an answer."""
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
     vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
+    calls = _capture_sessions(main_agent)
     with _focused(loader):
         await _turn(vm, "Switch me to Daisy.")
         await _turn(vm, "Take me to exercise.")
-        await _turn(vm, "No.")
+        await _turn(vm, "Yes.")
 
-    main_agent.execute_stream.assert_not_called()
     assert vm.focus().key == "day-planning"
-    assert vm.reply.tts.said() == ["Daisy here.", "Do you mean fitness coach Frankie?", "Okay, staying with Daisy."]
+    assert [prompt for prompt, _session in calls] == ["Yes."]
+    assert calls[0][1].session_id == "main:discord:day-planning"
 
 
 @pytest.mark.asyncio
-async def test_anything_else_drops_the_question_and_runs_as_a_normal_turn(mock_bot_runner, tmp_path):
+async def test_anything_else_after_do_you_mean_runs_as_a_normal_turn(mock_bot_runner, tmp_path):
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
     vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
     calls = _capture_sessions(main_agent)
     with _focused(loader):
         await _turn(vm, "Take me to exercise.")
         await _turn(vm, "What's the weather like?")
-        await _turn(vm, "Yes.")  # the question is gone: just a "yes" to the concierge
+        await _turn(vm, "Yes.")  # just a "yes" to the concierge
 
     assert vm.focus().is_lobby
     assert [prompt for prompt, _session in calls] == ["What's the weather like?", "Yes."]
 
 
 @pytest.mark.asyncio
-async def test_never_mind_drops_the_question(mock_bot_runner, tmp_path):
+async def test_never_mind_after_do_you_mean_switches_nothing(mock_bot_runner, tmp_path):
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
     vm.switcher._resolve = AsyncMock(return_value="fitness-coach")
     calls = _capture_sessions(main_agent)
@@ -1107,6 +1108,299 @@ async def test_join_typed_in_a_text_channel_starts_there(mock_bot_runner, tmp_pa
 
     vm.connection.join.assert_awaited_once_with("aoc-voice")
     assert vm.focus().key == "day-planning"
+
+
+# ---------------------------------------------------------------------------
+# Part 3: voice briefings from the channel inbox
+# ---------------------------------------------------------------------------
+
+DAISY_SPEECH = "Yesterday you noted the afternoon slipped away. How's your energy this morning, one to ten?"
+DAISY_QUESTION = "How's your energy this morning, one to ten?"
+
+
+def _inbox_row(channel, agent_id, **kw):
+    from core.inbox.model import InboxRow, Source
+    base = dict(channel=channel, agent_id=agent_id, posted_at=time.time() - 3600, source=Source.SCHEDULE)
+    base.update(kw)
+    return InboxRow(**base)
+
+
+def _briefed_room(mock_bot_runner, tmp_path, *rows, listening=True):
+    """The room fixture with the inbox's briefing hook plugged in (as the
+    Discord runner does), `rows` in the channel inbox, and you in the room."""
+    from core.inbox.store import InboxStore
+    from core.inbox.voice_briefing import VoiceBriefing
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    for row in rows:
+        InboxStore().put(row)
+    channels["room"].members = [MagicMock(bot=False)] if listening else []
+    vm.hooks = [VoiceBriefing(hour=lambda: 8)]
+    return vm, main_agent, loader, channels
+
+
+def _briefing(vm):
+    return vm.hooks[0]
+
+
+async def _settle(vm):
+    """Lets the speech writer and any announcement finish."""
+    for _ in range(3):
+        writers = [task for _, task in _briefing(vm).writer._tasks.values()]
+        await asyncio.gather(*writers, *list(vm._side_tasks))
+        await asyncio.sleep(0)
+
+
+def _status(channel):
+    from core.inbox.store import InboxStore
+    return InboxStore().get(channel).status.value
+
+
+@pytest.mark.asyncio
+async def test_joining_with_unfinished_channels_greets_you_with_the_digest(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("day-planning", "day-planner", label="your morning check-in", speech=DAISY_SPEECH,
+                   question=DAISY_QUESTION),
+        _inbox_row("market-scout", "market-scout", label="the market scan", speech="Markets are flat."),
+    )
+    with _focused(loader):
+        await vm.welcome()
+        await _settle(vm)
+
+    assert vm.reply.tts.said() == [
+        "Morning. Two agents have something for you. Daisy is waiting for your answer. "
+        "Marvin has the market scan. Start with Daisy? Say 'start with Daisy' to begin."
+    ]
+    assert _voices(vm) == [CONCIERGE_VOICE]
+
+
+@pytest.mark.asyncio
+async def test_next_agent_plays_what_the_agent_left_then_only_its_question(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("day-planning", "day-planner", label="your morning check-in", speech=DAISY_SPEECH,
+                   question=DAISY_QUESTION),
+    )
+    with _focused(loader):
+        await vm.welcome()
+        await _turn(vm, "Next agent.")
+        assert vm.focus().key == "day-planning"
+        assert _status("day-planning") == "AWAITING_REPLY"
+        await _turn(vm, "Take me to concierge.")
+        await _turn(vm, "Switch me to Daisy.")
+
+    main_agent.execute_stream.assert_not_called()
+    assert vm.reply.tts.said()[1:] == ["Daisy here.", DAISY_SPEECH, "Concierge here.", "Daisy here.", DAISY_QUESTION]
+    assert _voices(vm)[1:3] == [DAISY_VOICE, DAISY_VOICE], "the agent speaks its own post"
+
+
+@pytest.mark.asyncio
+async def test_answering_by_voice_finishes_the_channels_row(mock_bot_runner, tmp_path):
+    from core.inbox.store import InboxStore
+    vm, main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("day-planning", "day-planner", label="your morning check-in", speech=DAISY_SPEECH,
+                   question=DAISY_QUESTION),
+    )
+    calls = _capture_sessions(main_agent, reply="Good. What are your intentions for today?")
+    with _focused(loader):
+        await vm.welcome()
+        await _turn(vm, "Start with Daisy.")
+        await _turn(vm, "About a seven.")
+
+    assert [prompt for prompt, _session in calls] == ["About a seven."]
+    row = InboxStore().get("day-planning")
+    assert (row.status.value, row.status_via.value) == ("DONE", "VOICE")
+
+
+@pytest.mark.asyncio
+async def test_next_agent_with_nothing_left_says_so(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _briefed_room(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await vm.welcome()
+        await _turn(vm, "Next agent.")
+
+    assert vm.reply.tts.said() == ["Concierge here.", "That's everything."]
+    main_agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_reply_judged_after_you_join_is_announced_once_the_pipeline_is_idle(mock_bot_runner, tmp_path):
+    from core.inbox.model import Source
+    from core.inbox.speech_writer import SpeechWriter
+    vm, _main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("market-scout", "market-scout", source=Source.REPLY, label="a question for you",
+                   excerpt="Should I add NVDA to your watchlist?"),
+    )
+
+    async def write(row, name):
+        return "Should I add NVDA to your watchlist?", "Should I add NVDA to your watchlist?"
+
+    _briefing(vm).writer = SpeechWriter(write=write)
+    with _focused(loader):
+        await vm.welcome()
+        await _settle(vm)
+
+    # Unjudged, so not in the digest; announced once the speech writer kept it.
+    assert vm.reply.tts.said() == ["Concierge here.",
+                                   "Marvin has a question for you. Say 'switch to Marvin' to hear it."]
+    assert _voices(vm) == [CONCIERGE_VOICE, CONCIERGE_VOICE]
+
+
+@pytest.mark.asyncio
+async def test_no_announcement_when_nobody_is_listening(mock_bot_runner, tmp_path):
+    from core.inbox.model import Source
+    from core.inbox.speech_writer import SpeechWriter
+    vm, _main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("market-scout", "market-scout", source=Source.LATE_REPLY, label="a reply for you",
+                   excerpt="Done: the scan is in."),
+        listening=False,
+    )
+
+    async def write(row, name):
+        return "The scan is in.", None
+
+    _briefing(vm).writer = SpeechWriter(write=write)
+    with _focused(loader):
+        await vm.welcome()
+        await _settle(vm)
+
+    assert vm.reply.tts.said() == ["Concierge here."]
+
+
+# ---------------------------------------------------------------------------
+# Hooks: how features built on the room join in (core/voice/hooks.py)
+# ---------------------------------------------------------------------------
+
+class _RecordingHook:
+    """A hook that records every call, and does what the test sets."""
+
+    def __init__(self, greeting=None, handles=(), says_on_arrival=None):
+        self.greeting, self.handles, self.says_on_arrival = greeting, set(handles), says_on_arrival
+        self.calls = []
+
+    def joined(self, room):
+        self.calls.append(("joined",))
+        return self.greeting
+
+    def left(self, room):
+        self.calls.append(("left",))
+
+    async def handle(self, room, transcript, say):
+        self.calls.append(("handle", transcript))
+        if transcript.rstrip(".") in self.handles:
+            await say("Handled.", "main")
+            return True
+        return False
+
+    async def arrived(self, room, focus, speak):
+        self.calls.append(("arrived", focus.key))
+        if self.says_on_arrival:
+            await speak(self.says_on_arrival)
+
+    def turn(self, room, focus):
+        self.calls.append(("turn", focus.key))
+
+
+class _BrokenHook(_RecordingHook):
+    def joined(self, room):
+        raise RuntimeError("joined broke")
+
+    async def handle(self, room, transcript, say):
+        raise RuntimeError("handle broke")
+
+    async def arrived(self, room, focus, speak):
+        raise RuntimeError("arrived broke")
+
+    def turn(self, room, focus):
+        raise RuntimeError("turn broke")
+
+
+@pytest.mark.asyncio
+async def test_a_hook_may_greet_you_instead_of_the_concierge(mock_bot_runner, tmp_path):
+    vm, _agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    vm.hooks = [_RecordingHook(greeting=None), _RecordingHook(greeting="Morning. Two agents have something for you.")]
+    with _focused(loader):
+        await vm.welcome()
+    assert vm.reply.tts.said() == ["Morning. Two agents have something for you."]
+    assert [h.calls for h in vm.hooks] == [[("joined",)], [("joined",)]]
+
+
+@pytest.mark.asyncio
+async def test_hooks_hear_an_utterance_before_the_switcher_and_the_agent(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    hook = _RecordingHook(handles={"Take me to the next agent"})
+    vm.hooks = [hook]
+    with _focused(loader):
+        await _turn(vm, "Take me to the next agent.")
+
+    vm.switcher._resolve.assert_not_awaited()  # the switcher never saw it
+    main_agent.execute_stream.assert_not_called()
+    assert vm.reply.tts.said() == ["Handled."]
+    assert ("handle", "Take me to the next agent.") in hook.calls
+
+
+@pytest.mark.asyncio
+async def test_arriving_lets_hooks_speak_in_the_agents_voice(mock_bot_runner, tmp_path):
+    vm, _agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    hook = _RecordingHook(says_on_arrival="How's your energy this morning, one to ten?")
+    vm.hooks = [hook]
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+
+    assert vm.reply.tts.said() == ["Daisy here.", "How's your energy this morning, one to ten?"]
+    assert _voices(vm) == [DAISY_VOICE, DAISY_VOICE]
+    assert ("arrived", "day-planning") in hook.calls
+    # A lone "yes" over the end of what she said counts as an answer.
+    assert vm.floor._reply == "How's your energy this morning, one to ten?"
+
+
+@pytest.mark.asyncio
+async def test_a_turn_tells_hooks_which_channel_it_runs_in(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    _capture_sessions(main_agent)
+    hook = _RecordingHook()
+    vm.hooks = [hook]
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar?")
+    assert hook.calls[-1] == ("turn", "day-planning")
+
+
+@pytest.mark.asyncio
+async def test_a_broken_hook_is_skipped_and_the_room_carries_on(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    vm.hooks = [_BrokenHook()]
+    with _focused(loader):
+        await vm.welcome()
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar?")
+        await vm.leave()
+
+    assert vm.reply.tts.said()[:2] == ["Concierge here.", "Daisy here."]
+    assert [prompt for prompt, _session in calls] == ["What's on my calendar?"]
+
+
+@pytest.mark.asyncio
+async def test_say_when_idle_waits_for_the_turn_and_needs_a_listener(mock_bot_runner, tmp_path):
+    vm, _agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    channels["room"].members = [MagicMock(bot=False)]
+    vm.audio_queue.is_playing = MagicMock(return_value=True)  # a reply is playing
+    with _focused(loader), patch("core.voice.voice_manager.IDLE_POLL_S", 0.001):
+        vm.say_when_idle("Marvin has a question for you. Say 'switch to Marvin' to hear it.")
+        await asyncio.sleep(0.01)
+        assert vm.reply.tts.said() == [], "not over a reply"
+        vm.audio_queue.is_playing.return_value = False
+        await asyncio.gather(*list(vm._side_tasks))
+        assert vm.reply.tts.said() == ["Marvin has a question for you. Say 'switch to Marvin' to hear it."]
+
+        channels["room"].members = []  # you left
+        vm.say_when_idle("Ted has a reply for you.")
+        await asyncio.gather(*list(vm._side_tasks))
+    assert len(vm.reply.tts.said()) == 1
 
 
 # ---------------------------------------------------------------------------
