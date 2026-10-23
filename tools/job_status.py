@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from core.runtime.job_manager import JobManager
 from core.runtime.execution_context import try_context
 from core.util import format_tool_response
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+from core.storage.sessions import SessionStore
 from tools.agent_call import agent_call
 
 @tool
@@ -44,8 +44,8 @@ async def _job_status_async(job_id: str) -> str:
             
         session_id = job.session_id
 
-        # Use SqliteSessionStore to get history
-        session_store = SqliteSessionStore()
+        # Use SessionStore to get history
+        session_store = SessionStore()
         history = session_store.load_history(session_id, limit=100)
         ai_messages = [entry.get("message", "") for entry in history if entry.get("from") == "ai"]
         ai_message_count = len(ai_messages)

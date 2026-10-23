@@ -1,12 +1,10 @@
 import unittest
-from contextlib import closing
 from datetime import date
 
 from agents.day_planner.lib.recurring_chores import ChoresDue, assess, chores_due, format_chores, same_chore
 from agents.day_planner.lib.rules import RULES
-from agents.day_planner.lib.task_cache import connect_readonly
+from core.storage.tasks import TasksStore
 from core.tooling import Report
-from core.util.config import Config
 from tests.agents.day_planner import TODAY, PlanningCase
 
 LEAD_DAYS = 3  # chore_lead_days' default
@@ -95,7 +93,7 @@ class TestChoresDue(PlanningCase):
         self.task("- [ ] Pay the plumber 📅 2026-10-16")
 
     def report(self, today=TODAY, lead_days=LEAD_DAYS, report=None):
-        with closing(connect_readonly(Config().tasks_db_path)) as conn:
+        with TasksStore().read_only() as conn:
             return chores_due(conn, today, lead_days, report or Report())
 
     def test_sorts_chores_by_state(self):
@@ -183,7 +181,7 @@ class TestNoChores(PlanningCase):
 
     def test_says_none_for_each_state(self):
         self.task("- [ ] Pay the plumber 📅 2026-10-16")
-        with closing(connect_readonly(Config().tasks_db_path)) as conn:
+        with TasksStore().read_only() as conn:
             text = format_chores(chores_due(conn, TODAY, LEAD_DAYS, Report()))
         self.assertEqual(text, "Overdue: none\nDue today: none\nDue soon: none")
 

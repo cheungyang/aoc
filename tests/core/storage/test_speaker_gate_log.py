@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from core.voice.listening.gate_log import Effect, GateLog, GateRecord, Label, Mode
+from core.storage.speaker_gate_log import Effect, GateLog, GateRecord, Label, Mode
 
 
 def record(at=1000.0, verdict="NOT_YOU", score=0.3, **kw):

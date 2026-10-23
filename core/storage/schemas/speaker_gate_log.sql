@@ -1,4 +1,4 @@
--- The voiceprint gate's records (core/voice/listening/gate_log.py): one row
+-- The voiceprint gate's records (core/storage/speaker_gate_log.py): one row
 -- per utterance it scored, with your review mark. Every category column holds
 -- an enum's value, checked here.
 CREATE TABLE IF NOT EXISTS speaker_gate_log (

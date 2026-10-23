@@ -482,8 +482,8 @@ class TestSurfaceColumnStorage(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_round_trip(self):
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-        store = SqliteSessionStore(db_path=self.db_path)
+        from core.storage.sessions import SessionStore
+        store = SessionStore(self.db_path)
         store.append_token_usage("main:discord:general", "m", 1, 2, 0.0, 0.5, surface="voice")
         store.append_token_usage("main:discord:general", "m", 1, 2, 0.0, 0.5)
         rows = store.load_token_history("main:discord:general")
@@ -491,7 +491,7 @@ class TestSurfaceColumnStorage(unittest.TestCase):
 
     def test_migrates_a_legacy_table(self):
         import sqlite3
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
+        from core.storage.sessions import SessionStore, sanitize_table_name
         table = sanitize_table_name("main:discord:general")
         conn = sqlite3.connect(self.db_path)
         conn.execute(f"""
@@ -510,9 +510,10 @@ class TestSurfaceColumnStorage(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        store = SqliteSessionStore(db_path=self.db_path)
+        store = SessionStore(self.db_path)
         # Reading an unmigrated table must not fail.
         self.assertEqual(store.load_token_history("main:discord:general")[0]["surface"], None)
+        self.assertEqual(store.columns(table)[-1], "surface", "the migration adds it at the end")
         store.append_token_usage("main:discord:general", "new", 1, 1, 0.0, surface="scheduled")
         rows = store.load_token_history("main:discord:general")
         self.assertEqual([(r["model"], r["surface"]) for r in rows], [("old", None), ("new", "scheduled")])

@@ -21,7 +21,8 @@ nor the end-of-turn silence. Modes, per voice session
 
     off       nothing: no scoring, and no owner filter
     shadow    every finished utterance is scored on a worker thread and
-              recorded (gate_log.py), with nothing you hear changed
+              recorded (core/storage/speaker_gate_log.py), with nothing
+              you hear changed
     enforce   comes once the thresholds are set from your drives; until
               then it counts as "shadow"
 
@@ -43,8 +44,8 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 
 import numpy as np
 
+from core.storage.speaker_gate_log import Effect, GateLog, GateRecord, Mode
 from core.voice import settings
-from core.voice.listening.gate_log import Effect, GateLog, GateRecord, Mode
 from core.voice.listening.utterance import BYTES_PER_MS, SAMPLE_RATE, Utterance
 
 # --- features: 80-dim log mel fbank, Kaldi-compatible -----------------------------

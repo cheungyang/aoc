@@ -31,16 +31,16 @@ def _record_turn(session, user_prompt, reply_text: str):
     """Writes a deterministic turn into the human-readable session log.
 
     The checkpoint takes care of itself -- the node returns an AIMessage and the
-    compiled graph persists it. `SqliteSessionStore` does not: it is populated by
+    compiled graph persists it. `SessionStore` does not: it is populated by
     `LoggingHandler.on_llm_start`/`on_llm_end`, which are *LLM* callbacks. A
     routed turn never calls a model, so without this the transcript would simply
     skip every deterministic exchange, and the orchestrator would later read a
     channel's history as though nothing had happened in it.
     """
     try:
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+        from core.storage.sessions import SessionStore
 
-        store = SqliteSessionStore()
+        store = SessionStore()
         store.append_message(session.session_id, "user", prompt_to_text(user_prompt))
         if reply_text:
             store.append_message(session.session_id, "ai", reply_text)

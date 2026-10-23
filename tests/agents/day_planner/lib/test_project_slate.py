@@ -1,9 +1,7 @@
-from contextlib import closing
-
 from agents.day_planner.lib.project_slate import active_projects, due_tasks, format_projects
-from agents.day_planner.lib.task_cache import connect_readonly
+from core.storage.projects import ProjectsStore
+from core.storage.tasks import TasksStore
 from core.tooling import Report
-from core.util.config import Config
 from tests.agents.day_planner import TODAY, PlanningCase
 
 PROJECT_A_FILE = "vault/projects/Project A.md"
@@ -37,7 +35,7 @@ class TestActiveProjects(PlanningCase):
         self.task("- [ ] Get a quote for the raised beds ⏫ #p/garden", "vault/projects/Garden makeover.md")
 
     def projects(self, report=None):
-        with closing(connect_readonly(Config().projects_db_path)) as p, closing(connect_readonly(Config().tasks_db_path)) as t:
+        with ProjectsStore().read_only() as p, TasksStore().read_only() as t:
             return active_projects(p, t, TODAY, report or Report())
 
     def test_this_years_executing_and_planning_projects_by_priority(self):
@@ -85,7 +83,7 @@ class TestActiveProjects(PlanningCase):
 class TestDueTasks(PlanningCase):
 
     def lines(self, report=None):
-        with closing(connect_readonly(Config().tasks_db_path)) as conn:
+        with TasksStore().read_only() as conn:
             return due_tasks(conn, TODAY, report or Report())
 
     def test_due_within_a_week_or_slipped_soonest_first(self):

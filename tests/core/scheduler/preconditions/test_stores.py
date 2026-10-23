@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import unittest
 
@@ -37,14 +38,27 @@ class TestStorePreconditions(TmpDirCase):
         conn = sqlite3.connect(db)
         conn.execute("INSERT INTO tasks VALUES ('todo', NULL, '[\"a/learn\"]')")
         conn.commit()
+        # Read-only: the hand-built table is all there is, no schema was added.
+        self.assertEqual([r[0] for r in conn.execute("SELECT name FROM sqlite_master")], ["tasks"])
         conn.close()
         self.assertTrue(untriaged.evaluate(ctx()))
 
     def test_task_list_missing_db(self):
+        path = self.abs("none.db")
         p = build_precondition(
-            {"type": "task_list_non_empty", "db_path": self.abs("none.db")}
+            {"type": "task_list_non_empty", "db_path": path}
         )
-        self.assertFalse(p.evaluate(ctx()))
+        decision = p.evaluate(ctx())
+        self.assertFalse(decision)
+        self.assertEqual(decision.reason, f"task store {path} does not exist")
+        self.assertFalse(os.path.exists(path))
+
+    def test_project_list_missing_db(self):
+        path = self.abs("none.db")
+        decision = build_precondition({"type": "project_list_non_empty", "db_path": path}).evaluate(ctx())
+        self.assertFalse(decision)
+        self.assertEqual(decision.reason, f"project store {path} does not exist")
+        self.assertFalse(os.path.exists(path))
 
     def test_project_list_non_empty(self):
         path = self.abs("projects.db")

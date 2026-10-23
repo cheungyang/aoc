@@ -126,8 +126,8 @@ class TurnTrace:
         print(f"[TurnTrace] {json.dumps(summary, separators=(',', ':'), default=str)}")
         if session_id:
             try:
-                from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-                SqliteSessionStore().append_turn_trace(session_id, summary, surface=surface)
+                from core.storage.sessions import SessionStore
+                SessionStore().append_turn_trace(session_id, summary, surface=surface)
             except Exception as e:
                 print(f"[TurnTrace] could not store trace for {session_id}: {e}")
         return summary

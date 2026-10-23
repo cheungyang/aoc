@@ -3,7 +3,7 @@ import unittest
 
 from core.inbox.commands import USAGE, handle_inbox_command
 from core.inbox.model import InboxRow, Priority, Source, Status
-from core.inbox.store import InboxStore
+from core.storage.channel_inbox import InboxStore
 
 NOW = 1_000_000.0
 

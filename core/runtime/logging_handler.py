@@ -5,8 +5,8 @@ import time
 import ast
 from typing import Any, Optional, Union
 from langchain_core.callbacks import BaseCallbackHandler
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 from core.runtime.execution_context import ExecutionContext
+from core.storage.sessions import SessionStore
 from core.util.logging_util import extract_model_name, format_tool_extra_str
 
 
@@ -22,7 +22,7 @@ class LoggingHandler(BaseCallbackHandler):
         self.agent_id = session.agent_id
         self.role = role
         self.human_message = human_message
-        self.manager = SqliteSessionStore()
+        self.manager = SessionStore()
         self.llm_start_time = None
         self.last_execution_time = 0.0
         self.tool_start_times = {}

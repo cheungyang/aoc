@@ -1,6 +1,6 @@
 from typing import Optional, Any, Union
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 from core.runtime.execution_context import ExecutionContext, inherited_record_memory, inherited_surface
+from core.storage.sessions import SessionStore
 
 
 class SessionManager:
@@ -59,9 +59,9 @@ class SessionManager:
         )
 
     def clear_session(self, session: ExecutionContext) -> str:
-        store = SqliteSessionStore()
+        store = SessionStore()
         return store.archive_session(session.session_id)
 
     def clear_sessions(self) -> str:
-        store = SqliteSessionStore()
+        store = SessionStore()
         return store.archive_all_sessions()

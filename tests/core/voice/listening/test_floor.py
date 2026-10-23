@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.storage.speaker_gate_log import Effect
 from core.voice.listening.floor import Floor
-from core.voice.listening.gate_log import Effect
 from core.voice.listening.utterance import Transcript, Utterance
 
 

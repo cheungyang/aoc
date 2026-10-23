@@ -16,7 +16,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from core.knowledge.projects.sync import sync_projects, get_pkm_dir, get_projects_dir
-from core.knowledge.projects.db import get_db_path
+from core.storage.projects import ProjectsStore
 
 
 def has_work(ctx):
@@ -25,7 +25,7 @@ def has_work(ctx):
 
     if ctx.last_success_at is None:
         return True, "no previous successful sync"
-    if not os.path.exists(get_db_path()):
+    if not ProjectsStore().exists():
         return True, "projects.db does not exist yet"
     projects_dir = get_projects_dir(get_pkm_dir())
     changed = first_changed_path([projects_dir], ctx.last_success_at, suffixes=(".md",))
@@ -47,7 +47,7 @@ def parse_args():
 def main():
     args = parse_args()
     pkm_dir = os.path.abspath(os.path.expanduser(args.pkm_dir)) if args.pkm_dir else get_pkm_dir()
-    db_path = os.path.abspath(os.path.expanduser(args.db_path)) if args.db_path else get_db_path()
+    db_path = os.path.abspath(os.path.expanduser(args.db_path)) if args.db_path else ProjectsStore().path
     projects_dir = os.path.abspath(os.path.expanduser(args.projects_dir)) if args.projects_dir else get_projects_dir(pkm_dir)
 
     print(f"=== Starting PKM Projects Sync ===")

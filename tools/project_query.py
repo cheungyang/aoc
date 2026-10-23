@@ -5,16 +5,7 @@ from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
 from core.runtime.execution_context import try_context
-from core.knowledge.projects.db import (
-    get_connection,
-    init_db,
-    query_projects_db,
-    get_project_by_id,
-    get_project_by_name,
-    get_project_stats,
-    execute_read_sql,
-    get_db_path,
-)
+from core.storage.projects import ProjectsStore
 from core.knowledge.projects.sync import sync_projects
 
 
@@ -90,37 +81,37 @@ def project_query(
             sync_result = sync_projects()
             return format_tool_response("project_query", payload=json.dumps(sync_result, indent=2))
 
-        conn = get_connection()
-        try:
-            init_db(conn)
+        store = ProjectsStore()
+        with store.connect() as conn:
+            store.init(conn)
 
             if action == "get":
                 target_id = (id or project_id or name or "").strip()
                 if not target_id:
                     return format_tool_response("project_query", payload="", errors="Error: 'id' or 'name' is required for action='get'.")
 
-                proj = get_project_by_id(conn, target_id)
+                proj = store.get_project(target_id, conn=conn)
                 if not proj:
-                    proj = get_project_by_name(conn, target_id)
+                    proj = store.get_project_by_name(target_id, conn=conn)
 
                 if not proj:
                     return format_tool_response("project_query", payload="", errors=f"Error: Project not found with ID or name '{target_id}'.")
                 return format_tool_response("project_query", payload=json.dumps(proj, indent=2, ensure_ascii=False))
 
             elif action == "stats":
-                stats = get_project_stats(conn)
+                stats = store.stats(conn=conn)
                 return format_tool_response("project_query", payload=json.dumps(stats, indent=2, ensure_ascii=False))
 
             elif action == "sql":
                 if not sql:
                     return format_tool_response("project_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
-                results, err = execute_read_sql(conn, sql, limit=limit)
+                results, err = store.read_sql(sql, limit=limit, conn=conn)
                 if err:
                     return format_tool_response("project_query", payload="", errors=err)
                 return format_tool_response("project_query", payload=json.dumps(results, indent=2, ensure_ascii=False))
 
             elif action == "search":
-                results = query_projects_db(
+                results = store.search(
                     conn=conn,
                     status=status if status else None,
                     commitment_year=commitment_year,
@@ -144,8 +135,6 @@ def project_query(
                     payload="",
                     errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'."
                 )
-        finally:
-            conn.close()
 
     except Exception as e:
         return format_tool_response("project_query", payload="", errors=f"Error in project_query: {e}")

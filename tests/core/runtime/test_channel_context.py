@@ -7,9 +7,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
 from core.runtime import channel_context as cc
 from core.runtime.session_manager import SessionManager
+from core.storage.sessions import SessionStore
 
 
 class FakeLoader:
@@ -135,7 +135,7 @@ class TestAppendAndReplay(unittest.IsolatedAsyncioTestCase):
         last = tup.checkpoint["channel_values"]["messages"][-1]
         self.assertIn("Today's plan", last.content)
         self.assertIn("day-planner:morning", last.content)
-        log = SqliteSessionStore().load_history(written[0], limit=5)
+        log = SessionStore().load_history(written[0], limit=5)
         self.assertTrue(any("Today's plan" in str(row) for row in log))
 
     def test_record_channel_post_never_raises(self):

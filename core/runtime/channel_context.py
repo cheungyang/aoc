@@ -180,7 +180,7 @@ def _log_transcript(session_id: str, body: str) -> None:
     """Keeps the human-readable log consistent with the checkpoint (see
     `graphs.main.graph._record_turn` for why this is separate)."""
     try:
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-        SqliteSessionStore().append_message(session_id, "ai", body)
+        from core.storage.sessions import SessionStore
+        SessionStore().append_message(session_id, "ai", body)
     except Exception as e:
         print(f"[channel_context] Warning: could not log transcript for {session_id}: {e}", file=sys.stderr)

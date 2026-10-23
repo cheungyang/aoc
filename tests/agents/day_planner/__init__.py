@@ -176,45 +176,35 @@ class PlanningCase(unittest.TestCase):
         return self.write(f"vault/journals/weekly/{name}.md", text.replace("{day}", day))
 
     def _init_caches(self):
-        from core.knowledge.projects.db import get_connection as projects_connection
-        from core.knowledge.projects.db import init_db as init_projects
-        from core.knowledge.tasks.db import get_connection as tasks_connection
-        from core.knowledge.tasks.db import init_db as init_tasks
+        from core.storage.projects import ProjectsStore
+        from core.storage.tasks import TasksStore
 
-        conn = tasks_connection(Config().tasks_db_path)
-        init_tasks(conn)
-        conn.close()
-        conn = projects_connection(Config().projects_db_path)
-        init_projects(conn)
-        conn.close()
+        TasksStore().init()
+        ProjectsStore().init()
 
     def task(self, line, source="vault/projects/Chores.md"):
         """Adds one task, parsed from its markdown line by the real parser."""
-        from core.knowledge.tasks.db import get_connection, upsert_tasks
         from core.knowledge.tasks.parser import parse_task_line
+        from core.storage.tasks import TasksStore
 
         self._lines = getattr(self, "_lines", 0) + 1
         parsed, _ = parse_task_line(line, self._lines, source)
-        conn = get_connection(Config().tasks_db_path)
-        upsert_tasks(conn, [parsed])
-        conn.close()
+        TasksStore().upsert_tasks([parsed])
         return parsed
 
     def project(self, name, status="executing", year=2026, priority="⏫", rank=2, aliases=(), category=None,
                 file_name=None, commitments=()):
-        from core.knowledge.projects.db import get_connection
+        from core.storage.projects import ProjectsStore
 
-        conn = get_connection(Config().projects_db_path)
         pid = f"id-{name}"
-        conn.execute(
-            "INSERT INTO projects (id, name, file_path, status, raw_status, commitment_year, priority, "
-            "priority_rank, category, aliases, tags, content_hash, updated_date) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'h', '2026-10-01')",
-            (pid, name, f"vault/projects/{file_name or name + '.md'}", status, status, year, priority, rank,
-             category, json.dumps(list(aliases))),
-        )
-        for y in commitments:
-            conn.execute("INSERT INTO project_commitments (id, year, priority, priority_rank) VALUES (?, ?, ?, ?)",
-                         (pid, y, priority, rank))
-        conn.commit()
-        conn.close()
+        with ProjectsStore().connect() as conn:
+            conn.execute(
+                "INSERT INTO projects (id, name, file_path, status, raw_status, commitment_year, priority, "
+                "priority_rank, category, aliases, tags, content_hash, updated_date) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'h', '2026-10-01')",
+                (pid, name, f"vault/projects/{file_name or name + '.md'}", status, status, year, priority, rank,
+                 category, json.dumps(list(aliases))),
+            )
+            for y in commitments:
+                conn.execute("INSERT INTO project_commitments (id, year, priority, priority_rank) VALUES (?, ?, ?, ?)",
+                             (pid, y, priority, rank))

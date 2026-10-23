@@ -103,10 +103,10 @@ def speaker_model_path() -> Optional[str]:
 def voice_data_dir() -> str:
     """Your voiceprint and the kept clips: beside memory.db, on this machine only
     (sessions/ is never committed or put in an image). Looked up at call time,
-    so anything that repoints the session store (the test suite) repoints this."""
-    from core.knowledge.memory import sqlite_session_store
+    so anything that repoints memory.db (the test suite) repoints this."""
+    from core.util.config import Config
     return os.environ.get("AOC_VOICE_DATA_DIR") or os.path.join(
-        os.path.dirname(sqlite_session_store.DEFAULT_DB_PATH), "voice")
+        os.path.dirname(Config().memory_db_path), "voice")
 
 # --- Text to speech --------------------------------------------------------
 # "chirp3_hd": Cloud Text-to-Speech, streamed. Each stretch of speech is one

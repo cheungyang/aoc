@@ -3,8 +3,8 @@ import os
 import tempfile
 import unittest
 
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-from scripts.compare_token_stats import _agent_for_table, _percentile, get_health_stats, get_voice_stats
+from core.storage.sessions import SessionStore
+from scripts.compare_token_stats import _agent_for_table, _percentile, get_health_stats, get_stats, get_voice_stats
 
 
 class TestVoiceStats(unittest.TestCase):
@@ -12,7 +12,7 @@ class TestVoiceStats(unittest.TestCase):
     def test_voice_tokens_and_turn_traces(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "memory.db")
-            store = SqliteSessionStore(db_path=db)
+            store = SessionStore(db)
             session = "main:discord:general"
             store.append_token_usage(session, "m", 1000, 50, 0.0, surface="voice")
             store.append_token_usage(session, "m", 900, 40, 0.0, surface="text")
@@ -37,7 +37,7 @@ class TestVoiceStats(unittest.TestCase):
     def test_health_counts_round_trips_and_dead_ends(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "memory.db")
-            store = SqliteSessionStore(db_path=db)
+            store = SessionStore(db)
             session = "home-steward:discord:home-automation"
             store.append_message(session, "user", "lights off")
             for _ in range(3):
@@ -55,6 +55,30 @@ class TestVoiceStats(unittest.TestCase):
         self.assertEqual(stats["calls"][("home-steward", "voice")], [3, 1])
         self.assertEqual(len(stats["denied"]["home-steward"]), 1)
         self.assertEqual(len(stats["skill_failures"]["home-steward"]), 1)
+
+    def test_token_periods_include_archived_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "memory.db")
+            store = SessionStore(db)
+            store.append_token_usage("day-planner:tool:day-planning", "m", 100, 10, 50.0, execution_time=2.0)
+            store.archive_session("day-planner:tool:day-planning")
+            store.append_token_usage("main:discord:general", "m", 300, 30, 0.0)
+
+            historical, current = get_stats(db_path=db, cutoff_ts=0)
+
+        self.assertEqual(historical["calls"], 0)
+        self.assertEqual((current["calls"], current["in_tokens"], current["out_tokens"]), (2, 400, 40))
+        self.assertEqual(current["cached_weighted"], 50.0)
+        self.assertEqual((current["exec_time"], current["exec_calls"]), (2.0, 1))
+        self.assertEqual(dict(current["agents"]), {"day-planner": [110, 1, 100, 50.0], "main": [330, 1, 300, 0.0]})
+
+    def test_a_missing_db_is_reported_not_created(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "memory.db")
+            self.assertEqual(get_stats(db_path=db), (None, None))
+            self.assertIsNone(get_voice_stats(db_path=db))
+            self.assertIsNone(get_health_stats(db_path=db))
+            self.assertFalse(os.path.exists(db))
 
     def test_helpers(self):
         self.assertEqual(_agent_for_table("ctx_day_planner_tool_day_planning", ["day-planner", "main"]), "day-planner")

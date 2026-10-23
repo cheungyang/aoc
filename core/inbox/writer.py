@@ -29,7 +29,7 @@ from core.inbox.model import (
     Via,
     excerpt_of,
 )
-from core.inbox.store import InboxStore
+from core.storage.channel_inbox import InboxStore
 
 # A ✅ counts for a row if the message it's on is no older than this before
 # the row's post: a run posts while it works, and its row is written at the end.

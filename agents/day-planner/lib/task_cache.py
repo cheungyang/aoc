@@ -6,12 +6,12 @@ raises instead of being created empty, and nothing here can write.
 """
 import re
 import sqlite3
+from contextlib import ExitStack, contextmanager
 from datetime import date
-from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
+from core.storage import Store, StoreMissing
 from core.tooling import Report
-from core.util.config import Config
 
 PRIORITY_ICONS = ("🔺", "⏫", "🔼", "🔽", "⏬")
 RECURRENCE = "🔁"
@@ -26,36 +26,19 @@ _TAG = re.compile(r"(?:^|\s)#[\w/\-]+")
 _URL = re.compile(r"https?://\S+")
 
 
-def tasks_db_path() -> str:
-    """Where the task cache is: the config's `tasks_db_path`."""
-    return Config().tasks_db_path
-
-
-def projects_db_path() -> str:
-    """Where the project cache is: the config's `projects_db_path`."""
-    return Config().projects_db_path
-
-
-def connect_readonly(path: str) -> sqlite3.Connection:
-    """Opens a SQLite cache read-only, with rows as `sqlite3.Row`."""
-    file = Path(path).expanduser()
-    if not file.is_file():
-        raise FileNotFoundError(f"{file} not found")
-    conn = sqlite3.connect(f"{file.resolve().as_uri()}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def open_cache(path: str, report: Report, required: bool = False) -> Optional[sqlite3.Connection]:
-    """`connect_readonly(path)`, or None when the file is missing.
+@contextmanager
+def open_cache(store: Store, report: Report, required: bool = False) -> Iterator[Optional[sqlite3.Connection]]:
+    """`store.read_only()` for the block, or None when its file is missing.
 
     A missing file goes in `report`: as required data (`failed`) or not (`partial`).
     """
-    try:
-        return connect_readonly(path)
-    except FileNotFoundError:
-        (report.missing if required else report.problem)(path, "not found")
-        return None
+    with ExitStack() as stack:
+        try:
+            conn = stack.enter_context(store.read_only())
+        except StoreMissing:
+            (report.missing if required else report.problem)(store.path, "not found")
+            conn = None
+        yield conn
 
 
 def cache_path(conn: sqlite3.Connection) -> str:

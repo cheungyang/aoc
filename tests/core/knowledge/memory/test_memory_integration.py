@@ -9,16 +9,16 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
 from core.runtime.session_manager import SessionManager
 from core.runtime.logging_handler import LoggingHandler
+from core.storage.sessions import SessionStore
 
 class TestMemoryIntegration(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.test_dir, "memory.db")
-        self.checkpointer = SqliteCheckpointer(db_path=self.db_path)
-        self.store = SqliteSessionStore(db_path=self.db_path)
+        self.checkpointer = SqliteCheckpointer(self.db_path)
+        self.store = SessionStore(self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -89,7 +89,7 @@ class TestMemoryIntegration(unittest.TestCase):
         self.assertEqual(new_history[0]["message"], "Hello again, fresh session!")
         
         # 10. Check that archived table still preserves old history
-        with self.store._get_connection() as conn:
+        with self.store.connect() as conn:
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_main_discord_general_archived_%'")
             archived_tables = cursor.fetchall()
             self.assertEqual(len(archived_tables), 1)

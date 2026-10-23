@@ -4,17 +4,8 @@ import os
 import shutil
 import sqlite3
 
-from core.knowledge.tasks.db import (
-    get_connection,
-    init_db,
-    upsert_tasks,
-    prune_deleted_tasks,
-    query_tasks_db,
-    get_task_by_id,
-    get_task_stats,
-    execute_read_sql
-)
 from core.knowledge.tasks.sync import sync_tasks, process_file
+from core.storage.tasks import TasksStore
 
 
 class TestTaskSyncAndDb(unittest.TestCase):
@@ -22,6 +13,7 @@ class TestTaskSyncAndDb(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.temp_dir, "test_tasks.db")
+        self.store = TasksStore(self.db_path)
         self.pkm_dir = os.path.join(self.temp_dir, "pkm")
         os.makedirs(os.path.join(self.pkm_dir, "ticktick"), exist_ok=True)
         os.makedirs(os.path.join(self.pkm_dir, "vault", "projects"), exist_ok=True)
@@ -30,8 +22,8 @@ class TestTaskSyncAndDb(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_db_init_and_crud(self):
-        conn = get_connection(self.db_path)
-        init_db(conn)
+        store = self.store
+        store.init()
 
         # Upsert 2 tasks
         tasks = [
@@ -73,62 +65,57 @@ class TestTaskSyncAndDb(unittest.TestCase):
             }
         ]
 
-        stats = upsert_tasks(conn, tasks)
+        stats = store.upsert_tasks(tasks)
         self.assertEqual(stats["inserted"], 2)
         self.assertEqual(stats["updated"], 0)
         self.assertEqual(stats["unchanged"], 0)
 
         # Fetch by ID
-        t1 = get_task_by_id(conn, "t1")
+        t1 = store.get_task("t1")
         self.assertIsNotNone(t1)
         self.assertEqual(t1["title"], "Task 1")
         self.assertEqual(t1["priority"], "🔺")
         self.assertEqual(t1["tags"], ["p/aoc"])
 
         # Query filter by tag
-        res = query_tasks_db(conn, status="todo", tags=["p/aoc"])
+        res = store.search(status="todo", tags=["p/aoc"])
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["id"], "t1")
 
         # Query filter by priority rank
-        res_p = query_tasks_db(conn, min_priority="🔼", status="all")
+        res_p = store.search(min_priority="🔼", status="all")
         self.assertEqual(len(res_p), 1)
         self.assertEqual(res_p[0]["id"], "t1")
 
         # Stats check
-        s = get_task_stats(conn)
+        s = store.stats()
         self.assertEqual(s["total_tasks"], 2)
         self.assertEqual(s["status"]["todo"], 1)
         self.assertEqual(s["status"]["completed"], 1)
 
         # Update a task
         tasks[0]["title"] = "Task 1 Updated"
-        stats2 = upsert_tasks(conn, tasks)
+        stats2 = store.upsert_tasks(tasks)
         self.assertEqual(stats2["inserted"], 0)
         self.assertEqual(stats2["updated"], 1)
         self.assertEqual(stats2["unchanged"], 1)
 
         # Prune deleted tasks
-        pruned = prune_deleted_tasks(conn, ["t1"]) # t2 deleted
+        pruned = store.prune_deleted(["t1"]) # t2 deleted
         self.assertEqual(pruned, 1)
-        self.assertIsNone(get_task_by_id(conn, "t2"))
+        self.assertIsNone(store.get_task("t2"))
 
-        conn.close()
-
-    def test_execute_read_sql(self):
-        conn = get_connection(self.db_path)
-        init_db(conn)
+    def test_read_sql(self):
+        self.store.init()
 
         # Valid SELECT
-        res, err = execute_read_sql(conn, "SELECT count(*) as count FROM tasks")
+        res, err = self.store.read_sql("SELECT count(*) as count FROM tasks")
         self.assertIsNone(err)
         self.assertEqual(res[0]["count"], 0)
 
         # Reject mutation statements
-        res_del, err_del = execute_read_sql(conn, "DELETE FROM tasks")
+        res_del, err_del = self.store.read_sql("DELETE FROM tasks")
         self.assertIn("Error: Only read-only SELECT queries are permitted.", err_del)
-
-        conn.close()
 
     def test_full_sync_workflow(self):
         # Create ticktick file
@@ -155,14 +142,12 @@ class TestTaskSyncAndDb(unittest.TestCase):
             self.assertIn("%% aoc_id ", content)
 
         # Verify database contents
-        conn = get_connection(self.db_path)
-        all_tasks = query_tasks_db(conn, status="all")
+        all_tasks = self.store.search(status="all")
         self.assertEqual(len(all_tasks), 2)
         
         titles = {t["title"] for t in all_tasks}
         self.assertIn("Doc Title", titles)
         self.assertIn("Fix leaky faucet", titles)
-        conn.close()
 
 
 if __name__ == "__main__":

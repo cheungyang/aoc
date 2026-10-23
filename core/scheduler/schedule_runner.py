@@ -23,7 +23,6 @@ changes, so an edit takes effect without a restart.
 import asyncio
 import datetime
 import json
-import sqlite3
 import sys
 import time
 from dataclasses import dataclass
@@ -34,7 +33,6 @@ from croniter import croniter
 from core.channel.discord.loader import BotsLoader
 from core.inbox.model import Priority
 from core.inbox.writer import record_push
-from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.channel_context import record_channel_post
 from core.runtime.job_manager import JobManager
@@ -51,7 +49,8 @@ from core.scheduler.spec import (
     SessionPolicy,
     WorkDecision,
 )
-from core.scheduler.state import ScheduleState
+from core.storage.schedule_state import ScheduleState
+from core.storage.sessions import CHECKPOINT_ENTRIES, SessionStore, sanitize_table_name
 from core.util import safe_chunks
 from core.prompts.voice import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership
@@ -74,21 +73,7 @@ def reset_conversation(session) -> int:
     accounting is untouched. Returns the number of rows removed.
     """
     table = sanitize_table_name(session.get_session_thread_id())
-    conn = sqlite3.connect(SqliteCheckpointer().db_path)
-    try:
-        conn.execute("PRAGMA busy_timeout = 5000")
-        exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (table,)
-        ).fetchone()
-        if not exists:
-            return 0
-        cursor = conn.execute(
-            f"DELETE FROM \"{table}\" WHERE entry_type IN ('checkpoint', 'write')"
-        )
-        conn.commit()
-        return cursor.rowcount or 0
-    finally:
-        conn.close()
+    return SessionStore().delete_entries([table], CHECKPOINT_ENTRIES)
 
 
 @dataclass

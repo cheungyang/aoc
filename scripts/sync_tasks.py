@@ -17,7 +17,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from core.knowledge.tasks.sync import sync_tasks, get_pkm_dir
-from core.knowledge.tasks.db import get_db_path
+from core.storage.tasks import TasksStore
 
 
 def has_work(ctx):
@@ -30,7 +30,7 @@ def has_work(ctx):
 
     if ctx.last_success_at is None:
         return True, "no previous successful sync"
-    if not os.path.exists(get_db_path()):
+    if not TasksStore().exists():
         return True, "tasks.db does not exist yet"
     pkm_dir = get_pkm_dir()
     changed = first_changed_path(
@@ -55,7 +55,7 @@ def parse_args():
 def main():
     args = parse_args()
     pkm_dir = os.path.abspath(os.path.expanduser(args.pkm_dir)) if args.pkm_dir else get_pkm_dir()
-    db_path = os.path.abspath(os.path.expanduser(args.db_path)) if args.db_path else get_db_path()
+    db_path = os.path.abspath(os.path.expanduser(args.db_path)) if args.db_path else TasksStore().path
 
     print(f"=== Starting PKM Tasks Sync ===")
     print(f"PKM Directory: {pkm_dir}")

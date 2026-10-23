@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from core.scheduler.state import ScheduleState
+from core.storage.schedule_state import ScheduleState
 
 
 class TestScheduleState(unittest.TestCase):
@@ -43,15 +43,15 @@ class TestScheduleState(unittest.TestCase):
         self.assertEqual(self.state.get_last_success("a"), 1.0)
         self.assertEqual(self.state.get_last_success("b"), 2.0)
 
-    def test_default_path_follows_session_store(self):
-        from core.knowledge.memory import sqlite_session_store
-        self.assertEqual(ScheduleState().db_path, sqlite_session_store.DEFAULT_DB_PATH)
+    def test_default_path_is_memory_db(self):
+        from core.util.config import Config
+        self.assertEqual(ScheduleState().path, Config().memory_db_path)
 
     def test_a_notice_is_claimed_once_per_schedule_issue_and_day(self):
         self.assertTrue(self.state.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
         self.assertFalse(self.state.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
         # A fresh connection (a restart) remembers it.
-        again = ScheduleState(self.state.db_path)
+        again = ScheduleState(self.state.path)
         self.assertFalse(again.claim_notice("x", "criteria.md: names no state", "2026-10-18"))
         self.assertTrue(again.claim_notice("x", "criteria.md: names no state", "2026-10-19"))
         self.assertTrue(again.claim_notice("y", "criteria.md: names no state", "2026-10-18"))

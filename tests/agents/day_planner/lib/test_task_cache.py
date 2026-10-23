@@ -6,15 +6,13 @@ from datetime import date
 
 from agents.day_planner.lib.task_cache import (
     cache_path,
-    connect_readonly,
     display_title,
     open_cache,
     read_day,
     recurrence_rule,
-    tasks_db_path,
 )
+from core.storage.tasks import TasksStore
 from core.tooling import Report
-from core.util.config import Config
 
 
 class TestDisplayTitle(unittest.TestCase):
@@ -55,13 +53,15 @@ class TestRecurrenceRule(unittest.TestCase):
         self.assertEqual(recurrence_rule("Plain task 📅 2026-10-15"), "")
 
 
-class TestConnectReadonly(unittest.TestCase):
+class TestReadOnly(unittest.TestCase):
+    """The caches open through the stores' read_only()."""
 
     def test_missing_cache_raises_instead_of_being_created(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "tasks.db")
             with self.assertRaises(FileNotFoundError):
-                connect_readonly(path)
+                with TasksStore(path).read_only():
+                    pass
             self.assertFalse(os.path.exists(path))
 
     def test_cannot_write(self):
@@ -71,12 +71,11 @@ class TestConnectReadonly(unittest.TestCase):
             setup.execute("CREATE TABLE t (x)")
             setup.commit()
             setup.close()
-            conn = connect_readonly(path)
-            self.assertEqual(conn.execute("SELECT count(*) FROM t").fetchone()[0], 0)
-            with self.assertRaises(sqlite3.OperationalError):
-                conn.execute("INSERT INTO t VALUES (1)")
-            self.assertEqual(cache_path(conn), os.path.realpath(path))
-            conn.close()
+            with TasksStore(path).read_only() as conn:
+                self.assertEqual(conn.execute("SELECT count(*) FROM t").fetchone()[0], 0)
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute("INSERT INTO t VALUES (1)")
+                self.assertEqual(cache_path(conn), os.path.realpath(path))
 
 
 class TestOpenCache(unittest.TestCase):
@@ -85,21 +84,25 @@ class TestOpenCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "tasks.db")
             report = Report()
-            self.assertIsNone(open_cache(path, report))
+            with open_cache(TasksStore(path), report) as conn:
+                self.assertIsNone(conn)
             self.assertEqual((report.status, report.issue_lines()), ("partial", [f"{path}: not found"]))
             report = Report()
-            self.assertIsNone(open_cache(path, report, required=True))
+            with open_cache(TasksStore(path), report, required=True) as conn:
+                self.assertIsNone(conn)
             self.assertEqual(report.status, "failed")
             self.assertFalse(os.path.exists(path))
 
-    def test_the_path_comes_from_the_config(self):
-        config = Config()
-        saved = config._tasks_db_path  # the override, not the env default
-        config.tasks_db_path = "/tmp/elsewhere/tasks.db"
-        try:
-            self.assertEqual(tasks_db_path(), "/tmp/elsewhere/tasks.db")
-        finally:
-            config._tasks_db_path = saved
+    def test_a_cache_is_open_for_the_block_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TasksStore(os.path.join(tmp, "tasks.db"))
+            store.init()
+            report = Report()
+            with open_cache(store, report) as conn:
+                self.assertEqual(conn.execute("SELECT count(*) FROM tasks").fetchone()[0], 0)
+            self.assertEqual(report.issues, [])
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
 
 
 class TestReadDay(unittest.TestCase):

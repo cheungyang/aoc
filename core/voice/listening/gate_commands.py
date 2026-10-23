@@ -18,8 +18,8 @@ import asyncio
 import time
 from typing import Any, Dict, Optional
 
+from core.storage.speaker_gate_log import Effect, GateRecord, Label
 from core.voice import settings
-from core.voice.listening.gate_log import Effect, GateRecord, Label
 
 REVIEW_HOURS = 24
 REVIEW_LIMIT = 10

@@ -58,7 +58,7 @@ class TestSessionManager(unittest.TestCase):
         session = SessionManager.get_session("topic-researcher", "tool", mock_thread)
         self.assertEqual(session.session_id, "topic-researcher:tool:topic-research:123456789012345678")
 
-    @patch('core.runtime.session_manager.SqliteSessionStore')
+    @patch('core.runtime.session_manager.SessionStore')
     def test_clear_session(self, mock_store_class):
         mock_store = MagicMock()
         mock_store.archive_session.return_value = "Archived"
@@ -69,7 +69,7 @@ class TestSessionManager(unittest.TestCase):
         self.assertEqual(result, "Archived")
         mock_store.archive_session.assert_called_once_with("main:discord:general")
 
-    @patch('core.runtime.session_manager.SqliteSessionStore')
+    @patch('core.runtime.session_manager.SessionStore')
     def test_clear_sessions(self, mock_store_class):
         mock_store = MagicMock()
         mock_store.archive_all_sessions.return_value = "Archived all"

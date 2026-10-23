@@ -16,12 +16,8 @@ import shutil
 import tempfile
 from datetime import date
 
-from core.knowledge.projects.db import get_connection as projects_connection
-from core.knowledge.projects.db import init_db as init_projects
-from core.knowledge.projects.db import upsert_projects
-from core.knowledge.tasks.db import get_connection as tasks_connection
-from core.knowledge.tasks.db import init_db as init_tasks
-from core.knowledge.tasks.db import upsert_tasks
+from core.storage.projects import ProjectsStore
+from core.storage.tasks import TasksStore
 from core.tooling import Report
 from agents.goal_setter.lib.rules import RULES as RULE_DECLARATIONS
 
@@ -136,14 +132,12 @@ class CoachingPkm:
         self.pkm_dir = os.path.join(self.root, "pkm")
         self.projects_db = os.path.join(self.pkm_dir, "projects.db")
         self.tasks_db = os.path.join(self.pkm_dir, "tasks.db")
-        conn = projects_connection(self.projects_db)
-        init_projects(conn)
-        upsert_projects(conn, PROJECTS)
-        conn.close()
-        conn = tasks_connection(self.tasks_db)
-        init_tasks(conn)
-        upsert_tasks(conn, TASKS)
-        conn.close()
+        projects = ProjectsStore(self.projects_db)
+        projects.init()
+        projects.upsert_projects(PROJECTS)
+        tasks = TasksStore(self.tasks_db)
+        tasks.init()
+        tasks.upsert_tasks(TASKS)
         self.write("wiki/project-coaching/Finish a 10k by June 2026.md", DOSSIER_RUN)
         self.write("wiki/project-coaching/Project Alpha launch.md", DOSSIER_ALPHA)
         self.write(NOTE_RUN, NOTE_RUN_TEXT)

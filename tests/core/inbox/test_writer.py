@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from core.inbox import writer
 from core.inbox.model import LATE_REPLY_S, InboxRow, Priority, Source, Status, Via
-from core.inbox.store import InboxStore
+from core.storage.channel_inbox import InboxStore
 from tests.core.inbox import loader
 
 

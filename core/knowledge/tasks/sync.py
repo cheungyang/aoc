@@ -4,7 +4,7 @@ import tempfile
 from typing import Dict, Any, List, Optional, Tuple
 
 from core.knowledge.tasks.parser import is_task_line, parse_task_line, extract_id
-from core.knowledge.tasks.db import get_connection, init_db, upsert_tasks, prune_deleted_tasks, get_db_path
+from core.storage.tasks import TasksStore
 from core.util.config import Config
 
 
@@ -132,13 +132,13 @@ def sync_tasks(
     Returns summary statistics.
     """
     pkm_dir = pkm_dir or get_pkm_dir()
-    db_path = db_path or get_db_path()
+    store = TasksStore(db_path)
+    db_path = store.path
 
     if not os.path.isdir(pkm_dir):
         raise FileNotFoundError(f"PKM directory not found: {pkm_dir}")
 
-    conn = get_connection(db_path)
-    init_db(conn)
+    store.init()
 
     files_to_scan = scan_markdown_files(pkm_dir)
     all_tasks = []
@@ -154,12 +154,10 @@ def sync_tasks(
             all_task_ids.append(t["id"])
 
     # Upsert into DB
-    upsert_stats = upsert_tasks(conn, all_tasks)
+    upsert_stats = store.upsert_tasks(all_tasks)
     
     # Prune tasks that no longer exist
-    pruned_count = prune_deleted_tasks(conn, all_task_ids)
-
-    conn.close()
+    pruned_count = store.prune_deleted(all_task_ids)
 
     return {
         "status": "success",

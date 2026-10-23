@@ -102,7 +102,8 @@ the turn to the one agent allowed to answer in this channel. Async.
     something the orchestrator itself said and reasoned its way to.
   - When a context is active it calls
     [_record_turn](graph.py#L30-L48), which
-    appends the `user` and `ai` messages to `SqliteSessionStore`. This is
+    appends the `user` and `ai` messages to
+    [`SessionStore`](../../core/storage/sessions.py). This is
     needed because the session log is populated by `LoggingHandler`'s *LLM*
     callbacks, and a routed turn never calls a model — without it the
     transcript would skip every deterministic exchange.
@@ -260,7 +261,7 @@ return workflow.compile(checkpointer=checkpointer)                # outer graph 
 
 A consequence of this design is that the `direct_call` node has to write the
 human-readable session log itself (`_record_turn`), since the checkpoint is
-handled automatically by the compiled graph but `SqliteSessionStore` is only
+handled automatically by the compiled graph but `SessionStore` is only
 populated by LLM callbacks that a routed turn never triggers.
 
 ## Files

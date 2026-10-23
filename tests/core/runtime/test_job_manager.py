@@ -19,7 +19,7 @@ class TestJobManager(unittest.TestCase):
         # Use temp db path for isolating test executions
         self.temp_dir = tempfile.TemporaryDirectory()
         self.temp_db_path = os.path.join(self.temp_dir.name, "memory.db")
-        self.manager = JobManager(db_path=self.temp_db_path)
+        self.manager = JobManager(path=self.temp_db_path)
 
     def tearDown(self):
         JobManager._instance = None
@@ -84,7 +84,7 @@ class TestJobManager(unittest.TestCase):
 
         # Reset singleton and create new instance pointing to same DB
         JobManager._instance = None
-        manager2 = JobManager(db_path=self.temp_db_path)
+        manager2 = JobManager(path=self.temp_db_path)
 
         loaded_job = manager2.get_job("persist_job_1")
         self.assertIsNotNone(loaded_job)
@@ -115,7 +115,7 @@ class TestJobManager(unittest.TestCase):
 
         # Initialize JobManager on this path
         JobManager._instance = None
-        legacy_manager = JobManager(db_path=legacy_db_path)
+        legacy_manager = JobManager(path=legacy_db_path)
 
         migrated_job = legacy_manager.get_job("legacy_job_1")
         self.assertIsNotNone(migrated_job)
@@ -164,7 +164,7 @@ class TestJobManager(unittest.TestCase):
         self.assertGreater(job.updated, old_updated)
 
         # Verify persisted in sqlite
-        with self.manager._get_connection() as conn:
+        with self.manager._store.connect() as conn:
             cursor = conn.execute("SELECT status FROM jobs WHERE job_id = ?", ("job_test",))
             self.assertEqual(cursor.fetchone()["status"], "completed")
 
@@ -176,7 +176,7 @@ class TestJobManager(unittest.TestCase):
         self.assertEqual(job.status, "killing")
 
         # Verify persisted in sqlite
-        with self.manager._get_connection() as conn:
+        with self.manager._store.connect() as conn:
             cursor = conn.execute("SELECT status FROM jobs WHERE job_id = ?", ("job_to_kill",))
             self.assertEqual(cursor.fetchone()["status"], "killing")
 
@@ -201,12 +201,11 @@ class TestJobManager(unittest.TestCase):
         if age_seconds:
             ts = time.time() - age_seconds
             self.manager._jobs[job_id].updated = ts
-            with self.manager._get_connection() as conn:
+            with self.manager._store.connect() as conn:
                 conn.execute("UPDATE jobs SET updated = ? WHERE job_id = ?", (ts, job_id))
-                conn.commit()
 
     def _db_status(self, job_id):
-        with self.manager._get_connection() as conn:
+        with self.manager._store.connect() as conn:
             row = conn.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
             return row["status"] if row else None
 
@@ -276,13 +275,12 @@ class TestJobManager(unittest.TestCase):
 
     def test_reap_stale_sees_rows_not_in_memory(self):
         """Rows written by another process (or before load) are still reaped."""
-        with self.manager._get_connection() as conn:
+        with self.manager._store.connect() as conn:
             conn.execute(
                 "INSERT INTO jobs (job_id, agent_id, session_id, started, updated, status, prompt) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 ("orphan", "a", "s", time.time() - 7200, time.time() - 7200, "running", ""),
             )
-            conn.commit()
         self.assertTrue(self.manager.has_stale())
         self.assertEqual(self.manager.reap_stale(), ["orphan"])
         self.assertEqual(self._db_status("orphan"), "timeout")
@@ -290,7 +288,7 @@ class TestJobManager(unittest.TestCase):
     def test_startup_does_not_reap(self):
         self._add("old_run", "running", age_seconds=3600)
         JobManager._instance = None
-        manager2 = JobManager(db_path=self.temp_db_path)
+        manager2 = JobManager(path=self.temp_db_path)
         self.assertEqual(manager2.get_job("old_run").status, "running")
 
     def test_get_jobs_default_excludes_timeout_and_killed(self):
@@ -324,14 +322,13 @@ class TestProductionIsolation(unittest.TestCase):
     def test_default_job_manager_db_is_not_production(self):
         JobManager._instance = None
         manager = JobManager()
-        self.assertFalse(os.path.realpath(manager.db_path).startswith(self.PROD_SESSIONS + os.sep))
+        self.assertFalse(os.path.realpath(manager._store.path).startswith(self.PROD_SESSIONS + os.sep))
 
     def test_default_session_store_and_checkpointer_are_not_production(self):
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-        for store in (SqliteSessionStore(), SqliteCheckpointer()):
-            self.assertFalse(
-                os.path.realpath(store.db_path).startswith(self.PROD_SESSIONS + os.sep), store.db_path)
+        from core.storage.sessions import SessionStore
+        for path in (SessionStore().path, SqliteCheckpointer().store.path):
+            self.assertFalse(os.path.realpath(path).startswith(self.PROD_SESSIONS + os.sep), path)
 
 
 if __name__ == "__main__":

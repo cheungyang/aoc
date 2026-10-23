@@ -4,13 +4,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from core.knowledge.projects.parser import parse_project_file
-from core.knowledge.projects.db import (
-    get_connection,
-    init_db,
-    upsert_projects,
-    prune_deleted_projects,
-    get_db_path,
-)
+from core.storage.projects import ProjectsStore
 from core.util.config import Config
 
 
@@ -110,7 +104,8 @@ def sync_projects(
     Returns summary statistics.
     """
     pkm_dir = pkm_dir or get_pkm_dir()
-    db_path = db_path or get_db_path()
+    store = ProjectsStore(db_path)
+    db_path = store.path
     projects_dir = projects_dir or get_projects_dir(pkm_dir)
 
     if not os.path.isdir(pkm_dir):
@@ -119,8 +114,7 @@ def sync_projects(
     if not os.path.isdir(projects_dir):
         raise FileNotFoundError(f"Projects directory not found: {projects_dir}")
 
-    conn = get_connection(db_path)
-    init_db(conn)
+    store.init()
 
     files_to_scan = scan_project_files(projects_dir, pkm_dir)
     all_projects = []
@@ -143,9 +137,9 @@ def sync_projects(
 
     if not dry_run:
         # Upsert into DB
-        upsert_stats = upsert_projects(conn, all_projects)
+        upsert_stats = store.upsert_projects(all_projects)
         # Prune projects that no longer exist
-        pruned_count = prune_deleted_projects(conn, all_project_ids)
+        pruned_count = store.prune_deleted(all_project_ids)
     else:
         upsert_stats = {
             "inserted": len(all_projects),
@@ -154,8 +148,6 @@ def sync_projects(
             "total_scanned": len(all_projects)
         }
         pruned_count = 0
-
-    conn.close()
 
     return {
         "status": "success",

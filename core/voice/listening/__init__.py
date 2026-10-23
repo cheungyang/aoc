@@ -12,7 +12,9 @@ Hearing only you (Part 4):
 
     speaker_gate.py   does an utterance sound like you? Your voiceprint, and a
                       verdict per utterance (shadow mode: scored and recorded only)
-    gate_log.py       the gate's records, and your ✅/❌ marks on them
     enrollment.py     `!enroll`: your voiceprint, from four sentences read aloud
     gate_commands.py  `!voiceprint` and `!gate review` in Discord
+
+The gate's records, and your ✅/❌ marks on them, are in memory.db
+(core/storage/speaker_gate_log.py).
 """

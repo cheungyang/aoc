@@ -1,6 +1,5 @@
 """Preconditions over the local task and project stores (tasks.db, projects.db)."""
 import json
-import os
 from typing import Any, List
 
 from core.scheduler.preconditions.base import Precondition, PreconditionError
@@ -42,18 +41,15 @@ class TaskListNonEmpty(Precondition):
             )
 
     def evaluate(self, ctx):
-        from core.knowledge.tasks.db import get_connection, get_db_path
+        from core.storage import StoreMissing
+        from core.storage.tasks import TasksStore
 
-        db_path = self.config.get("db_path") or get_db_path()
-        if not os.path.exists(db_path):
-            return WorkDecision(False, f"task store {db_path} does not exist")
-        conn = get_connection(db_path)
+        store = TasksStore(self.config.get("db_path"))
         try:
-            rows = conn.execute(
-                "SELECT priority, tags FROM tasks WHERE status = 'todo'"
-            ).fetchall()
-        finally:
-            conn.close()
+            with store.read_only() as conn:
+                rows = store.select("tasks", {"status": "todo"}, columns=("priority", "tags"), conn=conn)
+        except StoreMissing:
+            return WorkDecision(False, f"task store {store.path} does not exist")
 
         if self.filter == "untriaged":
             count = sum(1 for r in rows if is_untriaged(r["priority"], r["tags"]))
@@ -82,18 +78,15 @@ class ProjectListNonEmpty(Precondition):
             )
 
     def evaluate(self, ctx):
-        from core.knowledge.projects.db import get_connection, get_db_path
+        from core.storage import StoreMissing
+        from core.storage.projects import ProjectsStore
 
-        db_path = self.config.get("db_path") or get_db_path()
-        if not os.path.exists(db_path):
-            return WorkDecision(False, f"project store {db_path} does not exist")
-        conn = get_connection(db_path)
+        store = ProjectsStore(self.config.get("db_path"))
         try:
-            count = conn.execute(
-                "SELECT count(*) FROM projects WHERE lower(status) = ?", (self.status,)
-            ).fetchone()[0]
-        finally:
-            conn.close()
+            with store.read_only() as conn:
+                count = store.count_with_status(self.status, conn=conn)
+        except StoreMissing:
+            return WorkDecision(False, f"project store {store.path} does not exist")
         if count:
             return WorkDecision(True, f"{count} {self.status} project(s)")
         return WorkDecision(False, f"no {self.status} projects")

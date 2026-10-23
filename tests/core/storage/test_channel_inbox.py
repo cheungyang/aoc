@@ -4,7 +4,7 @@ import time
 import unittest
 
 from core.inbox.model import TTL_S, InboxRow, Priority, Source, Status, Via
-from core.inbox.store import InboxStore
+from core.storage.channel_inbox import _COLUMNS, InboxStore
 
 
 def row(channel="day-planning", posted_at=None, **kw):
@@ -37,9 +37,14 @@ class TestStore(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.put(row(priority=Priority.IGNORE))
 
+    def test_the_store_writes_every_column_of_its_schema(self):
+        self.assertEqual(InboxStore.schema, ("channel_inbox",))
+        with self.store.connect() as conn:
+            columns = [r["name"] for r in conn.execute("PRAGMA table_info(channel_inbox)")]
+        self.assertEqual(columns, list(_COLUMNS))
+
     def test_the_table_checks_every_category(self):
-        self.store.rows()  # creates the table
-        with sqlite3.connect(self.store.db_path) as conn:
+        with self.store.connect() as conn:  # creates the table
             for column, value in (("status", "READ"), ("source", "PUSH"), ("priority", "IGNORE"), ("status_via", "EMAIL")):
                 with self.subTest(column=column), self.assertRaises(sqlite3.IntegrityError):
                     conn.execute(

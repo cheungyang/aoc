@@ -471,8 +471,8 @@ class BotRunner:
                     except Exception:
                         starter_msg = None
                 if starter_msg and starter_msg.id != message.id and getattr(starter_msg, "content", None):
-                    from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-                    session_store = SqliteSessionStore()                    
+                    from core.storage.sessions import SessionStore
+                    session_store = SessionStore()
                     history = session_store.load_history(session.session_id, limit=1)
                     if not history:
                         starter_author = getattr(starter_msg.author, "display_name", "User")

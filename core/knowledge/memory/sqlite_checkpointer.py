@@ -1,11 +1,15 @@
-import os
-import sqlite3
+"""LangGraph's checkpoint saver, on the session tables in memory.db.
+
+A thread's checkpoints and pending writes are rows of its ctx_ table, beside
+the session's transcript; all of the SQL is SessionStore's
+(core/storage/sessions.py). This module keeps the LangGraph side: the saver
+contract, the blobs (pickled, then zlib-compressed) and the history cleanup
+done on read.
+"""
 import pickle
 import json
-import time
 import zlib
 import re
-from contextlib import contextmanager
 from typing import Optional, List, Iterator, Sequence, Any, Dict
 from collections import defaultdict
 from langchain_core.runnables import RunnableConfig
@@ -18,14 +22,8 @@ from langgraph.checkpoint.base import (
     PendingWrite
 )
 
-SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "sessions"))
-DEFAULT_DB_PATH = os.path.join(SESSIONS_DIR, "memory.db")
-
-
-def sanitize_table_name(thread_id: str) -> str:
-    """Sanitizes a thread/context ID into a valid SQLite table name."""
-    clean = "".join(c if c.isalnum() or c == "_" else "_" for c in thread_id)
-    return f"ctx_{clean}"
+from core.storage.sessions import SessionStore, sanitize_table_name
+from core.util.config import Config
 
 
 class UnreconstructableError(RuntimeError):
@@ -191,27 +189,12 @@ def _sanitize_checkpoint_messages(checkpoint: Any) -> Any:
 
 
 class SqliteCheckpointer(BaseCheckpointSaver):
-    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+    def __init__(self, path: Optional[str] = None):
         super().__init__()
-        self.db_path = db_path
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        self._init_db()
-
-    @contextmanager
-    def _get_connection(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    def _init_db(self):
-        # Trigger directory and initial connection check
-        with self._get_connection() as conn:
+        # Resolved once, like the file this saver was built on. Opening it now
+        # creates the file eagerly: a saver that can't open it fails here.
+        self.store = SessionStore(path or Config().memory_db_path)
+        with self.store.connect():
             pass
 
     def _serialize_blob(self, obj: Any) -> bytes:
@@ -234,125 +217,63 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         # hides the actual cause.
         return pickle.loads(raw)
 
-    def _ensure_table(self, conn: sqlite3.Connection, table_name: str):
-        conn.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{table_name}" (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_type TEXT NOT NULL,
-            checkpoint_id TEXT,
-            step INTEGER DEFAULT -1,
-            data BLOB,
-            metadata TEXT,
-            config TEXT,
-            parent_config TEXT,
-            from_role TEXT,
-            message TEXT,
-            model TEXT,
-            input_tokens INTEGER,
-            output_tokens INTEGER,
-            cached_tokens REAL,
-            execution_time REAL DEFAULT 0.0,
-            created_at REAL NOT NULL
-        )
-        """)
-        # Auto-migrate existing tables that don't have execution_time column
-        columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table_name}");').fetchall()]
-        if "execution_time" not in columns:
-            conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN execution_time REAL DEFAULT 0.0;')
-        # Index for efficient lookups by entry_type, step, and checkpoint_id
-        conn.execute(f"""
-        CREATE INDEX IF NOT EXISTS "idx_{table_name}_entry_step"
-        ON "{table_name}" (entry_type, step, id)
-        """)
-        conn.execute(f"""
-        CREATE INDEX IF NOT EXISTS "idx_{table_name}_cpid"
-        ON "{table_name}" (entry_type, checkpoint_id)
-        """)
-
-    def _table_exists(self, conn: sqlite3.Connection, table_name: str) -> bool:
-        cursor = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-            (table_name,)
-        )
-        return cursor.fetchone() is not None
-
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         thread_id = config["configurable"].get("thread_id")
         if not thread_id:
             return None
 
         table_name = sanitize_table_name(thread_id)
-        with self._get_connection() as conn:
-            if not self._table_exists(conn, table_name):
-                return None
+        row, write_rows = self.store.checkpoint(table_name, config["configurable"].get("checkpoint_id"))
+        if not row:
+            return None
 
-            checkpoint_id = config["configurable"].get("checkpoint_id")
-            
-            if checkpoint_id:
-                cursor = conn.execute(
-                    f'SELECT * FROM "{table_name}" WHERE entry_type = \'checkpoint\' AND checkpoint_id = ? LIMIT 1',
-                    (checkpoint_id,)
+        checkpoint_data = self._deserialize_blob(row["data"])
+        checkpoint = _sanitize_checkpoint_messages(checkpoint_data.get("checkpoint"))
+        metadata = checkpoint_data.get("metadata", {})
+        entry_config = checkpoint_data.get("config", {})
+        parent_config = checkpoint_data.get("parent_config")
+
+        # Pending writes for this checkpoint if any
+        cp_id = row["checkpoint_id"]
+        pending_writes = []
+        for w_row in write_rows:
+            try:
+                write_info = self._deserialize_blob(w_row["data"])
+            except Exception as e:
+                # Pending writes are resumption state for an interrupted
+                # turn, not conversation history. Dropping one loses at most
+                # an in-flight retry, whereas propagating makes the thread
+                # unusable forever. Databases written before _make_picklable
+                # existed can contain such rows.
+                print(
+                    f"SqliteCheckpointer: skipping unreadable pending write in "
+                    f"{table_name} (checkpoint {cp_id}): {type(e).__name__}: {e}"
                 )
-            else:
-                cursor = conn.execute(
-                    f'SELECT * FROM "{table_name}" WHERE entry_type = \'checkpoint\' ORDER BY step DESC, id DESC LIMIT 1'
-                )
+                continue
+            if isinstance(write_info, dict) and "writes" in write_info:
+                for w in write_info["writes"]:
+                    pending_writes.append((write_info.get("task_id", ""), w[0], w[1]))
+            elif isinstance(write_info, tuple) or isinstance(write_info, list):
+                pending_writes.append(write_info)
 
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            checkpoint_data = self._deserialize_blob(row["data"])
-            checkpoint = _sanitize_checkpoint_messages(checkpoint_data.get("checkpoint"))
-            metadata = checkpoint_data.get("metadata", {})
-            entry_config = checkpoint_data.get("config", {})
-            parent_config = checkpoint_data.get("parent_config")
-
-            # Fetch pending writes for this checkpoint if any
-            cp_id = row["checkpoint_id"]
-            writes_cursor = conn.execute(
-                f'SELECT data FROM "{table_name}" WHERE entry_type = \'write\' AND checkpoint_id = ?',
-                (cp_id,)
-            )
-            pending_writes = []
-            for w_row in writes_cursor.fetchall():
-                try:
-                    write_info = self._deserialize_blob(w_row["data"])
-                except Exception as e:
-                    # Pending writes are resumption state for an interrupted
-                    # turn, not conversation history. Dropping one loses at most
-                    # an in-flight retry, whereas propagating makes the thread
-                    # unusable forever. Databases written before _make_picklable
-                    # existed can contain such rows.
-                    print(
-                        f"SqliteCheckpointer: skipping unreadable pending write in "
-                        f"{table_name} (checkpoint {cp_id}): {type(e).__name__}: {e}"
-                    )
-                    continue
-                if isinstance(write_info, dict) and "writes" in write_info:
-                    for w in write_info["writes"]:
-                        pending_writes.append((write_info.get("task_id", ""), w[0], w[1]))
-                elif isinstance(write_info, tuple) or isinstance(write_info, list):
-                    pending_writes.append(write_info)
-
-            def normalize_entry_config(cfg_in):
-                cfg = {
-                    **(cfg_in or {}),
-                    "configurable": {
-                        **(cfg_in.get("configurable", {}) if cfg_in else {})
-                    }
+        def normalize_entry_config(cfg_in):
+            cfg = {
+                **(cfg_in or {}),
+                "configurable": {
+                    **(cfg_in.get("configurable", {}) if cfg_in else {})
                 }
-                if "checkpoint_ns" not in cfg["configurable"]:
-                    cfg["configurable"]["checkpoint_ns"] = config["configurable"].get("checkpoint_ns", "")
-                return cfg
+            }
+            if "checkpoint_ns" not in cfg["configurable"]:
+                cfg["configurable"]["checkpoint_ns"] = config["configurable"].get("checkpoint_ns", "")
+            return cfg
 
-            return CheckpointTuple(
-                config=normalize_entry_config(entry_config),
-                checkpoint=checkpoint,
-                metadata=metadata,
-                parent_config=parent_config,
-                pending_writes=pending_writes if pending_writes else None
-            )
+        return CheckpointTuple(
+            config=normalize_entry_config(entry_config),
+            checkpoint=checkpoint,
+            metadata=metadata,
+            parent_config=parent_config,
+            pending_writes=pending_writes if pending_writes else None
+        )
 
     def put(self, config: RunnableConfig, checkpoint: Checkpoint, metadata: CheckpointMetadata, new_versions: ChannelVersions) -> RunnableConfig:
         thread_id = config["configurable"].get("thread_id")
@@ -382,44 +303,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         blob = self._serialize_blob(entry_data)
         step = metadata.get("step", -1) if isinstance(metadata, dict) else -1
         meta_json = json.dumps(metadata) if isinstance(metadata, dict) else str(metadata)
-        now = time.time()
-
-        with self._get_connection() as conn:
-            self._ensure_table(conn, table_name)
-            conn.execute(
-                f"""
-                INSERT INTO "{table_name}" (
-                    entry_type, checkpoint_id, step, data, metadata, config, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                ("checkpoint", checkpoint_id, step, blob, meta_json, json.dumps(return_config), now)
-            )
-
-            # Prune older intermediate checkpoints (keep last 10 snapshots) to prevent exponential bloat
-            conn.execute(
-                f"""
-                DELETE FROM "{table_name}"
-                WHERE entry_type = 'checkpoint'
-                AND id NOT IN (
-                    SELECT id FROM "{table_name}"
-                    WHERE entry_type = 'checkpoint'
-                    ORDER BY step DESC, id DESC
-                    LIMIT 10
-                )
-                """
-            )
-            # Prune orphaned writes
-            conn.execute(
-                f"""
-                DELETE FROM "{table_name}"
-                WHERE entry_type = 'write'
-                AND checkpoint_id NOT IN (
-                    SELECT checkpoint_id FROM "{table_name}"
-                    WHERE entry_type = 'checkpoint'
-                )
-                """
-            )
-            conn.commit()
+        self.store.add_checkpoint(table_name, checkpoint_id, step, blob, meta_json, json.dumps(return_config))
 
         return return_config
 
@@ -430,7 +314,6 @@ class SqliteCheckpointer(BaseCheckpointSaver):
 
         table_name = sanitize_table_name(thread_id)
         checkpoint_id = config["configurable"].get("checkpoint_id")
-        now = time.time()
 
         write_data = {
             # LangGraph records task failures as a ("__error__", exc) write. If
@@ -442,60 +325,41 @@ class SqliteCheckpointer(BaseCheckpointSaver):
             "checkpoint_id": checkpoint_id
         }
         blob = self._serialize_blob(write_data)
-
-        with self._get_connection() as conn:
-            self._ensure_table(conn, table_name)
-            conn.execute(
-                f"""
-                INSERT INTO "{table_name}" (
-                    entry_type, checkpoint_id, data, created_at
-                ) VALUES (?, ?, ?, ?)
-                """,
-                ("write", checkpoint_id, blob, now)
-            )
-            conn.commit()
+        self.store.add_write(table_name, checkpoint_id, blob)
 
     def list(self, config: RunnableConfig | None, *, filter: dict[str, Any] | None = None, before: RunnableConfig | None = None, limit: int | None = None) -> Iterator[CheckpointTuple]:
         all_checkpoints = []
-        with self._get_connection() as conn:
-            tables_to_query = []
-            if config and config.get("configurable", {}).get("thread_id"):
-                tname = sanitize_table_name(config["configurable"]["thread_id"])
-                if self._table_exists(conn, tname):
-                    tables_to_query.append(tname)
-            else:
-                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%' AND name NOT LIKE '%_archived_%'")
-                tables_to_query = [r["name"] for r in cursor.fetchall()]
+        table_name = None  # every active thread
+        if config and config.get("configurable", {}).get("thread_id"):
+            table_name = sanitize_table_name(config["configurable"]["thread_id"])
 
-            for table_name in tables_to_query:
-                cursor = conn.execute(f'SELECT * FROM "{table_name}" WHERE entry_type = \'checkpoint\' ORDER BY step DESC, id DESC')
-                for row in cursor.fetchall():
-                    cp_id = row["checkpoint_id"]
-                    if before and before["configurable"].get("checkpoint_id") == cp_id:
-                        continue
+        for row in self.store.checkpoints(table_name):
+            cp_id = row["checkpoint_id"]
+            if before and before["configurable"].get("checkpoint_id") == cp_id:
+                continue
 
-                    try:
-                        checkpoint_data = self._deserialize_blob(row["data"])
-                    except Exception:
-                        continue
+            try:
+                checkpoint_data = self._deserialize_blob(row["data"])
+            except Exception:
+                continue
 
-                    metadata = checkpoint_data.get("metadata", {})
-                    if filter:
-                        match = True
-                        for k, v in filter.items():
-                            if metadata.get(k) != v:
-                                match = False
-                                break
-                        if not match:
-                            continue
+            metadata = checkpoint_data.get("metadata", {})
+            if filter:
+                match = True
+                for k, v in filter.items():
+                    if metadata.get(k) != v:
+                        match = False
+                        break
+                if not match:
+                    continue
 
-                    all_checkpoints.append(CheckpointTuple(
-                        config=checkpoint_data.get("config", {}),
-                        checkpoint=checkpoint_data.get("checkpoint"),
-                        metadata=metadata,
-                        parent_config=checkpoint_data.get("parent_config"),
-                        pending_writes=checkpoint_data.get("pending_writes")
-                    ))
+            all_checkpoints.append(CheckpointTuple(
+                config=checkpoint_data.get("config", {}),
+                checkpoint=checkpoint_data.get("checkpoint"),
+                metadata=metadata,
+                parent_config=checkpoint_data.get("parent_config"),
+                pending_writes=checkpoint_data.get("pending_writes")
+            ))
 
         all_checkpoints.sort(key=lambda x: (x.metadata.get("step", -1) if isinstance(x.metadata, dict) else -1, x.checkpoint.get("id", "") if isinstance(x.checkpoint, dict) else ""), reverse=True)
 
@@ -505,56 +369,26 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         return iter(all_checkpoints)
 
     def delete_thread(self, thread_id: str) -> None:
-        table_name = sanitize_table_name(thread_id)
-        with self._get_connection() as conn:
-            if self._table_exists(conn, table_name):
-                conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                conn.commit()
+        # Drops the session's whole table, its transcript and token rows included.
+        self.store.drop_table(sanitize_table_name(thread_id))
 
     def rollback_last_step(self, thread_id: str) -> None:
-        table_name = sanitize_table_name(thread_id)
-        with self._get_connection() as conn:
-            if self._table_exists(conn, table_name):
-                cursor = conn.execute(f'SELECT checkpoint_id FROM "{table_name}" WHERE entry_type = \'checkpoint\' ORDER BY step DESC, id DESC LIMIT 1')
-                row = cursor.fetchone()
-                if row:
-                    cp_id = row["checkpoint_id"]
-                    conn.execute(f'DELETE FROM "{table_name}" WHERE checkpoint_id = ?', (cp_id,))
-                    conn.commit()
+        self.store.delete_last_checkpoint(sanitize_table_name(thread_id))
 
     def archive_thread(self, thread_id: str) -> str:
-        table_name = sanitize_table_name(thread_id)
-        ts = int(time.time())
-        archive_table_name = f"{table_name}_archived_{ts}"
-        with self._get_connection() as conn:
-            if self._table_exists(conn, table_name):
-                conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archive_table_name}"')
-                conn.commit()
-                return f"Thread {thread_id} archived to table {archive_table_name}"
-            return "No active thread table found to archive."
+        archive_table_name = self.store.archive_table(sanitize_table_name(thread_id))
+        if archive_table_name:
+            return f"Thread {thread_id} archived to table {archive_table_name}"
+        return "No active thread table found to archive."
 
     def archive_all(self) -> str:
-        ts = int(time.time())
-        responses = []
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%' AND name NOT LIKE '%_archived_%'"
-            )
-            tables = [row["name"] for row in cursor.fetchall()]
-            for table_name in tables:
-                archive_table_name = f"{table_name}_archived_{ts}"
-                conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archive_table_name}"')
-                responses.append(f"Archived {table_name} to {archive_table_name}")
-            conn.commit()
+        responses = [f"Archived {table_name} to {archive_table_name}"
+                     for table_name, archive_table_name in self.store.archive_all()]
         return "\n".join(responses) if responses else "No active threads found to archive."
 
     def vacuum(self) -> None:
         """Reclaims unused space in SQLite database."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute("VACUUM")
-        finally:
-            conn.close()
+        self.store.vacuum()
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         return self.get_tuple(config)

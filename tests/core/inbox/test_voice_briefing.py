@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 
 from core.inbox.model import InboxRow, Priority, Source, Status
 from core.inbox.speech_writer import SpeechWriter
-from core.inbox.store import InboxStore
 from core.inbox.voice_briefing import (
     VoiceBriefing,
     announcement,
@@ -18,6 +17,7 @@ from core.inbox.voice_briefing import (
     ordered,
     should_announce,
 )
+from core.storage.channel_inbox import InboxStore
 from core.voice.room.focus import FocusDirectory
 from tests.core.inbox import loader
 

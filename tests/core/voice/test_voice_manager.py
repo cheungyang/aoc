@@ -1128,8 +1128,8 @@ def _inbox_row(channel, agent_id, **kw):
 def _briefed_room(mock_bot_runner, tmp_path, *rows, listening=True):
     """The room fixture with the inbox's briefing hook plugged in (as the
     Discord runner does), `rows` in the channel inbox, and you in the room."""
-    from core.inbox.store import InboxStore
     from core.inbox.voice_briefing import VoiceBriefing
+    from core.storage.channel_inbox import InboxStore
     vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     for row in rows:
         InboxStore().put(row)
@@ -1151,7 +1151,7 @@ async def _settle(vm):
 
 
 def _status(channel):
-    from core.inbox.store import InboxStore
+    from core.storage.channel_inbox import InboxStore
     return InboxStore().get(channel).status.value
 
 
@@ -1196,7 +1196,7 @@ async def test_next_agent_plays_what_the_agent_left_then_only_its_question(mock_
 
 @pytest.mark.asyncio
 async def test_answering_by_voice_finishes_the_channels_row(mock_bot_runner, tmp_path):
-    from core.inbox.store import InboxStore
+    from core.storage.channel_inbox import InboxStore
     vm, main_agent, loader, _channels = _briefed_room(
         mock_bot_runner, tmp_path,
         _inbox_row("day-planning", "day-planner", label="your morning check-in", speech=DAISY_SPEECH,
@@ -1737,8 +1737,8 @@ def test_the_sink_hears_only_the_gates_owners(mock_bot_runner):
 
 @pytest.mark.asyncio
 async def test_shadow_mode_records_each_utterance_and_changes_nothing(mock_bot_runner, tmp_path):
+    from core.storage.speaker_gate_log import Effect, GateLog
     from core.voice.listening import speaker_gate as sg
-    from core.voice.listening.gate_log import Effect, GateLog
     from tests.helpers import FAKE_VOICEPRINT, FakeSpeakerModel
     vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     calls = _capture_sessions(main_agent)

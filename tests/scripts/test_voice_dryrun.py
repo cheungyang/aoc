@@ -1,7 +1,6 @@
 """The voice replay benchmark (scripts/voice_dryrun.py)."""
 import json
 import os
-import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -210,28 +209,36 @@ class TestSpeechContract:
 class TestIsolation:
 
     def test_stores_point_at_the_throwaway_db(self, tmp_path):
-        from core.knowledge.memory import sqlite_checkpointer, sqlite_session_store
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        from core.runtime.job_manager import JobManager
+        from core.storage.sessions import SessionStore
+        from core.util.config import Config
         db = isolate_sessions(str(tmp_path / "replay"))
-        assert sqlite_session_store.SqliteSessionStore().db_path == db
-        assert sqlite_checkpointer.SqliteCheckpointer().db_path == db
+        assert SessionStore().path == db
+        assert SqliteCheckpointer().store.path == db
+        assert Config().memory_db_path == db
+        assert JobManager()._store.path == db
 
     def test_history_reset_and_token_count(self, tmp_path):
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
+        from core.storage.sessions import SessionStore
         db = str(tmp_path / "memory.db")
-        store = SqliteSessionStore(db_path=db)
+        store = SessionStore(db)
         store.append_token_usage("home-steward:tool:home-automation", "m", 100, 20, 0.0)
         store.append_message("home-steward:tool:home-automation", "user", "hi")
-        conn = sqlite3.connect(db)
-        conn.execute('INSERT INTO "ctx_home_steward_tool_home_automation" (entry_type, created_at) VALUES (\'checkpoint\', 0)')
-        conn.commit()
-        conn.close()
+        with store.connect() as conn:
+            conn.execute('INSERT INTO "ctx_home_steward_tool_home_automation" (entry_type, created_at) VALUES (\'checkpoint\', 0)')
 
         assert replay_tokens(0, db) == {"input": 100, "output": 20}
         reset_history(db)
-        conn = sqlite3.connect(db)
-        kinds = [r[0] for r in conn.execute('SELECT entry_type FROM "ctx_home_steward_tool_home_automation"')]
-        conn.close()
+        with store.connect() as conn:
+            kinds = [r[0] for r in conn.execute('SELECT entry_type FROM "ctx_home_steward_tool_home_automation"')]
         assert sorted(kinds) == ["message", "token"]
+
+    def test_a_missing_db_is_left_missing(self, tmp_path):
+        db = str(tmp_path / "replay" / "memory.db")
+        assert replay_tokens(0, db) == {"input": 0, "output": 0}
+        reset_history(db)
+        assert not os.path.exists(os.path.dirname(db))
 
 
 @pytest.mark.asyncio

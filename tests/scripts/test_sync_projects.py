@@ -13,6 +13,8 @@ spec = importlib.util.spec_from_file_location("sync_projects_script", script_pat
 sp_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sp_module)
 
+from core.util.config import Config  # noqa: E402
+
 
 class TestSyncProjectsScript(unittest.TestCase):
 
@@ -42,10 +44,9 @@ class TestSyncProjectsScript(unittest.TestCase):
             self.assertTrue(args.verbose)
 
     @patch.object(sp_module, "get_projects_dir")
-    @patch.object(sp_module, "get_db_path")
     @patch.object(sp_module, "get_pkm_dir")
     @patch.object(sp_module, "sync_projects")
-    def test_main_success(self, mock_sync, mock_get_pkm_dir, mock_get_db_path, mock_get_projects_dir):
+    def test_main_success(self, mock_sync, mock_get_pkm_dir, mock_get_projects_dir):
         """With no CLI paths, `main` must resolve all three paths through the
         project's helpers -- and derive the projects directory *from the
         resolved PKM directory*, not from the raw argument -- then report the
@@ -55,7 +56,9 @@ class TestSyncProjectsScript(unittest.TestCase):
         scan simply finds nothing and the sync reports a clean zero.
         """
         mock_get_pkm_dir.return_value = "/fake/pkm"
-        mock_get_db_path.return_value = "/fake/pkm/projects.db"
+        config = Config()  # where ProjectsStore() finds the database
+        config.projects_db_path = "/fake/pkm/projects.db"
+        self.addCleanup(setattr, config, "projects_db_path", None)
         mock_get_projects_dir.return_value = "/fake/pkm/vault/projects"
         mock_sync.return_value = {
             "status": "success",

@@ -5,7 +5,6 @@ between Historical Baseline vs Post-Optimization period.
 """
 import os
 import sys
-import sqlite3
 import datetime
 import argparse
 from collections import defaultdict
@@ -13,73 +12,74 @@ from collections import defaultdict
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sessions", "memory.db"))
+from core.storage.sessions import SessionStore  # noqa: E402
+
 # Default cutoff timestamp: Optimization point (2026-08-24T08:40:00-07:00)
 DEFAULT_CUTOFF_TS = 1787585994
 
-def get_stats(db_path=DB_PATH, cutoff_ts=DEFAULT_CUTOFF_TS):
-    if not os.path.exists(db_path):
-        print(f"Database not found at {db_path}")
+def get_stats(db_path=None, cutoff_ts=DEFAULT_CUTOFF_TS):
+    store = SessionStore(db_path)
+    if not store.exists():
+        print(f"Database not found at {store.path}")
         return None, None
 
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    tables = [r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'").fetchall()]
+    with store.read_only() as conn:
+        cursor = conn.cursor()
+        tables = store.tables(include_archived=True, conn=conn)
 
-    periods = {
-        'historical': {'calls': 0, 'in_tokens': 0, 'out_tokens': 0, 'cached_weighted': 0.0, 'exec_time': 0.0, 'exec_calls': 0, 'agents': defaultdict(lambda: [0, 0, 0, 0])},
-        'current': {'calls': 0, 'in_tokens': 0, 'out_tokens': 0, 'cached_weighted': 0.0, 'exec_time': 0.0, 'exec_calls': 0, 'agents': defaultdict(lambda: [0, 0, 0, 0])}
-    }
+        periods = {
+            'historical': {'calls': 0, 'in_tokens': 0, 'out_tokens': 0, 'cached_weighted': 0.0, 'exec_time': 0.0, 'exec_calls': 0, 'agents': defaultdict(lambda: [0, 0, 0, 0])},
+            'current': {'calls': 0, 'in_tokens': 0, 'out_tokens': 0, 'cached_weighted': 0.0, 'exec_time': 0.0, 'exec_calls': 0, 'agents': defaultdict(lambda: [0, 0, 0, 0])}
+        }
 
-    known_agents = [
-        'agent-designer', 'day-planner', 'excursion-planner', 'goal-setter',
-        'graph-worker', 'main', 'meal-planner', 'property-scout',
-        'receipt-processor', 'reward-travel', 'script-executor',
-        'software-planner', 'topic-researcher', 'wiki-gardener',
-        'brand-editor', 'content-creator', 'software-coder', 'software-qa',
-        'knowledge-retriever'
-    ]
-    known_agents_norm = {a.replace('-', '_'): a for a in known_agents}
+        known_agents = [
+            'agent-designer', 'day-planner', 'excursion-planner', 'goal-setter',
+            'graph-worker', 'main', 'meal-planner', 'property-scout',
+            'receipt-processor', 'reward-travel', 'script-executor',
+            'software-planner', 'topic-researcher', 'wiki-gardener',
+            'brand-editor', 'content-creator', 'software-coder', 'software-qa',
+            'knowledge-retriever'
+        ]
+        known_agents_norm = {a.replace('-', '_'): a for a in known_agents}
 
-    for t in tables:
-        # Determine agent name
-        raw = t[4:].split('_archived_')[0]
-        matched_agent = None
-        for norm_a in sorted(known_agents_norm.keys(), key=len, reverse=True):
-            if raw.startswith(norm_a):
-                matched_agent = known_agents_norm[norm_a]
-                break
-        if not matched_agent:
-            matched_agent = raw.split('_')[0]
+        for t in tables:
+            # Determine agent name
+            raw = t[4:].split('_archived_')[0]
+            matched_agent = None
+            for norm_a in sorted(known_agents_norm.keys(), key=len, reverse=True):
+                if raw.startswith(norm_a):
+                    matched_agent = known_agents_norm[norm_a]
+                    break
+            if not matched_agent:
+                matched_agent = raw.split('_')[0]
 
-        cursor.execute(f"""
-            SELECT input_tokens, output_tokens, cached_tokens, execution_time, created_at 
-            FROM "{t}" 
-            WHERE entry_type = 'token'
-        """)
-        for in_tok, out_tok, cached_pct, exec_t, ts in cursor.fetchall():
-            in_tok = in_tok or 0
-            out_tok = out_tok or 0
-            cached_pct = cached_pct or 0.0
-            exec_t = exec_t or 0.0
-            tot = in_tok + out_tok
+            cursor.execute(f"""
+                SELECT input_tokens, output_tokens, cached_tokens, execution_time, created_at 
+                FROM "{t}" 
+                WHERE entry_type = 'token'
+            """)
+            for in_tok, out_tok, cached_pct, exec_t, ts in cursor.fetchall():
+                in_tok = in_tok or 0
+                out_tok = out_tok or 0
+                cached_pct = cached_pct or 0.0
+                exec_t = exec_t or 0.0
+                tot = in_tok + out_tok
 
-            bucket = 'historical' if ts < cutoff_ts else 'current'
-            p = periods[bucket]
-            p['calls'] += 1
-            p['in_tokens'] += in_tok
-            p['out_tokens'] += out_tok
-            p['cached_weighted'] += in_tok * (cached_pct / 100.0)
-            if exec_t > 0:
-                p['exec_time'] += exec_t
-                p['exec_calls'] += 1
+                bucket = 'historical' if ts < cutoff_ts else 'current'
+                p = periods[bucket]
+                p['calls'] += 1
+                p['in_tokens'] += in_tok
+                p['out_tokens'] += out_tok
+                p['cached_weighted'] += in_tok * (cached_pct / 100.0)
+                if exec_t > 0:
+                    p['exec_time'] += exec_t
+                    p['exec_calls'] += 1
 
-            p['agents'][matched_agent][0] += tot
-            p['agents'][matched_agent][1] += 1
-            p['agents'][matched_agent][2] += in_tok
-            p['agents'][matched_agent][3] += in_tok * (cached_pct / 100.0)
+                p['agents'][matched_agent][0] += tot
+                p['agents'][matched_agent][1] += 1
+                p['agents'][matched_agent][2] += in_tok
+                p['agents'][matched_agent][3] += in_tok * (cached_pct / 100.0)
 
-    conn.close()
     return periods['historical'], periods['current']
 
 def print_comparison(cutoff_ts=DEFAULT_CUTOFF_TS):
@@ -149,7 +149,7 @@ def _agent_for_table(table, agent_ids):
     return raw.split("_")[0]
 
 
-def get_voice_stats(db_path=DB_PATH, since_ts=0):
+def get_voice_stats(db_path=None, since_ts=0):
     """Token use of voice turns and the latency of each pipeline stage, since `since_ts`.
 
     Token rows are tagged `surface='voice'` (including the agents a voice turn
@@ -163,17 +163,15 @@ def get_voice_stats(db_path=DB_PATH, since_ts=0):
         "agents": defaultdict(lambda: [0, 0, 0]),   # calls, in, out
         "turns": 0, "outcomes": defaultdict(int), "ttfa": [], "stages": defaultdict(list), "model_calls": [],
     }
-    if not os.path.exists(db_path):
-        print(f"Database not found at {db_path}")
+    store = SessionStore(db_path)
+    if not store.exists():
+        print(f"Database not found at {store.path}")
         return None
-    conn = sqlite3.connect(db_path)
     agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
     agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
-    try:
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
-        for t in tables:
-            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{t}")')}
-            if "surface" not in columns:
+    with store.read_only() as conn:
+        for t in store.tables(include_archived=True, conn=conn):
+            if "surface" not in store.columns(t, conn=conn):
                 continue
             agent = _agent_for_table(t, agent_ids)
             for in_tok, out_tok in conn.execute(
@@ -201,12 +199,10 @@ def get_voice_stats(db_path=DB_PATH, since_ts=0):
                 for stage, delta in (trace.get("deltas") or {}).items():
                     stats["stages"][stage].append(delta)
                 stats["model_calls"].append(sum(1 for e in trace.get("events", []) if e.get("kind") == "model_call"))
-    finally:
-        conn.close()
     return stats
 
 
-def print_voice_stats(since_ts=0, db_path=DB_PATH):
+def print_voice_stats(since_ts=0, db_path=None):
     stats = get_voice_stats(db_path=db_path, since_ts=since_ts)
     if stats is None:
         return
@@ -247,7 +243,7 @@ DENIED_MARKERS = ("does not have permission to perform",)
 SKILL_FAILURE_MARKERS = ("Error loading skill", "does not have access to skill", "not found.")
 
 
-def get_health_stats(db_path=DB_PATH, since_ts=0):
+def get_health_stats(db_path=None, since_ts=0):
     """Round trips and dead ends per agent since `since_ts`, from every session table.
 
     A turn is a user message plus everything up to the next one; its model
@@ -255,17 +251,15 @@ def get_health_stats(db_path=DB_PATH, since_ts=0):
     reads and failed load_skill calls are found in the stored tool outputs.
     """
     stats = {"calls": defaultdict(list), "denied": defaultdict(list), "skill_failures": defaultdict(list)}
-    if not os.path.exists(db_path):
-        print(f"Database not found at {db_path}")
+    store = SessionStore(db_path)
+    if not store.exists():
+        print(f"Database not found at {store.path}")
         return None
-    conn = sqlite3.connect(db_path)
     agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
     agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
-    try:
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
-        for t in tables:
-            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{t}")')}
-            if "surface" not in columns:
+    with store.read_only() as conn:
+        for t in store.tables(include_archived=True, conn=conn):
+            if "surface" not in store.columns(t, conn=conn):
                 continue
             agent = _agent_for_table(t, agent_ids)
             turn = None  # [model calls, surface]
@@ -292,12 +286,10 @@ def get_health_stats(db_path=DB_PATH, since_ts=0):
                     elif "load_skill" in message and any(m in message for m in SKILL_FAILURE_MARKERS):
                         stats["skill_failures"][agent].append(message[:200])
             close(turn)
-    finally:
-        conn.close()
     return stats
 
 
-def print_health_stats(since_ts=0, db_path=DB_PATH):
+def print_health_stats(since_ts=0, db_path=None):
     """The Phase 2 "done when" checks: round trips per turn, denied reads, failed load_skill."""
     stats = get_health_stats(db_path=db_path, since_ts=since_ts)
     if stats is None:
@@ -338,8 +330,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     if args.archive_all:
-        from core.knowledge.memory.sqlite_session_store import SqliteSessionStore
-        store = SqliteSessionStore(db_path=DB_PATH)
+        store = SessionStore()
         res = store.archive_all_sessions()
         print("Archived all active sessions:")
         print(res)

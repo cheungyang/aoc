@@ -3,11 +3,11 @@ import tempfile
 import os
 import shutil
 import json
-from unittest.mock import patch
 
 from tools.project_query import project_query
 from tests.helpers import execution_context
-from core.knowledge.projects.db import get_connection, init_db, upsert_projects
+from core.storage.projects import ProjectsStore
+from core.util.config import Config
 
 
 class TestProjectQueryTool(unittest.TestCase):
@@ -20,9 +20,9 @@ class TestProjectQueryTool(unittest.TestCase):
         os.makedirs(self.projects_dir, exist_ok=True)
 
         # Initialize test data
-        conn = get_connection(self.db_path)
-        init_db(conn)
-        upsert_projects(conn, [
+        store = ProjectsStore(self.db_path)
+        store.init()
+        store.upsert_projects([
             {
                 "id": "vault/projects/alpha.md",
                 "name": "Alpha Project",
@@ -65,17 +65,15 @@ class TestProjectQueryTool(unittest.TestCase):
                 "tags": ["s/🟢Done", "c/🔽2025"],
             }
         ])
-        conn.close()
+        # The tool's ProjectsStore() reads its path from the config.
+        config = Config()
+        config.projects_db_path = self.db_path
+        self.addCleanup(setattr, config, "projects_db_path", None)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
-    @patch("core.knowledge.projects.db.get_db_path")
-    @patch("tools.project_query.get_db_path")
-    def test_search_action(self, mock_db_path1, mock_db_path2):
-        mock_db_path1.return_value = self.db_path
-        mock_db_path2.return_value = self.db_path
-
+    def test_search_action(self):
         with execution_context(agent_id="day-planner"):
             # Search all
             resp = project_query.func(
@@ -108,12 +106,7 @@ class TestProjectQueryTool(unittest.TestCase):
             )
             self.assertIn("raw_status", resp_full)
 
-    @patch("core.knowledge.projects.db.get_db_path")
-    @patch("tools.project_query.get_db_path")
-    def test_get_action(self, mock_db_path1, mock_db_path2):
-        mock_db_path1.return_value = self.db_path
-        mock_db_path2.return_value = self.db_path
-
+    def test_get_action(self):
         with execution_context(agent_id="day-planner"):
             resp = project_query.func(
                 action="get",
@@ -129,24 +122,14 @@ class TestProjectQueryTool(unittest.TestCase):
             )
             self.assertIn("Error: Project not found", resp_nf)
 
-    @patch("core.knowledge.projects.db.get_db_path")
-    @patch("tools.project_query.get_db_path")
-    def test_stats_action(self, mock_db_path1, mock_db_path2):
-        mock_db_path1.return_value = self.db_path
-        mock_db_path2.return_value = self.db_path
-
+    def test_stats_action(self):
         with execution_context(agent_id="day-planner"):
             resp = project_query.func(
                 action="stats"
             )
         self.assertIn('"total_projects": 2', resp)
 
-    @patch("core.knowledge.projects.db.get_db_path")
-    @patch("tools.project_query.get_db_path")
-    def test_sql_action(self, mock_db_path1, mock_db_path2):
-        mock_db_path1.return_value = self.db_path
-        mock_db_path2.return_value = self.db_path
-
+    def test_sql_action(self):
         with execution_context(agent_id="day-planner"):
             resp = project_query.func(
                 action="sql",

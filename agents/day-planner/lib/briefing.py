@@ -23,7 +23,9 @@ from agents.day_planner.lib.day_calendar import (
     week_start,
 )
 from agents.day_planner.lib.recurring_chores import chores_due, format_chores
-from agents.day_planner.lib.task_cache import open_cache, projects_db_path, tasks_db_path
+from agents.day_planner.lib.task_cache import open_cache
+from core.storage.projects import ProjectsStore
+from core.storage.tasks import TasksStore
 from core.tooling import Report, display_path, pkm_path
 
 _FOCUS_STATES = {
@@ -48,16 +50,16 @@ def build_briefing(now: datetime, report: Report, rules: Dict[str, Any], include
     not exist yet; only a turn that may log the plan needs it.
     """
     pkm_dir, today = pkm_path(), now.date()
-    tasks_path, projects_path = tasks_db_path(), projects_db_path()
-    tasks, projects = open_cache(tasks_path, report), open_cache(projects_path, report)
-    template = _template_reader(pkm_dir, report)
+    tasks_store, projects_store = TasksStore(), ProjectsStore()
+    tasks_path, projects_path = tasks_store.path, projects_store.path
+    with open_cache(tasks_store, report) as tasks, open_cache(projects_store, report) as projects:
+        template = _template_reader(pkm_dir, report)
 
-    def need(conn: Optional[sqlite3.Connection], path: str) -> sqlite3.Connection:
-        if conn is None:
-            raise _Unavailable(f"{display_path(path)} not found")
-        return conn
+        def need(conn: Optional[sqlite3.Connection], path: str) -> sqlite3.Connection:
+            if conn is None:
+                raise _Unavailable(f"{display_path(path)} not found")
+            return conn
 
-    try:
         sections = [
             header(today, report),
             _section("Daily notes in the last 7 days", report, lambda: _last_days(pkm_dir, today)),
@@ -76,10 +78,6 @@ def build_briefing(now: datetime, report: Report, rules: Dict[str, Any], include
                     need(projects, projects_path), need(tasks, tasks_path), today, report)),
             ),
         ]
-    finally:
-        for conn in (tasks, projects):
-            if conn is not None:
-                conn.close()
     return "\n\n".join(sections)
 
 

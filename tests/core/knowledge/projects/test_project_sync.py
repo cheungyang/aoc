@@ -3,12 +3,8 @@ import tempfile
 import os
 import shutil
 
-from core.knowledge.projects.db import (
-    get_connection,
-    query_projects_db,
-    get_project_by_id,
-)
 from core.knowledge.projects.sync import sync_projects
+from core.storage.projects import ProjectsStore
 
 
 class TestProjectSync(unittest.TestCase):
@@ -76,8 +72,8 @@ Done in 2024.
             self.assertIn("id: ", p1_content)
 
         # Retrieve project 1 from DB
-        conn = get_connection(self.db_path)
-        all_projs = query_projects_db(conn, status="all")
+        store = ProjectsStore(self.db_path)
+        all_projs = store.search(status="all")
         self.assertEqual(len(all_projs), 2)
 
         p1_db = [p for p in all_projs if p["name"] == "Agentic Workflow"][0]
@@ -86,7 +82,6 @@ Done in 2024.
         self.assertEqual(p1_db["file_path"], "vault/projects/Agentic Workflow.md")
         self.assertEqual(p1_db["status"], "executing")
         self.assertEqual(p1_db["commitment_year"], 2026)
-        conn.close()
 
         # 3. Rename/move file: 'Agentic Workflow.md' -> 'Renamed Agentic.md'
         renamed_p1_path = os.path.join(self.projects_dir, "Renamed Agentic.md")
@@ -106,12 +101,10 @@ Done in 2024.
         self.assertEqual(result_rename["pruned"], 0)    # Not pruned because UUID was preserved!
 
         # Verify DB updated file_path for the same UUID
-        conn = get_connection(self.db_path)
-        p1_renamed_db = get_project_by_id(conn, p1_uuid)
+        p1_renamed_db = store.get_project(p1_uuid)
         self.assertIsNotNone(p1_renamed_db)
         self.assertEqual(p1_renamed_db["file_path"], "vault/projects/Renamed Agentic.md")
         self.assertEqual(p1_renamed_db["id"], p1_uuid)
-        conn.close()
 
         # 4. Delete project 2 and sync -> pruned
         os.remove(p2_path)

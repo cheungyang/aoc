@@ -1,10 +1,9 @@
 """recurring_chores_due: recurring chores that need attention, judged by when the user usually does each one."""
-from contextlib import closing
-
 from core.tooling import Report, agent_tool, get_local_now, load_rules
+from core.storage.tasks import TasksStore
 from agents.day_planner.lib.recurring_chores import chores_due, format_chores
 from agents.day_planner.lib.rules import RULES
-from agents.day_planner.lib.task_cache import open_cache, tasks_db_path
+from agents.day_planner.lib.task_cache import open_cache
 
 
 @agent_tool
@@ -22,9 +21,7 @@ def recurring_chores_due(report: Report, within_days: int = 0) -> str:
             window hasn't opened yet; 7 answers "this week". Defaults to 0 (flagged chores only).
     """
     rules = load_rules("day-planner", RULES, report)
-    path = tasks_db_path()
-    conn = open_cache(path, report, required=True)
-    report.raise_if_failed()
-    with closing(conn):
+    with open_cache(TasksStore(), report, required=True) as conn:
+        report.raise_if_failed()
         chores = chores_due(conn, get_local_now().date(), rules["chore_lead_days"], report)
     return format_chores(chores, within_days=max(0, within_days))

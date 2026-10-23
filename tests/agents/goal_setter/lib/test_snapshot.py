@@ -2,9 +2,10 @@ import os
 import sqlite3
 import unittest
 
+from core.storage.tasks import TasksStore
 from core.tooling import DataProblem, Report
 from tests.agents.goal_setter.lib.coaching_fixture import CoachingPkm
-from agents.goal_setter.lib.snapshot import _readonly, load_snapshot
+from agents.goal_setter.lib.snapshot import load_snapshot
 
 
 class TestSnapshot(unittest.TestCase):
@@ -47,7 +48,7 @@ class TestSnapshot(unittest.TestCase):
         self.assertIn("can't be read (file is not a database)", report.issue_lines()[0])
 
     def test_the_connection_is_read_only(self):
-        with _readonly(self.pkm.tasks_db) as conn:
+        with TasksStore(self.pkm.tasks_db).read_only() as conn:
             with self.assertRaises(sqlite3.OperationalError):
                 conn.execute("DELETE FROM tasks")
 

@@ -59,7 +59,6 @@ import asyncio
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 import unicodedata
@@ -566,51 +565,37 @@ def isolate_sessions(directory: str) -> str:
     run on `<agent>:tool:<channel>` sessions that live turns share. This is the
     same redirect the test suite applies in tests/conftest.py.
     """
-    from core.knowledge.memory import sqlite_checkpointer, sqlite_session_store
     from core.runtime import job_manager
 
     os.makedirs(directory, exist_ok=True)
     db_path = os.path.join(directory, "memory.db")
-    for module in (job_manager, sqlite_session_store, sqlite_checkpointer):
-        module.SESSIONS_DIR = directory
-        module.DEFAULT_DB_PATH = db_path
-    sqlite_session_store.SqliteSessionStore.__init__.__defaults__ = (db_path,)
-    sqlite_checkpointer.SqliteCheckpointer.__init__.__defaults__ = (db_path,)
+    # Config().memory_db_path: the core/storage stores (sessions and jobs among them), the
+    # checkpointer and the voice data follow it.
+    os.environ["MEMORY_DB_PATH"] = db_path
     job_manager.JobManager._instance = None
     return db_path
 
 
 def reset_history(db_path: str) -> None:
     """Deletes every checkpoint in the isolated DB, so the next case starts with no history."""
-    if not os.path.exists(db_path):
+    from core.storage.sessions import CHECKPOINT_ENTRIES, SessionStore
+
+    store = SessionStore(db_path)
+    if not store.exists():
         return
-    conn = sqlite3.connect(db_path)
-    try:
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
-        for table in tables:
-            conn.execute(f"DELETE FROM \"{table}\" WHERE entry_type IN ('checkpoint', 'write')")
-        conn.commit()
-    finally:
-        conn.close()
+    with store.connect() as conn:
+        store.delete_entries(store.tables(include_archived=True, conn=conn), CHECKPOINT_ENTRIES, conn=conn)
 
 
 def replay_tokens(since: float, db_path: str) -> Dict[str, int]:
     """Input/output tokens every session wrote since `since` (epoch seconds) in the isolated DB."""
+    from core.storage.sessions import SessionStore
+
     totals = {"input": 0, "output": 0}
-    if not os.path.exists(db_path):
+    store = SessionStore(db_path)
+    if not store.exists():
         return totals
-    conn = sqlite3.connect(db_path)
-    try:
-        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ctx_%'")]
-        for table in tables:
-            row = conn.execute(
-                f'SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) FROM "{table}" '
-                "WHERE entry_type = 'token' AND created_at >= ?", (since,)
-            ).fetchone()
-            totals["input"] += row[0]
-            totals["output"] += row[1]
-    finally:
-        conn.close()
+    totals["input"], totals["output"] = store.token_sums(since)
     return totals
 
 

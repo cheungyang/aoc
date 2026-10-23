@@ -40,6 +40,7 @@ class Config:
             cls._instance._local_llm_history_tokens = None
             cls._instance._tasks_db_path = None
             cls._instance._projects_db_path = None
+            cls._instance._memory_db_path = None
             cls._instance._projects_dir = None
             cls._instance._knowledge_db_path = None
             cls._instance._knowledge_backend = None
@@ -79,6 +80,7 @@ class Config:
         self._local_llm_history_tokens = None
         self._tasks_db_path = None
         self._projects_db_path = None
+        self._memory_db_path = None
         self._projects_dir = None
         self._knowledge_db_path = None
         self._knowledge_backend = None
@@ -410,6 +412,21 @@ class Config:
         self._projects_db_path = str(value) if value is not None else None
 
     @property
+    def memory_db_path(self) -> str:
+        """The runtime SQLite file: sessions and checkpoints, jobs, schedule state, the channel inbox and the gate log.
+
+        Tests and the voice dry run point it elsewhere with MEMORY_DB_PATH, which
+        survives `reset()`, unlike an override.
+        """
+        if self._memory_db_path is not None:
+            return self._memory_db_path
+        return os.getenv("MEMORY_DB_PATH", os.path.join(workspace_root, "sessions", "memory.db"))
+
+    @memory_db_path.setter
+    def memory_db_path(self, value):
+        self._memory_db_path = str(value) if value is not None else None
+
+    @property
     def projects_dir(self) -> str:
         if self._projects_dir is not None:
             return self._projects_dir
@@ -670,6 +687,7 @@ class Config:
         self._local_llm_history_tokens = None
         self._tasks_db_path = None
         self._projects_db_path = None
+        self._memory_db_path = None
         self._projects_dir = None
         self._knowledge_db_path = None
         self._knowledge_backend = None

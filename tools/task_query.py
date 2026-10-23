@@ -5,15 +5,7 @@ from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
 from core.util import format_tool_response
 from core.runtime.execution_context import try_context
-from core.knowledge.tasks.db import (
-    get_connection,
-    init_db,
-    query_tasks_db,
-    get_task_by_id,
-    get_task_stats,
-    execute_read_sql,
-    get_db_path,
-)
+from core.storage.tasks import TasksStore
 from core.knowledge.tasks.sync import sync_tasks
 
 
@@ -90,20 +82,20 @@ def task_query(
             sync_result = sync_tasks()
             return format_tool_response("task_query", payload=json.dumps(sync_result, indent=2))
 
-        conn = get_connection()
-        try:
-            init_db(conn)
+        store = TasksStore()
+        with store.connect() as conn:
+            store.init(conn)
 
             if action == "get":
                 if not task_id:
                     return format_tool_response("task_query", payload="", errors="Error: 'task_id' is required for action='get'.")
-                task = get_task_by_id(conn, task_id.strip())
+                task = store.get_task(task_id.strip(), conn=conn)
                 if not task:
                     return format_tool_response("task_query", payload="", errors=f"Error: Task not found with ID '{task_id}'.")
                 return format_tool_response("task_query", payload=json.dumps(task, indent=2))
 
             elif action == "stats":
-                stats = get_task_stats(conn)
+                stats = store.stats(conn=conn)
                 return format_tool_response("task_query", payload=json.dumps(stats, indent=2))
 
             elif action == "sql":
@@ -111,18 +103,18 @@ def task_query(
                     return format_tool_response("task_query", payload="", errors="Error: 'sql' query parameter is required for action='sql'.")
                 limit = max(1, limit)
                 # One row past the cap is enough to tell whether anything was cut.
-                results, err = execute_read_sql(conn, sql, limit=limit + 1)
+                results, err = store.read_sql(sql, limit=limit + 1, conn=conn)
                 if err:
                     return format_tool_response("task_query", payload="", errors=err)
                 hidden = 0
                 if len(results) > limit:
-                    total = _count_rows(conn, sql)
+                    total = _count_rows(store, conn, sql)
                     hidden = max(1, total - limit) if total is not None else None
                 return format_tool_response("task_query", payload=_capped_payload("rows", results[:limit], hidden))
 
             elif action == "search":
                 limit = max(1, limit)
-                results = query_tasks_db(
+                results = store.search(
                     conn=conn,
                     status=status,
                     tags=tags,
@@ -143,8 +135,6 @@ def task_query(
 
             else:
                 return format_tool_response("task_query", payload="", errors=f"Error: Unknown action '{action}'. Supported actions: 'search', 'get', 'stats', 'sql', 'sync'.")
-        finally:
-            conn.close()
 
     except Exception as e:
         return format_tool_response("task_query", payload="", errors=f"Error in task_query: {e}")
@@ -164,7 +154,7 @@ def _capped_payload(key: str, shown: list, hidden: Optional[int]) -> str:
     return json.dumps(payload, indent=2)
 
 
-def _count_rows(conn: sqlite3.Connection, sql: str) -> Optional[int]:
+def _count_rows(store: TasksStore, conn: sqlite3.Connection, sql: str) -> Optional[int]:
     """How many rows `sql` returns in total, or None when it cannot be counted.
 
     SQLite does the counting, so the rows past the cap are never fetched into
@@ -172,5 +162,5 @@ def _count_rows(conn: sqlite3.Connection, sql: str) -> Optional[int]:
     swallowing the closing parenthesis.
     """
     inner = sql.strip().rstrip(";").strip()
-    rows, err = execute_read_sql(conn, f"SELECT COUNT(*) AS n FROM (\n{inner}\n)", limit=1)
+    rows, err = store.read_sql(f"SELECT COUNT(*) AS n FROM (\n{inner}\n)", limit=1, conn=conn)
     return None if err or not rows else rows[0]["n"]

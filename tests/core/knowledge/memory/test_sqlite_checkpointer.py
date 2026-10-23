@@ -10,7 +10,8 @@ from unittest.mock import patch
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer, sanitize_table_name
+from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+from core.storage.sessions import sanitize_table_name
 
 
 def _open_fd_count():
@@ -42,7 +43,7 @@ class TestSqliteCheckpointer(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.test_dir, "test_memory.db")
-        self.checkpointer = SqliteCheckpointer(db_path=self.db_path)
+        self.checkpointer = SqliteCheckpointer(self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -50,9 +51,43 @@ class TestSqliteCheckpointer(unittest.TestCase):
     def test_init_creates_db_file(self):
         self.assertTrue(os.path.exists(self.db_path))
 
+    def test_the_default_path_is_resolved_once_when_built(self):
+        first = os.path.join(self.test_dir, "first", "memory.db")
+        with patch.dict(os.environ, {"MEMORY_DB_PATH": first}):
+            checkpointer = SqliteCheckpointer()
+        self.assertTrue(os.path.exists(first), "built eagerly on Config().memory_db_path")
+
+        with patch.dict(os.environ, {"MEMORY_DB_PATH": os.path.join(self.test_dir, "second.db")}):
+            checkpointer.put({"configurable": {"thread_id": "t"}}, {"id": "cp1"}, {"step": 1}, {})
+        self.assertEqual(checkpointer.store.path, first)
+        # Another saver on the same file sees what this one saved.
+        self.assertEqual(SqliteCheckpointer(first).get_tuple({"configurable": {"thread_id": "t"}}).checkpoint["id"], "cp1")
+
     def test_sanitize_table_name(self):
         tbl = sanitize_table_name("thread:123/abc-test.xyz")
         self.assertEqual(tbl, "ctx_thread_123_abc_test_xyz")
+
+    def test_a_repeated_checkpoint_id(self):
+        """ContextPruner re-saves a pruned checkpoint under its own id: by id, the first saved is found;
+        the latest is the newest; rolling back removes every row saved with that id."""
+        config = {"configurable": {"thread_id": "dup_thread"}}
+        self.checkpointer.put(config, {"id": "cp0", "v": "base"}, {"step": 0}, {})
+        self.checkpointer.put(config, {"id": "cp1", "v": "first"}, {"step": 1}, {})
+        self.checkpointer.put(config, {"id": "cp1", "v": "pruned"}, {"step": 1}, {})
+
+        by_id = self.checkpointer.get_tuple({"configurable": {"thread_id": "dup_thread", "checkpoint_id": "cp1"}})
+        self.assertEqual(by_id.checkpoint["v"], "first")
+        self.assertEqual(self.checkpointer.get_tuple(config).checkpoint["v"], "pruned")
+
+        self.checkpointer.rollback_last_step("dup_thread")
+        self.assertEqual(self.checkpointer.get_tuple(config).checkpoint["id"], "cp0")
+
+    def test_unreconstructable_error_keeps_its_module_path(self):
+        """Stored blobs name it by module path, so it must stay importable from here."""
+        import pickle
+        from core.knowledge.memory.sqlite_checkpointer import UnreconstructableError
+        self.assertEqual(UnreconstructableError.__module__, "core.knowledge.memory.sqlite_checkpointer")
+        self.assertIn(b"core.knowledge.memory.sqlite_checkpointer", pickle.dumps(UnreconstructableError("x")))
 
     def test_put_and_get_tuple_latest(self):
         config = {"configurable": {"thread_id": "thread1"}}
@@ -192,7 +227,7 @@ class TestSqliteCheckpointer(unittest.TestCase):
             self.checkpointer.put(config, {"id": f"cp_{i}"}, {"step": i}, {})
 
         # Query direct SQLite row count for checkpoints
-        with self.checkpointer._get_connection() as conn:
+        with self.checkpointer.store.connect() as conn:
             cursor = conn.execute('SELECT count(*) as cnt FROM "ctx_prune_thread" WHERE entry_type = \'checkpoint\'')
             cnt = cursor.fetchone()["cnt"]
             self.assertEqual(cnt, 10)
@@ -213,7 +248,7 @@ class TestSqliteCheckpointer(unittest.TestCase):
         self.checkpointer.delete_thread("vacuum_drop")
 
         def freelist_count():
-            with self.checkpointer._get_connection() as conn:
+            with self.checkpointer.store.connect() as conn:
                 return conn.execute("PRAGMA freelist_count").fetchone()[0]
 
         before = freelist_count()
@@ -419,8 +454,8 @@ class TestSqliteCheckpointer(unittest.TestCase):
 
     def test_no_file_descriptor_leak(self):
         # Repeated checkpointer operations should close connections and not accumulate open FDs.
-        # SqliteCheckpointer._get_connection is a contextmanager whose `finally` closes the
-        # connection; if that ever regresses, every put/get/list burns db + -wal + -shm handles.
+        # Every call opens its own connection through its SessionStore and closes it in a
+        # `finally`; if that ever regresses, every put/get/list burns db + -wal + -shm handles.
         config = {"configurable": {"thread_id": "fd_leak_thread"}}
 
         opened = []
@@ -442,7 +477,7 @@ class TestSqliteCheckpointer(unittest.TestCase):
         # Sanity: the loop really did open connections (3 per iteration: put, get_tuple, list)
         self.assertGreaterEqual(len(opened), 60)
 
-        # Every connection handed out by _get_connection must be closed once its block exits
+        # Every connection the store opened must be closed once its call returns
         still_open = [c for c in opened if _is_connection_open(c)]
         self.assertEqual(
             len(still_open), 0,
@@ -472,7 +507,7 @@ class TestUnpicklableExceptionWrites(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.test_dir, "poison.db")
-        self.checkpointer = SqliteCheckpointer(db_path=self.db_path)
+        self.checkpointer = SqliteCheckpointer(self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -547,12 +582,11 @@ class TestUnpicklableExceptionWrites(unittest.TestCase):
             {"writes": [("__error__", self._api_error())], "task_id": "t"}
         ))
         table = sanitize_table_name("poison4")
-        with self.checkpointer._get_connection() as conn:
+        with self.checkpointer.store.connect() as conn:
             conn.execute(
                 f'INSERT INTO "{table}" (entry_type, checkpoint_id, data, created_at) '
                 f"VALUES ('write', 'cp1', ?, 0)", (bad,)
             )
-            conn.commit()
 
         cp_tuple = self.checkpointer.get_tuple(config)
         self.assertIsNotNone(cp_tuple, "a single bad write row bricked the whole session")

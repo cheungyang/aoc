@@ -2,14 +2,13 @@
 import contextvars
 import json
 import os
-import sqlite3
 import tempfile
 import time
 import unittest
 
-from core.knowledge.memory.sqlite_session_store import SqliteSessionStore, sanitize_table_name
 from core.runtime import turn_trace
 from core.runtime.turn_trace import STAGES, TurnTrace, current_turn_trace, detach_turn_trace, start_turn_trace
+from core.storage.sessions import SessionStore, sanitize_table_name
 
 
 class TestTurnTrace(unittest.TestCase):
@@ -66,16 +65,15 @@ class TestStorage(unittest.TestCase):
     def test_trace_is_stored_next_to_the_token_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "memory.db")
-            store = SqliteSessionStore(db_path=db)
+            store = SessionStore(db)
             store.append_token_usage("main:discord:general", "gemini", 10, 5, 0.0, surface="voice")
             store.append_turn_trace("main:discord:general", {"ttfa_ms": 4200, "marks": {"audio_start": 4200}})
             store.append_turn_trace("main:discord:general", {"ttfa_ms": None, "marks": {}})
 
-            conn = sqlite3.connect(db)
-            rows = conn.execute(
-                f'SELECT entry_type, execution_time, surface, message FROM "{sanitize_table_name("main:discord:general")}" ORDER BY id'
-            ).fetchall()
-            conn.close()
+            with store.connect() as conn:
+                rows = conn.execute(
+                    f'SELECT entry_type, execution_time, surface, message FROM "{sanitize_table_name("main:discord:general")}" ORDER BY id'
+                ).fetchall()
 
         self.assertEqual([r[0] for r in rows], ["token", "turn_trace", "turn_trace"])
         self.assertAlmostEqual(rows[1][1], 4.2)

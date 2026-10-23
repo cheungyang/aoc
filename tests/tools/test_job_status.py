@@ -22,7 +22,7 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload="", errors="Job unknown_job not found."))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.SqliteSessionStore')
+    @patch('tools.job_status.SessionStore')
     @patch('tools.job_status.agent_call')
     def test_job_status_from_history(self, mock_agent_call, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
@@ -55,7 +55,7 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload=expected_payload, errors="None"))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.SqliteSessionStore')
+    @patch('tools.job_status.SessionStore')
     @patch('tools.job_status.agent_call')
     def test_job_status_fallback_to_last_message(self, mock_agent_call, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
@@ -87,7 +87,7 @@ class TestJobStatusTool(unittest.TestCase):
         self.assertEqual(result, format_tool_response("job_status", payload=expected_payload, errors="None"))
 
     @patch('tools.job_status.JobManager')
-    @patch('tools.job_status.SqliteSessionStore')
+    @patch('tools.job_status.SessionStore')
     def test_job_status_no_history(self, mock_session_store_class, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager

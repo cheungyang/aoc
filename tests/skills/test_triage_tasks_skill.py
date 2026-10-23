@@ -13,7 +13,7 @@ import unittest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.knowledge.tasks.db import execute_read_sql, get_connection, init_db
+from core.storage.tasks import TasksStore
 
 SKILL_MD = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "skills", "triage_tasks", "SKILL.md"))
@@ -35,9 +35,8 @@ class TestTriageTasksSkillSql(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.conn = get_connection(os.path.join(self.tmp.name, "tasks.db"))
-        self.addCleanup(self.conn.close)
-        init_db(self.conn)
+        self.store = TasksStore(os.path.join(self.tmp.name, "tasks.db"))
+        self.store.init()
         rows = [
             # id, title, priority, tags, source, line
             ("t1", "Read DDIA ch 3", "🔼", ["a/learn", "p/aoc"], "projects/aoc.md", 1),
@@ -47,18 +46,18 @@ class TestTriageTasksSkillSql(unittest.TestCase):
             ("t5", "Write memo", "⏫", ["a/write", "p/aoc"], "projects/aoc.md", 3),
             ("t6", "Learn Go", None, ["a/learn", "p/aoc"], "O'Brien.md", 1),
         ]
-        for tid, title, prio, tags, source, line in rows:
-            self.conn.execute(
-                "INSERT INTO tasks (id, title, status, priority, tags, source, source_type, "
-                "line_number, raw_line, content_hash, updated_date) "
-                "VALUES (?, ?, 'todo', ?, ?, ?, 'vault', ?, ?, 'h', '2026-09-23')",
-                (tid, title, prio, json.dumps(tags), source, line, f"- [ ] {title}"),
-            )
-        self.conn.commit()
+        with self.store.connect() as conn:
+            for tid, title, prio, tags, source, line in rows:
+                conn.execute(
+                    "INSERT INTO tasks (id, title, status, priority, tags, source, source_type, "
+                    "line_number, raw_line, content_hash, updated_date) "
+                    "VALUES (?, ?, 'todo', ?, ?, ?, 'vault', ?, ?, 'h', '2026-09-23')",
+                    (tid, title, prio, json.dumps(tags), source, line, f"- [ ] {title}"),
+                )
         self.blocks = _sql_blocks()
 
     def _run(self, sql, limit=50):
-        results, err = execute_read_sql(self.conn, sql, limit=limit)
+        results, err = self.store.read_sql(sql, limit=limit)
         self.assertIsNone(err, f"{err}\n{sql}")
         return results
 

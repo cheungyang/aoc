@@ -99,7 +99,7 @@ class TestSleepLoggedToday(unittest.TestCase):
     def test_once_a_day_gate_survives_restart(self):
         """last_success_at lives in SQLite; a fresh ScheduleState (new process) sees it."""
         from datetime import timedelta
-        from core.scheduler.state import ScheduleState
+        from core.storage.schedule_state import ScheduleState
 
         self.sleep_data = {"sessions": [self.session()]}
         with tempfile.TemporaryDirectory() as tmp:

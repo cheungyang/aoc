@@ -19,7 +19,7 @@ from core.scheduler.spec import (
     SessionPolicy,
     WorkDecision,
 )
-from core.scheduler.state import ScheduleState
+from core.storage.schedule_state import ScheduleState
 from core.util.time_util import get_local_now
 from tests.core.scheduler import use_real_croniter
 
@@ -503,6 +503,7 @@ class TestResetConversation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             db = os.path.join(d, "memory.db")
             table = runner_mod.sanitize_table_name("agent1:scheduled:c")
+            # A hand-built table with only the columns the reset needs: it must not be given the schema.
             conn = sqlite3.connect(db)
             conn.execute(f'CREATE TABLE "{table}" (entry_type TEXT, data TEXT)')
             conn.executemany(
@@ -514,16 +515,19 @@ class TestResetConversation(unittest.TestCase):
 
             session = MagicMock()
             session.get_session_thread_id.return_value = "agent1:scheduled:c"
-            with patch.object(runner_mod, "SqliteCheckpointer") as cp:
-                cp.return_value.db_path = db
+            with patch.dict(os.environ, {"MEMORY_DB_PATH": db}):  # where SessionStore() finds memory.db
                 self.assertEqual(reset_conversation(session), 2)
                 session.get_session_thread_id.return_value = "missing:thread"
                 self.assertEqual(reset_conversation(session), 0)
 
             conn = sqlite3.connect(db)
             left = sorted(r[0] for r in conn.execute(f'SELECT entry_type FROM "{table}"'))
+            columns = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')]
+            tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
             conn.close()
             self.assertEqual(left, ["message", "token_usage"])
+            self.assertEqual(columns, ["entry_type", "data"], "not migrated")
+            self.assertEqual(tables, [table], "no table made for the missing thread")
 
 
 if __name__ == "__main__":

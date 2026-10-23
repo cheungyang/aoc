@@ -11,7 +11,7 @@ from core.inbox import writer
 from core.inbox.model import Status
 from core.channel.response_parser import AgentResponse
 from core.inbox.speech_writer import SpeechWriter, write_speech
-from core.inbox.store import InboxStore
+from core.storage.channel_inbox import InboxStore
 from tests.core.inbox import loader
 
 

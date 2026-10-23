@@ -15,9 +15,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from core.storage.speaker_gate_log import Effect, GateLog, Mode
 from core.voice import settings
 from core.voice.listening import speaker_gate as sg
-from core.voice.listening.gate_log import Effect, GateLog, Mode
 from core.voice.listening.utterance import BYTES_PER_MS, SAMPLE_RATE, Transcript, Utterance
 
 from tests.helpers import FAKE_VOICEPRINT, FakeSpeakerModel as FakeModel
@@ -148,8 +148,8 @@ def test_a_missing_or_broken_voiceprint_is_none(tmp_path):
 
 
 def test_the_voiceprint_lives_beside_memory_db_unless_told_otherwise(monkeypatch, tmp_path):
-    from core.knowledge.memory import sqlite_session_store
-    assert sg.voiceprint_path() == os.path.join(os.path.dirname(sqlite_session_store.DEFAULT_DB_PATH),
+    from core.util.config import Config
+    assert sg.voiceprint_path() == os.path.join(os.path.dirname(Config().memory_db_path),
                                                 "voice", "voiceprint.json")
     monkeypatch.setenv("AOC_VOICE_DATA_DIR", str(tmp_path))
     assert sg.clips_dir() == str(tmp_path / "gate_audio")

@@ -223,7 +223,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader.get_agent.assert_called_with("main")
         mock_agent.execute_stream.assert_called_once()
 
-    @patch('core.knowledge.memory.sqlite_session_store.SqliteSessionStore.load_history', return_value=[])
+    @patch('core.storage.sessions.SessionStore.load_history', return_value=[])
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')
     async def test_on_message_from_thread_seeds_starter_message(self, mock_bot_class, mock_agents_loader_class, mock_load_history):
@@ -524,7 +524,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content_arg[1]["type"], "image_url")
         self.assertTrue(content_arg[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
 
-    @patch('core.knowledge.memory.sqlite_session_store.SqliteSessionStore.load_history')
+    @patch('core.storage.sessions.SessionStore.load_history')
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')
     async def test_on_message_does_not_reseed_thread_starter_when_history_exists(self, mock_bot_class, mock_agents_loader_class, mock_load_history):
@@ -533,7 +533,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         The original version of this test was named
         `test_on_message_without_attachments_does_not_pull_history`, from a time when
         on_message scraped Discord history looking for a previous image. That code is
-        gone; the only history access left is the SqliteSessionStore.load_history guard
+        gone; the only history access left is the SessionStore.load_history guard
         at bot_runner.py:242, which exists so a thread's starter message is injected
         *once* (on the first turn) and never again. This test pins that guard: with a
         non-empty stored history, the starter text must be absent and the payload must
@@ -786,7 +786,7 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
     async def test_a_mark_on_a_gate_review_post_labels_the_utterance_not_the_inbox(self, mock_bot_class,
                                                                                   mock_loader_class, mark_read,
                                                                                   record_reply):
-        from core.voice.listening.gate_log import GateRecord, Label, Mode
+        from core.storage.speaker_gate_log import GateRecord, Label, Mode
         runner, message = self._runner(mock_bot_class, mock_loader_class)
         runner.bot.get_channel.return_value = message.channel
         log = runner.voice_manager.speaker_gate.log
