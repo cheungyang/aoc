@@ -66,7 +66,6 @@ MODELS_DIR = os.path.join(ASSET_ROOT, "models")
 BLURP_VOICE = os.environ.get("AOC_BLURP_VOICE", "en-US-AriaNeural")
 REQUIRED_BLURPS = {
     "assets/sounds/blurps/default_ack.wav": "Okay.",
-    "assets/sounds/blurps/coder_beep.wav": "On it.",
     "assets/sounds/blurps/concierge_ping.wav": "Yes?",
 }
 

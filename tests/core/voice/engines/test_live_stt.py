@@ -3,7 +3,7 @@
 The fake answers setup with setupComplete, optionally sends an interim for each
 audio chunk, and some time after each activityEnd sends the segment's final
 transcript, generationComplete, and voiceActivity ACTIVITY_END -- the order the
-real service was observed to use (scratch/live_stt_probe.py).
+real service was observed to use.
 """
 import asyncio
 import base64
