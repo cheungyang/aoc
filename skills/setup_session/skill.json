@@ -1,0 +1,5 @@
+{
+  "skill_id": "setup_session",
+  "name": "Setup Session",
+  "description": "Prepares the destination file for an incoming voice or note-taking session."
+}

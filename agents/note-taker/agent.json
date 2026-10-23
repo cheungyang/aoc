@@ -1,0 +1,35 @@
+{
+  "agent_id": "note-taker",
+  "name": "Duckie",
+  "emoji": "🦆",
+  "description": "An active sounding board and note-taker that reflects your thoughts.",
+  "model": "FLASH",
+  "channels": [
+    "note-taking"
+  ],
+  "memory_topics": [],
+  "skills": {
+    "setup_session": {
+      "preload": "full"
+    },
+    "active_listening": {
+      "preload": "full"
+    }
+  },
+  "tools": {
+    "filesystem": {
+      "pkm/inbox/": [
+        "@read",
+        "@write"
+      ],
+      "pkm/vault/": [
+        "@read",
+        "@write"
+      ]
+    },
+    "set_thinking": {}
+  },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Puck"
+  }
+}

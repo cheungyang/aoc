@@ -1,0 +1,5 @@
+{
+  "skill_id": "active_listening",
+  "name": "Active Listening",
+  "description": "The core voice loop: structures notes, writes them to disk, and reflects a synthesis back to the user."
+}
