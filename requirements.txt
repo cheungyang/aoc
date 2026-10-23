@@ -7,9 +7,9 @@ croniter
 discord.py
 langchain-core
 langchain-google-genai
-# Used by graph_builder for ChatOllama when a model sets provider: ollama.
+# Used by GraphBuilder for ChatOllama when a model sets provider: ollama.
 langchain-ollama
-# Used by graph_builder for ChatOpenAI when an agent sets provider: local. The
+# Used by GraphBuilder for ChatOpenAI when an agent sets provider: local. The
 # on-device server speaks the OpenAI wire format; this is a protocol client for
 # it, not a dependency on the hosted API.
 langchain-openai

@@ -62,7 +62,7 @@ def get_voice_mode_prompt() -> str:
     A scheduled run gets the scheduled variant inside `scheduled_speech_scope`:
     its post may be heard later, from the channel inbox.
     """
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
     sess = try_context()
     if sess is None or sess.is_stateless():
         return ""

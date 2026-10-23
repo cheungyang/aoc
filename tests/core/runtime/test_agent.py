@@ -69,11 +69,11 @@ if not hasattr(sys.modules['discord'], 'SelectOption'):
 
 import discord
 from core.runtime.agent import Agent
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.sessions import SessionManager
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from core.runtime.job_manager import JobManager
+        from core.runtime.foundation.jobs import JobManager
         JobManager._instance = None
 
 
@@ -412,9 +412,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_job_manager = MagicMock()
         mock_job_manager_class.return_value = mock_job_manager
-        mock_job = MagicMock()
-        mock_job.status = "killed"
-        mock_job_manager._jobs = {"123": mock_job}
+        mock_job_manager.is_killed.return_value = True
         
         # We need to mock new_job_id to return a fixed id
         mock_job_manager.new_job_id.return_value = "123"
@@ -501,7 +499,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply_discord, "Direct user response")
         mock_channel.send.assert_called_once_with("Direct user response")
 
-    @patch('core.runtime.session_manager.SessionManager.clear_session')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_session')
     async def test_execute_new_command(self, mock_clear_session):
         mock_clear_session.return_value = "archived"
         agent = Agent("test-agent", {})
@@ -513,7 +511,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_clear_session.assert_called_once()
         mock_channel.send.assert_called_once_with("Session context cleared. archived")
 
-    @patch('core.runtime.session_manager.SessionManager.clear_sessions')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_sessions')
     async def test_execute_newall_command(self, mock_clear_sessions):
         mock_clear_sessions.return_value = "all archived"
         agent = Agent("test-agent", {})
@@ -628,7 +626,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         )
         mock_channel.send.assert_called_once_with("Task completed successfully.")
 
-    @patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session')
+    @patch('core.runtime.history.pruner.ContextPruner.aauto_prune_session')
     @patch('core.runtime.agent.LoggingHandler')
     async def test_execute_prunes_after_the_turn_not_before(self, mock_logging_handler_class, mock_auto_prune):
         """B22: pruning used to run before the graph, on the critical path."""
@@ -671,7 +669,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         agent._graphs[""] = mock_graph
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
 
-        with patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
+        with patch('core.runtime.history.pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
             await agent.execute("first", session=session)
             second = asyncio.create_task(agent.execute("second", session=session))
             await asyncio.sleep(0.01)
@@ -684,7 +682,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.runtime.agent.LoggingHandler')
     async def test_a_prune_wait_is_recorded_in_the_turn_trace(self, mock_logging_handler_class):
-        from core.runtime.turn_trace import start_turn_trace
+        from core.runtime.observability.turn_trace import start_turn_trace
 
         release = asyncio.Event()
 
@@ -702,7 +700,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             await agent.execute(prompt, session=session)
             return [e for e in trace.events if e["kind"] == "prune_wait"]
 
-        with patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
+        with patch('core.runtime.history.pruner.ContextPruner.aauto_prune_session', side_effect=slow_prune):
             self.assertEqual(await traced_turn("first"), [], "nothing to wait for on the first turn")
             second = asyncio.create_task(traced_turn("second"))
             await asyncio.sleep(0.02)
@@ -712,7 +710,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(waits), 1)
         self.assertGreaterEqual(waits[0]["ms"], 15)
 
-    @patch('core.runtime.context_pruner.ContextPruner.aauto_prune_session')
+    @patch('core.runtime.history.pruner.ContextPruner.aauto_prune_session')
     @patch('core.runtime.agent.LoggingHandler')
     async def test_stateless_sessions_are_not_pruned(self, mock_logging_handler_class, mock_auto_prune):
         mock_graph = MagicMock()

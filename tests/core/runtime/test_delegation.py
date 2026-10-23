@@ -21,7 +21,8 @@ from core.runtime.delegation import (
     stream_delegate,
     with_caller,
 )
-from core.runtime.stream_handler import (
+from core.runtime.foundation.events import (
+    RESPONSE_HINT,
     ROUTE_REACTION,
     SUBAGENT_STREAM_FINAL,
     SUBAGENT_STREAM_TOKEN,
@@ -188,8 +189,8 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
     @patch('core.channel.discord.loader.BotsLoader')
     @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_caller_inferred_from_context(self, mock_agents_loader, mock_bots_loader):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
 
         capture = {}
         mock_loader = MagicMock()
@@ -214,8 +215,8 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
     @patch('core.loaders.agents_loader.AgentsLoader')
     async def test_thread_context_is_preserved(self, mock_agents_loader, mock_bots_loader):
         import discord
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
 
         capture = {}
         mock_loader = MagicMock()
@@ -279,7 +280,6 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
     async def test_a_stateless_agent_returns_its_parsed_reply_too(self, mock_agents_loader, mock_bots_loader):
         """As the streaming path does: Python callers read `<speech>` from it."""
         from core.channel.response_parser import AgentResponse
-        from core.runtime.agent import RESPONSE_HINT
 
         parsed = AgentResponse.from_string("<speech>Ted here.</speech>")
 

@@ -8,7 +8,8 @@ import base64
 from collections import OrderedDict
 from discord.ext import commands
 from core.loaders.agents_loader import AgentsLoader
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation import events
+from core.runtime.foundation.sessions import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
 from core.util import format_error_message, safe_chunks
@@ -500,9 +501,9 @@ class BotRunner:
                     callbacks=[reaction_handler]
                 ):
                     event_type = event.get("type")
-                    if event_type == "token":
+                    if event_type == events.TOKEN:
                         await stream_buffer.append_token(event.get("content", ""))
-                    elif event_type == "reaction":
+                    elif event_type == events.REACTION:
                         # Delegation acknowledgement. This arrives from the
                         # delegation path itself rather than from a tool
                         # callback, so it fires for both the LLM's choice and
@@ -513,7 +514,7 @@ class BotRunner:
                                 await message.add_reaction(emoji)
                             except Exception as re:
                                 print(f"[BotRunner:{self.agent_id}] Could not add routing reaction: {re}")
-                    elif event_type == "final_response":
+                    elif event_type == events.FINAL_RESPONSE:
                         final_text = event.get("text", "")
                         await stream_buffer.finalize(
                             final_text=final_text,

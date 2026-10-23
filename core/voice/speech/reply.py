@@ -19,6 +19,7 @@ from typing import Callable, Dict, List, Optional
 
 import discord
 
+from core.runtime.foundation import events
 from core.voice import settings
 from core.voice.engines.tts import TTSEngine, Voice, agent_voice
 from . import missing_speech
@@ -192,13 +193,13 @@ class ReplyStreamer:
                     return False
 
                 event_type = event.get("type")
-                if event_type == "tool_start":
+                if event_type == events.TOOL_START:
                     trace.event("tool_start", tool=event.get("tool_name", ""))
 
-                elif event_type == "tool_end":
+                elif event_type == events.TOOL_END:
                     trace.event("tool_end", tool=event.get("tool_name", ""))
 
-                elif event_type == "token":
+                elif event_type == events.TOKEN:
                     token = event.get("content", "")
                     if not token:
                         continue
@@ -213,7 +214,7 @@ class ReplyStreamer:
                     speaker = event.get("agent_id") or speaker
                     route(*router.feed(token))
 
-                elif event_type == "final_response":
+                elif event_type == events.FINAL_RESPONSE:
                     route(*router.flush())
                     replied = True
                     response = event.get("response")
@@ -221,7 +222,7 @@ class ReplyStreamer:
                     on_final(speech_of(response) or final_text)
                     text_lane.put_nowait(("final", event))
 
-                elif event_type == "error":
+                elif event_type == events.ERROR:
                     failed = True
                     self._log(f"Agent stream error: {event.get('content')}")
 

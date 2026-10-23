@@ -128,7 +128,7 @@ def agent_tool(func: Callable[..., Any]) -> AgentTool:
 
 
 def _run(name: str, func: Callable[..., Any], report: Report, kwargs: dict) -> str:
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
 
     ctx = try_context()
     if ctx is None:
@@ -174,7 +174,7 @@ def _loader():
 
 
 def _running_call(caller: str):
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
 
     name, ctx = _running_tool.get(), try_context()
     if name is None or ctx is None:
@@ -212,7 +212,7 @@ def tool_grant() -> Any:
 
 def current_agent_id() -> str:
     """The id of the agent whose run this is, e.g. "meal-planner"."""
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
 
     ctx = try_context()
     if ctx is None:

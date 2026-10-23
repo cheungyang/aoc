@@ -9,8 +9,8 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.runtime.session_manager import SessionManager
-from core.runtime.logging_handler import LoggingHandler
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.observability.transcript import LoggingHandler
 from core.storage.sessions import SessionStore
 
 class TestMemoryIntegration(unittest.TestCase):

@@ -518,7 +518,7 @@ async def test_a_reply_without_speech_speaks_the_fallback_and_notes_it_under_the
     vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, reply)
     _play_at_once(vm)
     traces = []
-    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
                side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
         await _run_turn(vm, agent)
 
@@ -710,7 +710,7 @@ async def test_turn_trace_records_stages_and_first_audio(mock_bot_runner, tmp_pa
     _play_at_once(vm)
     utterance = _spoken(QUESTION, speech_end_at=time.monotonic() - 0.9)
     utterance.stream = MagicMock(timings={"final_after_end_ms": 412.4})  # the live session's timings
-    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
                side_effect=lambda self, session_id=None, surface="voice": traces.append((self, session_id))):
         with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
              patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
@@ -743,7 +743,7 @@ async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runne
     starts = []
     vm.audio_queue.put = AsyncMock(side_effect=lambda speaker, on_start=None: starts.append(on_start))
     traces = []
-    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
                side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
         await _run_turn(vm, agent)
         assert traces == [], "recorded before the answer was heard"
@@ -1768,7 +1768,7 @@ async def test_the_turn_trace_carries_each_utterances_verdict(mock_bot_runner, t
     utterance = _spoken(QUESTION)
     utterance.gate = Assessment(Verdict.YOU, 0.83, 1000, voiced_share=0.9, compute_ms=8)
     traces = []
-    with patch("core.runtime.turn_trace.TurnTrace.finish", autospec=True,
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
                side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
         with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
              patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):

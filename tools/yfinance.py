@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Union
 import yfinance as yf
 from langchain_core.tools import tool
 
-from core.runtime.execution_context import try_context
+from core.runtime.foundation.context import try_context
 from core.util import format_tool_response
 from core.util.time_util import get_local_now
 

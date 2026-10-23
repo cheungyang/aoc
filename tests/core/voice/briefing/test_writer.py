@@ -41,7 +41,7 @@ class TestPushes(unittest.TestCase):
         self.assertIsNone(push(priority="IGNORE"))
         self.assertIsNone(push(text="   "))
         thread = SimpleNamespace(name="t", parent=SimpleNamespace(name="day-planning"), type="public_thread")
-        with patch("core.runtime.execution_context._is_thread", return_value=True):
+        with patch("core.runtime.foundation.context._is_thread", return_value=True):
             self.assertIsNone(push(channel=thread))
         self.assertEqual(InboxStore().rows(), [])
 

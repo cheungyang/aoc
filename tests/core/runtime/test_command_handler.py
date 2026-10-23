@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.command_handler import CommandHandler
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.sessions import SessionManager
 
 
 class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
@@ -24,7 +24,7 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         result = await self.handler.handle_command("regular user prompt", session=session)
         self.assertFalse(result)
 
-    @patch('core.runtime.session_manager.SessionManager.clear_session')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_session')
     async def test_handle_new_command_with_channel(self, mock_clear_session):
         mock_clear_session.return_value = "archived table"
         mock_channel = AsyncMock()
@@ -36,7 +36,7 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         mock_clear_session.assert_called_once_with(session)
         mock_channel.send.assert_called_once_with("Session context cleared. archived table")
 
-    @patch('core.runtime.session_manager.SessionManager.clear_session')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_session')
     async def test_handle_new_command_without_channel(self, mock_clear_session):
         mock_clear_session.return_value = "archived table"
 
@@ -45,7 +45,7 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         mock_clear_session.assert_called_once_with(session)
 
-    @patch('core.runtime.session_manager.SessionManager.clear_sessions')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_sessions')
     async def test_handle_newall_command_with_channel(self, mock_clear_sessions):
         mock_clear_sessions.return_value = "all archived"
         mock_channel = AsyncMock()
@@ -57,7 +57,7 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         mock_clear_sessions.assert_called_once()
         mock_channel.send.assert_called_once_with("All session contexts cleared. all archived")
 
-    @patch('core.runtime.session_manager.SessionManager.clear_sessions')
+    @patch('core.runtime.foundation.sessions.SessionManager.clear_sessions')
     async def test_handle_newall_command_without_channel(self, mock_clear_sessions):
         mock_clear_sessions.return_value = "all archived"
 
@@ -84,7 +84,7 @@ class TestCommandHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
 
-    @patch('core.runtime.context_pruner.ContextPruner._asummarize_with_graph_worker', return_value="Compacted summary")
+    @patch('core.runtime.history.pruner.ContextPruner._asummarize_with_graph_worker', return_value="Compacted summary")
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.put')
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
     async def test_handle_compact_command(self, mock_get_tuple, mock_put, mock_worker):

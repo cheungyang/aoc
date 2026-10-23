@@ -89,10 +89,10 @@ def channel_name(channel: Any) -> Optional[str]:
     if channel is None:
         return None
     if not isinstance(channel, str):
-        from core.runtime.execution_context import _is_thread
+        from core.runtime.foundation.context import _is_thread
         if _is_thread(channel):
             return None
-    from core.runtime.channel_context import _channel_name
+    from core.runtime.history.channel_posts import _channel_name
     name = _channel_name(channel).strip().lower()
     return name or None
 
@@ -101,7 +101,7 @@ def answering_agent_for(name: str, loader: Any = None, fallback: Optional[str] =
     """Who answers an untagged message in channel `name`: routed as the voice
     host routes it, else as its first host does. `fallback` when nobody hosts it."""
     from core.loaders.agents_loader import AgentsLoader
-    from core.runtime.channel_context import channel_hosts_for
+    from core.runtime.history.channel_posts import channel_hosts_for
     from core.voice.room.focus import answering_agent
 
     loader = loader or AgentsLoader()

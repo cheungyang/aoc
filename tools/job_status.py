@@ -2,8 +2,8 @@ import os
 import asyncio
 import re
 from langchain_core.tools import tool
-from core.runtime.job_manager import JobManager
-from core.runtime.execution_context import try_context
+from core.runtime.foundation.jobs import JobManager
+from core.runtime.foundation.context import try_context
 from core.util import format_tool_response
 from core.storage.sessions import SessionStore
 from tools.agent_call import agent_call
@@ -38,7 +38,7 @@ def job_status(job_id: str) -> str:
 async def _job_status_async(job_id: str) -> str:
     try:
         manager = JobManager()
-        job = manager._jobs.get(job_id)
+        job = manager.job(job_id)
         if not job:
             return format_tool_response("job_status", payload="", errors=f"Job {job_id} not found.")
             

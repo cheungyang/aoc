@@ -539,7 +539,7 @@ on **any** exception (import or construction), falls back to `langgraph.checkpoi
 — so the graph is always compiled with persistence of some kind, degrading to in-process only.
 `**kwargs` (`llm`, `tools`, `prompt`, `agent_id`, `config`, …) are accepted for signature
 compatibility with the generic builder in
-[graph_builder.py](../../core/agent/graph_builder.py#L129-L144) and ignored: this
+[graph_builder.py](../../core/runtime/graph_builder.py#L201-L209) and ignored: this
 graph binds its own tools. A default compiled instance is exported as `graph`
 ([graph.py:156](graph.py#L155-L156)).
 

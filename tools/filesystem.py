@@ -3,7 +3,7 @@ import shutil
 import fnmatch
 from langchain_core.tools import tool
 from core.util import format_tool_response
-from core.runtime.execution_context import try_context
+from core.runtime.foundation.context import try_context
 
 # Named action bundles for `agent.json` grants, e.g. {"pkm/wiki": ["@write"]}.
 # Declared here, beside the actions they name, so that adding an action and

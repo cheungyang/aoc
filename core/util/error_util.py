@@ -62,7 +62,7 @@ def _describe_unreachable_local_llm(error: Any) -> str:
         # The request URL is the only reliable way to tell this server apart
         # from any other OpenAI-compatible endpoint. When it is absent, claim
         # the error anyway: in this codebase the openai client is constructed
-        # only by graph_builder's `local` branch.
+        # only by GraphBuilder's `local` branch.
         request_url = str(getattr(getattr(err, "request", None), "url", "") or "")
         if request_url:
             expected_host = urlparse(base_url).netloc

@@ -3,7 +3,7 @@
 `agent_call` is now a wrapper: it validates the arguments an LLM supplied and
 wraps the outcome in a tool-response envelope. The delegation mechanics it used
 to own -- permissions, caller tagging, streaming, thread context -- live in
-`core.runtime.delegation` and are tested in `tests/core/agent/test_delegation.py`.
+`core.runtime.delegation` and are tested in `tests/core/runtime/test_delegation.py`.
 Re-testing them through the tool would only assert that the wrapper forwards.
 """
 import os

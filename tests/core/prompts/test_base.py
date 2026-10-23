@@ -164,7 +164,7 @@ class TestWorkerPrompt(unittest.IsolatedAsyncioTestCase):
 
     async def test_it_runs_on_graph_worker_low_through_ask_worker(self):
         ask = AsyncMock(return_value=SimpleNamespace(text="<payload>hi</payload>", response=None))
-        with patch("core.runtime.delegation.ask_worker", new=ask):
+        with patch("core.prompts.base._worker", new=ask):
             self.assertEqual(await _Echo(text="hi").run(channel="general"), "<payload>hi</payload>")
         self.assertEqual(ask.await_args.args, ("Say hi.",))
         self.assertEqual(ask.await_args.kwargs, {"channel": "general", "caller": "echo-test", "timeout": 3.0,
@@ -173,7 +173,7 @@ class TestWorkerPrompt(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_caller_may_replace_the_timeout(self):
         ask = AsyncMock(return_value=SimpleNamespace(text="", response=None))
-        with patch("core.runtime.delegation.ask_worker", new=ask):
+        with patch("core.prompts.base._worker", new=ask):
             await _Echo(text="hi").run(channel="general", timeout=9.5)
         self.assertEqual(ask.await_args.kwargs["timeout"], 9.5)
 
@@ -182,10 +182,15 @@ class TestWorkerPrompt(unittest.IsolatedAsyncioTestCase):
             def parse(self, result):
                 return result.text.upper()
 
-        with patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=SimpleNamespace(text="hi"))):
+        with patch("core.prompts.base._worker", new=AsyncMock(return_value=SimpleNamespace(text="hi"))):
             self.assertEqual(await Shout(text="hi").run(channel="general"), "HI")
-        with patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=None)):
+        with patch("core.prompts.base._worker", new=AsyncMock(return_value=None)):
             self.assertIsNone(await Shout(text="hi").run(channel="general"))
+
+    async def test_without_a_worker_it_says_how_to_plug_one_in(self):
+        with patch("core.prompts.base._worker", new=None):
+            with self.assertRaisesRegex(RuntimeError, "bootstrap.wire"):
+                await _Echo(text="hi").run(channel="general")
 
 
 REPO = Path(core.prompts.__file__).resolve().parents[2]

@@ -28,7 +28,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.runtime import job_manager as _job_manager_mod  # noqa: E402
+from core.runtime.foundation import jobs as _jobs_mod  # noqa: E402
 
 _ORIGINALS = {
     "tick_env": os.environ.get("AOC_TICK_ERROR_CACHE"),
@@ -57,11 +57,17 @@ def _plain_setenv(name, value):
 # Session-wide fallback, applied at import time.
 _SESSION_DIR = tempfile.mkdtemp(prefix="aoc-test-sessions-")
 _redirect(_plain_setenv, _SESSION_DIR)
-_job_manager_mod.JobManager._instance = None
+_jobs_mod.JobManager._instance = None
+
+# The runtime's ports, filled as main.py fills them (core/runtime/bootstrap.py).
+# Imported only now, after the redirect, because it loads most of the runtime.
+from core.runtime import bootstrap  # noqa: E402
+
+bootstrap.wire()
 
 
 def pytest_unconfigure(config):
-    _job_manager_mod.JobManager._instance = None
+    _jobs_mod.JobManager._instance = None
     if _ORIGINALS["tick_env"] is None:
         os.environ.pop("AOC_TICK_ERROR_CACHE", None)
     else:
@@ -77,9 +83,9 @@ def pytest_unconfigure(config):
 def _isolate_production_state(tmp_path, monkeypatch):
     """Per-test: fresh sessions dir under tmp_path and a fresh JobManager."""
     _redirect(monkeypatch.setenv, str(tmp_path / "sessions"))
-    _job_manager_mod.JobManager._instance = None
+    _jobs_mod.JobManager._instance = None
     yield
-    _job_manager_mod.JobManager._instance = None
+    _jobs_mod.JobManager._instance = None
 
 
 @pytest.fixture(autouse=True)

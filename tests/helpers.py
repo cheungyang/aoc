@@ -12,8 +12,8 @@ tests that speak, and `FakeSpeakerModel` for tests of the voiceprint gate.
 import re
 from contextlib import contextmanager
 
-from core.runtime.execution_context import current_execution_context
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
 
 
 def make_context(agent_id="test-agent", graph_id=None, source="job", channel=None, stateless=True):

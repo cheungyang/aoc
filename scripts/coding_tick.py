@@ -329,6 +329,10 @@ def main(argv=None) -> int:
         # means nothing has been queued yet.
         return 0
 
+    # The graph's worker calls run agents, so the runtime has to be plugged in.
+    from core.runtime import bootstrap
+    bootstrap.wire()
+
     sections = []
     try:
         with quiet_stdout(args.verbose):
@@ -358,7 +362,7 @@ def main(argv=None) -> int:
 if __name__ == "__main__":
     ensure_project_interpreter()
     enter_project_root()
-    from core.runtime.execution_context import surface_scope
+    from core.runtime.foundation.context import surface_scope
 
     # Run as a script, this is the scheduled tick: the worker calls it makes
     # are booked as scheduled work.

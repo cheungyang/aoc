@@ -66,6 +66,22 @@ class TestAgentsLoader(unittest.IsolatedAsyncioTestCase):
         
         self.assertIs(agent1, agent2)
 
+    def test_agents_are_built_by_the_plugged_in_factory(self):
+        loader = AgentsLoader()
+        loader._agent_configs = {"built": {"id": "built"}}
+        built = object()
+        factory = MagicMock(return_value=built)
+        with patch("core.loaders.agents_loader._agent_factory", new=factory):
+            self.assertIs(loader.get_agent("built"), built)
+        factory.assert_called_once_with("built", {"id": "built"})
+
+    def test_without_a_factory_it_says_how_to_plug_one_in(self):
+        loader = AgentsLoader()
+        loader._agent_configs = {"unbuilt": {"id": "unbuilt"}}
+        with patch("core.loaders.agents_loader._agent_factory", new=None):
+            with self.assertRaisesRegex(RuntimeError, "bootstrap.wire"):
+                loader.get_agent("unbuilt")
+
 
 
 

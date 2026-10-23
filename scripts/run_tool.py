@@ -12,10 +12,12 @@ load_dotenv(os.path.join(workspace_root, ".env"))
 sys.path.append(workspace_root)
 
 from core.loaders.tools_loader import ToolsLoader
-from core.runtime.session_manager import SessionManager
-from core.runtime.execution_context import current_execution_context
+from core.runtime import bootstrap
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.foundation.context import current_execution_context
 
 def main():
+    bootstrap.wire()
     print("Loading tools...")
     # ToolsLoader prints "Loaded X tools..." to stderr/stdout, so it will show up.
     loader = ToolsLoader()

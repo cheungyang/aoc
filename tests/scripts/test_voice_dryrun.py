@@ -210,7 +210,7 @@ class TestIsolation:
 
     def test_stores_point_at_the_throwaway_db(self, tmp_path):
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-        from core.runtime.job_manager import JobManager
+        from core.runtime.foundation.jobs import JobManager
         from core.storage.sessions import SessionStore
         from core.util.config import Config
         db = isolate_sessions(str(tmp_path / "replay"))

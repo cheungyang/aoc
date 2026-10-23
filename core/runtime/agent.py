@@ -9,28 +9,17 @@ from typing import Any, Dict, Optional, Tuple, List, Union
 from core.util import Config, format_error_message, save_agent_memory_log
 from core.prompts.system import stamp_user_message
 from core.runtime.base_agent import BaseAgent
-from core.runtime.job_manager import JobManager
-from core.runtime.execution_context import current_execution_context
-from core.runtime.logging_handler import LoggingHandler
+from core.runtime.foundation.jobs import JobManager
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.observability.transcript import LoggingHandler
 from core.runtime.command_handler import CommandHandler
-from core.runtime.context_pruner import ContextPruner
+from core.runtime.history.pruner import ContextPruner
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.dispatcher import dispatch_discord_output
-from core.runtime.execution_context import ExecutionContext
+from core.runtime.foundation.context import ExecutionContext
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.runtime.stream_handler import (
-    StreamHandler,
-    EVENT_TOKEN,
-    EVENT_FINAL_RESPONSE,
-    EVENT_ERROR,
-    EVENT_SUBAGENT_FINAL,
-    SUBAGENT_STREAM_TOKEN,
-    SUBAGENT_STREAM_FINAL,
-)
-
-# Where `execute` leaves the parsed AgentResponse in `session.turn_hints`, for
-# callers that need more than its text (the schedule runner's speech version).
-RESPONSE_HINT = "agent_response"
+from core.runtime.foundation import events
+from core.runtime.streaming import StreamHandler
 
 
 class Agent(BaseAgent):
@@ -144,7 +133,7 @@ class Agent(BaseAgent):
         if pending is not None and not pending.done():
             return
         try:
-            from core.runtime.turn_trace import detach_turn_trace
+            from core.runtime.observability.turn_trace import detach_turn_trace
             context = contextvars.copy_context()
             # Run as the session being pruned, wherever this is called from, and
             # outside the voice turn's trace: the summariser's model calls are not
@@ -185,7 +174,7 @@ class Agent(BaseAgent):
             # awaited from here. Same-session turns on two loops are rare enough
             # that proceeding beats failing the turn.
             return
-        from core.runtime.turn_trace import current_turn_trace
+        from core.runtime.observability.turn_trace import current_turn_trace
         started = time.monotonic()
         try:
             await asyncio.shield(pending)
@@ -204,8 +193,7 @@ class Agent(BaseAgent):
         if not job_id:
             return
 
-        job = JobManager()._jobs.get(job_id)
-        if job and job.status == "killed":
+        if JobManager().is_killed(job_id):
             return
 
         state = graph.get_state(config) if (graph is not None and hasattr(graph, "get_state")) else None
@@ -348,7 +336,7 @@ class Agent(BaseAgent):
             response = self._parse_final_response(reply_message.content, session)
             # For callers that need more than the text: a scheduled run reads
             # the speech version and its question from here (schedule_runner).
-            session.turn_hints[RESPONSE_HINT] = response
+            session.turn_hints[events.RESPONSE_HINT] = response
             await self._dispatch_discord_output(session, response)
             return response.text
         finally:
@@ -373,7 +361,7 @@ class Agent(BaseAgent):
         if self._is_empty_prompt(prompt):
             msg = await self._handle_empty_content(session.channel_obj, session.source)
             yield {
-                "type": EVENT_FINAL_RESPONSE,
+                "type": events.FINAL_RESPONSE,
                 "text": msg,
                 "poll_data": None,
                 "image_paths": [],
@@ -406,15 +394,15 @@ class Agent(BaseAgent):
                         is_corrupt_checkpoint_fn=self._is_corrupt_checkpoint_error,
                         agent_id=self.agent_id
                     ):
-                        if event.get("type") == EVENT_TOKEN:
+                        if event.get("type") == events.TOKEN:
                             accumulated_tokens.append(event.get("content", ""))
-                        elif event.get("type") == EVENT_SUBAGENT_FINAL:
+                        elif event.get("type") == events.SUBAGENT_FINAL:
                             subagent_final_response = event.get("response")
                         yield event
                     self._update_job_status(session, config, graph)
                 except Exception as e:
                     err_msg = await self._handle_execution_error(session, e)
-                    yield {"type": EVENT_ERROR, "content": err_msg}
+                    yield {"type": events.ERROR, "content": err_msg}
                     return
 
             response = subagent_final_response
@@ -428,7 +416,7 @@ class Agent(BaseAgent):
                 )
 
             yield {
-                "type": EVENT_FINAL_RESPONSE,
+                "type": events.FINAL_RESPONSE,
                 "text": response.text,
                 "poll_data": response.poll_data,
                 "image_paths": response.image_paths,

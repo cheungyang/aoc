@@ -88,7 +88,7 @@ class SessionStore(Store):
         return f"Appended token usage to {session_id}"
 
     def append_turn_trace(self, session_id: str, trace: Dict[str, Any], surface: Optional[str] = "voice") -> str:
-        """Stores one turn's latency trace (see core.runtime.turn_trace) beside its token rows.
+        """Stores one turn's latency trace (see core.runtime.observability.turn_trace) beside its token rows.
 
         The whole trace is JSON in `message`; time to first audio is also put in
         `execution_time` (seconds) so p50/p90 need no JSON parsing. A turn that

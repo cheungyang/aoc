@@ -35,7 +35,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -73,7 +73,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -105,7 +105,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.llm_retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      @patch('core.runtime.graph_builder.try_context')
      @patch('core.runtime.graph_builder.JobManager')
@@ -153,20 +153,18 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          mock_try_context.return_value = MagicMock(job_id="job1")
          mock_job_manager = MagicMock()
          mock_job_manager_class.return_value = mock_job_manager
-         mock_job = MagicMock()
-         mock_job.status = "running"
-         mock_job_manager._jobs = {"job1": mock_job}
+         mock_job_manager.honor_kill.return_value = False
          
          result = wrapped_tool._run()
          self.assertEqual(result, "tool_output")
+         mock_job_manager.honor_kill.assert_called_with("job1")
          mock_interrupt.assert_not_called()
          
-         # Test execution when job is killing
-         mock_job.status = "killing"
+         # Test execution when a kill was requested
+         mock_job_manager.honor_kill.return_value = True
          
          wrapped_tool._run()
          
-         mock_job_manager.update_job.assert_called_with("job1", "killed")
          mock_interrupt.assert_called_once_with("Job was killed")
  
      @patch('core.runtime.graph_builder.get_agent_static_prompt')

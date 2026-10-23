@@ -23,12 +23,26 @@ read on each render, so an edit takes effect without a restart.
 import dataclasses
 import re
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Optional, Set
+from typing import Any, Awaitable, Callable, ClassVar, Dict, Optional, Set
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 # The cheap, stateless worker agent that runs a WorkerPrompt.
 WORKER_LOW = "graph-worker-low"
+
+# What runs a WorkerPrompt: the runtime's `ask_worker` (core/runtime/delegation.py),
+# plugged in by core/runtime/bootstrap.py, since prompts never import the runtime.
+# Called as worker(text, channel=, caller=, timeout=, agent_id=); returns the
+# run's DelegationResult, or None when it didn't complete.
+Worker = Callable[..., Awaitable[Optional[Any]]]
+_worker: Optional[Worker] = None
+
+
+def set_worker(worker: Optional[Worker]) -> None:
+    """Plugs in what `WorkerPrompt.run` hands its task to (core/runtime/bootstrap.py)."""
+    global _worker
+    _worker = worker
+
 
 _NAME = r"[A-Za-z_][A-Za-z0-9_]*"
 _PLACEHOLDER = re.compile(r"\{\{\s*(" + _NAME + r")\s*\}\}")
@@ -127,8 +141,9 @@ class WorkerPrompt(Prompt):
     """A prompt that is a whole task, run as is by the stateless worker.
 
     `run()` renders it and hands it to `agent_id` (graph-worker-low) through
-    `ask_worker` (core/runtime/delegation.py): the path every delegation takes,
-    recording nothing to memory and cut off after `timeout` seconds. It returns
+    the worker core/runtime/bootstrap.py plugs in, `ask_worker`
+    (core/runtime/delegation.py): the path every delegation takes, recording
+    nothing to memory and cut off after `timeout` seconds. It returns
     `parse(result)`, or None when the run didn't complete (it failed or ran out
     of time), which ask_worker has logged.
 
@@ -148,8 +163,8 @@ class WorkerPrompt(Prompt):
     async def run(self, *, channel: str, timeout: Optional[float] = None) -> Any:
         """The worker's answer, asked from `channel`; None when the run didn't
         complete. `timeout` replaces the class's for a caller whose budget is configured."""
-        from core.runtime.delegation import ask_worker
-
-        result = await ask_worker(self.render(), channel=channel, caller=self.caller,
-                                  timeout=self.timeout if timeout is None else timeout, agent_id=self.agent_id)
+        if _worker is None:
+            raise RuntimeError("No worker is plugged in: call core.runtime.bootstrap.wire() at startup.")
+        result = await _worker(self.render(), channel=channel, caller=self.caller,
+                               timeout=self.timeout if timeout is None else timeout, agent_id=self.agent_id)
         return None if result is None else self.parse(result)

@@ -1,7 +1,7 @@
 # Main Graph
 
 `graphs/main` is the default LangGraph workflow for **every** agent in the
-system: [`GraphBuilder.build_graph`](../../core/agent/graph_builder.py#L129-L144)
+system: [`GraphBuilder.build_graph`](../../core/runtime/graph_builder.py#L194-L209)
 reads `config.get("graph", "main")` and no `agent.json` currently overrides it.
 The graph puts a deterministic router in front of the conversational ReAct
 agent, so a turn whose answer is already fixed by configuration — a channel in
@@ -16,7 +16,7 @@ handles: Discord messages, scheduled jobs, `agent_call` delegations, and
 > Because this graph is shared by all agents, the router must stay **inert**
 > for specialists. Any change here has to keep an agent that does not hold
 > `agent_call`, or does not host the channel, on the concierge path — see
-> [routing_enabled](router.py#L134-L152).
+> [routing_enabled](../../core/runtime/foundation/routing.py#L134-L152).
 
 ## Workflow
 
@@ -61,7 +61,7 @@ route and stashes it for the conditional edge. Synchronous and model-free.
 - **Inputs from state:** `messages` (only the last message's `content` is
   inspected, as `latest`).
 - **Other inputs:** the ambient
-  [`ExecutionContext`](../../core/agent/execution_context.py#L40-L57)
+  [`ExecutionContext`](../../core/runtime/foundation/context.py#L115-L158)
   via `try_context()` (for `agent_id` and `channel_name`), the agent config
   captured at build time, and a fresh
   [`AgentsLoader`](../../core/loaders/agents_loader.py#L77-L124)
@@ -87,7 +87,7 @@ the turn to the one agent allowed to answer in this channel. Async.
 - **Other inputs:** the ambient context for `channel_name` and the calling
   `agent_id` (falling back to `owner_agent_id`).
 - **Behavior:** awaits
-  [stream_delegate](../../core/agent/delegation.py#L114-L254),
+  [stream_delegate](../../core/runtime/delegation.py#L112-L265),
   the single shared delegation path (also used by the `agent_call` tool), so
   the streamed header, custom events, channel-permission check and `<caller>`
   prefix are identical on both paths.
@@ -96,7 +96,7 @@ the turn to the one agent allowed to answer in this channel. Async.
     misconfigured channel should say so in the channel rather than crash the
     graph ([graph.py:L109-L113](graph.py#L109-L113)).
   - On success the reply text is prefixed with
-    [agent_header](../../core/agent/delegation.py#L107-L111)
+    [agent_header](../../core/runtime/delegation.py#L105-L109)
     (`emoji Name: `). Attribution matters: this text becomes part of the
     orchestrator's own history, and an unattributed reply would later read as
     something the orchestrator itself said and reasoned its way to.
@@ -129,13 +129,13 @@ existing ReAct behaviour, for turns with a real decision in them. Async.
 
 ## Routing
 
-All routing logic lives in [router.py](router.py)
-and is deliberately pure: `decide()` is a function of
+All routing logic lives in [core/runtime/foundation/routing.py](../../core/runtime/foundation/routing.py),
+where voice and channel posts use it too, and is deliberately pure: `decide()` is a function of
 `(prompt, agent_id, channel_name, agent_config, loader)` and performs no work
 and no network I/O, so the routing table is something a test can pin.
 
-[decide](router.py#L155-L178) returns a
-frozen [RouteDecision](router.py#L42-L57)
+[decide](../../core/runtime/foundation/routing.py#L155-L178) returns a
+frozen [RouteDecision](../../core/runtime/foundation/routing.py#L42-L57)
 (`target`, `agent_id`, `prompt`, `reason`; `is_direct` is a convenience
 property). `reason` exists for logs and tests: when routing is wrong, the
 useful question is *which rule fired*.
@@ -151,7 +151,7 @@ useful question is *which rule fired*.
 
 ### `routing_enabled`
 
-[routing_enabled](router.py#L134-L152)
+[routing_enabled](../../core/runtime/foundation/routing.py#L134-L152)
 requires all three:
 
 1. a non-empty `agent_id` **and** non-empty `channel_name`;
@@ -172,15 +172,15 @@ has no other eligible agent in it anyway.
 
 The openers that mean "don't route this, answer it here" are read from the
 agent's config under
-[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](router.py#L39),
+[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](../../core/runtime/foundation/routing.py#L39),
 not hard-coded, because which phrases belong there depends on which tools that
 agent holds (`kill` earns its place only because `main` has `job_kill`) — and
 that is config, not logic.
-[concierge_prefixes](router.py#L94-L99)
+[concierge_prefixes](../../core/runtime/foundation/routing.py#L94-L99)
 accepts a list or a single string and drops blanks and non-strings.
 
 Two forms, matched by
-[match_concierge_prefix](router.py#L107-L131)
+[match_concierge_prefix](../../core/runtime/foundation/routing.py#L107-L131)
 (case-insensitive, in declaration order, first match wins):
 
 | Form | Example | Anchoring | Prompt handed to the concierge |
@@ -194,9 +194,9 @@ silently steals ordinary messages from the specialist, which is worse than
 missing a few.
 
 Prompt handling is multimodal-safe:
-[leading_text](router.py#L60-L74) reads only
+[leading_text](../../core/runtime/foundation/routing.py#L60-L74) reads only
 the leading text part of a content-part list, and
-[_replace_leading_text](router.py#L77-L91)
+[_replace_leading_text](../../core/runtime/foundation/routing.py#L77-L91)
 rewrites that part while preserving attachments.
 
 ### Resolving the target agent
@@ -212,7 +212,7 @@ choice is real and the concierge decides.
 
 > [!NOTE]
 > `direct_call` delegation is still permission-checked downstream:
-> [channel_permits](../../core/agent/delegation.py#L101-L104)
+> [channel_permits](../../core/runtime/delegation.py#L99-L102)
 > inside `stream_delegate` rejects a target whose `channels` grant does not
 > cover the channel, and the node reports that as the turn's reply.
 
@@ -222,7 +222,7 @@ Both helpers are picked up by name by
 [GraphsLoader](../../core/loaders/graphs_loader.py#L80-L97)
 and used by the [`graph_call`](../../tools/graph_call.py#L40-L42)
 tool when this graph is invoked as a subgraph. (The normal agent path in
-[`Agent._prepare_execution`](../../core/agent/agent.py#L113)
+[`Agent._prepare_execution`](../../core/runtime/agent.py#L56)
 builds `{"messages": [...]}` itself and does not call them.)
 
 ```python
@@ -255,9 +255,9 @@ return workflow.compile(checkpointer=checkpointer)                # outer graph 
 > The checkpointer belongs to this **outer** graph. The inner ReAct agent is
 > compiled without one — otherwise the two would write the same thread from two
 > levels. `GraphBuilder` passes a
-> [`SqliteCheckpointer`](../../core/agent/graph_builder.py#L125)
+> [`SqliteCheckpointer`](../../core/runtime/graph_builder.py#L190)
 > in, and the thread id comes from
-> [`ExecutionContext.get_session_thread_id()`](../../core/agent/execution_context.py#L218-L230).
+> [`ExecutionContext.get_session_thread_id()`](../../core/runtime/foundation/context.py#L367-L379).
 
 A consequence of this design is that the `direct_call` node has to write the
 human-readable session log itself (`_record_turn`), since the checkpoint is
@@ -269,7 +269,6 @@ populated by LLM callbacks that a routed turn never triggers.
 | File | Description |
 | --- | --- |
 | [graph.py](graph.py) | Builds and compiles the workflow: the `route`, `direct_call` and `concierge` nodes, `RouterState`, plus `prepare_input`/`format_output`. |
-| [router.py](router.py) | Pure routing logic: `decide()`, `routing_enabled()`, escape-prefix matching, and the `RouteDecision` dataclass. |
 | [graph.json](graph.json) | Graph metadata consumed by `GraphsLoader`: `graph_id`/`name` `main`, description, emoji 🧭, no extra tool grants, `dream` skill. |
 
 ### Tests
@@ -277,4 +276,4 @@ populated by LLM callbacks that a routed turn never triggers.
 | File | Description |
 | --- | --- |
 | [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, ambiguous channel → concierge, prefix stripping, turn recording, failed delegation, and that specialists never route. |
-| [test_router.py](../../tests/graphs/main/test_router.py) | Unit-tests `decide()`, `routing_enabled()` and prefix matching, and pins the live routing table against the real `agents/` configs. |
+| [test_routing.py](../../tests/core/runtime/foundation/test_routing.py) | Unit-tests `decide()`, `routing_enabled()` and prefix matching, and pins the live routing table against the real `agents/` configs. |

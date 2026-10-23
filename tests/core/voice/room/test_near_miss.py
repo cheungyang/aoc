@@ -70,7 +70,7 @@ class TestClosestTarget(unittest.IsolatedAsyncioTestCase):
 
     def _worker(self, text=None, fails=False):
         result = None if fails else SimpleNamespace(text=text, response=SimpleNamespace(text=text))
-        return patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=result))
+        return patch("core.prompts.base._worker", new=AsyncMock(return_value=result))
 
     async def test_returns_the_key_the_worker_names(self):
         with self._worker("<payload>fitness-coach</payload>") as ask:

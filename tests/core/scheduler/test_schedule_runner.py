@@ -394,7 +394,7 @@ class TestPromptDispatch(RunnerCase):
     def _execute_with(self, response):
         """The agent's run leaves `response` where Agent.execute does, and
         notes which agent the scheduled speech scope named."""
-        from core.runtime.agent import RESPONSE_HINT
+        from core.runtime.foundation.events import RESPONSE_HINT
         from core.prompts.voice import _scheduled_speech_agent
         seen = {}
 

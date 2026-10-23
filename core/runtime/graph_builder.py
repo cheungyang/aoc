@@ -19,8 +19,8 @@ from core.prompts.system import (
 from core.prompts.voice import get_voice_mode_prompt
 from core.util.message_util import cap_tool_output
 from langgraph.types import interrupt
-from core.runtime.job_manager import JobManager
-from core.runtime.execution_context import try_context
+from core.runtime.foundation.jobs import JobManager
+from core.runtime.foundation.context import try_context
 
 class GraphBuilder:
     def __init__(self):
@@ -122,11 +122,8 @@ class GraphBuilder:
             def _abort_if_killed():
                 active_sess = try_context()
                 job_id = active_sess.job_id if active_sess else None
-                if job_id:
-                    job = JobManager()._jobs.get(job_id)
-                    if job and job.status == "killing":
-                        JobManager().update_job(job_id, "killed")
-                        interrupt("Job was killed")
+                if job_id and JobManager().honor_kill(job_id):
+                    interrupt("Job was killed")
 
             # Every result passes through here before it becomes a ToolMessage,
             # so this is the one place a runaway output can be stopped for all
@@ -187,8 +184,8 @@ class GraphBuilder:
             )
         else:
             # 503s are retried (and resumed mid-stream) by the subclass; the SDK
-            # keeps the other retriable codes. See core/runtime/llm_retry.py.
-            from core.runtime.llm_retry import RetryingChatGoogleGenerativeAI
+            # keeps the other retriable codes. See core/runtime/model/retry.py.
+            from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
             llm = RetryingChatGoogleGenerativeAI(model=model_name, max_retries=Config().llm_max_retries)
         checkpointer = SqliteCheckpointer()
 

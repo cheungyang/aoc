@@ -259,7 +259,7 @@ class Config:
     # -------------------------------------------------------------------------
     # On-device LLM (OpenAI-compatible server)
     # -------------------------------------------------------------------------
-    # Read by graph_builder when an agent sets `"provider": "local"`. Only the
+    # Read by GraphBuilder when an agent sets `"provider": "local"`. Only the
     # endpoint and the timeout live here. Which model a tier maps to is in
     # core/util/models.py, and there is deliberately no API key setting: the
     # server does not authenticate, and offering the knob would invite pointing
@@ -635,7 +635,7 @@ class Config:
         """Attempts (including the first) per Gemini call. Passed as
         `ChatGoogleGenerativeAI.max_retries`, so it bounds both the SDK's own
         retries (408/429/500/502/504) and the 503 retry loop in
-        `core.runtime.llm_retry`. 6 is langchain-google-genai's default, ~31s
+        `core.runtime.model.retry`. 6 is langchain-google-genai's default, ~31s
         of backoff. `LLM_MAX_RETRIES`, min 1 (1 = no retries)."""
         env_val = os.getenv("LLM_MAX_RETRIES")
         if env_val:

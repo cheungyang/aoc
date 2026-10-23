@@ -26,7 +26,7 @@ class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
         response = AgentResponse.from_string(
             "<speech>Should the two notes be merged? <question>Should the two notes be merged?</question></speech>")
         ask = AsyncMock(return_value=SimpleNamespace(text="", response=response))
-        with patch("core.runtime.delegation.ask_worker", new=ask):
+        with patch("core.prompts.base._worker", new=ask):
             speech, question = await write_speech(self._row(), "William")
         self.assertEqual((speech, question), ("Should the two notes be merged?", "Should the two notes be merged?"))
         self.assertEqual(ask.await_args.kwargs["channel"], "pkm-wiki")
@@ -35,7 +35,7 @@ class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Author: William", ask.await_args.args[0])
 
     async def test_nothing_when_the_worker_fails(self):
-        with patch("core.runtime.delegation.ask_worker", new=AsyncMock(return_value=None)):
+        with patch("core.prompts.base._worker", new=AsyncMock(return_value=None)):
             self.assertEqual(await write_speech(self._row(), "William"), (None, None))
 
 

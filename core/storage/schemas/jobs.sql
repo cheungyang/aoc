@@ -1,5 +1,5 @@
 -- Agent jobs (core/storage/jobs.py): one row per job, from queued to done.
--- JobManager (core/runtime/job_manager.py) caches them and owns the statuses;
+-- JobManager (core/runtime/foundation/jobs.py) caches them and owns the statuses;
 -- the table doesn't check them.
 CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,

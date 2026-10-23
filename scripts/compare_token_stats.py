@@ -154,7 +154,7 @@ def get_voice_stats(db_path=None, since_ts=0):
 
     Token rows are tagged `surface='voice'` (including the agents a voice turn
     delegates to); latency comes from the `turn_trace` rows VoiceManager writes
-    beside them (see core/runtime/turn_trace.py).
+    beside them (see core/runtime/observability/turn_trace.py).
     """
     import json
 
@@ -225,7 +225,7 @@ def print_voice_stats(since_ts=0, db_path=None):
     if stats["stages"]:
         print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'n':>5}")
         print("-" * 60)
-        from core.runtime.turn_trace import STAGES
+        from core.runtime.observability.turn_trace import STAGES
         for stage in STAGES:
             values = stats["stages"].get(stage)
             if values:

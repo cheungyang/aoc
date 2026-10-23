@@ -22,14 +22,7 @@ from typing import Any, List, Optional, Union
 from langchain_core.callbacks import adispatch_custom_event
 
 from core.prompts.base import WORKER_LOW
-from core.runtime.stream_handler import (
-    EVENT_ERROR,
-    EVENT_FINAL_RESPONSE,
-    EVENT_TOKEN,
-    ROUTE_REACTION,
-    SUBAGENT_STREAM_FINAL,
-    SUBAGENT_STREAM_TOKEN,
-)
+from core.runtime.foundation import events
 
 Prompt = Union[str, list]
 
@@ -135,8 +128,8 @@ async def stream_delegate(
     `<system_memory_log>` from being saved (and is inherited by anything it
     delegates to); `model` overrides the callee's model tier for this call.
     """
-    from core.runtime.execution_context import try_context
-    from core.runtime.session_manager import SessionManager
+    from core.runtime.foundation.context import try_context
+    from core.runtime.foundation.sessions import SessionManager
     from core.loaders.agents_loader import AgentsLoader
     from core.channel.discord.loader import BotsLoader
 
@@ -187,7 +180,7 @@ async def stream_delegate(
     # The reaction is dispatched from here, not from the callers, so the concierge
     # path and the router path acknowledge a delegation identically.
     await safe_dispatch_custom_event(
-        ROUTE_REACTION,
+        events.ROUTE_REACTION,
         {"agent_id": agent_id, "emoji": config.get("emoji", "🤖")},
     )
 
@@ -203,13 +196,11 @@ async def stream_delegate(
         )
 
     if is_stateless:
-        from core.runtime.agent import RESPONSE_HINT
-
         res = await agent.execute(formatted_prompt, session=target_session)
         text = res if isinstance(res, str) else (res.text if hasattr(res, "text") else str(res or ""))
         # The parsed reply, as the streaming path returns it. It's left only by
         # a run that completed: a failed one returns its error as text.
-        response = target_session.turn_hints.get(RESPONSE_HINT)
+        response = target_session.turn_hints.get(events.RESPONSE_HINT)
         return DelegationResult(agent_id=agent_id, text=text, response=response, job_id=target_session.job_id)
 
     header = agent_header(config, agent_id)
@@ -221,7 +212,7 @@ async def stream_delegate(
         nonlocal header_emitted
         if not header_emitted:
             await safe_dispatch_custom_event(
-                SUBAGENT_STREAM_TOKEN,
+                events.SUBAGENT_STREAM_TOKEN,
                 {"content": header, "agent_id": agent_id, "is_header": True},
             )
             header_emitted = True
@@ -229,20 +220,20 @@ async def stream_delegate(
     async for event in agent.execute_stream(formatted_prompt, session=target_session):
         etype = event.get("type")
 
-        if etype == EVENT_TOKEN:
+        if etype == events.TOKEN:
             delta = event.get("content", "")
             if delta:
                 await _emit_header()
                 accumulated.append(delta)
                 await safe_dispatch_custom_event(
-                    SUBAGENT_STREAM_TOKEN,
+                    events.SUBAGENT_STREAM_TOKEN,
                     {"content": delta, "agent_id": agent_id},
                 )
 
-        elif etype == EVENT_FINAL_RESPONSE:
+        elif etype == events.FINAL_RESPONSE:
             subagent_response = event.get("response")
             await safe_dispatch_custom_event(
-                SUBAGENT_STREAM_FINAL,
+                events.SUBAGENT_STREAM_FINAL,
                 {
                     "agent_id": agent_id,
                     "response": subagent_response,
@@ -250,12 +241,12 @@ async def stream_delegate(
                 },
             )
 
-        elif etype == EVENT_ERROR:
+        elif etype == events.ERROR:
             err_msg = event.get("content", "Error in subagent execution")
             await _emit_header()
             # `is_error`: the channel shows the error; voice never reads it out.
             await safe_dispatch_custom_event(
-                SUBAGENT_STREAM_TOKEN,
+                events.SUBAGENT_STREAM_TOKEN,
                 {"content": f"\n[Error: {err_msg}]", "agent_id": agent_id, "is_error": True},
             )
 

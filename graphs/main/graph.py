@@ -8,7 +8,7 @@ routing question has more than one possible answer.
 
 Two things to know before editing:
 
-1. This graph is the default for *every* agent (`graph_builder` falls back to
+1. This graph is the default for *every* agent (`GraphBuilder` falls back to
    "main" and no agent.json overrides it). The router is therefore inert unless
    the executing agent both holds `agent_call` and hosts the channel -- see
    `router.routing_enabled`. Any change here must keep the specialist agents on
@@ -24,7 +24,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from core.runtime.delegation import agent_header, prompt_to_text, stream_delegate
-from graphs.main.router import CONCIERGE, DIRECT_CALL, decide
+from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, decide
 
 
 def _record_turn(session, user_prompt, reply_text: str):
@@ -57,7 +57,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
     def _decide(state: MessagesState) -> Dict[str, Any]:
         """Resolves the route and stashes it for the conditional edge."""
-        from core.runtime.execution_context import try_context
+        from core.runtime.foundation.context import try_context
         from core.loaders.agents_loader import AgentsLoader
 
         ctx = try_context()
@@ -92,7 +92,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
         """Hands the turn to the one agent allowed to answer here."""
-        from core.runtime.execution_context import try_context
+        from core.runtime.foundation.context import try_context
 
         ctx = try_context()
         messages = state.get("messages") or []

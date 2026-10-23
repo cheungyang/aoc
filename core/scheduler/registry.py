@@ -16,7 +16,7 @@ Accepted entry shapes:
 
 Prompt schedules may also set `thinking_level` (minimal | low | medium | high)
 for that run's model calls; without it the agent's scheduled level applies
-(see core.runtime.thinking).
+(see core.runtime.model.thinking).
 
 Any schedule may set `priority` (IGNORE | LOW | DEFAULT | HIGHEST, default
 DEFAULT) and `label` ("your morning check-in"): how its posts reach you in

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional, Any, Union
-from core.runtime.execution_context import ExecutionContext
+from core.runtime.foundation import events
+from core.runtime.foundation.context import ExecutionContext
 
 class BaseAgent(ABC):
     def __init__(self, agent_id: str, config: dict):
@@ -29,8 +30,8 @@ class BaseAgent(ABC):
     ):
         """Default streaming implementation that falls back to execute."""
         result = await self.execute(prompt, session=session, callbacks=callbacks, role=role)
-        yield {"type": "token", "content": result}
-        yield {"type": "final_response", "text": result}
+        yield {"type": events.TOKEN, "content": result}
+        yield {"type": events.FINAL_RESPONSE, "text": result}
 
     def get_config(self, key, default_value=None):
         return self.config.get(key, default_value)

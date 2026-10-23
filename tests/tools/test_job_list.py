@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.runtime.job_manager import Job
+from core.runtime.foundation.jobs import Job
 from tools import job_list as job_list_mod
 from tools.job_list import job_list
 
@@ -81,8 +81,8 @@ class TestJobListTool(unittest.TestCase):
 
     def test_uses_real_job_manager_default_filter(self):
         """Integration: timeout/completed jobs never appear (conftest isolates the DB)."""
-        from core.runtime.job_manager import JobManager
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.jobs import JobManager
+        from core.runtime.foundation.sessions import SessionManager
         jm = JobManager()
         for jid, status in [("live", "running"), ("dead", "timeout"), ("done", "completed")]:
             jm.add_job(SessionManager.get_session(agent_id="a", source="discord", channel="general", job_id=jid))

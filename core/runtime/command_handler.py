@@ -2,8 +2,8 @@ import os
 import sys
 import asyncio
 from typing import Union
-from core.runtime.execution_context import ExecutionContext
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.context import ExecutionContext
+from core.runtime.foundation.sessions import SessionManager
 from core.util import safe_chunks
 
 class CommandHandler:
@@ -69,7 +69,7 @@ class CommandHandler:
         session_id = session.session_id
 
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-        from core.runtime.context_pruner import ContextPruner, estimate_total_tokens
+        from core.runtime.history.pruner import ContextPruner, estimate_total_tokens
 
         checkpointer = SqliteCheckpointer()
         tuple_res = checkpointer.get_tuple({"configurable": {"thread_id": session_id}})

@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.runtime.foundation.routing import decide
+
 # The lobby: Concierge's own channel, unless voice_config sets `lobby_channel`.
 DEFAULT_LOBBY_CHANNEL = "general"
 # What you say to get back to the lobby, besides the channel's own name.
@@ -55,11 +57,10 @@ def _list(value: Any) -> List[Any]:
 def answering_agent(host_id: str, channel: str, loader: Any) -> str:
     """Who answers an untagged message in `channel` hosted by `host_id`.
 
-    graphs/main's own decision, so voice can't drift from typed routing: the
-    sole eligible agent, else the host itself (its concierge).
+    The routing policy typed messages follow (core/runtime/foundation/routing.py), so
+    voice can't drift from them: the sole eligible agent, else the host itself
+    (its concierge).
     """
-    from graphs.main.router import decide
-
     decision = decide(
         prompt="",
         agent_id=host_id,
@@ -135,7 +136,7 @@ class FocusDirectory:
 
     def for_channel(self, channel: Any) -> Optional[VoiceFocus]:
         """The focus for a text channel (object or name); a thread counts as its parent."""
-        from core.runtime.execution_context import _is_thread
+        from core.runtime.foundation.context import _is_thread
 
         name = getattr(channel, "name", channel)
         if _is_thread(channel):

@@ -9,6 +9,7 @@ from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.scheduler.schedule_runner import ScheduleRunner
 from core.channel.discord.ownership import DEV, PROD, Ownership
+from core.runtime import bootstrap
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
 faulthandler.enable()
@@ -94,6 +95,7 @@ async def run_bots(dev: bool = False, agents: list = None):
 
 if __name__ == "__main__":
     cli_args = parse_args()
+    bootstrap.wire()
 
     try:
         asyncio.run(run_bots(dev=cli_args.dev, agents=_split_agents(cli_args.agents)))

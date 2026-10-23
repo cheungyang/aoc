@@ -25,8 +25,8 @@ from typing import Any, List, Optional, Sequence
 import discord
 
 from core.loaders.agents_loader import AgentsLoader
-from core.runtime.session_manager import SessionManager
-from core.runtime.turn_trace import start_turn_trace
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.observability.turn_trace import start_turn_trace
 from . import settings
 from .engines.stt import SpeechRecognizer, agent_vocabulary
 from .hooks import VoiceHook
