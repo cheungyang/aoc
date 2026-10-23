@@ -52,7 +52,7 @@ VOICE_LAYERS = (
     ("core.voice.foundation",),
     ("core.voice.engines",),
     VOICE_PARTS,
-    ("core.voice.voice_manager", "core.voice.hooks"),
+    ("core.voice.voice_manager", "core.voice.turn", "core.voice.hooks"),
     ("core.voice.briefing",),
 )
 # The adapters that may import voice.

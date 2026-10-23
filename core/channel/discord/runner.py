@@ -112,7 +112,7 @@ class BotRunner:
         async def cmd_inbox(ctx, *, args: str = ""):
             # What voice briefings will tell you about (core/voice/briefing). Only the
             # voice host's bot answers, so one message gets one reply.
-            if not self._is_voice_host():
+            if not self.voice_manager.hosts_voice():
                 return
             from core.voice.briefing.commands import handle_inbox_command
             for chunk in safe_chunks(handle_inbox_command(args, inbox_channel(ctx.channel))):
@@ -123,21 +123,21 @@ class BotRunner:
         @self.bot.command(name="enroll")
         async def cmd_enroll(ctx, *, args: str = ""):
             # Your voiceprint: typed while you're in the voice channel.
-            if not self._is_voice_host():
+            if not self.voice_manager.hosts_voice():
                 return
             for chunk in safe_chunks(await self.voice_manager.enroll(args, ctx.channel)):
                 await ctx.send(chunk)
 
         @self.bot.command(name="voiceprint")
         async def cmd_voiceprint(ctx, *, args: str = ""):
-            if not self._is_voice_host():
+            if not self.voice_manager.hosts_voice():
                 return
             for chunk in safe_chunks(self.voice_manager.voiceprint(args)):
                 await ctx.send(chunk)
 
         @self.bot.command(name="gate")
         async def cmd_gate(ctx, *, args: str = ""):
-            if not self._is_voice_host():
+            if not self.voice_manager.hosts_voice():
                 return
             await self.voice_manager.gate(args, ctx.channel)
 
@@ -151,27 +151,6 @@ class BotRunner:
         """Alias for stop()."""
         await self.stop()
 
-    def get_hosted_voice_channels(self, agent) -> list:
-        """Resolves target voice channels for an agent from explicit voice_config or channel_hosts convention."""
-        if not agent:
-            return []
-        voice_config = agent.config.get("voice_config", {})
-        if "voice_channels" in voice_config:
-            return voice_config["voice_channels"]
-        if "voice_channel" in voice_config:
-            return [voice_config["voice_channel"]]
-            
-        channel_hosts = agent.config.get("channel_hosts", [])
-        return [f"{ch}-voice" for ch in channel_hosts]
-
-    def _is_voice_host(self) -> bool:
-        """Whether this bot speaks in the voice room (Concierge's). It keeps the
-        channel inbox's ✅ signal, answers `!inbox`, and keeps the voiceprint
-        gate (`!enroll`, `!voiceprint`, `!gate`)."""
-        agent = AgentsLoader().get_agent(self.agent_id)
-        voice = agent.config.get("voice_config") if agent else None
-        return isinstance(voice, dict) and bool(voice.get("enabled"))
-
     async def on_raw_reaction_add(self, payload):
         """✅ or ❌ on a `!gate review` post marks that utterance as yours or
         not (core/voice/listening/gate_commands.py). ✅ on any other post
@@ -182,7 +161,7 @@ class BotRunner:
         member = getattr(payload, "member", None)
         if member is None or getattr(member, "bot", False):
             return  # a DM, or a bot's own reaction
-        if not Ownership().is_mine(self.agent_id) or not self._is_voice_host():
+        if not Ownership().is_mine(self.agent_id) or not self.voice_manager.hosts_voice():
             return
         if self.voice_manager.mark_review(payload.message_id, emoji):
             return
@@ -195,33 +174,13 @@ class BotRunner:
                   message_time=discord.utils.snowflake_time(payload.message_id).timestamp())
 
     async def on_voice_state_update(self, member, before, after):
-        """Follows you into the voice channel and greets you there: each time
-        you join is a new voice session, with the concierge in the lobby."""
+        """Follows you into the voice channel and greets you there
+        (VoiceManager.member_moved), if this instance owns the agent."""
         if member.bot:
             return
         if not Ownership().is_mine(self.agent_id):
             return
-        loader = AgentsLoader()
-        agent = loader.get_agent(self.agent_id)
-        if not agent:
-            return
-        voice_config = agent.config.get("voice_config", {})
-        if not voice_config.get("enabled"):
-            return
-            
-        vc_targets = self.get_hosted_voice_channels(agent)
-        
-        if after.channel and any(
-            after.channel.name == vc or normalize_channel_name(after.channel.name) == normalize_channel_name(vc)
-            for vc in vc_targets
-        ):
-            if self.voice_manager.room() != after.channel:
-                print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
-                if not await self.voice_manager.join(after.channel.name):
-                    return
-            # You arrived (not a mute or deafen while already in the channel).
-            if before.channel != after.channel:
-                await self.voice_manager.welcome()
+        await self.voice_manager.member_moved(member, before, after)
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
@@ -241,40 +200,10 @@ class BotRunner:
 
     async def _maybe_auto_join(self):
         """Joins the configured voice channel if voice auto_join is on and this
-        instance owns the agent."""
+        instance owns the agent (VoiceManager.auto_join)."""
         if not Ownership().is_mine(self.agent_id):
             return
-        loader = AgentsLoader()
-        agent = loader.get_agent(self.agent_id)
-        if agent:
-            voice_config = agent.config.get("voice_config", {})
-            if voice_config.get("enabled") and voice_config.get("auto_join"):
-                vc_targets = self.get_hosted_voice_channels(agent)
-                async def _auto_join():
-                    await self.bot.wait_until_ready()
-                    await asyncio.sleep(1.5) # Allow guild cache to populate
-                    targets = vc_targets if vc_targets else ["general-voice"]
-                    
-                    selected_target = None
-                    for t in targets:
-                        norm_t = normalize_channel_name(str(t))
-                        for guild in self.bot.guilds:
-                            for vc in guild.voice_channels:
-                                if str(t).isdigit() and vc.id == int(t):
-                                    selected_target = t
-                                    break
-                                if vc.name == t or normalize_channel_name(vc.name) == norm_t:
-                                    selected_target = t
-                                    break
-                            if selected_target:
-                                break
-                        if selected_target:
-                            break
-
-                    target_to_join = selected_target or targets[0]
-                    print(f"Agent {self.agent_id} auto-joining voice channel '{target_to_join}'...")
-                    await self.voice_manager.join(target_to_join)
-                asyncio.create_task(_auto_join())
+        self.voice_manager.auto_join()
 
     def _on_ownership_change(self, agent_id):
         """Hands voice over when this agent moves between prod and dev."""

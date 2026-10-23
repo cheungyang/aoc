@@ -7,14 +7,16 @@ Every finished utterance with enough speech is a reading; after the last one
 the speaker gate averages them into your voiceprint (speaker_gate.py).
 
 While it runs, what you say is a reading, not a request: VoiceManager hands
-each utterance here instead of to an agent. Saying "cancel" or typing
-`!enroll cancel` stops it; so do leaving the voice channel, and
-ENROLL_TIMEOUT_S without a word.
+each turn's utterances to `EnrollmentFlow` instead of to an agent. Saying
+"cancel" or typing `!enroll cancel` stops it; so do leaving the voice
+channel, and ENROLL_TIMEOUT_S without a word.
 """
 import time
-from typing import Any, Callable, List, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
+from core.voice.foundation import settings
 from core.voice.foundation.utterance import Utterance
+from core.voice.listening.turn_taking import bare_stop
 
 # Phonetically varied, and like what you say to the agents anyway.
 SENTENCES = (
@@ -99,3 +101,103 @@ def saved_message(voiceprint: Any, mode: str) -> str:
     else:
         text += f" The gate is in `{mode}` mode."
     return text
+
+
+class EnrollmentFlow:
+    """`!enroll` in the voice room: starts and stops an Enrollment, takes what
+    you say as readings while one runs, and saves your voiceprint.
+
+    VoiceManager builds it with what it needs from the room: the speaker gate,
+    which holds the enrollment and makes the voiceprint; how to transcribe and
+    how to speak in the bot's voice; how to run something beside the turn; and
+    how to quiet the room when an enrollment starts.
+    """
+
+    def __init__(self, gate: Any, *, transcribe: Callable, say: Callable, spawn: Callable,
+                 quiet: Callable[[], None], log: Callable[[str], None]):
+        self.gate = gate
+        self._transcribe = transcribe  # utterance -> its Transcript
+        self._say = say                # text -> said in the bot's own voice
+        self._spawn = spawn            # runs a coroutine beside the turn
+        self._quiet = quiet            # stops any reply, and forgets what's unanswered
+        self._log = log
+
+    def command(self, args: str = "", channel: Any = None, *, in_room: bool) -> str:
+        """`!enroll`, typed in `channel`: starts taking your voiceprint; with
+        "cancel", stops. `in_room`: you and the bot are in the voice channel.
+        Returns what to post back."""
+        gate, action = self.gate, (args or "").strip().lower()
+        if action in ("cancel", "stop"):
+            if gate.enrollment is None:
+                return "No enrollment is in progress."
+            gate.enrollment = None
+            return "Enrollment cancelled."
+        if action:
+            return "Type `!enroll` to take your voiceprint, or `!enroll cancel` to stop."
+        if not in_room:
+            return "Join the voice channel first, then type `!enroll` again."
+        if gate.model is None:
+            return (f"The speaker model `{settings.SPEAKER_MODEL_FILE}` isn't installed: run "
+                    f"`scripts/provision_assets.py --stage runtime --only speaker`.")
+        enrollment = Enrollment(channel)
+        gate.enrollment = enrollment
+        self._quiet()
+        self._log("🎙️ Voiceprint enrollment started.")
+        self._spawn(self._say(enrollment.opening_line()))
+        return enrollment.instructions()
+
+    def reset(self) -> None:
+        """No enrollment carries over: you left, or a new voice session began."""
+        self.gate.enrollment = None
+
+    def active(self) -> Optional[Enrollment]:
+        """The enrollment in progress, unless it has timed out."""
+        enrollment = self.gate.enrollment
+        if enrollment is not None and enrollment.expired():
+            self._log("🎙️ Voiceprint enrollment timed out.")
+            self.gate.enrollment = enrollment = None
+        return enrollment
+
+    async def take(self, enrollment: Enrollment, utterances: List[Utterance]) -> None:
+        """What you said during `!enroll`: readings for your voiceprint, not requests.
+        They're taken before anything is awaited, so a reading that interrupts
+        the bot's "Got it" still counts."""
+        if not any([enrollment.take(u) for u in utterances]):
+            # Too short for a reading: "cancel", "wait", a word or two, or noise.
+            text = (await self._transcribe(utterances[-1])).text.strip()
+            stop = bare_stop(text)
+            if stop == "cancel":
+                self.gate.enrollment = None
+                self._log("🎙️ Voiceprint enrollment cancelled.")
+                await self._post(enrollment.channel, "Enrollment cancelled.")
+                await self._say("Okay, enrollment cancelled.")
+            elif text and stop is None:
+                await self._say(enrollment.retry_line())
+            return
+        if not enrollment.done:
+            await self._say(enrollment.progress_line())
+            return
+        self.gate.enrollment = None
+        # Not part of the turn, which the next thing you say cancels.
+        self._spawn(self._save(enrollment))
+
+    async def _save(self, enrollment: Enrollment) -> None:
+        try:
+            voiceprint = await self.gate.enroll(enrollment.readings)
+        except Exception as e:
+            self._log(f"🎙️ Could not make the voiceprint: {type(e).__name__}: {e}")
+            await self._post(enrollment.channel, f"⚠️ I couldn't make your voiceprint ({e}). "
+                                                 f"Type `!enroll` to try again.")
+            await self._say("Sorry, I couldn't make your voiceprint. Type enroll to try again.")
+            return
+        self._log(f"🎙️ Voiceprint saved: {voiceprint.readings} readings, consistency {voiceprint.consistency:.2f}.")
+        await self._post(enrollment.channel, saved_message(voiceprint, self.gate.mode))
+        await self._say("Done. Your voiceprint is saved.")
+
+    async def _post(self, channel: Any, text: str) -> None:
+        if channel is None:
+            return
+        try:
+            await channel.send(text)
+        except Exception as e:
+            self._log(f"Could not post in #{getattr(channel, 'name', channel)}: {e}")

@@ -29,157 +29,53 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         names = {c.kwargs.get("name") for c in mock_bot.command.call_args_list}
         self.assertEqual(names, {"join", "leave", "inbox", "enroll", "voiceprint", "gate"})
 
-    def _voice_runner(self, mock_loader_class, joined=True):
-        """A runner whose agent hosts the one voice channel, aoc-voice."""
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "channel_hosts": ["general", "day-planning"],
-            "voice_config": {"enabled": True, "voice_channel": "aoc-voice"},
-        }
-        mock_loader = MagicMock()
-        mock_loader.get_agent.return_value = mock_agent
-        mock_loader_class.return_value = mock_loader
-
+    def _voice_runner(self):
+        """A runner whose voice room is a stand-in: what the runner forwards to it."""
         runner = BotRunner("test_token", "main")
         runner.voice_manager = MagicMock()
-        runner.voice_manager.room.return_value = None
-        runner.voice_manager.join = AsyncMock(return_value=joined)
-        runner.voice_manager.welcome = AsyncMock()
-        room = MagicMock()
-        room.name = "aoc-voice"
-        return runner, room
+        runner.voice_manager.member_moved = AsyncMock()
+        return runner
 
     @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_voice_state_update_auto_follows_user(self, mock_loader_class, mock_bot_class):
-        """You join the voice channel: the bot follows you there and greets you
-        (a new voice session, in the lobby)."""
+    async def test_on_voice_state_update_forwards_your_moves_to_the_voice_room(self, mock_bot_class):
+        """Following you into the voice channel is the voice room's
+        (VoiceManager.member_moved); the runner only forwards."""
         mock_bot_class.return_value = MagicMock()
-        runner, room = self._voice_runner(mock_loader_class)
+        runner = self._voice_runner()
 
-        member = MagicMock(bot=False, display_name="Sam")
-        await runner.on_voice_state_update(member, MagicMock(channel=None), MagicMock(channel=room))
+        member, before, after = MagicMock(bot=False), MagicMock(), MagicMock()
+        await runner.on_voice_state_update(member, before, after)
 
-        runner.voice_manager.join.assert_awaited_once_with("aoc-voice")
-        runner.voice_manager.welcome.assert_awaited_once()
+        runner.voice_manager.member_moved.assert_awaited_once_with(member, before, after)
 
     @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_voice_state_update_mute_is_not_an_arrival(self, mock_loader_class, mock_bot_class):
-        """Muting or deafening in the channel you're in keeps the conversation going."""
+    async def test_on_voice_state_update_ignores_bots_and_agents_owned_elsewhere(self, mock_bot_class):
         mock_bot_class.return_value = MagicMock()
-        runner, room = self._voice_runner(mock_loader_class)
-        runner.voice_manager.room.return_value = room
+        runner = self._voice_runner()
 
-        member = MagicMock(bot=False, display_name="Sam")
-        await runner.on_voice_state_update(member, MagicMock(channel=room), MagicMock(channel=room))
+        await runner.on_voice_state_update(MagicMock(bot=True), MagicMock(), MagicMock())
+        with patch('core.channel.discord.runner.Ownership') as ownership:
+            ownership.return_value.is_mine.return_value = False
+            await runner.on_voice_state_update(MagicMock(bot=False), MagicMock(), MagicMock())
 
-        runner.voice_manager.join.assert_not_awaited()
-        runner.voice_manager.welcome.assert_not_awaited()
-
-    @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_voice_state_update_no_greeting_if_join_fails(self, mock_loader_class, mock_bot_class):
-        mock_bot_class.return_value = MagicMock()
-        runner, room = self._voice_runner(mock_loader_class, joined=False)
-
-        member = MagicMock(bot=False, display_name="Sam")
-        await runner.on_voice_state_update(member, MagicMock(channel=None), MagicMock(channel=room))
-
-        runner.voice_manager.welcome.assert_not_awaited()
+        runner.voice_manager.member_moved.assert_not_awaited()
 
     @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_voice_state_update_ignores_other_voice_channels(self, mock_loader_class, mock_bot_class):
-        mock_bot_class.return_value = MagicMock()
-        runner, _ = self._voice_runner(mock_loader_class)
-        other = MagicMock()
-        other.name = "day-planning-voice"
-
-        member = MagicMock(bot=False, display_name="Sam")
-        await runner.on_voice_state_update(member, MagicMock(channel=None), MagicMock(channel=other))
-
-        runner.voice_manager.join.assert_not_awaited()
-        runner.voice_manager.welcome.assert_not_awaited()
-
-    @patch('core.channel.discord.runner.commands.Bot')
-    def test_get_hosted_voice_channels_convention(self, mock_bot_class):
-        mock_bot = MagicMock()
-        mock_bot_class.return_value = mock_bot
-        runner = BotRunner("test_token", "main")
-        
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "channel_hosts": ["general", "day-planning", "agent-management"],
-            "voice_config": {"enabled": True}
-        }
-        channels = runner.get_hosted_voice_channels(mock_agent)
-        self.assertEqual(channels, ["general-voice", "day-planning-voice", "agent-management-voice"])
-
-    @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_ready(self, mock_loader_class, mock_bot_class):
+    async def test_on_ready_auto_joins_through_the_voice_room(self, mock_bot_class):
+        """Whether and where to auto-join is the voice room's (VoiceManager.auto_join)."""
         mock_bot = MagicMock()
         mock_bot.user = "TestBot#1234"
         mock_bot.change_presence = AsyncMock()
         mock_bot.wait_until_ready = AsyncMock()
         mock_bot.guilds = []
         mock_bot_class.return_value = mock_bot
-        
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "channel_hosts": ["general"],
-            "voice_config": {"enabled": True, "auto_join": True}
-        }
-        mock_loader = MagicMock()
-        mock_loader.get_agent.return_value = mock_agent
-        mock_loader_class.return_value = mock_loader
 
         runner = BotRunner("test_token", "main")
-        runner.voice_manager.join = AsyncMock(return_value=True)
-        
-        with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
-            await runner.on_ready()
-            mock_create_task.assert_called_once()
-            await mock_create_task.call_args[0][0]
-        
-        # Verify change_presence was called
+        runner.voice_manager = MagicMock()
+        await runner.on_ready()
+
         mock_bot.change_presence.assert_called_once()
-        runner.voice_manager.join.assert_called_with("general-voice")
-
-    @patch('core.channel.discord.runner.commands.Bot')
-    @patch('core.channel.discord.runner.AgentsLoader')
-    async def test_on_ready_picks_existing_guild_channel(self, mock_loader_class, mock_bot_class):
-        mock_bot = MagicMock()
-        mock_bot.user = "TestBot#1234"
-        mock_bot.change_presence = AsyncMock()
-        mock_bot.wait_until_ready = AsyncMock()
-        
-        mock_vc = MagicMock()
-        mock_vc.name = "day-planning-voice"
-        mock_guild = MagicMock()
-        mock_guild.voice_channels = [mock_vc]
-        mock_bot.guilds = [mock_guild]
-        mock_bot_class.return_value = mock_bot
-        
-        mock_agent = MagicMock()
-        mock_agent.config = {
-            "channel_hosts": ["general", "day-planning"],
-            "voice_config": {"enabled": True, "auto_join": True}
-        }
-        mock_loader = MagicMock()
-        mock_loader.get_agent.return_value = mock_agent
-        mock_loader_class.return_value = mock_loader
-
-        runner = BotRunner("test_token", "main")
-        runner.voice_manager.join = AsyncMock(return_value=True)
-        
-        with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
-            await runner.on_ready()
-            mock_create_task.assert_called_once()
-            await mock_create_task.call_args[0][0]
-        
-        runner.voice_manager.join.assert_called_with("day-planning-voice")
+        runner.voice_manager.auto_join.assert_called_once_with()
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')
@@ -695,6 +591,8 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
         mock_bot.user.bot = True
         mock_bot_class.return_value = mock_bot
         runner = BotRunner("test_token", "main")
+        # Whether this bot hosts the voice room (VoiceManager.hosts_voice).
+        runner.voice_manager.hosts_voice = MagicMock(return_value=voice)
 
         async def fake_stream(*args, **kwargs):
             yield {"type": "final_response", "text": reply, "response": None}

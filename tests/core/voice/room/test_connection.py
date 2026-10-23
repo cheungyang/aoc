@@ -1,19 +1,13 @@
-"""VoiceConnection: joining and leaving the voice room."""
+"""The voice connection: which voice channel the bot uses, and joining and leaving it."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
 
-from core.voice.room.connection import VoiceConnection, normalize_channel_name
-
-
-@pytest.fixture
-def mock_bot_runner():
-    runner = MagicMock()
-    runner.agent_id = "main"
-    runner.bot = MagicMock()
-    runner.bot.guilds = []
-    return runner
+from core.voice.room.connection import (
+    AUTO_JOIN_FALLBACK, VoiceConnection, configured_room, hosted_voice_channels, normalize_channel_name,
+    pick_voice_channel,
+)
 
 
 def _connection(runner, on_joined=None):
@@ -171,3 +165,36 @@ async def test_a_failed_join_is_not_reported(mock_bot_runner):
     assert await connection.join("general-voice") is False
     assert await connection.join("non_existent_vc") is False
     assert joined == []
+
+
+# --- which voice channel ------------------------------------------------------------------
+
+def test_hosted_voice_channels_follow_the_channel_hosts_convention():
+    config = {"channel_hosts": ["general", "day-planning", "agent-management"], "voice_config": {"enabled": True}}
+    assert hosted_voice_channels(config) == ["general-voice", "day-planning-voice", "agent-management-voice"]
+
+
+def test_hosted_voice_channels_prefer_the_configured_ones():
+    hosts = {"channel_hosts": ["general"]}
+    assert hosted_voice_channels({**hosts, "voice_config": {"voice_channels": ["a", "b"], "voice_channel": "c"}}) == ["a", "b"]
+    assert hosted_voice_channels({**hosts, "voice_config": {"voice_channel": "c"}}) == ["c"]
+    assert hosted_voice_channels(None) == []
+
+
+def test_join_without_a_name_goes_to_the_configured_room():
+    """`voice_channel` wins over `voice_channels`: the reverse of the hosted list."""
+    assert configured_room({"voice_channel": " aoc-voice ", "voice_channels": ["other"]}) == "aoc-voice"
+    assert configured_room({"voice_channels": ["first", "second"]}) == "first"
+    assert configured_room({"voice_channel": "  "}) is None
+    assert configured_room({}) is None
+
+
+def test_pick_voice_channel_takes_the_first_target_the_guild_has():
+    voice = MagicMock(id=123)
+    voice.name = "day-planning-voice"
+    guilds = [MagicMock(voice_channels=[voice])]
+    assert pick_voice_channel(guilds, ["general-voice", "day-planning-voice"]) == "day-planning-voice"
+    assert pick_voice_channel(guilds, ["general-voice", "123"]) == "123"
+    assert pick_voice_channel(guilds, ["Day Planning"]) == "Day Planning"  # normalized
+    assert pick_voice_channel([], ["general-voice", "other"]) == "general-voice"
+    assert AUTO_JOIN_FALLBACK == "general-voice"

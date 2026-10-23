@@ -2,12 +2,13 @@
 
   the room, at the root:
     voice_manager.py   one bot's voice: wires listening to speaking, and runs turns
+    turn.py            one turn: everything still unanswered, answered as one request
     hooks.py           how features built on the room join in, without the voice core knowing them
   foundation/          what every part shares: the settings, and the utterance
   engines/             speech-to-text and text-to-speech
-  listening/           the user's side: utterances, turn-taking, the voiceprint gate
+  listening/           the user's side: utterances, turn-taking, the voiceprint gate and `!enroll`
   speech/              what the agent says on a voice turn, and how it is played
-  room/                joining the room, and the focus: which agent the next turn is for
+  room/                which voice channel to join, and the focus: which agent the next turn is for
   briefing/            a feature built on the room: voice briefings of the channel inbox
 
 Layers, lowest first. A module imports from its own layer or the ones below
@@ -17,7 +18,7 @@ it, never above (checked by tests/test_layers.py):
   engines      engines/
   parts        listening/, speech/, room/: never import each other; they meet
                in VoiceManager, through the Protocols each one declares
-  the room     voice_manager, hooks
+  the room     voice_manager, turn, hooks
   features     briefing/: joins as a hook; the voice core never imports it
 
 Rules:
