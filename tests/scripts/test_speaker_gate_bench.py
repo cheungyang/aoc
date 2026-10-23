@@ -7,7 +7,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 
 import speaker_gate_bench as bench  # noqa: E402
-from core.voice.listening.utterance import BYTES_PER_MS  # noqa: E402
+from core.voice.foundation.utterance import BYTES_PER_MS  # noqa: E402
 from tests.helpers import FakeSpeakerModel  # noqa: E402
 
 

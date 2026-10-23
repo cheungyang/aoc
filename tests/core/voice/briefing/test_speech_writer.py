@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 from core.channel.response_parser import AgentResponse
 from core.storage.channel_inbox import InboxStore
-from core.voice.briefing import writer
-from core.voice.briefing.model import Status
+from core.channel import inbox
+from core.storage.channel_inbox import Status
 from core.voice.briefing.speech_writer import SpeechWriter, write_speech
 from tests.core.voice.briefing import loader
 
@@ -19,7 +19,7 @@ class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
     """One task for the stateless worker: a SpeechWriterPrompt, through `ask_worker`."""
 
     def _row(self):
-        return writer.record_reply("pkm-wiki", "Should the two notes on habits be merged?", asked_at=None,
+        return inbox.record_reply("pkm-wiki", "Should the two notes on habits be merged?", asked_at=None,
                                    agent_id="wiki-gardener", loader=loader())
 
     async def test_the_worker_writes_it(self):
@@ -42,7 +42,7 @@ class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):
 class TestSpeechWriter(unittest.IsolatedAsyncioTestCase):
 
     def _candidate(self, text="Should the two notes on habits be merged?"):
-        return writer.record_reply("pkm-wiki", text, asked_at=None, agent_id="wiki-gardener", loader=loader())
+        return inbox.record_reply("pkm-wiki", text, asked_at=None, agent_id="wiki-gardener", loader=loader())
 
     async def test_a_written_question_keeps_the_candidate_and_reports_it(self):
         calls, done = [], []
@@ -109,7 +109,7 @@ class TestSpeechWriter(unittest.IsolatedAsyncioTestCase):
         speech_writer = SpeechWriter(write=write, max_parallel=2)
         tasks = []
         for channel in ("general", "day-planning", "topic-research", "fitness-coach"):
-            row = writer.record_reply(channel, "Text.", asked_at=0, loader=loader())  # late replies
+            row = inbox.record_reply(channel, "Text.", asked_at=0, loader=loader())  # late replies
             tasks.append(speech_writer.start(row, "Someone"))
         await asyncio.gather(*tasks)
         self.assertEqual(peak, 2)

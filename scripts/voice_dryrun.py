@@ -647,7 +647,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     from core.loaders.agents_loader import AgentsLoader
     from core.runtime.foundation import events
     from core.runtime.foundation.sessions import SessionManager
-    from core.runtime.observability.turn_trace import start_turn_trace
+    from core.runtime.observability.turn_trace import Stage, start_turn_trace
     from core.voice.speech.missing_speech import fallback_speech
     from core.voice.speech.reply import ERROR_LINE, speech_of
     from core.voice.engines.tts import agent_voice
@@ -668,8 +668,8 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     trace = start_turn_trace(voice_bot, run, speech_end_at=heard.speech_end_at if heard else None, case=case["id"])
     if heard is not None:
         result.transcript = heard.transcript
-        trace.mark("vad_final", at=heard.vad_final_at)
-        trace.mark("stt_done", at=heard.stt_done_at)
+        trace.mark(Stage.VAD_FINAL, at=heard.vad_final_at)
+        trace.mark(Stage.STT_DONE, at=heard.stt_done_at)
     else:
         result.transcript = case["utterance"]
 
@@ -684,7 +684,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
 
     async def first_audio(text, voice):
         # Streamed into a speaker no one plays: its first audio is the mark.
-        out = PCMSpeaker(asyncio.get_running_loop(), on_audio=lambda: trace.mark("tts_first_byte"))
+        out = PCMSpeaker(asyncio.get_running_loop(), on_audio=lambda: trace.mark(Stage.TTS_FIRST_BYTE))
         stream = await tts.open(voice, out)
         stream.send(text)
         stream.finish()
@@ -693,7 +693,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     def speak(chunks):
         nonlocal tts_task
         for chunk in chunks:
-            trace.mark("first_chunk")
+            trace.mark(Stage.FIRST_CHUNK)
             result.spoken.append(chunk)
             if tts_task is None and measure_tts and tts is not None:
                 # Synthesized beside the stream, as the voice pipeline's speech
@@ -709,7 +709,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
             speak(voice_stream.add(speech_part))
 
     response = None
-    trace.mark("agent_start")
+    trace.mark(Stage.AGENT_START)
     async for event in agent.execute_stream(result.transcript, session=session):
         kind = event.get("type")
         if kind == events.TOKEN and event.get("content"):
@@ -722,7 +722,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
                     result.errored = True
                     result.failures.append(f"agent error: {event['content'].strip()}")
             else:
-                trace.mark("first_token")
+                trace.mark(Stage.FIRST_TOKEN)
                 speaking = event.get("agent_id") or speaking
                 route(*router.feed(event["content"]))
         elif kind == events.TOOL_START:

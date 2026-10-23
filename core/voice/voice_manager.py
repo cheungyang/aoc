@@ -26,21 +26,23 @@ import discord
 
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation.sessions import SessionManager
-from core.runtime.observability.turn_trace import start_turn_trace
-from . import settings
-from .engines.stt import SpeechRecognizer, agent_vocabulary
-from .hooks import VoiceHook
-from .listening.enrollment import Enrollment, saved_message
-from .listening.floor import Floor
-from .listening.speaker_gate import SpeakerGate
-from .listening.turn_taking import bare_stop, merge_transcripts
-from .listening.utterance import Utterance
-from .listening.vad_sink import VADSink
-from .room.connection import VoiceConnection
-from .room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
-from .room.room_switch import FocusSwitcher, Say
-from .speech.audio_queue import AudioStreamQueue
-from .speech.reply import ReplyStreamer, TurnSpeech
+from core.runtime.observability.turn_trace import Outcome, Stage, start_turn_trace
+from core.util.error_util import format_error_message
+from core.voice.foundation import settings
+from core.voice.foundation.utterance import Utterance
+from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
+from core.voice.hooks import VoiceHook
+from core.voice.listening.enrollment import Enrollment, saved_message
+from core.voice.listening.floor import Floor
+from core.voice.listening.gate_commands import gate_command, mark_from_reaction, voiceprint_command
+from core.voice.listening.speaker_gate import SpeakerGate
+from core.voice.listening.turn_taking import bare_stop, merge_transcripts
+from core.voice.listening.vad_sink import VADSink
+from core.voice.room.connection import VoiceConnection
+from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
+from core.voice.room.room_switch import FocusSwitcher, Say
+from core.voice.speech.audio_queue import AudioStreamQueue
+from core.voice.speech.reply import ReplyStreamer, TextOutputFactory, TurnSpeech
 
 
 # `say_when_idle` waits for the pipeline to be idle: checked this often, for
@@ -63,7 +65,10 @@ class _Turn:
 class VoiceManager:
     """Orchestrates one bot's voice: the parts above, and the turns between them."""
 
-    def __init__(self, bot_runner, hooks: Sequence[VoiceHook] = ()):
+    def __init__(self, bot_runner, hooks: Sequence[VoiceHook] = (), *, text_output: TextOutputFactory):
+        """`text_output(channel)` is where a turn's reply is written in its text
+        channel: the Discord runner, which hosts the voice room, passes its
+        stream buffer."""
         self.agent_id = bot_runner.agent_id
         agent = AgentsLoader().get_agent(self.agent_id)
         # A copy: the loader caches agent configs, and this one is per-bot state.
@@ -74,7 +79,7 @@ class VoiceManager:
         self.stt = SpeechRecognizer(vocabulary=self._stt_vocabulary())
         # Does it sound like you? Off until a join reads voice_config.speaker_gate.
         self.speaker_gate = SpeakerGate(transcribe=self.stt.transcribe)
-        self.reply = ReplyStreamer(self.agent_id, self.config, self.audio_queue, self.connection)
+        self.reply = ReplyStreamer(self.agent_id, self.config, self.audio_queue, self.connection, text_output)
         self.floor = Floor(self.stt, self.audio_queue, self.connection, turns=self, gate=self.speaker_gate)
         self.switcher = FocusSwitcher(self, self.agent_id)
 
@@ -164,6 +169,14 @@ class VoiceManager:
         if isinstance(rooms, list) and rooms and isinstance(rooms[0], str):
             return rooms[0]
         return None
+
+    def room(self):
+        """The voice channel the bot is in, or None."""
+        return self.connection.channel
+
+    def has_voice_client(self) -> bool:
+        """The bot holds a voice client: connected, or still connecting."""
+        return bool(self.connection.voice_client)
 
     # --- the focus: which conversation the room is in ------------------------------
 
@@ -331,6 +344,18 @@ class VoiceManager:
         self._spawn(self.reply.say(enrollment.opening_line(), self.agent_id))
         return enrollment.instructions()
 
+    def voiceprint(self, args: str = "") -> str:
+        """`!voiceprint`: your voiceprint and the gate's state. Returns what to post."""
+        return voiceprint_command(self.speaker_gate, args)
+
+    async def gate(self, args: str, channel) -> None:
+        """`!gate`, typed in `channel` (`!gate review` posts there)."""
+        await gate_command(self.speaker_gate, args, channel)
+
+    def mark_review(self, message_id, emoji: str) -> bool:
+        """✅ or ❌ on a `!gate review` post labels that utterance. True if it was one."""
+        return mark_from_reaction(self.speaker_gate, message_id, emoji)
+
     def _enrolling(self) -> Optional[Enrollment]:
         """The enrollment in progress, unless it has timed out."""
         enrollment = self.speaker_gate.enrollment
@@ -425,7 +450,7 @@ class VoiceManager:
             newest = utterances[-1]
             trace = start_turn_trace(self.agent_id, turn_id, speech_end_at=newest.speech_end_at)
             if newest.finished_at is not None:
-                trace.mark("vad_final", at=newest.finished_at)
+                trace.mark(Stage.VAD_FINAL, at=newest.finished_at)
             turn = _Turn(turn_id, utterances, trace, TurnSpeech(trace))
             cancelled = False
             self.floor.set_reply("")
@@ -433,10 +458,9 @@ class VoiceManager:
                 await self._answer(turn)
             except asyncio.CancelledError:
                 cancelled = True
-                trace.meta["outcome"] = "cancelled"
+                trace.meta["outcome"] = Outcome.CANCELLED
             except Exception as e:
-                from core.util import format_error_message
-                trace.meta["outcome"] = "error"
+                trace.meta["outcome"] = Outcome.ERROR
                 turn.answered = True
                 self._log(f"Error in voice pipeline: {format_error_message(e)}")
             finally:
@@ -445,8 +469,8 @@ class VoiceManager:
                 if turn.answered or turn.speech.heard:
                     self.floor.forget(utterances)
                 if turn_id != self._active_turn and not cancelled:
-                    trace.meta.setdefault("outcome", "superseded")
-                trace.mark("turn_end")
+                    trace.meta.setdefault("outcome", Outcome.SUPERSEDED)
+                trace.mark(Stage.TURN_END)
 
                 def finish_trace():
                     # The voiceprint gate scores alongside the turn: by the time
@@ -474,7 +498,7 @@ class VoiceManager:
         transcripts = [await self.stt.transcribe(u) for u in utterances]
         transcript = merge_transcripts(t.text for t in transcripts)
         newest = transcripts[-1].text.strip()
-        trace.mark("stt_done")
+        trace.mark(Stage.STT_DONE)
         trace.meta["stt"] = transcripts[-1].provider
         final_ms = (getattr(utterances[-1].stream, "timings", None) or {}).get("final_after_end_ms")
         if isinstance(final_ms, (int, float)):
@@ -484,7 +508,7 @@ class VoiceManager:
         if not newest:
             # Noise, not words. Anything older stays unanswered.
             self._log("Transcription empty. Ignoring.")
-            trace.meta["outcome"] = "no_transcript"
+            trace.meta["outcome"] = Outcome.NO_TRANSCRIPT
             self.floor.forget(utterances[-1:])
             return
         if not is_current():
@@ -497,7 +521,7 @@ class VoiceManager:
         if stop is not None:
             self._log(f"✋ Heard {newest!r}: stopping, "
                       + ("keeping the request for what comes next." if stop == "hold" else "request dropped."))
-            trace.meta["outcome"] = f"stop_{stop}"
+            trace.meta["outcome"] = Outcome.STOP_HOLD if stop == "hold" else Outcome.STOP_CANCEL
             if stop == "hold":
                 self.floor.forget(utterances[-1:])
             else:
@@ -514,11 +538,11 @@ class VoiceManager:
         #    anything unanswered behind with the old focus.
         say = partial(self.reply.say, is_current=is_current)
         if await self._hooks_handle(newest, say):
-            trace.meta["outcome"] = "hook"
+            trace.meta["outcome"] = Outcome.HOOK
             turn.answered = True
             return
         if await self.switcher.handle(newest, say=say):
-            trace.meta["outcome"] = "focus_switch"
+            trace.meta["outcome"] = Outcome.FOCUS_SWITCH
             turn.answered = True
             return
 

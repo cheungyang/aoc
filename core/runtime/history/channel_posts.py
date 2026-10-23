@@ -28,24 +28,12 @@ from typing import Any, List, Optional
 
 from langchain_core.messages import AIMessage
 
-from core.runtime.foundation.routing import decide
+from core.channel.names import channel_name
+from core.runtime.foundation.routing import channel_hosts_for, decide
 
 # A script can dump a lot of output; the channel already shows all of it, so
 # the session only needs enough to know what the post was about.
 MAX_RECORDED_CHARS = 8000
-
-
-def channel_hosts_for(channel_name: str, loader: Any) -> List[str]:
-    """Agent ids whose `channel_hosts` include `channel_name`, in loader order."""
-    target = str(channel_name or "").lstrip("#").lower()
-    if not target:
-        return []
-    hosts = []
-    for agent_id in loader.list_agent_ids():
-        config = loader.get_agent_config(agent_id) or {}
-        if target in [str(h).lower() for h in (config.get("channel_hosts") or [])]:
-            hosts.append(agent_id)
-    return hosts
 
 
 def reply_sessions(channel: Any, loader: Any = None) -> list:
@@ -60,7 +48,7 @@ def reply_sessions(channel: Any, loader: Any = None) -> list:
     loader = loader or AgentsLoader()
     sessions = {}
 
-    for host_id in channel_hosts_for(_channel_name(channel), loader):
+    for host_id in channel_hosts_for(channel_name(channel), loader):
         host_config = loader.get_agent_config(host_id) or {}
         host_session = SessionManager.get_session(host_id, source="discord", channel=channel)
 
@@ -82,20 +70,6 @@ def reply_sessions(channel: Any, loader: Any = None) -> list:
         sessions.setdefault(target.session_id, target)
 
     return list(sessions.values())
-
-
-def _channel_name(channel: Any) -> str:
-    """The name sessions key on: a thread reports its parent channel's name."""
-    if channel is None:
-        return ""
-    if isinstance(channel, str):
-        return channel.lstrip("#")
-    from core.runtime.foundation.context import _is_thread
-    if _is_thread(channel):
-        parent = getattr(channel, "parent", None)
-        if parent is not None and getattr(parent, "name", None):
-            return str(parent.name).lstrip("#")
-    return str(getattr(channel, "name", "") or "").lstrip("#")
 
 
 def format_post(text: str, origin: str, posted_at: Optional[Any] = None) -> str:

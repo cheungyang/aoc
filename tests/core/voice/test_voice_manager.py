@@ -2,15 +2,21 @@ import asyncio
 import time
 import pytest
 import os
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import discord
+from core.channel.discord.stream_buffer import DiscordStreamBuffer
 from core.channel.response_parser import AgentResponse
-from core.voice import settings as voice_settings
-from core.voice.listening.utterance import Transcript, Utterance
+from core.voice.foundation import settings as voice_settings
+from core.voice.foundation.utterance import Transcript, Utterance
 from core.voice.speech.missing_speech import alert
 from core.voice.speech.reply import ERROR_LINE
 from core.voice.voice_manager import VoiceManager
 from tests.helpers import FakeTTS
+
+# The voice room's text lane, as the Discord runner builds it.
+TEXT_OUTPUT = partial(DiscordStreamBuffer, edit_interval=1.5)
+
 
 @pytest.fixture
 def mock_bot_runner():
@@ -72,7 +78,7 @@ def test_voice_manager_init(mock_bot_runner):
         mock_agent.config = {"voice_config": {"audio_blurp": "assets/sounds/blurps/concierge_ping.wav"}}
         mock_loader.return_value.get_agent.return_value = mock_agent
 
-        vm = VoiceManager(mock_bot_runner)
+        vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
         assert vm.agent_id == "main"
         assert vm.config.get("audio_blurp") == "assets/sounds/blurps/concierge_ping.wav"
 
@@ -86,12 +92,12 @@ def test_stt_vocabulary_is_every_agent_name_and_spoken_id(mock_bot_runner):
         loader.get_agent_config.side_effect = lambda agent_id: {
             "day-planner": {"name": "Daisy"}, "main": {"name": "Concierge"},
         }[agent_id]
-        vm = VoiceManager(mock_bot_runner)
+        vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     assert vm.stt.vocabulary == ["Daisy", "day planner", "Concierge", "main"]
 
 def _playing_vm(mock_bot_runner):
     """A VoiceManager whose answer audio is playing."""
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     mock_vc = MagicMock()
     mock_vc.is_connected.return_value = True
     mock_vc.is_playing.return_value = True
@@ -161,7 +167,7 @@ async def test_a_discarded_blip_gives_the_reply_its_volume_back(mock_bot_runner)
 
 @pytest.mark.asyncio
 async def test_a_finished_utterance_runs_the_pipeline(mock_bot_runner, tmp_path):
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     
     mock_vc = MagicMock()
     mock_vc.is_connected.return_value = True
@@ -279,7 +285,7 @@ async def test_an_interruption_while_the_agent_works_discards_its_answer(mock_bo
     assert vm.floor.unanswered() == [first]
 
 def test_voice_manager_play_blurp_stops_existing_audio(mock_bot_runner, tmp_path):
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     mock_vc = MagicMock()
     mock_vc.is_connected.return_value = True
     mock_vc.is_playing.return_value = True
@@ -304,7 +310,7 @@ async def test_voice_manager_barge_in_and_second_sentence_flow(mock_bot_runner, 
     4. User finishes sentence 2.
     5. Bot replies to sentence 2 alone: sentence 1 was answered, so it isn't asked again.
     """
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     mock_vc = MagicMock()
     mock_vc.is_connected.return_value = True
     mock_vc.is_playing.return_value = False
@@ -388,7 +394,7 @@ QUESTION = "Where should we go this weekend?"
 def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
     """Wires a VoiceManager up to a mocked guild, agent, and audio queue.
     The agent writes `reply`, streamed as one token."""
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
 
     mock_vc = MagicMock()
     mock_vc.is_connected.return_value = True
@@ -1119,7 +1125,7 @@ DAISY_QUESTION = "How's your energy this morning, one to ten?"
 
 
 def _inbox_row(channel, agent_id, **kw):
-    from core.voice.briefing.model import InboxRow, Source
+    from core.storage.channel_inbox import InboxRow, Source
     base = dict(channel=channel, agent_id=agent_id, posted_at=time.time() - 3600, source=Source.SCHEDULE)
     base.update(kw)
     return InboxRow(**base)
@@ -1226,7 +1232,7 @@ async def test_next_agent_with_nothing_left_says_so(mock_bot_runner, tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_reply_judged_after_you_join_is_announced_once_the_pipeline_is_idle(mock_bot_runner, tmp_path):
-    from core.voice.briefing.model import Source
+    from core.storage.channel_inbox import Source
     from core.voice.briefing.speech_writer import SpeechWriter
     vm, _main_agent, loader, _channels = _briefed_room(
         mock_bot_runner, tmp_path,
@@ -1250,7 +1256,7 @@ async def test_a_reply_judged_after_you_join_is_announced_once_the_pipeline_is_i
 
 @pytest.mark.asyncio
 async def test_no_announcement_when_nobody_is_listening(mock_bot_runner, tmp_path):
-    from core.voice.briefing.model import Source
+    from core.storage.channel_inbox import Source
     from core.voice.briefing.speech_writer import SpeechWriter
     vm, _main_agent, loader, _channels = _briefed_room(
         mock_bot_runner, tmp_path,
@@ -1610,7 +1616,7 @@ def _you():
 
 def _reading(text="Add oat milk, eggs and spinach to the shopping list for Saturday.", ms=3000, user=None):
     """An utterance with `ms` of speech, its transcript already final."""
-    from core.voice.listening.utterance import BYTES_PER_MS
+    from core.voice.foundation.utterance import BYTES_PER_MS
     utterance = _spoken(text, user=user or _you())
     utterance.pcm += bytes(ms * BYTES_PER_MS)
     return utterance
@@ -1729,7 +1735,7 @@ async def test_each_join_reads_the_gate_settings_afresh(mock_bot_runner, tmp_pat
 
 
 def test_the_sink_hears_only_the_gates_owners(mock_bot_runner):
-    vm = VoiceManager(mock_bot_runner)
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     with patch("core.voice.voice_manager.VADSink") as sink_class:
         vm._make_sink()
     assert sink_class.call_args.kwargs["owners"] == vm.speaker_gate.owner_ids

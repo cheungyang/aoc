@@ -46,7 +46,7 @@ for path in (PROJECT_ROOT, SCRIPTS_DIR):
 
 import numpy as np  # noqa: E402
 
-from core.voice import settings as voice_settings  # noqa: E402
+from core.voice.foundation import settings as voice_settings  # noqa: E402
 
 DEFAULT_OUT_ROOT = os.path.join(PROJECT_ROOT, "scratch", "stt_benchmark")
 STT_TARGET_P50_MS = 300
@@ -432,7 +432,7 @@ async def run(args) -> int:
         for voice in voices:
             parts = [await asyncio.to_thread(synthesize, client, tts, text, voice) for text in case.parts]
             audio[(case.id, voice)] = parts
-            from core.voice.listening.utterance import pcm_to_wav
+            from core.voice.foundation.utterance import pcm_to_wav
             with open(os.path.join(out_dir, "audio", f"{case.id}-{voice.rsplit('-', 1)[-1]}.wav"), "wb") as f:
                 silence = bytes(SAMPLE_RATE * 2 * case.gap_ms // 1000)
                 f.write(pcm_to_wav(silence.join(parts)))

@@ -16,7 +16,7 @@ from core.voice.briefing.hook import (
     ordered,
     should_announce,
 )
-from core.voice.briefing.model import InboxRow, Priority, Source, Status
+from core.storage.channel_inbox import InboxRow, Priority, Source, Status
 from core.voice.briefing.speech_writer import SpeechWriter
 from core.voice.room.focus import FocusDirectory
 from tests.core.voice.briefing import loader
@@ -355,18 +355,18 @@ class TestAsAHook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row.status, row.status_via.value), (Status.DONE, "VOICE"))
 
     async def test_a_new_row_is_announced_through_the_room_only_while_someone_listens(self):
-        from core.voice.briefing import writer
+        from core.channel import inbox
         self.hook.joined(self.room)
         new = row("day-planning", "day-planner", -1, label="x", speech="Daisy here. Lunch at noon?",
                   question="Lunch at noon?")
         self.store.put(new)
-        writer._notify(new)
+        inbox._notify(new)
         self.assertEqual(self.room.lines, ["Daisy has a question for you. Say 'switch to Daisy' to hear it."])
 
         self.room.listening = False
         newer = row("market-scout", "market-scout", -1, priority=Priority.HIGHEST, label="a big move", speech="S.")
         self.store.put(newer)
-        writer._notify(newer)
+        inbox._notify(newer)
         self.assertEqual(len(self.room.lines), 1)
 
     async def test_leaving_ends_the_drive(self):

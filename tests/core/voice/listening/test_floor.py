@@ -10,7 +10,7 @@ import pytest
 
 from core.storage.speaker_gate_log import Effect
 from core.voice.listening.floor import Floor
-from core.voice.listening.utterance import Transcript, Utterance
+from core.voice.foundation.utterance import Transcript, Utterance
 
 
 class RecordingGate:

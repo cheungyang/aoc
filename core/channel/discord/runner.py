@@ -10,13 +10,13 @@ from discord.ext import commands
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation import events
 from core.runtime.foundation.sessions import SessionManager
+from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
+from core.channel.inbox import inbox_channel, mark_read, record_reply
 from core.util import format_error_message, safe_chunks
 from core.voice.briefing.hook import VoiceBriefing
-from core.voice.briefing.model import Via
-from core.voice.briefing.writer import mark_read, record_reply
-from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS, mark_from_reaction
+from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS
 from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
 
@@ -64,9 +64,16 @@ class BotRunner:
         self._processed_message_ids = OrderedDict()
         self.bot = None
         self._init_bot()
-        # The voice room, with the inbox's briefings plugged in as a hook.
-        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()])
+        # The voice room, with the inbox's briefings plugged in as a hook, and
+        # replies written into the focus's channel as a typed message's are.
+        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()], text_output=self._voice_text_output)
         Ownership().add_listener(self._on_ownership_change)
+
+    @staticmethod
+    def _voice_text_output(channel):
+        """Where a voice turn's reply is written: streamed into its text channel."""
+        from core.channel.discord.stream_buffer import DiscordStreamBuffer
+        return DiscordStreamBuffer(channel, edit_interval=1.5)
 
     def _init_bot(self):
         intents = discord.Intents.default()
@@ -92,7 +99,7 @@ class BotRunner:
             if success:
                 focus = self.voice_manager.focus()
                 where = "the lobby" if focus.is_lobby else f"#{focus.channel_name}"
-                await ctx.send(f"Connected to voice channel: `{self.voice_manager.connection.channel.name}`, talking in {where} 🎙️")
+                await ctx.send(f"Connected to voice channel: `{self.voice_manager.room().name}`, talking in {where} 🎙️")
             else:
                 await ctx.send("Could not join voice channel.")
 
@@ -108,8 +115,7 @@ class BotRunner:
             if not self._is_voice_host():
                 return
             from core.voice.briefing.commands import handle_inbox_command
-            from core.voice.briefing.writer import channel_name
-            for chunk in safe_chunks(handle_inbox_command(args, channel_name(ctx.channel))):
+            for chunk in safe_chunks(handle_inbox_command(args, inbox_channel(ctx.channel))):
                 await ctx.send(chunk)
 
         # The voiceprint gate (Part 4: core/voice/listening/speaker_gate.py),
@@ -126,16 +132,14 @@ class BotRunner:
         async def cmd_voiceprint(ctx, *, args: str = ""):
             if not self._is_voice_host():
                 return
-            from core.voice.listening.gate_commands import voiceprint_command
-            for chunk in safe_chunks(voiceprint_command(self.voice_manager.speaker_gate, args)):
+            for chunk in safe_chunks(self.voice_manager.voiceprint(args)):
                 await ctx.send(chunk)
 
         @self.bot.command(name="gate")
         async def cmd_gate(ctx, *, args: str = ""):
             if not self._is_voice_host():
                 return
-            from core.voice.listening.gate_commands import gate_command
-            await gate_command(self.voice_manager.speaker_gate, args, ctx.channel)
+            await self.voice_manager.gate(args, ctx.channel)
 
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
@@ -180,7 +184,7 @@ class BotRunner:
             return  # a DM, or a bot's own reaction
         if not Ownership().is_mine(self.agent_id) or not self._is_voice_host():
             return
-        if mark_from_reaction(self.voice_manager.speaker_gate, payload.message_id, emoji):
+        if self.voice_manager.mark_review(payload.message_id, emoji):
             return
         if emoji != "✅":
             return
@@ -211,9 +215,9 @@ class BotRunner:
             after.channel.name == vc or normalize_channel_name(after.channel.name) == normalize_channel_name(vc)
             for vc in vc_targets
         ):
-            if self.voice_manager.connection.channel != after.channel:
+            if self.voice_manager.room() != after.channel:
                 print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
-                if not await self.voice_manager.connection.join(after.channel.name):
+                if not await self.voice_manager.join(after.channel.name):
                     return
             # You arrived (not a mute or deafen while already in the channel).
             if before.channel != after.channel:
@@ -269,7 +273,7 @@ class BotRunner:
 
                     target_to_join = selected_target or targets[0]
                     print(f"Agent {self.agent_id} auto-joining voice channel '{target_to_join}'...")
-                    await self.voice_manager.connection.join(target_to_join)
+                    await self.voice_manager.join(target_to_join)
                 asyncio.create_task(_auto_join())
 
     def _on_ownership_change(self, agent_id):
@@ -282,7 +286,7 @@ class BotRunner:
             return
         if Ownership().is_mine(self.agent_id):
             loop.create_task(self._maybe_auto_join())
-        elif self.voice_manager.connection.voice_client:
+        elif self.voice_manager.has_voice_client():
             loop.create_task(self.voice_manager.leave())
 
     async def _handle_control_message(self, message):

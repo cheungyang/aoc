@@ -18,6 +18,9 @@ later token never moves `first_token`):
     audio_start     the first answer audio started playing
     turn_end        the pipeline finished (all audio queued or played)
 
+`Stage` names the stages and `Outcome` how a turn ended (`meta["outcome"]`;
+none means it was answered), so a misspelled one fails at import.
+
 Repeated events (`tool_start`, `tool_end`, `model_call` with the thinking
 level it was sent with) are kept in order as `events`. A `prune_wait` event
 records the milliseconds a turn waited for the previous turn's history prune;
@@ -38,17 +41,42 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+class Stage:
+    """The stages above, by name: `trace.mark(Stage.STT_DONE)`."""
+    SPEECH_END = "speech_end"
+    VAD_FINAL = "vad_final"
+    STT_DONE = "stt_done"
+    AGENT_START = "agent_start"
+    FIRST_TOKEN = "first_token"
+    FIRST_CHUNK = "first_chunk"
+    TTS_FIRST_BYTE = "tts_first_byte"
+    AUDIO_START = "audio_start"
+    TURN_END = "turn_end"
+
+
 STAGES = (
-    "speech_end",
-    "vad_final",
-    "stt_done",
-    "agent_start",
-    "first_token",
-    "first_chunk",
-    "tts_first_byte",
-    "audio_start",
-    "turn_end",
+    Stage.SPEECH_END,
+    Stage.VAD_FINAL,
+    Stage.STT_DONE,
+    Stage.AGENT_START,
+    Stage.FIRST_TOKEN,
+    Stage.FIRST_CHUNK,
+    Stage.TTS_FIRST_BYTE,
+    Stage.AUDIO_START,
+    Stage.TURN_END,
 )
+
+
+class Outcome:
+    """How a turn ended, in `meta["outcome"]`. A trace without one was answered."""
+    CANCELLED = "cancelled"          # its task was cancelled: a barge-in, or a newer turn
+    ERROR = "error"                  # the pipeline raised
+    SUPERSEDED = "superseded"        # a newer turn started before it finished
+    NO_TRANSCRIPT = "no_transcript"  # noise, not words
+    STOP_HOLD = "stop_hold"          # "wait": the reply stopped, the words kept
+    STOP_CANCEL = "stop_cancel"      # "stop": the reply stopped, the words dropped
+    HOOK = "hook"                    # a voice hook answered it ("next agent")
+    FOCUS_SWITCH = "focus_switch"    # the switcher answered it: a switch, "where am I?"
 
 _current_trace: contextvars.ContextVar[Optional["TurnTrace"]] = contextvars.ContextVar(
     "current_turn_trace", default=None
@@ -68,7 +96,7 @@ class TurnTrace:
     finished: bool = False
 
     def __post_init__(self):
-        self.marks.setdefault("speech_end", 0)
+        self.marks.setdefault(Stage.SPEECH_END, 0)
 
     def _ms(self, at: Optional[float] = None) -> int:
         return round(((time.monotonic() if at is None else at) - self.anchor) * 1000)
@@ -120,7 +148,7 @@ class TurnTrace:
         """
         if self.finished:
             return self.summary()
-        self.mark("turn_end")
+        self.mark(Stage.TURN_END)
         self.finished = True
         summary = self.summary()
         print(f"[TurnTrace] {json.dumps(summary, separators=(',', ':'), default=str)}")

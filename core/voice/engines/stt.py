@@ -10,10 +10,11 @@ decoding: it is the slow path, so it should at least not be slower than needed.
 import asyncio
 from typing import Callable, Iterable, List, Optional
 
+from core.util.config import Config
 from core.util.models import TRANSCRIBE_LIVE
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.engines.live_stt import LiveSTTSession
-from core.voice.listening.utterance import Transcript, Utterance
+from core.voice.foundation.utterance import Transcript, Utterance
 
 
 def agent_vocabulary(loader) -> List[str]:
@@ -39,8 +40,6 @@ class SpeechRecognizer:
         self.provider = provider or settings.STT_PROVIDER
         self.vocabulary = list(dict.fromkeys(v for v in vocabulary if v))[: settings.STT_VOCABULARY_LIMIT]
         if api_key is None:
-            from core.util.config import Config
-
             api_key = Config().gemini_api_key or ""
         self._api_key = api_key
         self._whisper_model = whisper_model or settings.WHISPER_MODEL

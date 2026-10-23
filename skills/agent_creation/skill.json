@@ -9,7 +9,7 @@
       "pkm/agents": ["@manage"],
       "pkm/wiki/memory/TAGS.md": ["@read"],
       "core/util/models.py": ["@read"],
-      "core/voice/settings.py": ["@read"]
+      "core/voice/foundation/settings.py": ["@read"]
     },
     "set_thinking": {},
     "agent_lint": {}

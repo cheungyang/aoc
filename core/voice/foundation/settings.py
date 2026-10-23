@@ -20,6 +20,8 @@ import os
 import re
 from typing import Optional
 
+from core.util.config import Config
+
 # --- Speech to text --------------------------------------------------------
 # "gemini_live": each utterance streams to gemini-3.5-transcribe-live while the
 # user is still talking (core/voice/engines/live_stt.py); local Whisper takes over only
@@ -87,7 +89,7 @@ SPEAKER_BORDERLINE = 0.10
 # The audio of would-be rejections is kept this long, for `!gate review`.
 GATE_AUDIO_KEEP_DAYS = 14
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 def speaker_model_path() -> Optional[str]:
@@ -104,7 +106,6 @@ def voice_data_dir() -> str:
     """Your voiceprint and the kept clips: beside memory.db, on this machine only
     (sessions/ is never committed or put in an image). Looked up at call time,
     so anything that repoints memory.db (the test suite) repoints this."""
-    from core.util.config import Config
     return os.environ.get("AOC_VOICE_DATA_DIR") or os.path.join(
         os.path.dirname(Config().memory_db_path), "voice")
 

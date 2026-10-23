@@ -9,15 +9,15 @@ FLASH_LITE), all in parallel, under the same rules as <voice_mode>,
 writes a speech version decides whether it holds a question; after that,
 nothing is judged again.
 
-The result decides a candidate's fate (writer.store_speech): a reply that
+The result decides a candidate's fate (store_speech, core/channel/inbox.py): a reply that
 asks you something stays, and any other is dropped.
 """
 import asyncio
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from core.prompts.voice import Speech, SpeechWriterPrompt
-from core.voice.briefing.model import InboxRow
-from core.voice.briefing.writer import store_speech
+from core.channel.inbox import store_speech
+from core.storage.channel_inbox import InboxRow
 
 # One call per post, all at once, but no more than this many in flight.
 MAX_PARALLEL = 4

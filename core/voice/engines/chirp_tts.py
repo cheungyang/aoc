@@ -13,8 +13,9 @@ import queue
 import threading
 from typing import Callable, List, Optional
 
-from core.util import Config, format_error_message
-from core.voice import settings
+from core.util.config import Config
+from core.util.error_util import format_error_message
+from core.voice.foundation import settings
 
 _client = None
 _client_lock = threading.Lock()

@@ -41,7 +41,7 @@ from core.scheduler.spec import (
     SessionPolicy,
 )
 from core.util.models import THINKING_LEVELS
-from core.voice.briefing.model import Priority
+from core.storage.channel_inbox import Priority
 
 KINDS = (KIND_PROMPT, KIND_SCRIPT)
 

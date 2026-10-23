@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from typing import Optional, Protocol
 
 from core.loaders import agents_loader
-from core.util import Config
-from core.voice import settings
+from core.util.config import Config
+from core.voice.engines import chirp_tts, edge_tts_stream
+from core.voice.foundation import settings
 
 
 class TTSStream(Protocol):
@@ -104,10 +105,9 @@ class ChirpCheck:
         """Opens Chirp's channel now; a refused key means edge-tts. A network
         hiccup doesn't: each stream still falls back on its own if it must."""
         from google.api_core import exceptions
-        from .chirp_tts import warm_up
 
         try:
-            warm_up()
+            chirp_tts.warm_up()
         except (exceptions.PermissionDenied, exceptions.Unauthenticated, exceptions.InvalidArgument) as e:
             return f"Cloud Text-to-Speech refused the key ({e.message})"
         except Exception as e:
@@ -140,9 +140,6 @@ class TTSEngine:
         chirp_check()  # start finding out now, so the first turn doesn't wait
 
     async def open(self, voice: Voice, speaker) -> TTSStream:
-        from .chirp_tts import ChirpStream
-        from .edge_tts_stream import EdgeStream
-
         if await chirp_check().result() is None:
-            return ChirpStream(voice, speaker, fallback=lambda: EdgeStream(voice, speaker))
-        return EdgeStream(voice, speaker)
+            return chirp_tts.ChirpStream(voice, speaker, fallback=lambda: edge_tts_stream.EdgeStream(voice, speaker))
+        return edge_tts_stream.EdgeStream(voice, speaker)

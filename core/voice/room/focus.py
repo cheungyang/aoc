@@ -13,14 +13,16 @@ conversation of its own. The lobby -- talking to Concierge itself -- is
 #general, Concierge's own channel.
 
 Everything here is pure: built from agent configs, so a test can pin the
-table. Turning names into spoken aliases is room_switch.py's job; this module
-only says which names lead where, and how each focus is spoken about.
+table. Turning names into spoken aliases is aliases.py's job; this module only
+says which names lead where, and how each focus is spoken about.
 """
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.runtime.foundation.routing import decide
+from core.channel.names import is_thread
+from core.runtime.foundation.routing import answering_agent
+from core.voice.room.aliases import alias_key, build_aliases
 
 # The lobby: Concierge's own channel, unless voice_config sets `lobby_channel`.
 DEFAULT_LOBBY_CHANNEL = "general"
@@ -52,23 +54,6 @@ def _names(value: Any) -> List[str]:
 
 def _list(value: Any) -> List[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
-
-
-def answering_agent(host_id: str, channel: str, loader: Any) -> str:
-    """Who answers an untagged message in `channel` hosted by `host_id`.
-
-    The routing policy typed messages follow (core/runtime/foundation/routing.py), so
-    voice can't drift from them: the sole eligible agent, else the host itself
-    (its concierge).
-    """
-    decision = decide(
-        prompt="",
-        agent_id=host_id,
-        channel_name=channel,
-        agent_config=loader.get_agent_config(host_id) or {},
-        loader=loader,
-    )
-    return decision.agent_id if decision.is_direct and decision.agent_id else host_id
 
 
 class FocusDirectory:
@@ -136,10 +121,8 @@ class FocusDirectory:
 
     def for_channel(self, channel: Any) -> Optional[VoiceFocus]:
         """The focus for a text channel (object or name); a thread counts as its parent."""
-        from core.runtime.foundation.context import _is_thread
-
         name = getattr(channel, "name", channel)
-        if _is_thread(channel):
+        if is_thread(channel):
             name = getattr(getattr(channel, "parent", None), "name", None) or name
         if not isinstance(name, str):
             return None
@@ -199,8 +182,6 @@ class FocusDirectory:
         """The name to say for `focus`: its agent's name at the agent's home
         channel, "concierge" for the lobby, else the channel's own name.
         Always one that `build_aliases` maps back to `focus`."""
-        from core.voice.room.room_switch import _key, build_aliases
-
         aliases = build_aliases(self.alias_sources())
         name = self.names.get(focus.agent_id)
         candidates = [LOBBY_ALIAS] if focus.is_lobby else []
@@ -208,7 +189,7 @@ class FocusDirectory:
             candidates.append(name)
         candidates.append(focus.label)
         for candidate in candidates:
-            if aliases.get(_key(candidate)) == focus.key:
+            if aliases.get(alias_key(candidate)) == focus.key:
                 return candidate
         return focus.label
 

@@ -50,8 +50,8 @@ from core.scheduler.spec import (
 )
 from core.storage.schedule_state import ScheduleState
 from core.storage.sessions import CHECKPOINT_ENTRIES, SessionStore, sanitize_table_name
-from core.voice.briefing.model import Priority
-from core.voice.briefing.writer import record_push
+from core.channel.inbox import record_push
+from core.storage.channel_inbox import Priority
 from core.util import safe_chunks
 from core.prompts.voice import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership

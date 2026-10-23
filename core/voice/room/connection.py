@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional
 import discord
 from discord.ext import voice_recv
 
-from core.voice import patches
+from core.voice.room import patches
 
 
 def normalize_channel_name(name: str) -> str:

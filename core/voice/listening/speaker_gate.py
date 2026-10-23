@@ -45,8 +45,8 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 import numpy as np
 
 from core.storage.speaker_gate_log import Effect, GateLog, GateRecord, Mode
-from core.voice import settings
-from core.voice.listening.utterance import BYTES_PER_MS, SAMPLE_RATE, Utterance
+from core.voice.foundation import settings
+from core.voice.foundation.utterance import BYTES_PER_MS, SAMPLE_RATE, Utterance
 
 # --- features: 80-dim log mel fbank, Kaldi-compatible -----------------------------
 # What WeSpeaker was trained on: 25 ms frames every 10 ms, a Hamming window, no

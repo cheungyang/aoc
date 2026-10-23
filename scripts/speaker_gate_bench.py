@@ -29,7 +29,7 @@ if PROJECT_ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from core.voice import settings  # noqa: E402
+from core.voice.foundation import settings  # noqa: E402
 from core.voice.listening import speaker_gate  # noqa: E402
 
 DURATIONS_S = (1.0, 1.5, 2.0, 5.0)

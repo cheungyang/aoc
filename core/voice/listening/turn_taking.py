@@ -15,7 +15,7 @@ The live transcriber supplies the text while the user is still talking:
 import re
 from typing import Iterable, List, Optional
 
-from core.voice.settings import (
+from core.voice.foundation.settings import (
     BARGE_IN_MIN_WORDS,
     END_OF_TURN_COMPLETE_MS,
     END_OF_TURN_CONTINUING_MS,

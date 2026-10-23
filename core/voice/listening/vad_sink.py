@@ -9,9 +9,9 @@ import numpy as np
 import onnxruntime as ort
 from discord.ext import voice_recv
 
-from core.voice.settings import STT_EARLY_END_MS
+from core.voice.foundation.settings import STT_EARLY_END_MS
 from core.voice.listening.turn_taking import end_of_turn_ms
-from core.voice.listening.utterance import Utterance
+from core.voice.foundation.utterance import Utterance
 
 WINDOW_SAMPLES = 576  # 36 ms at 16 kHz: Silero VAD v6's window
 WINDOW_MS = 36

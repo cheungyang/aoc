@@ -4,7 +4,7 @@ import wave
 
 import numpy as np
 
-from core.voice.listening.utterance import BYTES_PER_MS, Transcript, Utterance, pcm_to_wav
+from core.voice.foundation.utterance import BYTES_PER_MS, Transcript, Utterance, pcm_to_wav
 
 
 def test_utterances_get_distinct_ids():

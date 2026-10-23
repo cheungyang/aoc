@@ -12,22 +12,26 @@ deterministic fallback and a note under it (missing_speech.py). Fixed lines
 (switching who you're talking to) go through `say`. Every method that would make a sound takes
 an `is_current` check, so a turn that was interrupted or superseded goes
 quiet.
+
+The text lane writes into a `TextOutput` the voice room is handed (the
+Discord runner's stream buffer): voice never renders a channel itself.
 """
 import asyncio
 import os
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 import discord
 
 from core.runtime.foundation import events
-from core.voice import settings
+from core.runtime.observability.turn_trace import Stage
 from core.voice.engines.tts import TTSEngine, Voice, agent_voice
-from . import missing_speech
-from .blurp_generator import BlurpGenerator
-from .pcm_speaker import PCMSpeaker
-from .speech_router import BLOCK_END, SpeechTextRouter
-from .speech_util import speakable
-from .voice_stream import VoiceStream
+from core.voice.foundation import settings
+from core.voice.speech import missing_speech
+from core.voice.speech.blurp_generator import BlurpGenerator
+from core.voice.speech.pcm_speaker import PCMSpeaker
+from core.voice.speech.speech_router import BLOCK_END, SpeechTextRouter
+from core.voice.speech.speech_util import speakable
+from core.voice.speech.voice_stream import VoiceStream
 
 # How long a finished turn's trace waits for its first audio to start playing
 # before it is recorded anyway (audio can queue behind earlier speech).
@@ -37,6 +41,20 @@ FIRST_AUDIO_WAIT_S = 15.0
 ERROR_LINE = "Sorry, something went wrong. The details are in the channel."
 
 IsCurrent = Callable[[], bool]
+
+
+class TextOutput(Protocol):
+    """Where the text lane writes the reply: the focus's text channel, streamed."""
+
+    async def append_token(self, token: str) -> None:
+        """The next piece of the reply, as the agent writes it."""
+
+    async def finalize(self, final_text: str, response: Any = None) -> None:
+        """The reply is complete: its final text, and the parsed response."""
+
+
+# channel -> the TextOutput writing into it (the Discord runner passes DiscordStreamBuffer).
+TextOutputFactory = Callable[[Any], TextOutput]
 
 
 def speech_of(response) -> Optional[str]:
@@ -60,7 +78,7 @@ class TurnSpeech:
         if self.heard:
             return
         self.heard = True
-        self.trace.mark("audio_start")
+        self.trace.mark(Stage.AUDIO_START)
         if self._finish is not None:
             self._run_finish()
 
@@ -90,11 +108,12 @@ class TurnSpeech:
 
 
 class ReplyStreamer:
-    def __init__(self, agent_id: str, config: dict, audio, connection):
+    def __init__(self, agent_id: str, config: dict, audio, connection, text_output: TextOutputFactory):
         self.agent_id = agent_id
         self.config = config
         self.audio = audio  # the AudioStreamQueue
         self.connection = connection
+        self.text_output = text_output
         self.tts = TTSEngine()
 
     def _log(self, message: str) -> None:
@@ -126,7 +145,7 @@ class ReplyStreamer:
 
     async def _open(self, voice: Voice, speech: Optional[TurnSpeech] = None):
         """Starts a stretch of speech in `voice`: a TTS stream into a speaker queued to play."""
-        on_audio = (lambda: speech.trace.mark("tts_first_byte")) if speech else None
+        on_audio = (lambda: speech.trace.mark(Stage.TTS_FIRST_BYTE)) if speech else None
         speaker = PCMSpeaker(asyncio.get_running_loop(), on_audio=on_audio)
         speaker.stream = await self.tts.open(voice, speaker)
         if speech is not None:
@@ -156,8 +175,6 @@ class ReplyStreamer:
         first, leaving the words unanswered. `on_final` gets what the user
         hears: the reply's speech, or its text when it came without any.
         """
-        from core.channel.discord.stream_buffer import DiscordStreamBuffer
-
         # Mirror the user's words to the shared text channel without holding
         # up the agent: only the text lane waits for it, so the transcript
         # still lands above the reply.
@@ -167,7 +184,7 @@ class ReplyStreamer:
 
         trace = speech.trace
         router = SpeechTextRouter()
-        text_buffer = DiscordStreamBuffer(channel, edit_interval=1.5)
+        text_buffer = self.text_output(channel)
         text_lane: asyncio.Queue = asyncio.Queue()
         speech_lane: asyncio.Queue = asyncio.Queue()
 
@@ -185,7 +202,7 @@ class ReplyStreamer:
         speaker = you_asked  # whose reply is heard: a delegate's, once it streams
         replied, response, final_text, failed = False, None, "", False
         try:
-            trace.mark("agent_start")
+            trace.mark(Stage.AGENT_START)
             # Stream agent execution events (tokens, tool calls, and the final response)
             async for event in agent.execute_stream(transcript, session=session):
                 if not is_current():
@@ -210,7 +227,7 @@ class ReplyStreamer:
                         text_lane.put_nowait(("token", token))
                         failed = failed or bool(event.get("is_error"))
                         continue
-                    trace.mark("first_token")
+                    trace.mark(Stage.FIRST_TOKEN)
                     speaker = event.get("agent_id") or speaker
                     route(*router.feed(token))
 
@@ -334,7 +351,7 @@ class _Stretch:
             if self.stream is None:
                 self.stream = await self._reply._open(voice, self._speech)
                 self.voice = voice
-            self._speech.trace.mark("first_chunk")
+            self._speech.trace.mark(Stage.FIRST_CHUNK)
             self._reply._log(f"🔊 {voice.name.rsplit('-', 1)[-1]}: '{chunk[:60]}'")
             self.stream.send(chunk + " ")
 

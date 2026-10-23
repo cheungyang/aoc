@@ -116,7 +116,7 @@ You MUST use this exact JSON structure:
 - The `model` field names a **tier**, never a version string like `gemini-3.5-flash-lite` or an on-device build id. This holds for every provider. Valid tiers are defined per provider in `core/util/models.py`; omit the field to accept the default.
 - The `provider` field selects where the model runs. Omit it for Gemini. `"local"` routes the agent to the on-device server configured by `LOCAL_LLM_BASE_URL`. Both providers answer the same tier names, so moving an agent on-device is adding this one key and nothing else.
 - `thinking` (optional, rare) overrides the code defaults for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
-- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Every agent the user talks to has one, and no two agents share a voice (check the other `agent.json` files); only internal workers omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/settings.py`, never in agent.json.
+- `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/voice/foundation/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Every agent the user talks to has one, and no two agents share a voice (check the other `agent.json` files); only internal workers omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/voice/foundation/settings.py`, never in agent.json.
 
 *Before setting `"provider": "local"`, know two things:*
 - **The server handles one request at a time.** Local agents queue behind each other, so keep the local roster small and prefer low-volume, single-purpose agents.
@@ -152,6 +152,6 @@ Once the files are written, reply in plain Markdown, never XML (your reply is sh
 **Memory Trigger**: End with a `<system_memory_log>` block recording what you learned about agent design, context size or the user's preferences.
 
 ### Required Tools
-- `filesystem`: to read reference files (the tiers in `core/util/models.py`, the voice catalog in `core/voice/settings.py`) and write the files in `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
+- `filesystem`: to read reference files (the tiers in `core/util/models.py`, the voice catalog in `core/voice/foundation/settings.py`) and write the files in `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
 - `set_thinking`: high for the classification step.
 - `agent_lint`: to check the new agent's files, grants and budgets before the final report.

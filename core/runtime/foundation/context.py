@@ -2,7 +2,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Optional, Union
 import contextvars
-import sys
+
+from core.channel.names import is_thread
 
 _CONTEXT_SECRET = object()
 
@@ -86,29 +87,6 @@ def require_context() -> "ExecutionContext":
             "or an explicit `current_execution_context` scope."
         )
     return ctx
-
-
-def _is_thread(channel: Any) -> bool:
-    """Checks whether a channel object represents a thread without hard import."""
-    if channel is None or isinstance(channel, str):
-        return False
-    if getattr(channel, "is_thread", False) is True:
-        return True
-    discord_mod = sys.modules.get("discord")
-    if discord_mod:
-        thread_cls = getattr(discord_mod, "Thread", None)
-        if thread_cls and isinstance(channel, thread_cls):
-            return True
-        text_cls = getattr(discord_mod, "TextChannel", None)
-        if text_cls and isinstance(channel, text_cls):
-            return False
-    spec = getattr(channel, "_spec_class", None)
-    if spec and "Thread" in getattr(spec, "__name__", ""):
-        return True
-    cls_name = getattr(type(channel), "__name__", "")
-    if "Thread" in cls_name:
-        return True
-    return False
 
 
 @dataclass(frozen=True)
@@ -271,7 +249,7 @@ class ExecutionContext:
             return ""
         if isinstance(self.channel, str):
             return self.channel.lstrip("#")
-        if _is_thread(self.channel):
+        if is_thread(self.channel):
             parent = getattr(self.channel, "parent", None)
             if parent is not None and hasattr(parent, "name"):
                 return str(parent.name).lstrip("#")
@@ -289,7 +267,7 @@ class ExecutionContext:
         """Dynamically derives thread id if channel is a thread/subchannel."""
         if self.channel is None or isinstance(self.channel, str):
             return None
-        if _is_thread(self.channel):
+        if is_thread(self.channel):
             if hasattr(self.channel, "id"):
                 return str(getattr(self.channel, "id", ""))
             if hasattr(self.channel, "thread_id"):

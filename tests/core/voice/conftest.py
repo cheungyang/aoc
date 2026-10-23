@@ -14,7 +14,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_live_stt(monkeypatch):
-    from core.voice import settings
+    from core.voice.foundation import settings
     from core.voice.engines import live_stt
 
     async def refuse(*_args, **_kwargs):

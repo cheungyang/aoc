@@ -114,7 +114,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from core.voice.settings import CHIRP3_HD_VOICES, DEFAULT_VOICE, chirp3_voice  # noqa: E402
+from core.voice.foundation.settings import CHIRP3_HD_VOICES, DEFAULT_VOICE, chirp3_voice  # noqa: E402
 
 UTTERANCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_benchmark_utterances.json")
 AGENTS_DIR = os.path.join(PROJECT_ROOT, "agents")

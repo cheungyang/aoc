@@ -5,8 +5,9 @@ import unittest
 from unittest.mock import AsyncMock
 
 from core.voice.room.focus import FocusDirectory
+from core.voice.room.aliases import build_aliases
 from core.voice.room.room_switch import (
-    FocusSwitcher, build_aliases, could_name_a_target, is_where_am_i, match_target, parse_room_request,
+    FocusSwitcher, could_name_a_target, is_where_am_i, match_target, parse_room_request,
 )
 
 TARGETS = build_aliases([

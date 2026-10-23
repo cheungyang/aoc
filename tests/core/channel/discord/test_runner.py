@@ -42,8 +42,8 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
         runner = BotRunner("test_token", "main")
         runner.voice_manager = MagicMock()
-        runner.voice_manager.connection.channel = None
-        runner.voice_manager.connection.join = AsyncMock(return_value=joined)
+        runner.voice_manager.room.return_value = None
+        runner.voice_manager.join = AsyncMock(return_value=joined)
         runner.voice_manager.welcome = AsyncMock()
         room = MagicMock()
         room.name = "aoc-voice"
@@ -60,7 +60,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         member = MagicMock(bot=False, display_name="Sam")
         await runner.on_voice_state_update(member, MagicMock(channel=None), MagicMock(channel=room))
 
-        runner.voice_manager.connection.join.assert_awaited_once_with("aoc-voice")
+        runner.voice_manager.join.assert_awaited_once_with("aoc-voice")
         runner.voice_manager.welcome.assert_awaited_once()
 
     @patch('core.channel.discord.runner.commands.Bot')
@@ -69,12 +69,12 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         """Muting or deafening in the channel you're in keeps the conversation going."""
         mock_bot_class.return_value = MagicMock()
         runner, room = self._voice_runner(mock_loader_class)
-        runner.voice_manager.connection.channel = room
+        runner.voice_manager.room.return_value = room
 
         member = MagicMock(bot=False, display_name="Sam")
         await runner.on_voice_state_update(member, MagicMock(channel=room), MagicMock(channel=room))
 
-        runner.voice_manager.connection.join.assert_not_awaited()
+        runner.voice_manager.join.assert_not_awaited()
         runner.voice_manager.welcome.assert_not_awaited()
 
     @patch('core.channel.discord.runner.commands.Bot')
@@ -99,7 +99,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         member = MagicMock(bot=False, display_name="Sam")
         await runner.on_voice_state_update(member, MagicMock(channel=None), MagicMock(channel=other))
 
-        runner.voice_manager.connection.join.assert_not_awaited()
+        runner.voice_manager.join.assert_not_awaited()
         runner.voice_manager.welcome.assert_not_awaited()
 
     @patch('core.channel.discord.runner.commands.Bot')
@@ -136,7 +136,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader_class.return_value = mock_loader
 
         runner = BotRunner("test_token", "main")
-        runner.voice_manager.connection.join = AsyncMock(return_value=True)
+        runner.voice_manager.join = AsyncMock(return_value=True)
         
         with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
             await runner.on_ready()
@@ -145,7 +145,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         
         # Verify change_presence was called
         mock_bot.change_presence.assert_called_once()
-        runner.voice_manager.connection.join.assert_called_with("general-voice")
+        runner.voice_manager.join.assert_called_with("general-voice")
 
     @patch('core.channel.discord.runner.commands.Bot')
     @patch('core.channel.discord.runner.AgentsLoader')
@@ -172,14 +172,14 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_loader_class.return_value = mock_loader
 
         runner = BotRunner("test_token", "main")
-        runner.voice_manager.connection.join = AsyncMock(return_value=True)
+        runner.voice_manager.join = AsyncMock(return_value=True)
         
         with patch.object(asyncio, "create_task") as mock_create_task, patch("asyncio.sleep", AsyncMock()):
             await runner.on_ready()
             mock_create_task.assert_called_once()
             await mock_create_task.call_args[0][0]
         
-        runner.voice_manager.connection.join.assert_called_with("day-planning-voice")
+        runner.voice_manager.join.assert_called_with("day-planning-voice")
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')
@@ -721,7 +721,7 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
 
     async def test_posting_finishes_the_row_and_the_reply_is_a_candidate(self, mock_bot_class, mock_loader_class,
                                                                           mark_read, record_reply):
-        from core.voice.briefing.model import Via
+        from core.storage.channel_inbox import Via
         runner, message = self._runner(mock_bot_class, mock_loader_class)
         with patch('core.channel.discord.stream_buffer.DiscordStreamBuffer.finalize', new=AsyncMock()):
             await runner.on_message(message)
@@ -758,7 +758,7 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
     async def test_a_check_mark_finishes_the_posts_row(self, mock_bot_class, mock_loader_class, mark_read, record_reply):
         import datetime
         import discord
-        from core.voice.briefing.model import Via
+        from core.storage.channel_inbox import Via
         runner, message = self._runner(mock_bot_class, mock_loader_class)
         runner.bot.get_channel.return_value = message.channel
         posted = datetime.datetime(2026, 10, 22, 6, 0, tzinfo=datetime.timezone.utc)

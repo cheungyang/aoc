@@ -14,7 +14,7 @@ ENROLL_TIMEOUT_S without a word.
 import time
 from typing import Any, Callable, List, Sequence
 
-from core.voice.listening.utterance import Utterance
+from core.voice.foundation.utterance import Utterance
 
 # Phonetically varied, and like what you say to the agents anyway.
 SENTENCES = (

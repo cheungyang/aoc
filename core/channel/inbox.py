@@ -1,5 +1,10 @@
 """Writing the channel inbox: pushes, replies and read signals.
 
+Every channel writes it: the Discord runner (replies, read signals), the
+scheduler (pushes) and voice (heard, speech versions). Voice briefings read
+it (core/voice/briefing/). The rows and the table are
+core/storage/channel_inbox.py.
+
 Nothing here raises. As with `record_channel_post`, losing an inbox write is
 better than failing the run, reply or reaction that caused it.
 
@@ -12,24 +17,24 @@ better than failing the run, reply or reaction that caused it.
                    something, else DONE
     store_speech   the speech writer's result for a row
 
-A row's agent is whoever answers an untagged message in its channel: the
-voice focus target of Part 1.
+A row's agent is whoever answers an untagged message in its channel
+(`routing.answering_agent`): the voice focus target of Part 1.
 """
 import asyncio
 import sys
 import time
+from dataclasses import replace
 from typing import Any, Callable, List, Optional, Tuple
 
-from core.voice.briefing.model import (
-    LATE_REPLY_S,
-    InboxRow,
-    Priority,
-    Source,
-    Status,
-    Via,
-    excerpt_of,
-)
-from core.storage.channel_inbox import InboxStore
+from core.channel import names
+from core.loaders import agents_loader
+from core.runtime.foundation import routing
+from core.storage.channel_inbox import InboxRow, InboxStore, Priority, Source, Status, Via
+
+# A reply that arrives this long after your message has likely missed you.
+LATE_REPLY_S = 10 * 60
+# How much of a post the speech writer gets to read.
+MAX_EXCERPT_CHARS = 6000
 
 # A ✅ counts for a row if the message it's on is no older than this before
 # the row's post: a run posts while it works, and its row is written at the end.
@@ -83,33 +88,26 @@ def _notify(row: InboxRow) -> None:
 
 # --- whose row ----------------------------------------------------------------------
 
-def channel_name(channel: Any) -> Optional[str]:
+def inbox_channel(channel: Any) -> Optional[str]:
     """The inbox key for a channel object or name. None for a thread (out of
     scope, as in Part 1) or for nothing."""
     if channel is None:
         return None
-    if not isinstance(channel, str):
-        from core.runtime.foundation.context import _is_thread
-        if _is_thread(channel):
-            return None
-    from core.runtime.history.channel_posts import _channel_name
-    name = _channel_name(channel).strip().lower()
+    if not isinstance(channel, str) and names.is_thread(channel):
+        return None
+    name = names.channel_name(channel).strip().lower()
     return name or None
 
 
 def answering_agent_for(name: str, loader: Any = None, fallback: Optional[str] = None) -> Optional[str]:
     """Who answers an untagged message in channel `name`: routed as the voice
     host routes it, else as its first host does. `fallback` when nobody hosts it."""
-    from core.loaders.agents_loader import AgentsLoader
-    from core.runtime.history.channel_posts import channel_hosts_for
-    from core.voice.room.focus import answering_agent
-
-    loader = loader or AgentsLoader()
-    hosts = channel_hosts_for(name, loader)
+    loader = loader or agents_loader.AgentsLoader()
+    hosts = routing.channel_hosts_for(name, loader)
     if not hosts:
         return fallback
     host = next((h for h in hosts if _voice_enabled(loader, h)), hosts[0])
-    return answering_agent(host, name, loader)
+    return routing.answering_agent(host, name, loader)
 
 
 def _voice_enabled(loader: Any, agent_id: str) -> bool:
@@ -130,7 +128,7 @@ def record_push(channel: Any, text: str, *, schedule_id: str, agent_id: str,
     """
     try:
         priority = Priority.parse(priority)
-        name = channel_name(channel)
+        name = inbox_channel(channel)
         if priority is Priority.IGNORE or not name or not (text or "").strip():
             return None
         row = InboxRow(
@@ -163,7 +161,7 @@ def record_reply(channel: Any, text: str, *, asked_at: Optional[float], agent_id
     before then drops it (`mark_read`). Voice turns never come here: you heard them.
     """
     try:
-        name = channel_name(channel)
+        name = inbox_channel(channel)
         if not name or not (text or "").strip():
             return None
         now = time.time() if now is None else now
@@ -178,7 +176,7 @@ def record_reply(channel: Any, text: str, *, asked_at: Optional[float], agent_id
         )
         InboxStore().put(row)
     except Exception as e:
-        _log(f"Could not record a reply in #{channel_name(channel) if channel else '?'}: {e}")
+        _log(f"Could not record a reply in #{inbox_channel(channel) if channel else '?'}: {e}")
         return None
     _notify(row)
     return row
@@ -195,7 +193,7 @@ def mark_read(channel: Any, via: Via, *, message_time: Optional[float] = None) -
     changes nothing.
     """
     try:
-        name = channel_name(channel)
+        name = inbox_channel(channel)
         if not name:
             return False
         posted_before = message_time + REACTION_WINDOW_S if message_time is not None else None
@@ -223,8 +221,6 @@ def store_speech(row: InboxRow, speech: str, question: Optional[str]) -> Optiona
     """The speech writer's result for `row`. A candidate that asks nothing is
     dropped (DONE); everything else keeps its status. None if the row was
     replaced or finished meanwhile."""
-    from dataclasses import replace
-
     speech = (speech or "").strip()
     question = (question or "").strip() or None
     if not speech:
@@ -242,3 +238,13 @@ def store_speech(row: InboxRow, speech: str, question: Optional[str]) -> Optiona
     except Exception as e:
         _log(f"Could not store the speech version for #{row.channel}: {e}")
         return None
+
+
+# --- the part of a post the speech writer reads -------------------------------------
+
+def excerpt_of(text: str) -> str:
+    """The part of a post the speech writer reads."""
+    body = (text or "").strip()
+    if len(body) > MAX_EXCERPT_CHARS:
+        body = body[:MAX_EXCERPT_CHARS].rstrip() + " [...]"
+    return body

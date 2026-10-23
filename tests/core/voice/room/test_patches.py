@@ -7,16 +7,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord.opus
 
 import av  # noqa: F401 -- on macOS, discord.py finds libopus only once PyAV (which bundles it) is loaded
-from core.voice import patches
+from core.voice.room import patches
 
 patches.apply()  # as the voice room does before it connects
 
 
 def test_importing_core_voice_patches_nothing():
-    """Only the voice room's join applies the patches: a module that imports
-    something light from core.voice (the scheduler imports the briefing's
-    writer) loads neither libopus nor voice_recv."""
-    code = ("import sys; import core.voice, core.voice.briefing.writer, core.storage.channel_inbox; "
+    """Only the voice room's join applies the patches: importing the voice
+    package, its settings, or the channel inbox the scheduler writes loads
+    neither libopus nor voice_recv."""
+    code = ("import sys; import core.voice, core.voice.room, core.voice.foundation.settings, core.channel.inbox, "
+            "core.storage.channel_inbox; "
             "print(sorted(m for m in ('discord.ext.voice_recv', 'core.voice.voice_manager') if m in sys.modules))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "[]"
@@ -121,7 +122,7 @@ async def test_patch_discord_voice_gateway_session_description():
     assert msg["d"]["dave_protocol_version"] == 0
 
 def test_load_libopus():
-    from core.voice.patches import _load_libopus
+    from core.voice.room.patches import _load_libopus
     import discord.opus
     _load_libopus()
     assert discord.opus.is_loaded() is True
@@ -132,5 +133,5 @@ def test_docker_image_installs_libopus():
     dependency of chromium, and voice went deaf when the browser left the image."""
     import re
     from pathlib import Path
-    dockerfile = (Path(__file__).resolve().parents[3] / "Dockerfile").read_text()
+    dockerfile = (Path(__file__).resolve().parents[4] / "Dockerfile").read_text()
     assert re.search(r"^\s*libopus0\b", dockerfile, re.MULTILINE)

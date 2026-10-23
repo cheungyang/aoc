@@ -16,7 +16,7 @@ handles: Discord messages, scheduled jobs, `agent_call` delegations, and
 > Because this graph is shared by all agents, the router must stay **inert**
 > for specialists. Any change here has to keep an agent that does not hold
 > `agent_call`, or does not host the channel, on the concierge path — see
-> [routing_enabled](../../core/runtime/foundation/routing.py#L134-L152).
+> [routing_enabled](../../core/runtime/foundation/routing.py#L136-L154).
 
 ## Workflow
 
@@ -61,7 +61,7 @@ route and stashes it for the conditional edge. Synchronous and model-free.
 - **Inputs from state:** `messages` (only the last message's `content` is
   inspected, as `latest`).
 - **Other inputs:** the ambient
-  [`ExecutionContext`](../../core/runtime/foundation/context.py#L115-L158)
+  [`ExecutionContext`](../../core/runtime/foundation/context.py#L93-L136)
   via `try_context()` (for `agent_id` and `channel_name`), the agent config
   captured at build time, and a fresh
   [`AgentsLoader`](../../core/loaders/agents_loader.py#L77-L124)
@@ -134,8 +134,8 @@ where voice and channel posts use it too, and is deliberately pure: `decide()` i
 `(prompt, agent_id, channel_name, agent_config, loader)` and performs no work
 and no network I/O, so the routing table is something a test can pin.
 
-[decide](../../core/runtime/foundation/routing.py#L155-L178) returns a
-frozen [RouteDecision](../../core/runtime/foundation/routing.py#L42-L57)
+[decide](../../core/runtime/foundation/routing.py#L157-L180) returns a
+frozen [RouteDecision](../../core/runtime/foundation/routing.py#L44-L59)
 (`target`, `agent_id`, `prompt`, `reason`; `is_direct` is a convenience
 property). `reason` exists for logs and tests: when routing is wrong, the
 useful question is *which rule fired*.
@@ -151,7 +151,7 @@ useful question is *which rule fired*.
 
 ### `routing_enabled`
 
-[routing_enabled](../../core/runtime/foundation/routing.py#L134-L152)
+[routing_enabled](../../core/runtime/foundation/routing.py#L136-L154)
 requires all three:
 
 1. a non-empty `agent_id` **and** non-empty `channel_name`;
@@ -172,15 +172,15 @@ has no other eligible agent in it anyway.
 
 The openers that mean "don't route this, answer it here" are read from the
 agent's config under
-[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](../../core/runtime/foundation/routing.py#L39),
+[`PREFIX_CONFIG_KEY = "concierge_prefixes"`](../../core/runtime/foundation/routing.py#L41),
 not hard-coded, because which phrases belong there depends on which tools that
 agent holds (`kill` earns its place only because `main` has `job_kill`) — and
 that is config, not logic.
-[concierge_prefixes](../../core/runtime/foundation/routing.py#L94-L99)
+[concierge_prefixes](../../core/runtime/foundation/routing.py#L96-L101)
 accepts a list or a single string and drops blanks and non-strings.
 
 Two forms, matched by
-[match_concierge_prefix](../../core/runtime/foundation/routing.py#L107-L131)
+[match_concierge_prefix](../../core/runtime/foundation/routing.py#L109-L133)
 (case-insensitive, in declaration order, first match wins):
 
 | Form | Example | Anchoring | Prompt handed to the concierge |
@@ -194,9 +194,9 @@ silently steals ordinary messages from the specialist, which is worse than
 missing a few.
 
 Prompt handling is multimodal-safe:
-[leading_text](../../core/runtime/foundation/routing.py#L60-L74) reads only
+[leading_text](../../core/runtime/foundation/routing.py#L62-L76) reads only
 the leading text part of a content-part list, and
-[_replace_leading_text](../../core/runtime/foundation/routing.py#L77-L91)
+[_replace_leading_text](../../core/runtime/foundation/routing.py#L79-L93)
 rewrites that part while preserving attachments.
 
 ### Resolving the target agent
@@ -257,7 +257,7 @@ return workflow.compile(checkpointer=checkpointer)                # outer graph 
 > levels. `GraphBuilder` passes a
 > [`SqliteCheckpointer`](../../core/runtime/graph_builder.py#L190)
 > in, and the thread id comes from
-> [`ExecutionContext.get_session_thread_id()`](../../core/runtime/foundation/context.py#L367-L379).
+> [`ExecutionContext.get_session_thread_id()`](../../core/runtime/foundation/context.py#L345-L357).
 
 A consequence of this design is that the `direct_call` node has to write the
 human-readable session log itself (`_record_turn`), since the checkpoint is

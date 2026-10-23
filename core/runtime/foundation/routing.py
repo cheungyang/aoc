@@ -7,6 +7,8 @@ round-trips and can still be wrong. This module answers it from configuration.
 
 Nothing here performs work or touches the network. `decide()` is a pure function
 of (prompt, context, config) so the routing table is something a test can pin.
+`channel_hosts_for()` and `answering_agent()` answer the same question for a
+channel rather than a message, for the voice focus and the channel inbox.
 """
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, Union
@@ -176,3 +178,35 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
         prompt=prompt,
         reason=f"{len(eligible)} eligible agents in #{channel_name}",
     )
+
+
+# --- who answers a channel, for the voice focus and the channel inbox ---------------
+
+def channel_hosts_for(channel_name: str, loader: Any) -> List[str]:
+    """Agent ids whose `channel_hosts` include `channel_name`, in loader order."""
+    target = str(channel_name or "").lstrip("#").lower()
+    if not target:
+        return []
+    hosts = []
+    for agent_id in loader.list_agent_ids():
+        config = loader.get_agent_config(agent_id) or {}
+        if target in [str(h).lower() for h in (config.get("channel_hosts") or [])]:
+            hosts.append(agent_id)
+    return hosts
+
+
+def answering_agent(host_id: str, channel: str, loader: Any) -> str:
+    """Who answers an untagged message in `channel` hosted by `host_id`.
+
+    The policy typed messages follow (`decide`), so voice and the channel inbox
+    can't drift from them: the sole eligible agent, else the host itself (its
+    concierge).
+    """
+    decision = decide(
+        prompt="",
+        agent_id=host_id,
+        channel_name=channel,
+        agent_config=loader.get_agent_config(host_id) or {},
+        loader=loader,
+    )
+    return decision.agent_id if decision.is_direct and decision.agent_id else host_id

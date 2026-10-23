@@ -3,7 +3,7 @@ import unittest
 
 from core.storage.channel_inbox import InboxStore
 from core.voice.briefing.commands import USAGE, handle_inbox_command
-from core.voice.briefing.model import InboxRow, Priority, Source, Status
+from core.storage.channel_inbox import InboxRow, Priority, Source, Status
 
 NOW = 1_000_000.0
 

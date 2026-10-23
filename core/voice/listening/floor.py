@@ -21,9 +21,9 @@ import time
 from typing import Dict, List, Optional, Protocol
 
 from core.storage.speaker_gate_log import Effect
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.listening.turn_taking import confirms_barge_in, is_backchannel
-from core.voice.listening.utterance import Utterance
+from core.voice.foundation.utterance import Utterance
 
 
 class Turns(Protocol):

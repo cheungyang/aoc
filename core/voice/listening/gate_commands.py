@@ -19,7 +19,7 @@ import time
 from typing import Any, Dict, Optional
 
 from core.storage.speaker_gate_log import Effect, GateRecord, Label
-from core.voice import settings
+from core.voice.foundation import settings
 
 REVIEW_HOURS = 24
 REVIEW_LIMIT = 10
