@@ -7,8 +7,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from core.runtime.agent import Agent
-from core.runtime.session_manager import SessionManager
-from core.runtime.script_executor_agent import ScriptExecutorAgent
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.script_executor import ScriptExecutorAgent
 from tools.graph_call import graph_call
 from scripts.verify_langsmith import verify_langsmith
 

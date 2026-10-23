@@ -1,22 +1,17 @@
-"""Turn-taking rules: adaptive end of turn, barge-in confirmation, backchannels, stops."""
+"""Turn-taking rules: adaptive end of turn, barge-in confirmation, backchannels.
+
+The stop and wait phrases themselves are tested with their commands
+(tests/core/runtime/commands/spoken/test_stop.py).
+"""
 import pytest
 
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.listening.turn_taking import (
-    bare_stop,
     confirms_barge_in,
     end_of_turn_ms,
     is_backchannel,
-    is_stop_request,
     merge_transcripts,
-    words,
 )
-
-
-def test_words_lowercases_and_splits_hyphens():
-    assert words("Mm-hmm, OK.") == ["mm", "hmm", "ok"]
-    assert words("") == []
-    assert words(None) == []
 
 
 class TestEndOfTurn:
@@ -76,11 +71,7 @@ class TestBackchannel:
 class TestBargeIn:
     @pytest.mark.parametrize("text", ["stop", "Wait", "hold on", "Never mind", "okay stop"])
     def test_a_stop_phrase_interrupts_however_short(self, text):
-        assert is_stop_request(text)
         assert confirms_barge_in(text)
-
-    def test_a_stop_phrase_late_in_a_sentence_is_not_a_stop_request(self):
-        assert not is_stop_request("I want to know when the bus will stop")
 
     def test_two_real_words_interrupt(self):
         assert confirms_barge_in("Actually Friday")
@@ -94,23 +85,6 @@ class TestBargeIn:
         assert not confirms_barge_in("Yeah sure")
         assert not confirms_barge_in("Mm-hmm")
         assert not confirms_barge_in("Got it")
-
-
-class TestBareStop:
-    @pytest.mark.parametrize("text", ["Stop.", "Stop, stop.", "Okay, stop talking.", "Never mind.",
-                                      "Cancel that.", "No, no.", "Forget it.", "Enough."])
-    def test_stop_drops_the_request(self, text):
-        assert bare_stop(text) == "cancel"
-
-    @pytest.mark.parametrize("text", ["Wait.", "Hold on.", "Wait a second.", "Hang on a sec.",
-                                      "Hold up, please."])
-    def test_wait_keeps_the_request(self, text):
-        assert bare_stop(text) == "hold"
-
-    @pytest.mark.parametrize("text", ["Wait, make it Friday.", "Stop the timer.", "Wait, what?",
-                                      "Hold on, what about Thursday?", "Okay.", ""])
-    def test_anything_more_is_a_request(self, text):
-        assert bare_stop(text) is None
 
 
 def test_merge_transcripts_joins_in_order_and_skips_empty_parts():

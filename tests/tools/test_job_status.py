@@ -15,7 +15,7 @@ class TestJobStatusTool(unittest.TestCase):
     def test_job_status_not_found(self, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
-        mock_manager._jobs = {}
+        mock_manager.job.return_value = None
         
         result = job_status.func(job_id="unknown_job")
         
@@ -30,7 +30,7 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_job = MagicMock()
         mock_job.session_id = "session_123"
-        mock_manager._jobs = {"test_job_123": mock_job}
+        mock_manager.job.side_effect = {"test_job_123": mock_job}.get
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store
@@ -63,7 +63,7 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_job = MagicMock()
         mock_job.session_id = "session_123"
-        mock_manager._jobs = {"test_job_123": mock_job}
+        mock_manager.job.side_effect = {"test_job_123": mock_job}.get
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store
@@ -94,7 +94,7 @@ class TestJobStatusTool(unittest.TestCase):
         
         mock_job = MagicMock()
         mock_job.session_id = "session_123"
-        mock_manager._jobs = {"test_job_123": mock_job}
+        mock_manager.job.side_effect = {"test_job_123": mock_job}.get
         
         mock_session_store = MagicMock()
         mock_session_store_class.return_value = mock_session_store

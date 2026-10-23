@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from core.storage.speaker_gate_log import Effect, GateRecord, Label, Mode
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.listening import gate_commands as gc
 from core.voice.listening import speaker_gate as sg
 from tests.helpers import FAKE_VOICEPRINT, FakeSpeakerModel

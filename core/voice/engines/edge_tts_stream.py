@@ -8,7 +8,7 @@ to start, but played the same way. An agent keeps its voice's gender
 """
 import asyncio
 
-from core.voice import settings
+from core.voice.foundation import settings
 
 
 class EdgeStream:

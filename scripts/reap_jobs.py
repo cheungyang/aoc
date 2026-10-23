@@ -22,7 +22,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.runtime.job_manager import DEFAULT_STALE_SECONDS, JobManager
+from core.runtime.foundation.jobs import DEFAULT_STALE_SECONDS, JobManager
 
 
 def has_work(ctx):

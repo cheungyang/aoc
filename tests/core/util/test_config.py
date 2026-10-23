@@ -230,7 +230,7 @@ class TestConfig(unittest.TestCase):
         """There is deliberately no `local_llm_api_key`.
 
         The server does not authenticate, and a knob here would invite someone
-        to point the paid OPENAI_API_KEY at a local socket. graph_builder passes
+        to point the paid OPENAI_API_KEY at a local socket. GraphBuilder passes
         a placeholder constant instead, which cannot be misconfigured.
         """
         self.assertFalse(hasattr(self.config, "local_llm_api_key"))

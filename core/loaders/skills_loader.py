@@ -77,7 +77,7 @@ class SkillsLoader:
 
     @staticmethod
     def _require_ctx(ctx, caller: str):
-        from core.runtime.execution_context import ExecutionContext
+        from core.runtime.foundation.context import ExecutionContext
         if not isinstance(ctx, ExecutionContext):
             raise TypeError(
                 f"SkillsLoader.{caller}() expects an ExecutionContext, got {type(ctx).__name__}."

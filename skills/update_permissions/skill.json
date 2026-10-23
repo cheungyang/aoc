@@ -8,7 +8,7 @@
       "agents": ["@read", "overwrite"],
       "skills": ["@read", "overwrite"],
       "tools": ["@read"],
-      "tests/graphs/main/test_router.py": ["@read", "replace_block"]
+      "tests/core/runtime/foundation/test_routing.py": ["@read", "replace_block"]
     },
     "agent_lint": {}
   }

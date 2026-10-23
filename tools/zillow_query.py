@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 import requests
 
 from core.util import format_tool_response
-from core.runtime.execution_context import try_context
+from core.runtime.foundation.context import try_context
 from core.util.config import Config
 
 

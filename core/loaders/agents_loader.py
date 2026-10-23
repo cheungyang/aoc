@@ -1,9 +1,21 @@
 import os
 import json
 import time
+from typing import Any, Callable, Optional
 from core.knowledge.memory.inject import report_unknown_topics
 from core.loaders.agent_schema import known_skill_ids, validate_agent_config
 from core.loaders.hot_reloader import HotReloader
+
+# What builds an agent from its config: the runtime's `build_agent`, plugged in
+# by core/runtime/bootstrap.py, since the loaders never import the runtime.
+_agent_factory: Optional[Callable[[str, dict], Any]] = None
+
+
+def set_agent_factory(factory: Optional[Callable[[str, dict], Any]]) -> None:
+    """Plugs in what `get_agent` builds agents with (core/runtime/bootstrap.py)."""
+    global _agent_factory
+    _agent_factory = factory
+
 
 class AgentsLoader:
     _instance = None
@@ -140,13 +152,9 @@ class AgentsLoader:
         config = self._agent_configs.get(agent_id)
         if not config:
             raise ValueError(f"Agent configuration not found for: {agent_id}")
-                        
-        if agent_id == "script-executor":
-            from core.runtime.script_executor_agent import ScriptExecutorAgent
-            agent = ScriptExecutorAgent(agent_id, config)
-        else:
-            from core.runtime.agent import Agent
-            agent = Agent(agent_id, config)
+        if _agent_factory is None:
+            raise RuntimeError("No agent factory is plugged in: call core.runtime.bootstrap.wire() at startup.")
 
+        agent = _agent_factory(agent_id, config)
         self._agents_cache[agent_id] = agent
         return agent

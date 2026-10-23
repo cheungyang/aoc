@@ -12,8 +12,8 @@ tests that speak, and `FakeSpeakerModel` for tests of the voiceprint gate.
 import re
 from contextlib import contextmanager
 
-from core.runtime.execution_context import current_execution_context
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
 
 
 def make_context(agent_id="test-agent", graph_id=None, source="job", channel=None, stateless=True):
@@ -159,7 +159,7 @@ class FakeSpeakerModel:
     def embed(self, pcm):
         import numpy as np
         from core.voice.listening.speaker_gate import MIN_EMBED_MS
-        from core.voice.listening.utterance import BYTES_PER_MS
+        from core.voice.foundation.utterance import BYTES_PER_MS
 
         ms = len(pcm) // BYTES_PER_MS
         self.embedded.append(ms)

@@ -46,8 +46,9 @@ from core.knowledge.memory.entries import TagsError
 from core.knowledge.memory.inject import memory_topics
 from core.loaders.agents_loader import AgentsLoader
 from core.prompts.memory import CompactionPrompt, DreamPrompt
+from core.runtime import bootstrap
 from core.runtime.delegation import stream_delegate
-from core.runtime.execution_context import surface_scope
+from core.runtime.foundation.context import surface_scope
 from core.scheduler.script_runner import default_timeout
 from core.util.config import Config
 from core.util.models import tier_floor
@@ -514,6 +515,7 @@ async def run_standup(verbose: bool = False, include_all: bool = False):
 
 
 def main(argv=None):
+    bootstrap.wire()
     parser = argparse.ArgumentParser(description="Run the nightly dream standup.")
     parser.add_argument(
         "--dry-run",

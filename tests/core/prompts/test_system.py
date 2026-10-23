@@ -100,8 +100,8 @@ class TestPromptUtil(unittest.TestCase):
         self.assertIn("Discord channel: #software-dev", prompt)
 
     def test_get_channel_prompt_context_var(self):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
         sess = SessionManager.get_session(agent_id="test", source="discord", channel="weekend-planning")
         token = current_execution_context.set(sess)
         try:
@@ -114,8 +114,8 @@ class TestPromptUtil(unittest.TestCase):
     def test_get_channel_prompt_thread(self):
         import discord
         from unittest.mock import MagicMock
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
         mock_thread = MagicMock(spec=discord.Thread)
         mock_thread.id = 999
         mock_thread.name = "sub-topic"
@@ -131,7 +131,7 @@ class TestPromptUtil(unittest.TestCase):
             current_execution_context.reset(token)
 
     def test_get_channel_prompt_empty(self):
-        from core.runtime.execution_context import current_execution_context
+        from core.runtime.foundation.context import current_execution_context
         token = current_execution_context.set(None)
         try:
             prompt = get_channel_prompt()

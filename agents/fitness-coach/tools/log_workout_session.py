@@ -64,7 +64,7 @@ def _log_google_health(writes) -> str:
     # The one call outside core.tooling: google_health's write path takes the
     # ExecutionContext and a ToolsLoader. It moves behind core.tooling with the MCP step (P2).
     from core.loaders.tools_loader import ToolsLoader
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
     from tools.google_health import (
         GoogleHealthClient, GoogleHealthError, GuardRejection, InstructionError, log_workout,
     )

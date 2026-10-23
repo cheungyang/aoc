@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.util.models import TRANSCRIBE_LIVE
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.engines.stt import SpeechRecognizer
-from core.voice.listening.utterance import Utterance
+from core.voice.foundation.utterance import Utterance
 
 
 class FakeSession:

@@ -6,16 +6,20 @@ import time
 import discord
 import base64
 from collections import OrderedDict
+from typing import List
 from discord.ext import commands
 from core.loaders.agents_loader import AgentsLoader
-from core.runtime.session_manager import SessionManager
+from core.runtime.commands.base import ControlContext, TypedContext
+from core.runtime.commands.registry import CONTROL, TYPED
+from core.runtime.foundation import events
+from core.runtime.foundation.sessions import SessionManager
+from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
-from core.util import format_error_message, safe_chunks
+from core.channel.inbox import mark_read, record_reply
+from core.util import format_error_message
 from core.voice.briefing.hook import VoiceBriefing
-from core.voice.briefing.model import Via
-from core.voice.briefing.writer import mark_read, record_reply
-from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS, mark_from_reaction
+from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS
 from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
 
@@ -55,6 +59,32 @@ def append_reply_context(payload, reply_context: str):
     return f"{payload}\n\n{reply_context}" if payload else reply_context
 
 
+class _ControlThread:
+    """The control thread, as its commands use it (core/runtime/commands/ports.py):
+    the agents this process runs bots for, whether this bot answers for them
+    all, and this instance's ownership."""
+
+    def __init__(self, runner: "BotRunner", message):
+        from core.channel.discord.loader import BotsLoader
+        self._runner, self._message = runner, message
+        self._agent_ids = sorted(BotsLoader()._bots)
+
+    def agent_ids(self) -> List[str]:
+        return self._agent_ids
+
+    def elected(self) -> bool:
+        return bool(self._agent_ids) and self._agent_ids[0] == self._runner.agent_id
+
+    async def claim(self) -> None:
+        await Ownership().claim(self._runner.bot, self._runner.agent_id)
+
+    def describe(self) -> str:
+        return Ownership().describe(self._agent_ids)
+
+    async def react(self, emoji: str) -> None:
+        await BotRunner._react(self._message, emoji)
+
+
 class BotRunner:
     def __init__(self, discord_token, agent_id):
         self.discord_token = discord_token
@@ -63,78 +93,30 @@ class BotRunner:
         self._processed_message_ids = OrderedDict()
         self.bot = None
         self._init_bot()
-        # The voice room, with the inbox's briefings plugged in as a hook.
-        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()])
+        # The voice room, with the inbox's briefings plugged in as a hook, and
+        # replies written into the focus's channel as a typed message's are.
+        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()], text_output=self._voice_text_output)
         Ownership().add_listener(self._on_ownership_change)
+
+    @staticmethod
+    def _voice_text_output(channel):
+        """Where a voice turn's reply is written: streamed into its text channel."""
+        from core.channel.discord.stream_buffer import DiscordStreamBuffer
+        return DiscordStreamBuffer(channel, edit_interval=1.5)
 
     def _init_bot(self):
         intents = discord.Intents.default()
         intents.message_content = True # Required to read message content
         intents.voice_states = True # Required for voice channel tracking
-        self.bot = commands.Bot(command_prefix="!", intents=intents)
+        # Commands, `!help` among them, are core/runtime/commands/: on_message runs
+        # them, so discord.py's own command handling and help stay unused.
+        self.bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
         
         # Register events
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
         self.bot.event(self.on_voice_state_update)
         self.bot.event(self.on_raw_reaction_add)
-        
-        # Register voice commands
-        @self.bot.command(name="join")
-        async def cmd_join(ctx, *, channel_name: str = None):
-            # Typed in #day-planning, this joins the voice room and starts you
-            # with Daisy: the channel it was typed in becomes the focus.
-            target = channel_name
-            if not target and ctx.author.voice:
-                target = str(ctx.author.voice.channel.id)
-            success = await self.voice_manager.join(target, focus_channel=ctx.channel)
-            if success:
-                focus = self.voice_manager.focus()
-                where = "the lobby" if focus.is_lobby else f"#{focus.channel_name}"
-                await ctx.send(f"Connected to voice channel: `{self.voice_manager.connection.channel.name}`, talking in {where} 🎙️")
-            else:
-                await ctx.send("Could not join voice channel.")
-
-        @self.bot.command(name="leave")
-        async def cmd_leave(ctx):
-            await self.voice_manager.leave()
-            await ctx.send("Disconnected from voice channel. 👋")
-
-        @self.bot.command(name="inbox")
-        async def cmd_inbox(ctx, *, args: str = ""):
-            # What voice briefings will tell you about (core/voice/briefing). Only the
-            # voice host's bot answers, so one message gets one reply.
-            if not self._is_voice_host():
-                return
-            from core.voice.briefing.commands import handle_inbox_command
-            from core.voice.briefing.writer import channel_name
-            for chunk in safe_chunks(handle_inbox_command(args, channel_name(ctx.channel))):
-                await ctx.send(chunk)
-
-        # The voiceprint gate (Part 4: core/voice/listening/speaker_gate.py),
-        # answered by the voice host's bot only, like `!inbox`.
-        @self.bot.command(name="enroll")
-        async def cmd_enroll(ctx, *, args: str = ""):
-            # Your voiceprint: typed while you're in the voice channel.
-            if not self._is_voice_host():
-                return
-            for chunk in safe_chunks(await self.voice_manager.enroll(args, ctx.channel)):
-                await ctx.send(chunk)
-
-        @self.bot.command(name="voiceprint")
-        async def cmd_voiceprint(ctx, *, args: str = ""):
-            if not self._is_voice_host():
-                return
-            from core.voice.listening.gate_commands import voiceprint_command
-            for chunk in safe_chunks(voiceprint_command(self.voice_manager.speaker_gate, args)):
-                await ctx.send(chunk)
-
-        @self.bot.command(name="gate")
-        async def cmd_gate(ctx, *, args: str = ""):
-            if not self._is_voice_host():
-                return
-            from core.voice.listening.gate_commands import gate_command
-            await gate_command(self.voice_manager.speaker_gate, args, ctx.channel)
 
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
@@ -146,27 +128,6 @@ class BotRunner:
         """Alias for stop()."""
         await self.stop()
 
-    def get_hosted_voice_channels(self, agent) -> list:
-        """Resolves target voice channels for an agent from explicit voice_config or channel_hosts convention."""
-        if not agent:
-            return []
-        voice_config = agent.config.get("voice_config", {})
-        if "voice_channels" in voice_config:
-            return voice_config["voice_channels"]
-        if "voice_channel" in voice_config:
-            return [voice_config["voice_channel"]]
-            
-        channel_hosts = agent.config.get("channel_hosts", [])
-        return [f"{ch}-voice" for ch in channel_hosts]
-
-    def _is_voice_host(self) -> bool:
-        """Whether this bot speaks in the voice room (Concierge's). It keeps the
-        channel inbox's ✅ signal, answers `!inbox`, and keeps the voiceprint
-        gate (`!enroll`, `!voiceprint`, `!gate`)."""
-        agent = AgentsLoader().get_agent(self.agent_id)
-        voice = agent.config.get("voice_config") if agent else None
-        return isinstance(voice, dict) and bool(voice.get("enabled"))
-
     async def on_raw_reaction_add(self, payload):
         """✅ or ❌ on a `!gate review` post marks that utterance as yours or
         not (core/voice/listening/gate_commands.py). ✅ on any other post
@@ -177,9 +138,9 @@ class BotRunner:
         member = getattr(payload, "member", None)
         if member is None or getattr(member, "bot", False):
             return  # a DM, or a bot's own reaction
-        if not Ownership().is_mine(self.agent_id) or not self._is_voice_host():
+        if not Ownership().is_mine(self.agent_id) or not self.voice_manager.hosts_voice():
             return
-        if mark_from_reaction(self.voice_manager.speaker_gate, payload.message_id, emoji):
+        if self.voice_manager.mark_review(payload.message_id, emoji):
             return
         if emoji != "✅":
             return
@@ -190,33 +151,13 @@ class BotRunner:
                   message_time=discord.utils.snowflake_time(payload.message_id).timestamp())
 
     async def on_voice_state_update(self, member, before, after):
-        """Follows you into the voice channel and greets you there: each time
-        you join is a new voice session, with the concierge in the lobby."""
+        """Follows you into the voice channel and greets you there
+        (VoiceManager.member_moved), if this instance owns the agent."""
         if member.bot:
             return
         if not Ownership().is_mine(self.agent_id):
             return
-        loader = AgentsLoader()
-        agent = loader.get_agent(self.agent_id)
-        if not agent:
-            return
-        voice_config = agent.config.get("voice_config", {})
-        if not voice_config.get("enabled"):
-            return
-            
-        vc_targets = self.get_hosted_voice_channels(agent)
-        
-        if after.channel and any(
-            after.channel.name == vc or normalize_channel_name(after.channel.name) == normalize_channel_name(vc)
-            for vc in vc_targets
-        ):
-            if self.voice_manager.connection.channel != after.channel:
-                print(f"[VoiceManager:{self.agent_id}] 🏃 User {member.display_name} joined '{after.channel.name}'. Moving bot to follow user...")
-                if not await self.voice_manager.connection.join(after.channel.name):
-                    return
-            # You arrived (not a mute or deafen while already in the channel).
-            if before.channel != after.channel:
-                await self.voice_manager.welcome()
+        await self.voice_manager.member_moved(member, before, after)
 
     async def on_ready(self):
         print(f'Logged in as Discord bot: {self.bot.user} for agent {self.agent_id}')
@@ -236,40 +177,10 @@ class BotRunner:
 
     async def _maybe_auto_join(self):
         """Joins the configured voice channel if voice auto_join is on and this
-        instance owns the agent."""
+        instance owns the agent (VoiceManager.auto_join)."""
         if not Ownership().is_mine(self.agent_id):
             return
-        loader = AgentsLoader()
-        agent = loader.get_agent(self.agent_id)
-        if agent:
-            voice_config = agent.config.get("voice_config", {})
-            if voice_config.get("enabled") and voice_config.get("auto_join"):
-                vc_targets = self.get_hosted_voice_channels(agent)
-                async def _auto_join():
-                    await self.bot.wait_until_ready()
-                    await asyncio.sleep(1.5) # Allow guild cache to populate
-                    targets = vc_targets if vc_targets else ["general-voice"]
-                    
-                    selected_target = None
-                    for t in targets:
-                        norm_t = normalize_channel_name(str(t))
-                        for guild in self.bot.guilds:
-                            for vc in guild.voice_channels:
-                                if str(t).isdigit() and vc.id == int(t):
-                                    selected_target = t
-                                    break
-                                if vc.name == t or normalize_channel_name(vc.name) == norm_t:
-                                    selected_target = t
-                                    break
-                            if selected_target:
-                                break
-                        if selected_target:
-                            break
-
-                    target_to_join = selected_target or targets[0]
-                    print(f"Agent {self.agent_id} auto-joining voice channel '{target_to_join}'...")
-                    await self.voice_manager.connection.join(target_to_join)
-                asyncio.create_task(_auto_join())
+        self.voice_manager.auto_join()
 
     def _on_ownership_change(self, agent_id):
         """Hands voice over when this agent moves between prod and dev."""
@@ -281,36 +192,20 @@ class BotRunner:
             return
         if Ownership().is_mine(self.agent_id):
             loop.create_task(self._maybe_auto_join())
-        elif self.voice_manager.connection.voice_client:
+        elif self.voice_manager.has_voice_client():
             loop.create_task(self.voice_manager.leave())
 
     async def _handle_control_message(self, message):
         """Control-thread messages: claims, releases and user commands.
 
-        Every bot in this process sees the same message; `apply` is idempotent
-        and only one bot reacts or replies."""
-        ownership = Ownership()
-        event = ownership.apply(message)
+        Every bot in this process sees the same message; `apply` is idempotent,
+        and a user command (core/runtime/commands/control/) answers from one bot."""
+        event = Ownership().apply(message)
         if event is None or getattr(message.author, "bot", False):
             return
-        from core.channel.discord.loader import BotsLoader
-        agent_ids = sorted(BotsLoader()._bots)
-        is_elected = bool(agent_ids) and agent_ids[0] == self.agent_id
-
-        if event.kind == "cmd_claim":
-            if event.agent == self.agent_id:
-                try:
-                    await ownership.claim(self.bot, self.agent_id)
-                    await self._react(message, "✅")
-                except Exception as e:
-                    print(f"[BotRunner:{self.agent_id}] ⚠️ could not claim agent: {e}")
-                    await self._react(message, "⚠️")
-            elif is_elected and event.agent not in agent_ids:
-                await self._react(message, "❓")
-        elif event.kind == "cmd_release" and is_elected:
-            await self._react(message, "✅")
-        elif event.kind == "cmd_status" and is_elected:
-            await message.channel.send(ownership.describe(agent_ids))
+        ctx = ControlContext(channel=message.channel, author=message.author, agent_id=self.agent_id,
+                             control=_ControlThread(self, message))
+        await CONTROL.answer(message.content, ctx)
 
     @staticmethod
     async def _react(message, emoji):
@@ -340,6 +235,44 @@ class BotRunner:
             return None
         author = getattr(getattr(target, "author", None), "display_name", None) or "unknown"
         return format_reply_context(author, getattr(target, "created_at", None), content)
+
+    def _hosts(self, channel) -> bool:
+        """Whether this bot's agent hosts `channel` (a thread: its parent): its
+        name, its normalized name (general-voice -> general) or its id is in the
+        agent's channel_hosts."""
+        agent = AgentsLoader().get_agent(self.agent_id)
+        channel_hosts = agent.config.get("channel_hosts", []) if agent else []
+        channel_id = str(channel.id)
+        channel_name = channel.name if hasattr(channel, "name") else ""
+        if isinstance(channel, discord.Thread) and channel.parent:
+            channel_name = channel.parent.name
+        normalized_name = normalize_channel_name(channel_name)
+        return (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
+
+    def _answers(self, message, is_host: bool) -> bool:
+        """Whether this bot answers `message`: the host does, unless another bot
+        is tagged; any other bot only when it's tagged."""
+        tagged_bots = [user for user in message.mentions if user.bot]
+        is_self_tagged = self.bot.user in message.mentions
+        if is_host:
+            return not (tagged_bots and not is_self_tagged)
+        return is_self_tagged
+
+    async def _run_command(self, message, content: str) -> None:
+        """`!name args`: the typed command it names, if this bot answers it here.
+        Anything else after "!" is ignored."""
+        ctx = TypedContext(
+            channel=message.channel,
+            author=message.author,
+            agent_id=self.agent_id,
+            session=SessionManager().get_session(self.agent_id, source="discord", channel=message.channel),
+            answers_here=self._answers(message, self._hosts(message.channel)),
+            voice=self.voice_manager,
+        )
+        try:
+            await TYPED.answer(content, ctx)
+        except Exception as e:
+            print(f"[BotRunner:{self.agent_id}] {content.split()[0]} failed: {format_error_message(e)}")
 
     async def on_message(self, message):
         # Deduplicate incoming Discord messages by message ID.
@@ -380,47 +313,25 @@ class BotRunner:
                 # Ignore other messages from self to prevent loops
                 return
 
-        # Skip commands (if any)
+        # A typed command: `!name args` (core/runtime/commands/typed/). A bot's
+        # own message never runs one.
         if content.startswith("!"):
-            if mine:
-                await self.bot.process_commands(message)
+            if mine and not getattr(message.author, "bot", False):
+                await self._run_command(message, content)
             return
 
-        # Read channel_hosts from agent.json        
         loader = AgentsLoader()
-        config = loader.get_agent(self.agent_id).config
-        channel_hosts = config.get("channel_hosts", [])
-        channel_id = str(message.channel.id)
-        channel_name = message.channel.name if hasattr(message.channel, "name") else ""
-        if isinstance(message.channel, discord.Thread) and message.channel.parent:
-            channel_name = message.channel.parent.name
-            
-        # Check if channel or its normalized name matches channel_hosts (e.g. general-voice -> general)
-        normalized_name = normalize_channel_name(channel_name)
-        is_host = (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
-        
+        is_host = self._hosts(message.channel)
+
         # You posted here, typed or by voting in a poll: whatever its agent
         # left you in this channel is finished (core/voice/briefing).
         if is_host and mine:
             mark_read(message.channel, Via.TYPED)
 
-        # Check mentions
-        tagged_bots = [user for user in message.mentions if user.bot]
-        is_self_tagged = self.bot.user in message.mentions
-        
-        # Routing logic
-        if is_host:
-            if tagged_bots and not is_self_tagged:
-                # Another agent is tagged, let them respond
+        if not self._answers(message, is_host):
+            if is_host:
                 print(f"Agent {self.agent_id} (host) yielding to tagged agent(s).")
-                return
-            # Otherwise, respond as host
-        else:
-            # Not host
-            if not is_self_tagged:
-                # Ignore if not tagged
-                return
-            # Respond if tagged
+            return
 
         if not mine:
             holder = ownership.holder(self.agent_id) or "prod"
@@ -500,9 +411,9 @@ class BotRunner:
                     callbacks=[reaction_handler]
                 ):
                     event_type = event.get("type")
-                    if event_type == "token":
+                    if event_type == events.TOKEN:
                         await stream_buffer.append_token(event.get("content", ""))
-                    elif event_type == "reaction":
+                    elif event_type == events.REACTION:
                         # Delegation acknowledgement. This arrives from the
                         # delegation path itself rather than from a tool
                         # callback, so it fires for both the LLM's choice and
@@ -513,7 +424,7 @@ class BotRunner:
                                 await message.add_reaction(emoji)
                             except Exception as re:
                                 print(f"[BotRunner:{self.agent_id}] Could not add routing reaction: {re}")
-                    elif event_type == "final_response":
+                    elif event_type == events.FINAL_RESPONSE:
                         final_text = event.get("text", "")
                         await stream_buffer.finalize(
                             final_text=final_text,

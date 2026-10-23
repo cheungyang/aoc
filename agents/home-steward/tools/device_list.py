@@ -88,7 +88,7 @@ def _may_control() -> Callable[[str], bool]:
     # and this asks about home_assistant's grant. probe=True marks it as a question, not
     # a write, so the read-only replay lets it through.
     from core.loaders.tools_loader import ToolsLoader
-    from core.runtime.execution_context import try_context
+    from core.runtime.foundation.context import try_context
 
     loader, ctx = ToolsLoader(), try_context()
     grant = loader.get_tool_permissions(ctx, "home_assistant")

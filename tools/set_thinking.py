@@ -24,7 +24,7 @@ def set_thinking(level: Literal["minimal", "low", "medium", "high"], reason: str
         level: minimal, low, medium or high.
         reason: A few words on why the next step needs this depth; it is logged.
     """
-    from core.runtime.thinking import pick_thinking
+    from core.runtime.model.thinking import pick_thinking
 
     try:
         applied = pick_thinking(level, reason)

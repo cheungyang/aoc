@@ -11,8 +11,6 @@
 .vscode
 **/__pycache__/
 *bot_token*
-assets/models/
-assets/sounds/
 client_secret_*
 debug_log.log
 github_bot_token

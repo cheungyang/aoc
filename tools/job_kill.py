@@ -1,6 +1,6 @@
 import time
 from langchain_core.tools import tool
-from core.runtime.job_manager import JobManager
+from core.runtime.foundation.jobs import JobManager
 from core.util import format_tool_response
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 
@@ -12,7 +12,7 @@ def job_kill(job_id: str) -> str:
     """
     try:
         manager = JobManager()
-        job = manager._jobs.get(job_id)
+        job = manager.job(job_id)
         if not job:
             return format_tool_response("job_kill", payload="", errors=f"Job {job_id} not found.")
             
@@ -25,7 +25,7 @@ def job_kill(job_id: str) -> str:
         timeout = 10 # seconds
         start_time = time.time()
         while time.time() - start_time < timeout:
-            job = manager._jobs.get(job_id)
+            job = manager.job(job_id)
             if job and job.status == "killed":
                 break
             time.sleep(0.5)

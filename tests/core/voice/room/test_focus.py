@@ -1,7 +1,7 @@
 """The focus directory: which agent and text channel each voice switch leads to.
 
 Pinned against the live agent configs, like the routing table in
-tests/graphs/main/test_router.py: a channel gaining an agent, or an agent its
+tests/core/runtime/foundation/test_routing.py: a channel gaining an agent, or an agent its
 first channel, changes what "switch me to <name>" does with no code change.
 If a test here fails, confirm the config change was intended first.
 """
@@ -10,10 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from core.loaders.agents_loader import AgentsLoader
-from core.runtime.channel_context import reply_sessions
-from core.runtime.session_manager import SessionManager
+from core.runtime.history.channel_posts import reply_sessions
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.commands.spoken.words import alias_key
+from core.voice.room.aliases import build_aliases
 from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, spoken_label
-from core.voice.room.room_switch import _key, build_aliases
 
 
 def _live():
@@ -145,7 +146,7 @@ class TestLiveDirectory(unittest.TestCase):
         for key, focus in self.directory.targets.items():
             with self.subTest(channel=key):
                 alias = self.directory.spoken_alias(focus)
-                self.assertEqual(self.aliases.get(_key(alias)), key, alias)
+                self.assertEqual(self.aliases.get(alias_key(alias)), key, alias)
 
 
 class TestDirectoryRules(unittest.TestCase):

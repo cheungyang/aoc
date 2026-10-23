@@ -137,8 +137,8 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
         # This runs after the agent's execution context has been torn down (it is reached from
         # Agent._parse_final_response), so mint one. The agent_id comes from the Agent instance,
         # not from the model, so asserting this identity is legitimate.
-        from core.runtime.execution_context import current_execution_context, try_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context, try_context
+        from core.runtime.foundation.sessions import SessionManager
 
         ctx = try_context()
         if ctx is None or ctx.agent_id != agent_id:

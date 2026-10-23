@@ -1,6 +1,6 @@
 """Agent jobs: one row per job, from queued to done, in `memory.db`.
 
-JobManager (core/runtime/job_manager.py) keeps the cache, the statuses and
+JobManager (core/runtime/foundation/jobs.py) keeps the cache, the statuses and
 what they mean, and passes the statuses in; this holds the SQL. The schema is
 core/storage/schemas/jobs.sql.
 """

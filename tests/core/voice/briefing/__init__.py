@@ -1,4 +1,5 @@
-"""Tests for the channel inbox (core/voice/briefing)."""
+"""Tests for voice briefings (core/voice/briefing). The channel inbox's tests
+(tests/core/channel/test_inbox.py) use `loader()` too."""
 
 
 class Loader:

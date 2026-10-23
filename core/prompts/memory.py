@@ -14,7 +14,7 @@ from core.prompts.base import Prompt, WorkerPrompt
 @dataclass
 class ContextSummaryPrompt(WorkerPrompt):
     """Earlier conversation turns, distilled into a dense, machine-readable
-    summary that replaces them (core/runtime/context_pruner.py). The answer
+    summary that replaces them (core/runtime/history/pruner.py). The answer
     is the summary text; "" when the reply had none, and the pruner falls back
     to its heuristic summary. Its timeout is configured: the pruner passes it."""
 

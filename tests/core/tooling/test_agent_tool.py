@@ -220,7 +220,7 @@ class TestCalls(ToolCase):
         self.assertEqual(section(out, "payload"), "")
 
     def test_a_copy_and_an_async_call_behave_the_same(self):
-        # graph_builder binds a model_copy of each tool and may call it asynchronously.
+        # GraphBuilder binds a model_copy of each tool and may call it asynchronously.
         with execution_context(agent_id="meal-planner"):
             out = asyncio.run(fake_snapshot.model_copy().ainvoke({"limit": 1}))
         self.assertEqual(json.loads(section(out, "payload"))["limit"], 1)

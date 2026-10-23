@@ -16,9 +16,9 @@ import numpy as np
 import pytest
 
 from core.storage.speaker_gate_log import Effect, GateLog, Mode
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.listening import speaker_gate as sg
-from core.voice.listening.utterance import BYTES_PER_MS, SAMPLE_RATE, Transcript, Utterance
+from core.voice.foundation.utterance import BYTES_PER_MS, SAMPLE_RATE, Transcript, Utterance
 
 from tests.helpers import FAKE_VOICEPRINT, FakeSpeakerModel as FakeModel
 

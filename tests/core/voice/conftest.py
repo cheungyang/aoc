@@ -8,13 +8,17 @@ session factory. As a backstop, opening a real Live API connection fails.
 Text-to-speech never reaches the network either; that guard is suite-wide, in
 tests/conftest.py (`_no_tts_network`), since tests outside this folder build
 the voice stack too.
+
+`mock_bot_runner` is the Discord runner a VoiceManager is built with.
 """
+from unittest.mock import MagicMock
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def _no_live_stt(monkeypatch):
-    from core.voice import settings
+    from core.voice.foundation import settings
     from core.voice.engines import live_stt
 
     async def refuse(*_args, **_kwargs):
@@ -22,3 +26,13 @@ def _no_live_stt(monkeypatch):
 
     monkeypatch.setattr(settings, "STT_PROVIDER", "whisper")
     monkeypatch.setattr(live_stt, "connect_live", refuse)
+
+
+@pytest.fixture
+def mock_bot_runner():
+    runner = MagicMock()
+    runner.agent_id = "main"
+    runner.bot = MagicMock()
+    runner.bot.guilds = []
+    runner.bot.loop = MagicMock()
+    return runner

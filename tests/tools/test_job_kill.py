@@ -24,7 +24,7 @@ class TestJobKillTool(unittest.TestCase):
         mock_job = MagicMock()
         mock_job.session_id = "session_123"
         mock_job.status = "killed" # Simulate it being killed immediately for polling success
-        mock_manager._jobs = {"test_job_123": mock_job}
+        mock_manager.job.side_effect = {"test_job_123": mock_job}.get
         
         # Mock checkpointer
         mock_checkpointer = MagicMock()
@@ -56,7 +56,7 @@ class TestJobKillTool(unittest.TestCase):
     def test_job_kill_not_found(self, mock_job_manager_class):
         mock_manager = MagicMock()
         mock_job_manager_class.return_value = mock_manager
-        mock_manager._jobs = {}
+        mock_manager.job.return_value = None
         
         result = job_kill.func(job_id="unknown_job")
         
@@ -77,7 +77,7 @@ class TestJobKillTool(unittest.TestCase):
         mock_job = MagicMock()
         mock_job.session_id = "session_123"
         mock_job.status = "killing" # Remains killing to trigger timeout
-        mock_manager._jobs = {"test_job_123": mock_job}
+        mock_manager.job.side_effect = {"test_job_123": mock_job}.get
         
         result = job_kill.func(job_id="test_job_123")
         

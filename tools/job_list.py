@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 from langchain_core.tools import tool
-from core.runtime.job_manager import JobManager
+from core.runtime.foundation.jobs import JobManager
 from core.util import format_tool_response
 
 MAX_JOBS = 20

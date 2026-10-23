@@ -7,11 +7,11 @@ from unittest.mock import patch, MagicMock, AsyncMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.agent import Agent
-from core.runtime.session_manager import SessionManager
+from core.runtime.foundation.sessions import SessionManager
 
 class TestAgentStream(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from core.runtime.job_manager import JobManager
+        from core.runtime.foundation.jobs import JobManager
         JobManager._instance = None
 
     @patch('core.runtime.agent.LoggingHandler')
@@ -150,11 +150,11 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
     async def test_execute_stream_handles_subagent_custom_events(self, mock_logging_handler_class):
         mock_graph = MagicMock()
         from core.channel.response_parser import AgentResponse
-        from core.runtime.stream_handler import (
-            SUBAGENT_STREAM_TOKEN,
+        from core.runtime.foundation.events import (
+            FINAL_RESPONSE,
             SUBAGENT_STREAM_FINAL,
-            EVENT_TOKEN,
-            EVENT_FINAL_RESPONSE,
+            SUBAGENT_STREAM_TOKEN,
+            TOKEN,
         )
 
         sub_resp = AgentResponse(text="Subagent final text", poll_data={"options": ["A", "B"]})
@@ -185,12 +185,12 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
         async for event in agent.execute_stream("Research AI", session=session):
             events.append(event)
 
-        token_events = [e for e in events if e["type"] == EVENT_TOKEN]
+        token_events = [e for e in events if e["type"] == TOKEN]
         self.assertEqual(len(token_events), 2)
         self.assertEqual(token_events[0]["content"], "🔍 Researcher: ")
         self.assertEqual(token_events[1]["content"], "Subagent final text")
 
-        final_events = [e for e in events if e["type"] == EVENT_FINAL_RESPONSE]
+        final_events = [e for e in events if e["type"] == FINAL_RESPONSE]
         self.assertEqual(len(final_events), 1)
         self.assertEqual(final_events[0]["text"], "Subagent final text")
         self.assertEqual(final_events[0]["poll_data"], {"options": ["A", "B"]})

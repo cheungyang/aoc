@@ -15,6 +15,9 @@ The thread is an append-only log; state is the result of replaying it:
     [release]                    user command: every agent back to prod
     [status]                     user command: each instance reports its view
 
+The user commands are core/runtime/commands/control/: their phrasing, and
+their replies, which the Discord runner sends.
+
 Releasing is a *message*, never a deletion, so replaying history at startup
 always yields the same state as having watched it live.
 
@@ -33,6 +36,7 @@ import socket
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
+from core.runtime.commands.registry import CONTROL
 from core.util.config import Config
 
 PROD = "prod"
@@ -45,9 +49,6 @@ READY_TIMEOUT_SECONDS = 30
 
 _CLAIM_RE = re.compile(r"^🔒 claim `?([\w\-]+)`? @(\S+)")
 _RELEASE_RE = re.compile(r"^🔓 release `?([\w\-]+)`? @(\S+)")
-_CMD_CLAIM_RE = re.compile(r"^\[\s*claim\s+([\w\-]+)\s*\]$", re.IGNORECASE)
-_CMD_RELEASE_RE = re.compile(r"^\[\s*release\s*\]$", re.IGNORECASE)
-_CMD_STATUS_RE = re.compile(r"^\[\s*status\s*\]$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -69,12 +70,11 @@ def parse(content: str) -> Optional[Event]:
         return Event("claim", m.group(1), m.group(2))
     if m := _RELEASE_RE.match(text):
         return Event("release", m.group(1), m.group(2))
-    if m := _CMD_CLAIM_RE.match(text):
-        return Event("cmd_claim", m.group(1))
-    if _CMD_RELEASE_RE.match(text):
-        return Event("cmd_release")
-    if _CMD_STATUS_RE.match(text):
-        return Event("cmd_status")
+    # A user command: [claim <agent>], [release], [status] (core/runtime/commands/control/).
+    found = CONTROL.match(text)
+    if found:
+        command, args = found
+        return Event(f"cmd_{command.name}", args or None)
     return None
 
 

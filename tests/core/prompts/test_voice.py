@@ -24,8 +24,8 @@ class TestVoiceModePrompt(unittest.TestCase):
     """<voice_mode> reaches exactly the turns the user hears."""
 
     def _prompt_in(self, **session_kwargs):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
         token = current_execution_context.set(SessionManager.get_session(**session_kwargs))
         try:
             return get_voice_mode_prompt()
@@ -42,8 +42,8 @@ class TestVoiceModePrompt(unittest.TestCase):
         self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general"), "")
 
     def test_a_delegate_inherits_it_but_a_stateless_worker_never_gets_it(self):
-        from core.runtime.execution_context import current_execution_context
-        from core.runtime.session_manager import SessionManager
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
         voice_turn = SessionManager.get_session(agent_id="main", source="discord", channel="general", surface="voice")
         token = current_execution_context.set(voice_turn)
         try:
@@ -61,7 +61,7 @@ class TestVoiceModePrompt(unittest.TestCase):
                 current_execution_context.reset(token)
 
     def test_no_context_no_block(self):
-        from core.runtime.execution_context import current_execution_context
+        from core.runtime.foundation.context import current_execution_context
         token = current_execution_context.set(None)
         try:
             self.assertEqual(get_voice_mode_prompt(), "")

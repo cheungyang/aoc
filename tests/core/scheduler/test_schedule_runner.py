@@ -394,7 +394,7 @@ class TestPromptDispatch(RunnerCase):
     def _execute_with(self, response):
         """The agent's run leaves `response` where Agent.execute does, and
         notes which agent the scheduled speech scope named."""
-        from core.runtime.agent import RESPONSE_HINT
+        from core.runtime.foundation.events import RESPONSE_HINT
         from core.prompts.voice import _scheduled_speech_agent
         seen = {}
 
@@ -409,7 +409,7 @@ class TestPromptDispatch(RunnerCase):
 
     async def test_a_post_enters_the_inbox_with_the_runs_speech_version(self):
         from core.channel.response_parser import AgentResponse
-        from core.voice.briefing.model import Priority
+        from core.storage.channel_inbox import Priority
 
         seen = self._execute_with(AgentResponse(
             text="ok", speech="Daisy here. How's your energy, one to ten?", question="How's your energy, one to ten?"))
@@ -423,7 +423,7 @@ class TestPromptDispatch(RunnerCase):
         )
 
     async def test_an_ignore_schedule_writes_no_speech_version(self):
-        from core.voice.briefing.model import Priority
+        from core.storage.channel_inbox import Priority
 
         seen = self._execute_with(None)
         await self.make_runner().run_schedule(self.prompt_spec(priority="IGNORE"))

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from core.voice.listening.enrollment import (
     ENROLL_TIMEOUT_S, MIN_CONSISTENCY, MIN_READING_MS, SENTENCES, Enrollment, saved_message,
 )
-from core.voice.listening.utterance import BYTES_PER_MS, Utterance
+from core.voice.foundation.utterance import BYTES_PER_MS, Utterance
 
 
 def spoken(ms, preroll_ms=500):

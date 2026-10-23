@@ -565,14 +565,14 @@ def isolate_sessions(directory: str) -> str:
     run on `<agent>:tool:<channel>` sessions that live turns share. This is the
     same redirect the test suite applies in tests/conftest.py.
     """
-    from core.runtime import job_manager
+    from core.runtime.foundation import jobs
 
     os.makedirs(directory, exist_ok=True)
     db_path = os.path.join(directory, "memory.db")
     # Config().memory_db_path: the core/storage stores (sessions and jobs among them), the
     # checkpointer and the voice data follow it.
     os.environ["MEMORY_DB_PATH"] = db_path
-    job_manager.JobManager._instance = None
+    jobs.JobManager._instance = None
     return db_path
 
 
@@ -645,8 +645,9 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     """
     from core.channel.discord.stream_buffer import DiscordStreamBuffer
     from core.loaders.agents_loader import AgentsLoader
-    from core.runtime.session_manager import SessionManager
-    from core.runtime.turn_trace import start_turn_trace
+    from core.runtime.foundation import events
+    from core.runtime.foundation.sessions import SessionManager
+    from core.runtime.observability.turn_trace import Stage, start_turn_trace
     from core.voice.speech.missing_speech import fallback_speech
     from core.voice.speech.reply import ERROR_LINE, speech_of
     from core.voice.engines.tts import agent_voice
@@ -667,8 +668,8 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     trace = start_turn_trace(voice_bot, run, speech_end_at=heard.speech_end_at if heard else None, case=case["id"])
     if heard is not None:
         result.transcript = heard.transcript
-        trace.mark("vad_final", at=heard.vad_final_at)
-        trace.mark("stt_done", at=heard.stt_done_at)
+        trace.mark(Stage.VAD_FINAL, at=heard.vad_final_at)
+        trace.mark(Stage.STT_DONE, at=heard.stt_done_at)
     else:
         result.transcript = case["utterance"]
 
@@ -683,7 +684,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
 
     async def first_audio(text, voice):
         # Streamed into a speaker no one plays: its first audio is the mark.
-        out = PCMSpeaker(asyncio.get_running_loop(), on_audio=lambda: trace.mark("tts_first_byte"))
+        out = PCMSpeaker(asyncio.get_running_loop(), on_audio=lambda: trace.mark(Stage.TTS_FIRST_BYTE))
         stream = await tts.open(voice, out)
         stream.send(text)
         stream.finish()
@@ -692,7 +693,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     def speak(chunks):
         nonlocal tts_task
         for chunk in chunks:
-            trace.mark("first_chunk")
+            trace.mark(Stage.FIRST_CHUNK)
             result.spoken.append(chunk)
             if tts_task is None and measure_tts and tts is not None:
                 # Synthesized beside the stream, as the voice pipeline's speech
@@ -708,10 +709,10 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
             speak(voice_stream.add(speech_part))
 
     response = None
-    trace.mark("agent_start")
+    trace.mark(Stage.AGENT_START)
     async for event in agent.execute_stream(result.transcript, session=session):
         kind = event.get("type")
-        if kind == "token" and event.get("content"):
+        if kind == events.TOKEN and event.get("content"):
             result.agents = sorted(set(result.agents) | {event.get("agent_id") or voice_bot})
             if event.get("is_header") or event.get("is_error"):
                 # As the voice pipeline does: a delegate's attribution and its
@@ -721,19 +722,19 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
                     result.errored = True
                     result.failures.append(f"agent error: {event['content'].strip()}")
             else:
-                trace.mark("first_token")
+                trace.mark(Stage.FIRST_TOKEN)
                 speaking = event.get("agent_id") or speaking
                 route(*router.feed(event["content"]))
-        elif kind == "tool_start":
+        elif kind == events.TOOL_START:
             result.tools.append(event.get("tool_name", ""))
             trace.event("tool_start", tool=event.get("tool_name", ""))
-        elif kind == "tool_end":
+        elif kind == events.TOOL_END:
             trace.event("tool_end", tool=event.get("tool_name", ""))
-        elif kind == "final_response":
+        elif kind == events.FINAL_RESPONSE:
             route(*router.flush())
             response = event.get("response")
             result.reply = event.get("text", "") or ""
-        elif kind == "error":
+        elif kind == events.ERROR:
             result.errored = True
             result.failures.append(f"agent error: {event.get('content')}")
     route(*router.flush())
@@ -784,9 +785,11 @@ async def main(argv: Optional[List[str]] = None) -> int:
     import tempfile
     db_path = isolate_sessions(args.state_dir or tempfile.mkdtemp(prefix="aoc-voice-replay-"))
 
-    from core.runtime.execution_context import surface_scope
+    from core.runtime import bootstrap
+    from core.runtime.foundation.context import surface_scope
     from core.voice.engines.tts import TTSEngine
 
+    bootstrap.wire()
     tts = TTSEngine() if not args.no_tts else None
     hear = live_hearing() if args.stt == "live" else None
 

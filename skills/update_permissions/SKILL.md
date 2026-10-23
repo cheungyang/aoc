@@ -16,7 +16,7 @@ Use it to set a new agent's or skill's permissions, extend them, or fix a permis
 7. **Deny entries**: a key starting with `!` lists actions refused under its path, and a refusal beats any grant. `*` matches one folder name, only in `!` keys; grant keys are plain paths. `@change` (every action that modifies) is meant for deny entries. agent-designer keeps its five: `!agents/*/tools/`, `!agents/*/preconditions/`, `!agents/*/lib/`, `!agents/*/WORKFLOW.md` and `!tests/agents/`.
 8. **Read grants**: an agent may read every source its tools read (each tool docstring's `Reads:` line), so a broken tool slows it down instead of blinding it. A file a tool owns (a ledger, a workout history) gets `@read` only: writes go through the tool.
 9. **RULES.md**: every agent can already write its own `pkm/agents/<agent_id>/` folder, so RULES.md needs no grant.
-10. **Channels**: `channels` lists every channel the agent may be included or called in (`["*"]`: any). A **new channel** also goes in `channel_hosts` of `agents/main/agent.json` and in `TestLiveRoutingTable.EXPECTED` (`tests/graphs/main/test_router.py`), or the concierge won't route it.
+10. **Channels**: `channels` lists every channel the agent may be included or called in (`["*"]`: any). A **new channel** also goes in `channel_hosts` of `agents/main/agent.json` and in `TestLiveRoutingTable.EXPECTED` (`tests/core/runtime/foundation/test_routing.py`), or the concierge won't route it.
 11. **Preserve Everything Else**: you rewrite the whole file, so copy every key you aren't changing exactly as read, including `skills` settings, `thinking`, `memory_topics`, `voice`, `voice_config` and `schedules`. Never add a top-level key: unknown keys fail validation.
 
 ### Workflow

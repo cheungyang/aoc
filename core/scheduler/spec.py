@@ -178,7 +178,7 @@ class ScheduleSpec(ABC):
         label: Optional[str] = None,
         entry: Optional[Dict[str, Any]] = None,
     ):
-        from core.voice.briefing.model import Priority
+        from core.storage.channel_inbox import Priority
 
         self.schedule_id = schedule_id
         self.agent_id = agent_id

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.voice import settings
+from core.voice.foundation import settings
 from core.voice.engines import chirp_tts, edge_tts_stream, tts
 from core.voice.engines.chirp_tts import ChirpStream
 from core.voice.engines.edge_tts_stream import EdgeStream

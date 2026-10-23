@@ -55,7 +55,7 @@ HF_CACHE = os.environ.get("HF_HOME", os.path.join(ASSET_ROOT, "hf"))
 SEED_DIR = os.environ.get("AOC_SEED_DIR", "/opt/aoc-seed")
 
 # The voiceprint gate's speaker-embedding model (core/voice/listening/speaker_gate.py).
-# Mirrors SPEAKER_MODEL_FILE / SPEAKER_MODEL_URL in core/voice/settings.py, which
+# Mirrors SPEAKER_MODEL_FILE / SPEAKER_MODEL_URL in core/voice/foundation/settings.py, which
 # this standalone script doesn't import.
 SPEAKER_MODEL = os.environ.get("AOC_SPEAKER_MODEL", "wespeaker_en_voxceleb_CAM++.onnx")
 SPEAKER_MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
@@ -66,7 +66,6 @@ MODELS_DIR = os.path.join(ASSET_ROOT, "models")
 BLURP_VOICE = os.environ.get("AOC_BLURP_VOICE", "en-US-AriaNeural")
 REQUIRED_BLURPS = {
     "assets/sounds/blurps/default_ack.wav": "Okay.",
-    "assets/sounds/blurps/coder_beep.wav": "On it.",
     "assets/sounds/blurps/concierge_ping.wav": "Yes?",
 }
 

@@ -3,7 +3,7 @@
 The fake answers setup with setupComplete, optionally sends an interim for each
 audio chunk, and some time after each activityEnd sends the segment's final
 transcript, generationComplete, and voiceActivity ACTIVITY_END -- the order the
-real service was observed to use (scratch/live_stt_probe.py).
+real service was observed to use.
 """
 import asyncio
 import base64
@@ -23,7 +23,7 @@ from core.voice.engines.live_stt import (
     setup_message,
 )
 from core.voice.engines.live_stt import connect_live as real_connect_live  # before conftest patches it
-from core.voice.listening.utterance import Utterance
+from core.voice.foundation.utterance import Utterance
 
 WINDOW = 1152  # one 36 ms VAD window of 16 kHz 16-bit mono
 

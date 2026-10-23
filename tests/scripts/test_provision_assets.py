@@ -29,8 +29,8 @@ class TestProvisionAssetsStages(unittest.TestCase):
         self.assertTrue(provision_assets.MODELS_DIR.startswith(provision_assets.ASSET_ROOT))
 
     def test_the_speaker_model_matches_the_voice_settings(self):
-        # The script can't import core.voice.settings, so it mirrors it.
-        from core.voice import settings
+        # The script can't import core.voice.foundation.settings, so it mirrors it.
+        from core.voice.foundation import settings
         self.assertEqual(provision_assets.SPEAKER_MODEL, settings.SPEAKER_MODEL_FILE)
         self.assertEqual(provision_assets.SPEAKER_MODEL_URL, settings.SPEAKER_MODEL_URL)
 

@@ -728,7 +728,7 @@ Renders `error_message` as `🛑 Coding tick error: …` if set, otherwise joins
 [graph.py:L23-L95](graph.py#L23-L95)
 
 The loader hands every graph a checkpointer
-([graph_builder.py:L137-L144](../../core/agent/graph_builder.py#L137-L144)), so
+([graph_builder.py:L190-L209](../../core/runtime/graph_builder.py#L190-L209)), so
 the parameter is accepted — but it is **deliberately ignored**, and the workflow always compiles
 with `checkpointer=None`. It is not silently honoured, because a checkpoint would key durable state
 to the caller's session again, which is exactly the resume problem this design removed. Durable

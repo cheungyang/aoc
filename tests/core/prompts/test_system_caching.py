@@ -126,7 +126,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.agent.write("FEEDBACK", "feedback v2")
         self.assertEqual(before, get_agent_static_prompt("test-agent"))
 
-    # --- graph_builder order -----------------------------------------------
+    # --- GraphBuilder order -----------------------------------------------
 
     def test_block_order_static_then_memory_then_channel(self):
         blocks = self._system_blocks()

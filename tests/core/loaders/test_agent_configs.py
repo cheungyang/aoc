@@ -41,7 +41,7 @@ class TestCheckedInConfigs(unittest.TestCase):
                 self.assertEqual(validate_agent_config(config, known), [])
 
     def test_every_voice_is_a_real_chirp3_hd_voice(self):
-        from core.voice.settings import DEFAULT_VOICE, chirp3_voice
+        from core.voice.foundation.settings import DEFAULT_VOICE, chirp3_voice
 
         self.assertIsNotNone(chirp3_voice(DEFAULT_VOICE))
         for name, config in agent_configs():

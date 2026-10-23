@@ -1,6 +1,6 @@
 -- The channel inbox (core/storage/channel_inbox.py): at most one row per
 -- text channel, the newest agent post there that you may not have finished with.
--- Every category column holds an enum's value (core/voice/briefing/model.py), checked here.
+-- Every category column holds an enum's value (core/storage/channel_inbox.py), checked here.
 CREATE TABLE IF NOT EXISTS channel_inbox (
     channel      TEXT PRIMARY KEY,           -- the text channel's name: the voice focus key
     agent_id     TEXT NOT NULL,              -- who answers there
