@@ -12,7 +12,6 @@ from core.runtime.base_agent import BaseAgent
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.observability.transcript import LoggingHandler
-from core.runtime.command_handler import CommandHandler
 from core.runtime.history.pruner import ContextPruner
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.dispatcher import dispatch_discord_output
@@ -59,19 +58,14 @@ class Agent(BaseAgent):
         session: ExecutionContext,
         callbacks: Optional[list] = None,
         role: str = "user"
-    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], Any]]:
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
         """
-        Executes system commands, waits for any pending post-turn prune of this
-        session, ensures graph compilation, and returns (config, inputs, graph).
-        Returns None if handled by a system command.
+        Waits for any pending post-turn prune of this session, ensures graph
+        compilation, and returns (config, inputs, graph).
         """
         session_id = session.session_id
         channel_name = session.channel_name
         job_id = session.job_id
-
-        # Handle system commands ([new], [newall], [restart])
-        if await CommandHandler().handle_command(prompt, session=session):
-            return None
 
         # History is pruned after each turn (see _schedule_prune), not here: a
         # summary call before the model's first token was audible on voice. If the
@@ -312,11 +306,8 @@ class Agent(BaseAgent):
         prepared = False
         try:
             async with self._execution_context(session):
-                prep = await self._prepare_execution(prompt, session, callbacks, role)
-                if prep is None:
-                    return ""
+                config, inputs, graph = await self._prepare_execution(prompt, session, callbacks, role)
                 prepared = True
-                config, inputs, graph = prep
 
                 try:
                     print(f"Invoking graph for {self.agent_id}")
@@ -377,11 +368,8 @@ class Agent(BaseAgent):
         try:
             # Context entered before preparation — see the note in execute().
             async with self._execution_context(session):
-                prep = await self._prepare_execution(prompt, session, callbacks, role)
-                if prep is None:
-                    return
+                config, inputs, graph = await self._prepare_execution(prompt, session, callbacks, role)
                 prepared = True
-                config, inputs, graph = prep
 
                 try:
                     print(f"Streaming graph for {self.agent_id}")

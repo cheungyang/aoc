@@ -12,8 +12,9 @@ from unittest.mock import MagicMock
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.history.channel_posts import reply_sessions
 from core.runtime.foundation.sessions import SessionManager
+from core.runtime.commands.spoken.words import alias_key
+from core.voice.room.aliases import build_aliases
 from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, spoken_label
-from core.voice.room.aliases import alias_key, build_aliases
 
 
 def _live():

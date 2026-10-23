@@ -4,10 +4,12 @@ The floor decides when a turn is due and VoiceManager starts it (`begin_turn`);
 a `VoiceTurn` answers it:
 
     1. the cue that the agent heard you
-    2. the transcripts, merged: they were streamed while you spoke
-    3. noise, or "stop" / "wait" on its own: for the pipeline, not the agent
-    4. a hook's own command ("next agent"), or a switch ("switch me to Daisy")
-    5. the agent's reply, run exactly as an untagged message typed in the
+    2. the transcripts, merged: they were streamed while you spoke (noise,
+       with no words, is dropped)
+    3. a spoken command (core/runtime/commands/spoken/): "stop" or "wait" on
+       its own, for the pipeline rather than the agent; "next agent", "where
+       am I", or a switch ("switch me to Daisy")
+    4. the agent's reply, run exactly as an untagged message typed in the
        focus's text channel would be: on that channel's session, so voice and
        text share each agent's history
 
@@ -18,26 +20,28 @@ import asyncio
 from functools import partial
 from typing import Any, List, Optional, Protocol
 
+from core.runtime.commands.base import SpokenContext
+from core.runtime.commands.ports import VoiceControls
+from core.runtime.commands.registry import SPOKEN
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.observability.turn_trace import Outcome, Stage, start_turn_trace
 from core.util.error_util import format_error_message
 from core.voice.engines.stt import SpeechRecognizer
 from core.voice.foundation.utterance import Utterance
 from core.voice.listening.floor import Floor
-from core.voice.listening.turn_taking import bare_stop, merge_transcripts
+from core.voice.listening.turn_taking import merge_transcripts
 from core.voice.room.focus import VoiceFocus
-from core.voice.room.room_switch import FocusSwitcher, Say
 from core.voice.speech.reply import ReplyStreamer, TurnSpeech
 
 
-class TurnRoom(Protocol):
-    """What a turn needs from the voice room (VoiceManager)."""
+class TurnRoom(VoiceControls, Protocol):
+    """What a turn needs from the voice room (VoiceManager): its parts, and
+    VoiceControls, which the spoken commands use."""
 
     agent_id: str              # this bot's agent: the voice host, whose turn it runs
     stt: SpeechRecognizer
     reply: ReplyStreamer
     floor: Floor
-    switcher: FocusSwitcher
 
     def is_current(self, turn_id: int) -> bool:
         """No newer turn has started, and the turn wasn't interrupted."""
@@ -50,9 +54,6 @@ class TurnRoom(Protocol):
 
     def agent(self) -> Any:
         """The agent the turn runs as (this bot's), or None."""
-
-    async def offer_to_hooks(self, transcript: str, say: Say) -> bool:
-        """Whether a hook answered the utterance."""
 
     def turn_starting(self, focus: VoiceFocus) -> None:
         """Tells the hooks a turn is about to run in `focus`'s channel."""
@@ -71,6 +72,7 @@ class VoiceTurn:
             self.trace.mark(Stage.VAD_FINAL, at=newest.finished_at)
         self.speech = TurnSpeech(self.trace)
         self.answered = False
+        self._held = False  # "wait": this utterance dropped, the earlier words kept
         self.session_id: Optional[str] = None
 
     def _log(self, message: str) -> None:
@@ -78,6 +80,12 @@ class VoiceTurn:
 
     def is_current(self) -> bool:
         return self.room.is_current(self.id)
+
+    def hold(self) -> None:
+        """"Wait" (core/runtime/commands/spoken/wait.py): drops this utterance,
+        but keeps the words said before it for what's said next."""
+        self._held = True
+        self.room.floor.forget(self.utterances[-1:])
 
     async def run(self) -> None:
         """Answers the turn; its trace is recorded once the answer is first heard."""
@@ -113,7 +121,7 @@ class VoiceTurn:
             self.speech.finish_when_heard(finish_trace, cancelled=cancelled)
 
     async def _answer(self) -> None:
-        """The turn's transcripts, then a stop, a focus switch or the agent's reply."""
+        """The turn's transcripts, then a spoken command or the agent's reply."""
         room, trace, utterances = self.room, self.trace, self.utterances
         is_current = self.is_current
 
@@ -142,39 +150,25 @@ class VoiceTurn:
         if not is_current():
             return
 
-        # 3. "Stop" or "wait" on its own is for the pipeline, not the agent:
-        #    the reply has already stopped. "Wait" keeps the unanswered
-        #    words for what the user says next; "stop" drops them.
-        stop = bare_stop(newest)
-        if stop is not None:
-            self._log(f"✋ Heard {newest!r}: stopping, "
-                      + ("keeping the request for what comes next." if stop == "hold" else "request dropped."))
-            trace.meta["outcome"] = Outcome.STOP_HOLD if stop == "hold" else Outcome.STOP_CANCEL
-            if stop == "hold":
-                room.floor.forget(utterances[-1:])
-            else:
-                self.answered = True
-            return
-
         user = utterances[-1].user
         author = getattr(user, "display_name", str(user)) if user else "Speaker"
         merged = f" ({len(utterances)} utterances merged)" if len(utterances) > 1 else ""
         self._log(f"📝 Transcribed prompt from {author}{merged}: '{transcript}'")
 
-        # 4. A hook's own command ("next agent"), or "switch me to Daisy":
-        #    either moves the focus instead of starting a turn, and leaves
-        #    anything unanswered behind with the old focus.
+        # 3. A spoken command. "Stop" or "wait" on its own is for the
+        #    pipeline, not the agent: the reply has already stopped, and
+        #    "wait" keeps the unanswered words for what the user says next.
+        #    "Next agent" or "switch me to Daisy" moves the focus instead of
+        #    starting a turn, and leaves anything unanswered with the old one.
         say = partial(room.reply.say, is_current=is_current)
-        if await room.offer_to_hooks(newest, say):
-            trace.meta["outcome"] = Outcome.HOOK
-            self.answered = True
-            return
-        if await room.switcher.handle(newest, say=say):
-            trace.meta["outcome"] = Outcome.FOCUS_SWITCH
-            self.answered = True
+        command = await SPOKEN.answer(newest, SpokenContext(voice=room, heard=newest, say=say, turn=self,
+                                                            log=self._log))
+        if command is not None:
+            trace.meta["outcome"] = command.outcome
+            self.answered = not self._held
             return
 
-        # 5. Execute LangGraph Agent with streaming, exactly as an untagged
+        # 4. Execute LangGraph Agent with streaming, exactly as an untagged
         #    message typed in the focus's text channel would run. Concierge
         #    hosts every channel, so the turn runs as Concierge on that
         #    channel's session, and the router in graphs/main reaches the

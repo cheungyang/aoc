@@ -14,9 +14,9 @@ channel, and ENROLL_TIMEOUT_S without a word.
 import time
 from typing import Any, Callable, List, Optional, Sequence
 
+from core.runtime.commands.spoken.stop import bare_stop
 from core.voice.foundation import settings
 from core.voice.foundation.utterance import Utterance
-from core.voice.listening.turn_taking import bare_stop
 
 # Phonetically varied, and like what you say to the agents anyway.
 SENTENCES = (

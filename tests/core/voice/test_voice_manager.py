@@ -695,8 +695,8 @@ async def test_no_announcement_when_nobody_is_listening(mock_bot_runner, tmp_pat
 class _RecordingHook:
     """A hook that records every call, and does what the test sets."""
 
-    def __init__(self, greeting=None, handles=(), says_on_arrival=None):
-        self.greeting, self.handles, self.says_on_arrival = greeting, set(handles), says_on_arrival
+    def __init__(self, greeting=None, knows_next_agent=False, says_on_arrival=None):
+        self.greeting, self.knows_next_agent, self.says_on_arrival = greeting, knows_next_agent, says_on_arrival
         self.calls = []
 
     def joined(self, room):
@@ -706,12 +706,11 @@ class _RecordingHook:
     def left(self, room):
         self.calls.append(("left",))
 
-    async def handle(self, room, transcript, say):
-        self.calls.append(("handle", transcript))
-        if transcript.rstrip(".") in self.handles:
+    async def next_agent(self, room, say):
+        self.calls.append(("next_agent",))
+        if self.knows_next_agent:
             await say("Handled.", "main")
-            return True
-        return False
+        return self.knows_next_agent
 
     async def arrived(self, room, focus, speak):
         self.calls.append(("arrived", focus.key))
@@ -726,8 +725,8 @@ class _BrokenHook(_RecordingHook):
     def joined(self, room):
         raise RuntimeError("joined broke")
 
-    async def handle(self, room, transcript, say):
-        raise RuntimeError("handle broke")
+    async def next_agent(self, room, say):
+        raise RuntimeError("next_agent broke")
 
     async def arrived(self, room, focus, speak):
         raise RuntimeError("arrived broke")
@@ -747,9 +746,9 @@ async def test_a_hook_may_greet_you_instead_of_the_concierge(mock_bot_runner, tm
 
 
 @pytest.mark.asyncio
-async def test_hooks_hear_an_utterance_before_the_switcher_and_the_agent(mock_bot_runner, tmp_path):
+async def test_a_hook_answers_next_agent_before_the_switcher_and_the_agent(mock_bot_runner, tmp_path):
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
-    hook = _RecordingHook(handles={"Take me to the next agent"})
+    hook = _RecordingHook(knows_next_agent=True)
     vm.hooks = [hook]
     with _focused(loader):
         await _turn(vm, "Take me to the next agent.")
@@ -757,7 +756,20 @@ async def test_hooks_hear_an_utterance_before_the_switcher_and_the_agent(mock_bo
     vm.switcher._resolve.assert_not_awaited()  # the switcher never saw it
     main_agent.execute_stream.assert_not_called()
     assert vm.reply.tts.said() == ["Handled."]
-    assert ("handle", "Take me to the next agent.") in hook.calls
+    assert ("next_agent",) in hook.calls
+
+
+@pytest.mark.asyncio
+async def test_next_agent_goes_to_the_agent_when_no_hook_answers_it(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    hook = _RecordingHook()
+    vm.hooks = [hook]
+    with _focused(loader):
+        await _turn(vm, "Next agent.")
+
+    assert ("next_agent",) in hook.calls
+    assert [prompt for prompt, _session in calls] == ["Next agent."]
 
 
 @pytest.mark.asyncio
@@ -795,11 +807,12 @@ async def test_a_broken_hook_is_skipped_and_the_room_carries_on(mock_bot_runner,
     with _focused(loader):
         await vm.welcome()
         await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Next agent.")
         await _turn(vm, "What's on my calendar?")
         await vm.leave()
 
     assert vm.reply.tts.said()[:2] == ["Concierge here.", "Daisy here."]
-    assert [prompt for prompt, _session in calls] == ["What's on my calendar?"]
+    assert [prompt for prompt, _session in calls] == ["Next agent.", "What's on my calendar?"]
 
 
 @pytest.mark.asyncio

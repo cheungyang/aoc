@@ -3,7 +3,8 @@
     the digest      when you join, who has something for you: about 20
                     seconds or less, with no model call. It replaces
                     "Concierge here." when anything is unfinished.
-    "next agent"    the next channel with unfinished business, any time
+    "next agent"    the next channel with unfinished business, any time (the
+                    command is core/runtime/commands/spoken/next_agent.py)
     arriving        after a switch's greeting: the speech version of the
                     agent's unread post, or just the question it's waiting on
     announcements   one line when the pipeline is idle, for what needs you
@@ -18,7 +19,6 @@ The composing is pure functions over inbox rows and the focus directory.
 announced) and the speech writer, and joins the voice room as a hook
 (core/voice/hooks.py): the voice core never imports this module.
 """
-import re
 import time
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Set, Tuple
@@ -29,7 +29,6 @@ from core.util.time_util import get_local_now
 from core.voice.briefing.speech_writer import SpeechWriter
 from core.voice.hooks import Say, Speak, VoiceHook, VoiceRoom
 from core.voice.room.focus import FocusDirectory, VoiceFocus, spoken_label
-from core.voice.room.aliases import normalize
 
 # A switch into a channel whose speech version is still being written waits
 # this long for it (usually a second or less).
@@ -39,14 +38,6 @@ MAX_NAMED = 4
 
 _NUMBER_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
 
-# "Next agent", as a whole utterance: the keyword that walks the unfinished
-# channels. Hooks are asked before switch phrases, so "take me to the next
-# agent" never reaches the near-miss model call.
-_NEXT_AGENT = re.compile(
-    r"^(?:(?:hey|hi|ok|okay|so|um|uh|please|concierge)\s+)*"
-    r"(?:(?:go|take me|bring me|move me|switch(?: me)?|move on|skip) (?:on )?(?:to )?)?"
-    r"(?:the )?next agent(?: please)?$"
-)
 
 Announce = Callable[[str], None]
 
@@ -61,11 +52,6 @@ class Entry:
 
 
 # --- pure: composing what's said ------------------------------------------------------
-
-def is_next_agent(transcript: str) -> bool:
-    """Whether `transcript` is the "next agent" keyword."""
-    return bool(_NEXT_AGENT.match(normalize(transcript)))
-
 
 def spoken_name(directory: FocusDirectory, focus: VoiceFocus) -> str:
     """'Daisy'; 'the concierge' in the lobby; 'the software dev channel' where the concierge answers."""
@@ -243,10 +229,8 @@ class VoiceBriefing(VoiceHook):
     def left(self, room: VoiceRoom) -> None:
         self.end()
 
-    async def handle(self, room: VoiceRoom, transcript: str, say: Say) -> bool:
+    async def next_agent(self, room: VoiceRoom, say: Say) -> bool:
         """"Next agent": a switch to the next unfinished channel, or "That's everything."."""
-        if not is_next_agent(transcript):
-            return False
         directory = room.directory()
         target, nothing_left_line = self.next_unfinished(directory, room.focus())
         if target is None:

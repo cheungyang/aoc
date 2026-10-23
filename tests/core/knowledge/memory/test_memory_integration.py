@@ -73,7 +73,7 @@ class TestMemoryIntegration(unittest.TestCase):
         self.assertEqual(token_hist[0]["output_token"], 150)
         self.assertEqual(token_hist[0]["cached_token"], 45.5)
         
-        # 8. Test [new] command Archive Renaming
+        # 8. Test !new command Archive Renaming
         archive_res = self.store.archive_session(session_id)
         self.assertIn("archived to table ctx_main_discord_general_archived_", archive_res)
         
@@ -118,7 +118,7 @@ class TestMemoryIntegration(unittest.TestCase):
         self.assertIn("ctx_graph_content_creation_general", active)
         self.assertIn("ctx_graph_content_creation_dev", active)
 
-        # 4. Execute [new] for "main:discord:general"
+        # 4. Execute !new for "main:discord:general"
         archive_res = self.store.archive_session(session_id)
         self.assertIn("ctx_main_discord_general_archived_", archive_res)
         self.assertIn("Archived ctx_graph_content_creation_general to ctx_graph_content_creation_general_archived_", archive_res)
@@ -127,7 +127,7 @@ class TestMemoryIntegration(unittest.TestCase):
         self.assertIsNone(self.checkpointer.get_tuple(graph_config_general))
         self.assertIsNotNone(self.checkpointer.get_tuple(graph_config_dev))
 
-        # 6. Execute [newall] to archive all remaining graph states
+        # 6. Execute !newall to archive all remaining graph states
         archive_all_res = self.store.archive_all_sessions()
         self.assertIn("Archived ctx_graph_content_creation_dev to ctx_graph_content_creation_dev_archived_", archive_all_res)
 

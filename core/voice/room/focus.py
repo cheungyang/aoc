@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.channel.names import is_thread
 from core.runtime.foundation.routing import answering_agent
-from core.voice.room.aliases import alias_key, build_aliases
+from core.runtime.commands.spoken.words import alias_key
+from core.voice.room.aliases import build_aliases
 
 # The lobby: Concierge's own channel, unless voice_config sets `lobby_channel`.
 DEFAULT_LOBBY_CHANNEL = "general"

@@ -11,7 +11,6 @@ from core.voice.briefing.hook import (
     announcement,
     compose_digest,
     entries_for,
-    is_next_agent,
     nothing_left,
     ordered,
     should_announce,
@@ -107,18 +106,8 @@ class TestDigest(unittest.TestCase):
 
 
 class TestNextAgent(unittest.TestCase):
-
-    def test_the_keyword_as_a_whole_utterance(self):
-        for transcript in ("Next agent.", "next agent please", "Okay, next agent", "go to the next agent",
-                           "take me to the next agent", "Move on to the next agent", "skip to next agent"):
-            with self.subTest(transcript=transcript):
-                self.assertTrue(is_next_agent(transcript))
-
-    def test_not_inside_a_request(self):
-        for transcript in ("Who is the next agent?", "next agent meeting is at noon", "next", "the next one",
-                           "add a task for the next agent"):
-            with self.subTest(transcript=transcript):
-                self.assertFalse(is_next_agent(transcript))
+    """Where "next agent" goes. Its phrases are the next agent command's
+    (tests/core/runtime/commands/spoken/test_room_questions.py)."""
 
     def test_order_questions_then_priority_oldest_first_low_last_then_awaiting(self):
         awaiting = row("real-estate", "property-scout", 300, status=Status.AWAITING_REPLY,
@@ -326,19 +315,16 @@ class TestAsAHook(unittest.IsolatedAsyncioTestCase):
         self.store.put(DAISY)
         self.hook.joined(self.room)
         say = AsyncMock()
-        self.assertTrue(await self.hook.handle(self.room, "Next agent.", say))
+        self.assertTrue(await self.hook.next_agent(self.room, say))
         self.assertEqual(self.room.switches, ["day-planning"])
         say.assert_not_awaited()
 
     async def test_next_agent_with_nothing_left(self):
         self.hook.joined(self.room)
         say = AsyncMock()
-        self.assertTrue(await self.hook.handle(self.room, "next agent", say))
+        self.assertTrue(await self.hook.next_agent(self.room, say))
         say.assert_awaited_once_with("That's everything.", "main")
         self.assertEqual(self.room.switches, [])
-
-    async def test_anything_else_is_not_the_hooks(self):
-        self.assertFalse(await self.hook.handle(self.room, "Switch me to Daisy", AsyncMock()))
 
     async def test_arriving_speaks_what_was_left_then_marks_it_heard(self):
         self.store.put(DAISY)

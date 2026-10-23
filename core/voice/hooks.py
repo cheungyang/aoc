@@ -10,14 +10,17 @@ hook at these moments, in order, and a hook overrides only the ones it needs:
     joined(room)                     you joined: the line to greet you with,
                                      or None for the default ("Concierge here.")
     left(room)                       the bot left the voice room
-    handle(room, transcript, say)    a finished utterance, before switch
-                                     phrases and the agent: True if handled
+    next_agent(room, say)            you said "next agent"
+                                     (core/runtime/commands/spoken/next_agent.py):
+                                     True if the hook answered it
     arrived(room, focus, speak)      a switch's greeting was said: anything
                                      the hook wants said next, via `speak`
     turn(room, focus)                a turn is about to run in the focus's channel
 
 `room` is what a hook may use of the voice side (`VoiceRoom`). A hook that
-raises is logged and skipped; the voice pipeline carries on.
+raises is logged and skipped; the voice pipeline carries on. A hook answers no
+utterance of its own: what you can say is a spoken command, defined in
+core/runtime/commands/spoken/.
 """
 from typing import Awaitable, Callable, Optional, Protocol
 
@@ -56,7 +59,7 @@ class VoiceHook:
     def left(self, room: VoiceRoom) -> None:
         return None
 
-    async def handle(self, room: VoiceRoom, transcript: str, say: Say) -> bool:
+    async def next_agent(self, room: VoiceRoom, say: Say) -> bool:
         return False
 
     async def arrived(self, room: VoiceRoom, focus: VoiceFocus, speak: Speak) -> None:

@@ -25,9 +25,10 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
         mock_bot.event.assert_any_call(runner.on_voice_state_update)
-        # Voice commands, the inbox's, and the voiceprint gate's (Part 4).
-        names = {c.kwargs.get("name") for c in mock_bot.command.call_args_list}
-        self.assertEqual(names, {"join", "leave", "inbox", "enroll", "voiceprint", "gate"})
+        # Commands, `!help` among them, are core/runtime/commands/, run by
+        # on_message: discord.py's own command handling and help stay unused.
+        self.assertIsNone(mock_bot_class.call_args.kwargs["help_command"])
+        mock_bot.add_command.assert_not_called()
 
     def _voice_runner(self):
         """A runner whose voice room is a stand-in: what the runner forwards to it."""
@@ -574,6 +575,100 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         # Second delivery with same message ID -> dropped
         await runner.on_message(mock_message)
         self.assertEqual(called_count, 1)
+
+
+@patch('core.channel.discord.runner.AgentsLoader')
+@patch('core.channel.discord.runner.commands.Bot')
+class TestTypedCommands(unittest.IsolatedAsyncioTestCase):
+    """`!name` messages: the runner runs them from core/runtime/commands/
+    itself, and they never reach the agent."""
+
+    def _runner(self, mock_bot_class, mock_loader_class, hosts=("general",)):
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock(bot=True)
+        mock_bot_class.return_value = mock_bot
+        runner = BotRunner("test_token", "main")
+        agent = MagicMock()
+        agent.config = {"channel_hosts": list(hosts)}
+        mock_loader_class.return_value.get_agent.return_value = agent
+        return runner, agent
+
+    @staticmethod
+    def _message(content, mentions=()):
+        message = MagicMock()
+        message.author = MagicMock(bot=False)
+        message.content = content
+        message.mentions = list(mentions)
+        message.attachments = []
+        message.channel.name = "general"
+        message.channel.send = AsyncMock()
+        return message
+
+    async def test_help_is_one_of_ours(self, mock_bot_class, mock_loader_class):
+        """discord.py's help is off; `!help` lists every command there is."""
+        runner, agent = self._runner(mock_bot_class, mock_loader_class)
+        message = self._message("!help")
+        await runner.on_message(message)
+
+        text = "\n".join(c.args[0] for c in message.channel.send.await_args_list)
+        self.assertIn("`!new`", text)
+        self.assertIn("**Said in the voice room**", text)
+        agent.execute_stream.assert_not_called()
+
+    async def test_a_command_runs_on_the_channels_session(self, mock_bot_class, mock_loader_class):
+        runner, agent = self._runner(mock_bot_class, mock_loader_class)
+        message = self._message("!new")
+        with patch('core.channel.discord.runner.TYPED') as typed:
+            typed.answer = AsyncMock()
+            await runner.on_message(message)
+
+        text, ctx = typed.answer.await_args.args
+        self.assertEqual(text, "!new")
+        self.assertEqual((ctx.channel, ctx.agent_id, ctx.answers_here), (message.channel, "main", True))
+        self.assertEqual((ctx.session.agent_id, ctx.session.source, ctx.session.channel_name),
+                         ("main", "discord", "general"))
+        self.assertIs(ctx.voice, runner.voice_manager)
+        agent.execute_stream.assert_not_called()
+
+    async def test_it_answers_in_a_channel_it_hosts_or_where_it_is_tagged(self, mock_bot_class, mock_loader_class):
+        """As a message there would be answered. Voice room commands don't ask
+        (VoiceRoomCommand), so the registry hears every `!` message."""
+        runner, _agent = self._runner(mock_bot_class, mock_loader_class, hosts=())
+        other_bot = MagicMock(bot=True)
+        with patch('core.channel.discord.runner.TYPED') as typed:
+            typed.answer = AsyncMock()
+            await runner.on_message(self._message("!new"))
+            await runner.on_message(self._message("!new", mentions=[runner.bot.user]))
+            await runner.on_message(self._message("!new", mentions=[other_bot]))
+        self.assertEqual([c.args[1].answers_here for c in typed.answer.await_args_list], [False, True, False])
+
+        runner, _agent = self._runner(mock_bot_class, mock_loader_class)  # hosts #general
+        with patch('core.channel.discord.runner.TYPED') as typed:
+            typed.answer = AsyncMock()
+            await runner.on_message(self._message("!new"))
+            await runner.on_message(self._message("!new", mentions=[other_bot]))
+        self.assertEqual([c.args[1].answers_here for c in typed.answer.await_args_list], [True, False])
+
+    async def test_never_for_an_agent_held_elsewhere_or_from_a_bot(self, mock_bot_class, mock_loader_class):
+        runner, _agent = self._runner(mock_bot_class, mock_loader_class)
+        own_vote = self._message("<@1>: !restart")
+        own_vote.author = runner.bot.user  # the bot's own poll vote, mention stripped
+        with patch('core.channel.discord.runner.TYPED') as typed, \
+                patch('core.channel.discord.runner.Ownership') as ownership:
+            typed.answer = AsyncMock()
+            ownership.return_value.is_control_channel.return_value = False
+            ownership.return_value.is_mine.return_value = False
+            await runner.on_message(self._message("!restart"))
+            ownership.return_value.is_mine.return_value = True
+            await runner.on_message(own_vote)
+        typed.answer.assert_not_awaited()
+
+    async def test_a_failing_command_is_logged_and_the_bot_carries_on(self, mock_bot_class, mock_loader_class):
+        runner, agent = self._runner(mock_bot_class, mock_loader_class)
+        with patch('core.channel.discord.runner.TYPED') as typed:
+            typed.answer = AsyncMock(side_effect=RuntimeError("boom"))
+            await runner.on_message(self._message("!compact"))
+        agent.execute_stream.assert_not_called()
 
 
 @patch('core.channel.discord.runner.record_reply')

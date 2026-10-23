@@ -33,6 +33,10 @@ Rules:
      (faster_whisper, onnxruntime, the Google TTS client, edge-tts,
      websockets), never to dodge a cycle.
 
+The commands you give the room, typed or spoken (!join, "stop", "switch me
+to Daisy", ...), are core/runtime/commands/: they reach it through
+VoiceControls, which VoiceManager provides.
+
 Importing this package does nothing: the voice room loads libopus and patches
 the Discord libraries itself, just before it connects (room/patches.py).
 """

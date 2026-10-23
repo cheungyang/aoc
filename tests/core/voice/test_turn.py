@@ -345,14 +345,14 @@ async def test_a_spoken_reply_gets_no_note(mock_bot_runner, tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_turn_without_a_model_reply_is_not_held_to_speech(mock_bot_runner, tmp_path):
-    """A system command ("[new]") ends the stream before any model runs."""
+    """A stream that ends before any model runs has nothing to hold to speech."""
     vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
 
-    async def handled_by_a_command(*_args, **_kwargs):
+    async def nothing_streamed(*_args, **_kwargs):
         return
         yield  # an async generator that yields nothing
 
-    agent.execute_stream = MagicMock(side_effect=handled_by_a_command)
+    agent.execute_stream = MagicMock(side_effect=nothing_streamed)
     await _run_turn(vm, agent)
     assert _notes(_channel) == []
     assert _synthesized(vm) == []

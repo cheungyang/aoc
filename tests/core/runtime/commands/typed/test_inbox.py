@@ -1,9 +1,10 @@
 """`!inbox`: listing the channel inbox and marking a row done."""
 import unittest
+from unittest.mock import AsyncMock, MagicMock
 
-from core.storage.channel_inbox import InboxStore
-from core.voice.briefing.commands import USAGE, handle_inbox_command
-from core.storage.channel_inbox import InboxRow, Priority, Source, Status
+from core.runtime.commands.base import TypedContext
+from core.storage.channel_inbox import InboxRow, InboxStore, Priority, Source, Status
+from core.runtime.commands.typed.inbox import USAGE, InboxCommand, handle_inbox_command
 
 NOW = 1_000_000.0
 
@@ -45,6 +46,22 @@ class TestInboxCommand(unittest.TestCase):
     def test_anything_else_gets_the_usage(self):
         self.assertEqual(handle_inbox_command("clear all", "general", now=NOW), USAGE)
         self.assertEqual(handle_inbox_command("done", None, now=NOW), USAGE)
+
+
+class TestInboxCommandOnTheBot(unittest.IsolatedAsyncioTestCase):
+
+    def test_only_the_voice_host_answers(self):
+        room = MagicMock()
+        for hosts in (True, False):
+            room.hosts_voice.return_value = hosts
+            self.assertIs(InboxCommand().available(TypedContext(voice=room)), hosts)
+
+    async def test_done_typed_in_a_channel_marks_that_channels_row(self):
+        put("day-planning", 1)
+        channel = MagicMock(send=AsyncMock())
+        channel.name = "Day-Planning"
+        await InboxCommand().run(TypedContext(channel=channel, voice=MagicMock()), "done")
+        channel.send.assert_awaited_once_with("✅ #day-planning is done.")
 
 
 if __name__ == "__main__":

@@ -18,12 +18,14 @@ stops turns here. A turn answers every unanswered utterance as one request,
 under the current focus: exactly as an untagged message typed in the focus's
 text channel would be answered, so voice and text share each agent's history.
 
-The Discord runner, which hosts the voice room, builds this and forwards what
-Discord tells it: you moving between voice channels (`member_moved`), the bot
-being ready (`auto_join`), and the voice commands.
+The commands you give the room, typed or spoken, are core/runtime/commands/:
+they reach it through VoiceControls (core/runtime/commands/ports.py), which
+this class provides. The Discord runner, which hosts the voice room, builds
+it, and forwards what Discord tells it: you moving between voice channels
+(`member_moved`), and the bot being ready (`auto_join`).
 """
 import asyncio
-from typing import Any, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence, Tuple
 
 import discord
 
@@ -276,8 +278,19 @@ class VoiceManager:
 
     async def switch_to(self, focus: VoiceFocus, say: Say) -> bool:
         """Moves the focus as "switch to …" would: the greeting, then `arrive`.
-        For hooks; the switcher handles what you say."""
+        For hooks; `switch_to_named` handles what you say."""
         return await self.switcher.switch_to(focus, self.directory(), say)
+
+    async def switch_to_named(self, phrase: str, say: Say) -> bool:
+        """"Switch me to …" (core/runtime/commands/spoken/switch.py): the agent
+        or channel `phrase` names, or a near miss. False: it names none."""
+        return await self.switcher.switch_to_named(phrase, say)
+
+    def whereabouts(self) -> Tuple[str, str]:
+        """"Where am I" (core/runtime/commands/spoken/where_am_i.py): where the
+        room is, and the agent you're with, who says so."""
+        focus = self.focus()
+        return self.directory().whereabouts(focus), focus.agent_id
 
     def focus_channel(self, focus: VoiceFocus):
         """The Discord text channel `focus`'s turns are posted in, or None."""
@@ -344,16 +357,17 @@ class VoiceManager:
                 self._hook_failed(hook, point, e)
         return results
 
-    async def offer_to_hooks(self, transcript: str, say: Say) -> bool:
-        """Whether a hook answered the utterance; the first that does wins."""
+    async def next_agent(self, say: Say) -> bool:
+        """"Next agent" (core/runtime/commands/spoken/next_agent.py): the first
+        hook that knows where that is answers it. False: none does."""
         for hook in self.hooks:
             try:
-                if await hook.handle(self, transcript, say):
+                if await hook.next_agent(self, say):
                     return True
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self._hook_failed(hook, "handle", e)
+                self._hook_failed(hook, "next_agent", e)
         return False
 
     def turn_starting(self, focus: VoiceFocus) -> None:

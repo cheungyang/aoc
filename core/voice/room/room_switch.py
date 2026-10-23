@@ -1,10 +1,10 @@
 """Switching by voice: "switch me to Daisy" moves the focus to Daisy's channel.
+Its phrases are the switch and where-am-I commands'
+(core/runtime/commands/spoken/); this is the moving.
 
 There is one voice room; a switch changes which text channel the next turn
-belongs to (focus.py) and moves nobody. Matched on the transcript before the
-turn is routed. An exact agent or channel name switches at once, with no model
-call. Matching is deliberately strict -- the whole remainder after the command
-must be a known name -- so "go to day planning and add a task" is not a move.
+belongs to (focus.py) and moves nobody. An exact agent or channel name switches
+at once, with no model call.
 
 A switch phrase that names nothing exactly ("take me to exercise") gets one
 small model call to find the closest agent (near_miss.py), and an answer that
@@ -15,37 +15,17 @@ agent you're with ("take me to the airport on Friday"). A request that only
 starts like a switch ("go to Daisy and add a task", "talk to me about
 dinner") is one without asking.
 
-The matching is pure functions; `FocusSwitcher` does the rest (asking,
-checking the target can be reached, moving the focus, greeting in the target's
-voice). Features built on top switch through `switch_to` too: the inbox's
-"next agent" (core/voice/briefing/hook.py) arrives the same way.
+`FocusSwitcher` does the moving: asking, checking the target can be reached,
+moving the focus, greeting in the target's voice. Features built on top switch
+through `switch_to` too: the inbox's "next agent" (core/voice/briefing/hook.py)
+arrives the same way.
 """
-import re
 from typing import Awaitable, Callable, Dict, Optional, Protocol
 
 from core.voice.room import near_miss
-from core.voice.room.aliases import alias_key, build_aliases, clean
+from core.voice.room.aliases import build_aliases
 from core.voice.room.focus import FocusDirectory, VoiceFocus
 
-# A command at the start of the utterance, after optional politeness. The
-# capture is everything that follows: the target being asked for.
-_COMMAND = re.compile(
-    r"^(?:(?:hey|hi|ok|okay|so|um|uh|please|concierge)[\s,]+)*"
-    r"(?:can you |could you |would you |will you )?(?:please )?"
-    r"(?:take me (?:to|into)|bring me (?:to|into)|move me (?:to|into)|switch (?:me )?(?:to|over to)|"
-    r"go (?:to|into)|let'?s go (?:to|into)|i want to (?:talk|speak) (?:to|with)|"
-    r"let me (?:talk|speak) (?:to|with)|(?:talk|speak) (?:to|with)|"
-    r"(?:go |take me |bring me |head )?back (?:to|into)|return to|start (?:with|from))\s+"
-    r"(?P<target>.+)$"
-)
-
-# "Where am I?": answered from the focus, without a model call. "Who are you?"
-# is not here on purpose: the agent you're with answers it, in its own words,
-# as it would in its channel.
-_WHERE = re.compile(
-    r"^(?:(?:hey|hi|ok|okay|so|um|uh|concierge)[\s,]+)*"
-    r"(?:where am i|where are we|which (?:room|channel) am i in|what (?:room|channel) is this)(?: right now| now)?$"
-)
 
 # A switch target is a name or a few words about one ("exercise", "my workout
 # coach"). Anything longer is a request that happens to start like a switch,
@@ -54,27 +34,6 @@ MAX_TARGET_WORDS = 6
 # After a name, these start a request: "go to Daisy and add a task" stays an
 # ordinary request, so a switch is always its own clear step.
 _JOINERS = {"and", "then", "to", "so", "for", "about", "because", "with"}
-
-
-def parse_room_request(transcript: str) -> Optional[str]:
-    """The normalized target phrase if `transcript` asks to switch, else None."""
-    match = _COMMAND.match(clean(transcript))
-    if not match:
-        return None
-    return alias_key(match.group("target")) or None
-
-
-def is_where_am_i(transcript: str) -> bool:
-    """Whether `transcript` asks where the focus is."""
-    return bool(_WHERE.match(clean(transcript)))
-
-
-def match_target(transcript: str, aliases: Dict[str, str]) -> Optional[str]:
-    """The focus key `transcript` asks to switch to by an exact name, or None."""
-    target = parse_room_request(transcript)
-    if target is None:
-        return None
-    return aliases.get(target)
 
 
 def could_name_a_target(phrase: str, aliases: Dict[str, str]) -> bool:
@@ -122,23 +81,17 @@ class FocusSwitcher:
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
 
-    async def handle(self, transcript: str, say: Say) -> bool:
-        """Answers a switch request or a where-am-I question. True if
-        `transcript` was one of them.
+    async def switch_to_named(self, phrase: str, say: Say) -> bool:
+        """Answers a switch request for `phrase`, what was named after "switch me
+        to" (core/runtime/commands/spoken/switch.py). True if it was one: the
+        focus moved, or you were told the words for a near miss. False: the
+        words are an ordinary request for the agent you're with.
 
         `say(text, agent_id)` speaks a line in `agent_id`'s voice. Arriving is
         announced in the target's own voice; questions about switching are
         asked by the concierge, whose job routing is.
         """
         directory = self.voice.directory()
-        if is_where_am_i(transcript):
-            focus = self.voice.focus()
-            await say(directory.whereabouts(focus), focus.agent_id)
-            return True
-
-        phrase = parse_room_request(transcript)
-        if phrase is None:
-            return False
         aliases = build_aliases(directory.alias_sources())
         target = directory.get(aliases.get(phrase))
         if target is not None:
@@ -155,7 +108,7 @@ class FocusSwitcher:
         if target.key == self.voice.focus().key:
             await say(directory.already(target), target.agent_id)
             return True
-        self._log(f"🤔 {transcript!r} named no one exactly; suggesting #{target.channel_name}.")
+        self._log(f"🤔 {phrase!r} named no one exactly; suggesting #{target.channel_name}.")
         await say(f"Do you mean {directory.role(target)}? Say '{directory.words_to_switch(target)}' to get there.",
                   directory.voice_host)
         return True

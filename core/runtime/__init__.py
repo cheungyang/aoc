@@ -13,13 +13,14 @@
   model/                 the model call: thinking level, retry
   history/               a session's history across turns
   observability/         the transcript, token usage, latency marks
-  command_handler.py     the in-turn [new]/[compact]/... commands (commands/ in step 4)
+  commands/              every command, typed or spoken: !new, !help, !join, "stop",
+                         "switch me to Daisy", [claim]...; the adapters run them
 
 Layers, lowest first. A module imports from its own layer or the ones below
 it, never above (checked by tests/test_layers.py):
 
   foundation   foundation/: imports nothing else from the runtime
-  services     command_handler, model/, history/, observability/
+  services     commands/, model/, history/, observability/
   turn         agent, base_agent, script_executor, agent_factory, graph_builder, streaming
   delegation   delegation
   bootstrap    bootstrap

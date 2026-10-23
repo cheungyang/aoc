@@ -37,8 +37,7 @@ FOUNDATION = ("core.runtime.foundation",)
 # The runtime's layers, lowest first.
 LAYERS = (
     FOUNDATION,
-    ("core.runtime.command_handler", "core.runtime.commands", "core.runtime.model",
-     "core.runtime.history", "core.runtime.observability"),
+    ("core.runtime.commands", "core.runtime.model", "core.runtime.history", "core.runtime.observability"),
     ("core.runtime.agent", "core.runtime.base_agent", "core.runtime.script_executor",
      "core.runtime.agent_factory", "core.runtime.graph_builder", "core.runtime.streaming"),
     ("core.runtime.delegation",),
@@ -95,8 +94,6 @@ ALLOWED: Dict[str, Set[str]] = {
         # Phase 3: Agent's side work moves into turn hooks.
         "core.runtime.agent -> core.runtime.observability.turn_trace",
         "core.runtime.agent -> core.runtime.graph_builder",
-        "core.runtime.command_handler -> core.knowledge.memory.sqlite_checkpointer",
-        "core.runtime.command_handler -> core.runtime.history.pruner",
         # Phase 3: delegation stops resolving Discord channels.
         "core.runtime.delegation -> core.channel.discord.loader",
         "core.runtime.delegation -> core.loaders.agents_loader",

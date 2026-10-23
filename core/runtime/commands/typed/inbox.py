@@ -4,12 +4,15 @@
                            priority, source, label, age, and its question
     !inbox done            marks this channel's row done
     !inbox done <channel>  marks that channel's row done
+
+Only the voice host's bot answers: the inbox is what voice briefings read.
 """
 import time
 from typing import List, Optional
 
-from core.storage.channel_inbox import InboxStore
-from core.storage.channel_inbox import UNFINISHED, InboxRow, Status, Via
+from core.channel.inbox import inbox_channel
+from core.runtime.commands.base import TypedContext, VoiceRoomCommand
+from core.storage.channel_inbox import UNFINISHED, InboxRow, InboxStore, Status, Via
 
 USAGE = "Usage: `!inbox` lists the inbox; `!inbox done [channel]` marks a channel's row done."
 
@@ -61,3 +64,13 @@ def handle_inbox_command(args: Optional[str], here: Optional[str], store: Option
             return f"\u2705 #{channel} is done."
         return f"Nothing unfinished in #{channel}."
     return USAGE
+
+
+class InboxCommand(VoiceRoomCommand):
+    name = "inbox"
+    summary = "Lists the channel inbox; `!inbox done [channel]` marks a channel's row done."
+    usage = "[done [channel]]"
+    voice_host_only = True
+
+    async def run(self, ctx: TypedContext, args: str) -> None:
+        await ctx.reply(handle_inbox_command(args, inbox_channel(ctx.channel)))

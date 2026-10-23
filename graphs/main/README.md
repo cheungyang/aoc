@@ -222,7 +222,7 @@ Both helpers are picked up by name by
 [GraphsLoader](../../core/loaders/graphs_loader.py#L80-L97)
 and used by the [`graph_call`](../../tools/graph_call.py#L40-L42)
 tool when this graph is invoked as a subgraph. (The normal agent path in
-[`Agent._prepare_execution`](../../core/runtime/agent.py#L56)
+[`Agent._prepare_execution`](../../core/runtime/agent.py#L55)
 builds `{"messages": [...]}` itself and does not call them.)
 
 ```python

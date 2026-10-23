@@ -500,47 +500,21 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.send.assert_called_once_with("Direct user response")
 
     @patch('core.runtime.foundation.sessions.SessionManager.clear_session')
-    async def test_execute_new_command(self, mock_clear_session):
-        mock_clear_session.return_value = "archived"
+    @patch('core.runtime.agent.LoggingHandler')
+    async def test_execute_leaves_commands_to_the_channel(self, mock_logging_handler_class, mock_clear_session):
+        """Commands are answered before a message reaches the agent (the Discord
+        runner runs core/runtime/commands/): to the agent, "!new" is a prompt."""
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="A reply")]})
         agent = Agent("test-agent", {})
+        agent._graphs[""] = mock_graph
         mock_channel = AsyncMock()
         mock_channel.name = "general"
         session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
 
-        await agent.execute("[new]", session=session)
-        mock_clear_session.assert_called_once()
-        mock_channel.send.assert_called_once_with("Session context cleared. archived")
-
-    @patch('core.runtime.foundation.sessions.SessionManager.clear_sessions')
-    async def test_execute_newall_command(self, mock_clear_sessions):
-        mock_clear_sessions.return_value = "all archived"
-        agent = Agent("test-agent", {})
-        mock_channel = AsyncMock()
-        mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
-
-        await agent.execute("[newall]", session=session)
-        mock_clear_sessions.assert_called_once()
-        mock_channel.send.assert_called_once_with("All session contexts cleared. all archived")
-
-    @patch('os.execv')
-    async def test_execute_restart_command(self, mock_execv):
-        agent = Agent("test-agent", {})
-        mock_channel = AsyncMock()
-        mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
-
-        await agent.execute("[restart]", session=session)
-        mock_channel.send.assert_called_once_with("System is restarting...")
-        mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
-
-    @patch('os.execv')
-    async def test_execute_restart_command_no_channel(self, mock_execv):
-        agent = Agent("test-agent", {})
-        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")
-
-        await agent.execute("[restart]", session=session)
-        mock_execv.assert_called_once_with(sys.executable, [sys.executable] + sys.argv)
+        self.assertEqual(await agent.execute("!new", session=session), "A reply")
+        mock_graph.ainvoke.assert_awaited_once()
+        mock_clear_session.assert_not_called()
 
     @patch('core.runtime.agent.LoggingHandler')
     async def test_execute_with_poll_view(self, mock_logging_handler_class):
