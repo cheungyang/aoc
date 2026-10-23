@@ -23,10 +23,10 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Set, Tuple
 
-from core.inbox.model import InboxRow, Priority, Source, Status, Via
-from core.inbox.speech_writer import SpeechWriter
-from core.inbox.writer import mark_heard, mark_read, subscribe
 from core.storage.channel_inbox import InboxStore
+from core.voice.briefing.model import InboxRow, Priority, Source, Status, Via
+from core.voice.briefing.speech_writer import SpeechWriter
+from core.voice.briefing.writer import mark_heard, mark_read, subscribe
 from core.voice.hooks import Say, Speak, VoiceHook, VoiceRoom
 from core.voice.room.focus import FocusDirectory, VoiceFocus, spoken_label
 from core.voice.room.room_switch import normalize

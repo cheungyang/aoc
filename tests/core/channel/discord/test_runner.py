@@ -685,7 +685,7 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 @patch('core.channel.discord.runner.AgentsLoader')
 @patch('core.channel.discord.runner.commands.Bot')
 class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
-    """The runner's part of the channel inbox (core/inbox): posting in a
+    """The runner's part of the channel inbox (core/voice/briefing): posting in a
     channel or ✅ on a post finishes its row; a reply is a candidate."""
 
     def _runner(self, mock_bot_class, mock_loader_class, voice=True, hosts=("day-planning",), reply="Good, noted."):
@@ -721,7 +721,7 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
 
     async def test_posting_finishes_the_row_and_the_reply_is_a_candidate(self, mock_bot_class, mock_loader_class,
                                                                           mark_read, record_reply):
-        from core.inbox.model import Via
+        from core.voice.briefing.model import Via
         runner, message = self._runner(mock_bot_class, mock_loader_class)
         with patch('core.channel.discord.stream_buffer.DiscordStreamBuffer.finalize', new=AsyncMock()):
             await runner.on_message(message)
@@ -758,7 +758,7 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
     async def test_a_check_mark_finishes_the_posts_row(self, mock_bot_class, mock_loader_class, mark_read, record_reply):
         import datetime
         import discord
-        from core.inbox.model import Via
+        from core.voice.briefing.model import Via
         runner, message = self._runner(mock_bot_class, mock_loader_class)
         runner.bot.get_channel.return_value = message.channel
         posted = datetime.datetime(2026, 10, 22, 6, 0, tzinfo=datetime.timezone.utc)

@@ -11,6 +11,8 @@ from typing import Any, Callable, Optional
 import discord
 from discord.ext import voice_recv
 
+from core.voice import patches
+
 
 def normalize_channel_name(name: str) -> str:
     """Normalizes a channel name (strips 'voice-', '-voice', 'vc-', spaces, special chars)."""
@@ -78,6 +80,7 @@ class VoiceConnection:
 
     async def join(self, channel_name_or_id: str = None) -> bool:
         """Joins a Discord voice channel and starts listening."""
+        patches.apply()  # libopus and the voice gateway/decoder fixes, before the first connect
         target_channel = self._find_target(channel_name_or_id)
         if not target_channel:
             available_vcs = [f"'{vc.name}'" for guild in self.bot.guilds for vc in guild.voice_channels]

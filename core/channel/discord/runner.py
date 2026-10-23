@@ -11,10 +11,10 @@ from core.loaders.agents_loader import AgentsLoader
 from core.runtime.session_manager import SessionManager
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
-from core.inbox.model import Via
-from core.inbox.voice_briefing import VoiceBriefing
-from core.inbox.writer import mark_read, record_reply
 from core.util import format_error_message, safe_chunks
+from core.voice.briefing.hook import VoiceBriefing
+from core.voice.briefing.model import Via
+from core.voice.briefing.writer import mark_read, record_reply
 from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS, mark_from_reaction
 from core.voice.room.connection import normalize_channel_name
 from core.voice.voice_manager import VoiceManager
@@ -102,12 +102,12 @@ class BotRunner:
 
         @self.bot.command(name="inbox")
         async def cmd_inbox(ctx, *, args: str = ""):
-            # What voice briefings will tell you about (core/inbox). Only the
+            # What voice briefings will tell you about (core/voice/briefing). Only the
             # voice host's bot answers, so one message gets one reply.
             if not self._is_voice_host():
                 return
-            from core.inbox.commands import handle_inbox_command
-            from core.inbox.writer import channel_name
+            from core.voice.briefing.commands import handle_inbox_command
+            from core.voice.briefing.writer import channel_name
             for chunk in safe_chunks(handle_inbox_command(args, channel_name(ctx.channel))):
                 await ctx.send(chunk)
 
@@ -170,7 +170,7 @@ class BotRunner:
     async def on_raw_reaction_add(self, payload):
         """✅ or ❌ on a `!gate review` post marks that utterance as yours or
         not (core/voice/listening/gate_commands.py). ✅ on any other post
-        finishes its channel's inbox row (core/inbox)."""
+        finishes its channel's inbox row (core/voice/briefing)."""
         emoji = str(getattr(payload, "emoji", ""))
         if emoji not in GATE_REACTIONS:
             return
@@ -400,7 +400,7 @@ class BotRunner:
         is_host = (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
         
         # You posted here, typed or by voting in a poll: whatever its agent
-        # left you in this channel is finished (core/inbox).
+        # left you in this channel is finished (core/voice/briefing).
         if is_host and mine:
             mark_read(message.channel, Via.TYPED)
 

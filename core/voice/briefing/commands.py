@@ -8,8 +8,8 @@
 import time
 from typing import List, Optional
 
-from core.inbox.model import UNFINISHED, InboxRow, Status, Via
 from core.storage.channel_inbox import InboxStore
+from core.voice.briefing.model import UNFINISHED, InboxRow, Status, Via
 
 USAGE = "Usage: `!inbox` lists the inbox; `!inbox done [channel]` marks a channel's row done."
 

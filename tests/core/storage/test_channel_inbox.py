@@ -3,8 +3,8 @@ import sqlite3
 import time
 import unittest
 
-from core.inbox.model import TTL_S, InboxRow, Priority, Source, Status, Via
 from core.storage.channel_inbox import _COLUMNS, InboxStore
+from core.voice.briefing.model import TTL_S, InboxRow, Priority, Source, Status, Via
 
 
 def row(channel="day-planning", posted_at=None, **kw):

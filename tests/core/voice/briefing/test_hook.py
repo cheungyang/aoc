@@ -5,9 +5,8 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock
 
-from core.inbox.model import InboxRow, Priority, Source, Status
-from core.inbox.speech_writer import SpeechWriter
-from core.inbox.voice_briefing import (
+from core.storage.channel_inbox import InboxStore
+from core.voice.briefing.hook import (
     VoiceBriefing,
     announcement,
     compose_digest,
@@ -17,9 +16,10 @@ from core.inbox.voice_briefing import (
     ordered,
     should_announce,
 )
-from core.storage.channel_inbox import InboxStore
+from core.voice.briefing.model import InboxRow, Priority, Source, Status
+from core.voice.briefing.speech_writer import SpeechWriter
 from core.voice.room.focus import FocusDirectory
-from tests.core.inbox import loader
+from tests.core.voice.briefing import loader
 
 DIRECTORY = FocusDirectory.build(loader(), voice_host="main")
 JOINED = 1_000_000.0  # 8:10, when you join
@@ -355,7 +355,7 @@ class TestAsAHook(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row.status, row.status_via.value), (Status.DONE, "VOICE"))
 
     async def test_a_new_row_is_announced_through_the_room_only_while_someone_listens(self):
-        from core.inbox import writer
+        from core.voice.briefing import writer
         self.hook.joined(self.room)
         new = row("day-planning", "day-planner", -1, label="x", speech="Daisy here. Lunch at noon?",
                   question="Lunch at noon?")

@@ -18,7 +18,7 @@ dinner") is one without asking.
 The matching is pure functions; `FocusSwitcher` does the rest (asking,
 checking the target can be reached, moving the focus, greeting in the target's
 voice). Features built on top switch through `switch_to` too: the inbox's
-"next agent" (core/inbox/voice_briefing.py) arrives the same way.
+"next agent" (core/voice/briefing/hook.py) arrives the same way.
 """
 import re
 from typing import Awaitable, Callable, Dict, Iterable, Optional, Protocol, Tuple

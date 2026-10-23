@@ -7,12 +7,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from core.inbox import writer
-from core.inbox.model import Status
 from core.channel.response_parser import AgentResponse
-from core.inbox.speech_writer import SpeechWriter, write_speech
 from core.storage.channel_inbox import InboxStore
-from tests.core.inbox import loader
+from core.voice.briefing import writer
+from core.voice.briefing.model import Status
+from core.voice.briefing.speech_writer import SpeechWriter, write_speech
+from tests.core.voice.briefing import loader
 
 
 class TestWriteSpeech(unittest.IsolatedAsyncioTestCase):

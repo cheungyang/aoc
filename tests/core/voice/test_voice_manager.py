@@ -1119,7 +1119,7 @@ DAISY_QUESTION = "How's your energy this morning, one to ten?"
 
 
 def _inbox_row(channel, agent_id, **kw):
-    from core.inbox.model import InboxRow, Source
+    from core.voice.briefing.model import InboxRow, Source
     base = dict(channel=channel, agent_id=agent_id, posted_at=time.time() - 3600, source=Source.SCHEDULE)
     base.update(kw)
     return InboxRow(**base)
@@ -1128,7 +1128,7 @@ def _inbox_row(channel, agent_id, **kw):
 def _briefed_room(mock_bot_runner, tmp_path, *rows, listening=True):
     """The room fixture with the inbox's briefing hook plugged in (as the
     Discord runner does), `rows` in the channel inbox, and you in the room."""
-    from core.inbox.voice_briefing import VoiceBriefing
+    from core.voice.briefing.hook import VoiceBriefing
     from core.storage.channel_inbox import InboxStore
     vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     for row in rows:
@@ -1226,8 +1226,8 @@ async def test_next_agent_with_nothing_left_says_so(mock_bot_runner, tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_reply_judged_after_you_join_is_announced_once_the_pipeline_is_idle(mock_bot_runner, tmp_path):
-    from core.inbox.model import Source
-    from core.inbox.speech_writer import SpeechWriter
+    from core.voice.briefing.model import Source
+    from core.voice.briefing.speech_writer import SpeechWriter
     vm, _main_agent, loader, _channels = _briefed_room(
         mock_bot_runner, tmp_path,
         _inbox_row("market-scout", "market-scout", source=Source.REPLY, label="a question for you",
@@ -1250,8 +1250,8 @@ async def test_a_reply_judged_after_you_join_is_announced_once_the_pipeline_is_i
 
 @pytest.mark.asyncio
 async def test_no_announcement_when_nobody_is_listening(mock_bot_runner, tmp_path):
-    from core.inbox.model import Source
-    from core.inbox.speech_writer import SpeechWriter
+    from core.voice.briefing.model import Source
+    from core.voice.briefing.speech_writer import SpeechWriter
     vm, _main_agent, loader, _channels = _briefed_room(
         mock_bot_runner, tmp_path,
         _inbox_row("market-scout", "market-scout", source=Source.LATE_REPLY, label="a reply for you",

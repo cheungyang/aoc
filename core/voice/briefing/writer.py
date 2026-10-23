@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any, Callable, List, Optional, Tuple
 
-from core.inbox.model import (
+from core.voice.briefing.model import (
     LATE_REPLY_S,
     InboxRow,
     Priority,

@@ -28,7 +28,7 @@ class VoiceModePrompt(Prompt):
 class ScheduledVoiceModePrompt(Prompt):
     """On a scheduled run whose post may be heard later (see
     `scheduled_speech_scope`). The <speech> block is stored with the post's
-    channel inbox row (core/inbox) and never posted; the channel gets the rest."""
+    channel inbox row (core/voice/briefing) and never posted; the channel gets the rest."""
 
     template = "voice/scheduled_voice_mode"
 
@@ -83,7 +83,7 @@ _PAYLOAD_TAG = re.compile(r"</?payload\s*>", re.IGNORECASE)
 @dataclass
 class SpeechWriterPrompt(WorkerPrompt):
     """A Discord post, rewritten as what its author says aloud, under the same
-    rules as <voice_mode>, <question> included (core/inbox/speech_writer.py).
+    rules as <voice_mode>, <question> included (core/voice/briefing/speech_writer.py).
     The answer is the speech version and its marked question."""
 
     template = "voice/speech_writer"

@@ -1,4 +1,4 @@
-"""Tests for the channel inbox (core/inbox)."""
+"""Tests for the channel inbox (core/voice/briefing)."""
 
 
 class Loader:

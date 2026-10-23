@@ -15,9 +15,9 @@ asks you something stays, and any other is dropped.
 import asyncio
 from typing import Awaitable, Callable, Dict, Optional, Tuple
 
-from core.inbox.model import InboxRow
-from core.inbox.writer import store_speech
 from core.prompts.voice import Speech, SpeechWriterPrompt
+from core.voice.briefing.model import InboxRow
+from core.voice.briefing.writer import store_speech
 
 # One call per post, all at once, but no more than this many in flight.
 MAX_PARALLEL = 4

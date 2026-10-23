@@ -1,9 +1,9 @@
 """`!inbox`: listing the channel inbox and marking a row done."""
 import unittest
 
-from core.inbox.commands import USAGE, handle_inbox_command
-from core.inbox.model import InboxRow, Priority, Source, Status
 from core.storage.channel_inbox import InboxStore
+from core.voice.briefing.commands import USAGE, handle_inbox_command
+from core.voice.briefing.model import InboxRow, Priority, Source, Status
 
 NOW = 1_000_000.0
 

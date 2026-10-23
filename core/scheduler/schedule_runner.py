@@ -10,7 +10,7 @@ For every due schedule the runner:
 3. dispatches by kind — a prompt becomes an agent turn, a script a subprocess;
 4. records `last_success_at` only if the run succeeded.
 
-Every post it makes also puts its channel in the channel inbox (core/inbox),
+Every post it makes also puts its channel in the channel inbox (core/voice/briefing),
 unless the schedule's priority is IGNORE, so a voice briefing can tell you
 about it. A prompt run that isn't IGNORE also writes the speech version of
 its post (the scheduled <voice_mode> block), stored with that row.
@@ -31,8 +31,6 @@ from typing import Any, Dict, List, Optional
 from croniter import croniter
 
 from core.channel.discord.loader import BotsLoader
-from core.inbox.model import Priority
-from core.inbox.writer import record_push
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.channel_context import record_channel_post
 from core.runtime.job_manager import JobManager
@@ -51,6 +49,8 @@ from core.scheduler.spec import (
 )
 from core.storage.schedule_state import ScheduleState
 from core.storage.sessions import CHECKPOINT_ENTRIES, SessionStore, sanitize_table_name
+from core.voice.briefing.model import Priority
+from core.voice.briefing.writer import record_push
 from core.util import safe_chunks
 from core.prompts.voice import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership

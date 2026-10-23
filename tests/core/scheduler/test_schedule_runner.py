@@ -409,7 +409,7 @@ class TestPromptDispatch(RunnerCase):
 
     async def test_a_post_enters_the_inbox_with_the_runs_speech_version(self):
         from core.channel.response_parser import AgentResponse
-        from core.inbox.model import Priority
+        from core.voice.briefing.model import Priority
 
         seen = self._execute_with(AgentResponse(
             text="ok", speech="Daisy here. How's your energy, one to ten?", question="How's your energy, one to ten?"))
@@ -423,7 +423,7 @@ class TestPromptDispatch(RunnerCase):
         )
 
     async def test_an_ignore_schedule_writes_no_speech_version(self):
-        from core.inbox.model import Priority
+        from core.voice.briefing.model import Priority
 
         seen = self._execute_with(None)
         await self.make_runner().run_schedule(self.prompt_spec(priority="IGNORE"))

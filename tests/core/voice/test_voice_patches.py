@@ -1,9 +1,32 @@
+import subprocess
+import sys
+
 import pytest
 import nacl.secret
 from unittest.mock import AsyncMock, MagicMock, patch
 import discord.opus
 
-import core.voice  # triggers patches
+import av  # noqa: F401 -- on macOS, discord.py finds libopus only once PyAV (which bundles it) is loaded
+from core.voice import patches
+
+patches.apply()  # as the voice room does before it connects
+
+
+def test_importing_core_voice_patches_nothing():
+    """Only the voice room's join applies the patches: a module that imports
+    something light from core.voice (the scheduler imports the briefing's
+    writer) loads neither libopus nor voice_recv."""
+    code = ("import sys; import core.voice, core.voice.briefing.writer, core.storage.channel_inbox; "
+            "print(sorted(m for m in ('discord.ext.voice_recv', 'core.voice.voice_manager') if m in sys.modules))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    assert out.strip() == "[]"
+
+
+def test_apply_twice_patches_once():
+    import discord.gateway as gw
+    patched = gw.DiscordVoiceWebSocket.received_message
+    patches.apply()
+    assert gw.DiscordVoiceWebSocket.received_message is patched
 
 def test_patch_voice_recv_opus_safe_decode():
     import discord.ext.voice_recv.opus as vr_opus
@@ -98,8 +121,7 @@ async def test_patch_discord_voice_gateway_session_description():
     assert msg["d"]["dave_protocol_version"] == 0
 
 def test_load_libopus():
-    import core.voice
-    from core.voice import _load_libopus
+    from core.voice.patches import _load_libopus
     import discord.opus
     _load_libopus()
     assert discord.opus.is_loaded() is True

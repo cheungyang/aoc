@@ -10,7 +10,7 @@
     room/       joining the voice room, and the focus: which agent and text
                 channel the next turn belongs to ("switch me to Daisy")
     hooks       how features built on the room join in without the voice core
-                knowing them: the inbox's briefings (core/inbox/voice_briefing.py)
+                knowing them: the inbox's briefings (core/voice/briefing/hook.py)
 
 The VAD sink hands each utterance to the floor, and the floor starts and
 stops turns here. A turn answers every unanswered utterance as one request,

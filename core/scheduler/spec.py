@@ -178,7 +178,7 @@ class ScheduleSpec(ABC):
         label: Optional[str] = None,
         entry: Optional[Dict[str, Any]] = None,
     ):
-        from core.inbox.model import Priority
+        from core.voice.briefing.model import Priority
 
         self.schedule_id = schedule_id
         self.agent_id = agent_id
@@ -187,7 +187,7 @@ class ScheduleSpec(ABC):
         self.thread = thread
         self.enabled = enabled
         self.precondition = precondition
-        # How its posts reach you in voice briefings (core/inbox).
+        # How its posts reach you in voice briefings (core/voice/briefing).
         self.priority = Priority.parse(priority)
         self.label = label
         self.entry = dict(entry or {})

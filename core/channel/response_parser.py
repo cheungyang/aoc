@@ -136,7 +136,7 @@ def split_question(speech: Optional[str]) -> tuple[Optional[str], Optional[str]]
 
     The question's words stay where they were in the speech: they're heard in
     place the first time, and replayed alone while the post waits for an
-    answer (core/inbox). Only <question> inside <speech> is meant here; a
+    answer (core/voice/briefing). Only <question> inside <speech> is meant here; a
     poll's <question> lives outside it and is never passed in.
     """
     if not speech or not _QUESTION_TAG_RE.search(speech):

@@ -3,7 +3,7 @@ core knowing it.
 
 The voice core -- listening, the focus and switching, speaking -- knows
 nothing of the features that use it. A feature that needs to join in (the
-channel inbox's voice briefings, core/inbox/voice_briefing.py) is a
+channel inbox's voice briefings, core/voice/briefing/hook.py) is a
 `VoiceHook`, handed to VoiceManager when it's built. VoiceManager calls every
 hook at these moments, in order, and a hook overrides only the ones it needs:
 

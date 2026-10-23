@@ -20,7 +20,7 @@ for that run's model calls; without it the agent's scheduled level applies
 
 Any schedule may set `priority` (IGNORE | LOW | DEFAULT | HIGHEST, default
 DEFAULT) and `label` ("your morning check-in"): how its posts reach you in
-voice briefings (core/inbox). IGNORE posts never enter the channel inbox.
+voice briefings (core/voice/briefing). IGNORE posts never enter the channel inbox.
 
 The same validator backs the `schedule_validate` tool, so an agent editing
 `agent.json` can check an entry before it saves it.
@@ -30,7 +30,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from core.inbox.model import Priority
 from core.scheduler.preconditions import PreconditionError, build_precondition
 from core.scheduler.script_runner import check_script, parse_step
 from core.scheduler.spec import (
@@ -42,6 +41,7 @@ from core.scheduler.spec import (
     SessionPolicy,
 )
 from core.util.models import THINKING_LEVELS
+from core.voice.briefing.model import Priority
 
 KINDS = (KIND_PROMPT, KIND_SCRIPT)
 

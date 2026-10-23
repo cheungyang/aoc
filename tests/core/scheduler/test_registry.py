@@ -139,7 +139,7 @@ class TestCommonRules(RegistryCase):
         self.assertGreaterEqual(len(cm.exception.errors), 3)
 
     def test_priority_is_an_enum_and_defaults_to_default(self):
-        from core.inbox.model import Priority
+        from core.voice.briefing.model import Priority
 
         self.assertIs(build_spec("a", prompt_entry(), self.scripts).priority, Priority.DEFAULT)
         for value, expected in (("LOW", Priority.LOW), ("highest", Priority.HIGHEST), ("IGNORE", Priority.IGNORE)):
@@ -157,7 +157,7 @@ class TestCommonRules(RegistryCase):
         self.assertRejected(prompt_entry(label=["a"]), "'label' must be")
 
     def test_scripts_take_priority_and_label_too(self):
-        from core.inbox.model import Priority
+        from core.voice.briefing.model import Priority
 
         spec = build_spec("a", {"kind": "script", "cron": "0 9 * * *", "script": "ok.py", "channel": "general",
                                 "priority": "LOW", "label": "a coding update"}, self.scripts)

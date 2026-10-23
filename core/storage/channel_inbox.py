@@ -10,10 +10,10 @@ import sqlite3
 import time
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.inbox.model import TTL_S, UNFINISHED, InboxRow, Priority, Source, Status, Via
 from core.storage.base import Store
 from core.storage.util import placeholders
 from core.util.config import Config
+from core.voice.briefing.model import TTL_S, UNFINISHED, InboxRow, Priority, Source, Status, Via
 
 _COLUMNS = ("channel", "agent_id", "posted_at", "source", "schedule_id", "label", "speech",
             "question", "excerpt", "priority", "status", "status_at", "status_via")

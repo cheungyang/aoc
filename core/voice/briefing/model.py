@@ -3,7 +3,7 @@
 The inbox holds at most one row per text channel: the newest agent post there
 that you may not have finished with. That's a scheduled push, or a reply that
 needs you. Posts and read signals write it (writer.py); voice briefings read it
-(core/voice/briefing.py).
+(hook.py).
 """
 import time
 from dataclasses import dataclass, replace

@@ -100,7 +100,7 @@ def _no_inbox_listeners():
     """Per-test: nobody listens for new channel inbox rows. A voice manager
     that welcomed you subscribes for the process's life, so one test's
     must not hear the rows the next test writes."""
-    from core.inbox import writer
+    from core.voice.briefing import writer
 
     writer._listeners.clear()
     yield
