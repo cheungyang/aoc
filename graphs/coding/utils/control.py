@@ -387,7 +387,7 @@ async def handoff(manifest_paths: List[str], sync=None) -> Tuple[bool, str]:
     lines.append(f"🔄 {message}")
     lines.append(
         "✅ Handoff complete. Next: move the `script-executor` agent in the Discord "
-        "control thread (`[claim script-executor]` from the dev box, `[release]` to "
+        "control thread (`!claim script-executor` from the dev box, `!release` to "
         "give it back to prod), then run `scripts/coding_admin.py resume` on that host."
     )
     return True, "\n".join(lines)

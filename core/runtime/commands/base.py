@@ -5,7 +5,7 @@
                     answers in a channel the bot answers; VoiceRoomCommand is
                     for the voice room
     SpokenCommand   said in the voice room, recognized by its phrases
-    ControlCommand  typed in the ownership control thread
+    ControlCommand  `!name args` too, typed in the ownership control thread
 """
 import asyncio
 import re
@@ -144,8 +144,24 @@ class SpokenCommand(Command):
     outcome: str = ""                # the turn trace's outcome when it answers
 
 
-class ControlCommand(Command):
-    """Typed in the ownership control thread. Ownership replays the thread
-    through `match` to rebuild who holds which agent; `run` answers it live."""
+# The form control commands had before `!name`: "[claim main]", "[release]".
+_BRACKETED = re.compile(r"\[\s*(\w+)(?:\s+(.*?))?\s*\]\Z", re.DOTALL)
 
-    usage: str = ""   # how it's typed, for `!help`: "[claim <agent>]"
+
+class ControlCommand(TypedCommand):
+    """Typed in the ownership control thread as `!name args`. Ownership replays
+    the thread through `match` to rebuild who holds which agent; `run` answers it
+    live. The thread is a log, so the bracketed form these commands had before
+    (`[claim main]`) is still read: lines already in it keep their meaning."""
+
+    def match(self, text: str) -> Optional[str]:
+        text = (text or "").strip()
+        args = super().match(text)
+        if args is None:
+            old = _BRACKETED.match(text)
+            args = (old.group(2) or "").strip() if old and old.group(1).lower() == self.name else None
+        return args if args is not None and self.takes(args) else None
+
+    def takes(self, args: str) -> bool:
+        """Whether `args` are this command's arguments; by default it takes none."""
+        return args == ""

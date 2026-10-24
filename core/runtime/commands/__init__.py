@@ -12,8 +12,8 @@ command.
                   voice room: !join, !leave, !inbox, !enroll, !voiceprint, !gate
     spoken/       said in the voice room: "stop", "wait", "next agent",
                   "where am I", "switch me to Daisy"
-    control/      typed in the ownership control thread: [claim <agent>],
-                  [release], [status]
+    control/      typed in the ownership control thread: !claim <agent>,
+                  !release, !status
 
 Who runs them: the Discord runner asks TYPED about every message starting with
 "!", and CONTROL about the control thread (core/channel/discord/runner.py); the

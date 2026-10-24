@@ -66,7 +66,7 @@ async def run_bots(dev: bool = False, agents: list = None):
     if dev:
         print("=== DEV INSTANCE ===")
         print(f"Host '{ownership.host}' claims: {', '.join(agents) or 'nothing yet'}")
-        print("Other agents stay on prod. Use [claim <agent>] / [release] / [status] in the control thread.")
+        print("Other agents stay on prod. Use !claim <agent> / !release / !status in the control thread.")
         print("====================")
 
     tasks = []
@@ -89,7 +89,7 @@ async def run_bots(dev: bool = False, agents: list = None):
             try:
                 await asyncio.wait_for(ownership.release_all_mine(tokens), timeout=15)
             except Exception as e:
-                print(f"Could not release claims: {e}. Post [release] in the control thread.")
+                print(f"Could not release claims: {e}. Post !release in the control thread.")
     else:
         print("No Discord bots to start.")
 

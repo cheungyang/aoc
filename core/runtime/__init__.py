@@ -14,7 +14,7 @@
   history/               a session's history across turns
   observability/         the transcript, token usage, latency marks
   commands/              every command, typed or spoken: !new, !help, !join, "stop",
-                         "switch me to Daisy", [claim]...; the adapters run them
+                         "switch me to Daisy", !claim...; the adapters run them
 
 Layers, lowest first. A module imports from its own layer or the ones below
 it, never above (checked by tests/test_layers.py):

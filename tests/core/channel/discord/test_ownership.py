@@ -48,12 +48,19 @@ class TestParse(unittest.TestCase):
     def test_parses_bot_and_user_lines(self):
         self.assertEqual(parse("🔒 claim day-planner @laptop"), Event("claim", "day-planner", "laptop"))
         self.assertEqual(parse("🔓 release day-planner @laptop"), Event("release", "day-planner", "laptop"))
+        self.assertEqual(parse("!claim day-planner"), Event("cmd_claim", "day-planner"))
+        self.assertEqual(parse(" !release "), Event("cmd_release"))
+        self.assertEqual(parse("!status"), Event("cmd_status"))
+
+    def test_reads_the_bracketed_commands_already_in_the_thread(self):
+        """Before `!name` they were [claim <agent>], [release], [status]: replaying
+        the thread must still count them, or an old release would be lost."""
         self.assertEqual(parse("[claim day-planner]"), Event("cmd_claim", "day-planner"))
         self.assertEqual(parse(" [ RELEASE ] "), Event("cmd_release"))
         self.assertEqual(parse("[status]"), Event("cmd_status"))
 
     def test_ignores_chat(self):
-        for text in ["hello", "[release] please", "claim day-planner", "", None]:
+        for text in ["hello", "[release] please", "!release please", "claim day-planner", "!claim", "", None]:
             self.assertIsNone(parse(text))
 
     def test_round_trips_own_text(self):
@@ -87,7 +94,7 @@ class TestReduceAndOwnership(unittest.TestCase):
 
     def test_user_claim_is_manual_until_dev_takes_it(self):
         o = fresh(PROD)
-        o.apply(msg("[claim a]", 1))
+        o.apply(msg("!claim a", 1))
         self.assertEqual(o.holder("a"), MANUAL)
         self.assertFalse(o.is_mine("a"))
         o.apply(msg("🔒 claim a @laptop", 2, bot=True))
@@ -96,8 +103,8 @@ class TestReduceAndOwnership(unittest.TestCase):
     def test_user_release_clears_all(self):
         o = fresh(PROD)
         o.apply(msg("🔒 claim a @laptop", 1))
-        o.apply(msg("[claim b]", 2))
-        o.apply(msg("[release]", 3))
+        o.apply(msg("!claim b", 2))
+        o.apply(msg("!release", 3))
         self.assertEqual(o.holds, {})
 
     def test_apply_is_idempotent_per_message(self):
@@ -128,7 +135,7 @@ class TestReduceAndOwnership(unittest.TestCase):
         o.add_listener(seen.append)
         o.apply(msg("🔒 claim a @laptop", 1))
         o.apply(msg("🔒 claim a @laptop", 2))  # no change
-        o.apply(msg("[release]", 3))
+        o.apply(msg("!release", 3))
         self.assertEqual(seen, ["a", "a"])
 
     def test_describe_lists_holders(self):
@@ -260,7 +267,7 @@ class TestRunnerIntegration(unittest.IsolatedAsyncioTestCase):
     @patch("core.channel.discord.runner.AgentsLoader")
     async def test_control_messages_are_not_chat(self, mock_agents_loader):
         agent = self._agent(mock_agents_loader)
-        await self.runner.on_message(msg("[claim main]", 2))
+        await self.runner.on_message(msg("!claim main", 2))
         agent.execute_stream.assert_not_called()
         self.assertEqual(Ownership().holder("main"), MANUAL)
 
@@ -271,7 +278,7 @@ class TestRunnerIntegration(unittest.IsolatedAsyncioTestCase):
         thread = MagicMock()
         thread.send = AsyncMock(side_effect=lambda text: msg(text, 11, created=T0))
         self.runner.bot.get_channel.return_value = thread
-        command = msg("[claim main]", 3)
+        command = msg("!claim main", 3)
         await self.runner.on_message(command)
         thread.send.assert_awaited_once_with("🔒 claim main @laptop")
         command.add_reaction.assert_awaited_once_with("✅")
@@ -280,7 +287,7 @@ class TestRunnerIntegration(unittest.IsolatedAsyncioTestCase):
     @patch("core.channel.discord.loader.BotsLoader")
     async def test_status_replies_once_from_elected_bot(self, mock_bots_loader):
         mock_bots_loader.return_value._bots = {"main": self.runner, "zeta": MagicMock()}
-        command = msg("[status]", 4)
+        command = msg("!status", 4)
         await self.runner.on_message(command)
         command.channel.send.assert_awaited_once()
 

@@ -1,21 +1,19 @@
-"""`[claim <agent>]`: the dev instance takes <agent>. If no dev instance is
+"""`!claim <agent>`: the dev instance takes <agent>. If no dev instance is
 running, prod still goes quiet for it (ownership.py's MANUAL hold)."""
 import re
-from typing import Optional
 
 from core.runtime.commands.base import ControlCommand, ControlContext
 
-_CMD_CLAIM_RE = re.compile(r"^\[\s*claim\s+([\w\-]+)\s*\]$", re.IGNORECASE)
+_AGENT = re.compile(r"[\w\-]+")
 
 
 class ClaimCommand(ControlCommand):
     name = "claim"
-    usage = "[claim <agent>]"
+    usage = "<agent>"
     summary = "Hands <agent> to the dev instance; prod goes quiet for it even if no dev instance is running."
 
-    def match(self, text: str) -> Optional[str]:
-        found = _CMD_CLAIM_RE.match((text or "").strip())
-        return found.group(1) if found else None
+    def takes(self, args: str) -> bool:
+        return bool(_AGENT.fullmatch(args))
 
     async def run(self, ctx: ControlContext, agent: str) -> None:
         control = ctx.control

@@ -24,7 +24,7 @@ def describe(command: Command) -> str:
     elif isinstance(command, SpokenCommand):
         how = ", ".join(f"\u201c{example}\u201d" for example in command.examples)
     else:
-        how = f"`{getattr(command, 'usage', '') or command.name}`"
+        how = f"`{command.name}`"
     return f"{how}: {command.summary}"
 
 
@@ -56,7 +56,7 @@ class HelpCommand(ChannelCommand):
         return "\n".join(lines)
 
     def find(self, name: str) -> Optional[Command]:
-        """The command called `name` ("!join", "join", "next agent", "[claim]"), or None."""
+        """The command called `name` ("!join", "join", "next agent", "!claim"), or None."""
         wanted = name.strip().lstrip("!").strip("[]").strip().lower()
         for registry in (self.typed, self.spoken, self.control):
             for command in registry:

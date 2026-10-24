@@ -10,7 +10,7 @@ one of them, silently dropping the other's progress.
 *Which* host runs the scheduled tick is already decided elsewhere: the tick is a
 `script-executor` schedule, and the schedule runner only runs an agent's
 schedules on the host that owns it (`core/channel/discord/ownership.py`,
-switched with `[claim script-executor]` / `[release]`). What ownership cannot do
+switched with `!claim script-executor` / `!release`). What ownership cannot do
 is carry state across the switch — the old host's last manifest writes and
 unpushed work must reach GitHub and pkm before the new host's first tick. The
 switches here bridge that gap:

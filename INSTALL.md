@@ -463,9 +463,9 @@ python main.py --dev --agents day-planner   # dev takes day-planner; prod keeps 
 ```
 
 - **Ctrl+C** posts a release and prod takes the agent back immediately.
-- In the control thread: `[claim <agent>]` hands another agent to the running
-  dev instance, `[release]` gives every agent back to prod (use this if dev
-  crashed), and `[status]` makes each instance report who holds what.
+- In the control thread: `!claim <agent>` hands another agent to the running
+  dev instance, `!release` gives every agent back to prod (use this if dev
+  crashed), and `!status` makes each instance report who holds what.
 - While dev holds an agent it also runs that agent's schedules and voice.
 - All agent bots need permission to read and post in the control thread.
 

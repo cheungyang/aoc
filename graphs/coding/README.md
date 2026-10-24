@@ -764,7 +764,7 @@ switch, so the switch has three steps:
    here, waits for ticks still running here (exit 3 and nothing synced if any are; re-run later),
    pushes any task stuck at `implemented` (its work exists only on this disk), then syncs the pkm
    repo immediately instead of at the hourly sync.
-2. **Discord control thread:** `[claim script-executor]` from the dev box, or `[release]` to give
+2. **Discord control thread:** `!claim script-executor` from the dev box, or `!release` to give
    it back to prod.
 3. **New host:** `scripts/coding_admin.py resume` — pulls pkm first, refuses while another host
    still holds a live lease (`--force` overrides), then unpauses.

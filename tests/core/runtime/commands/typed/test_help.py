@@ -23,13 +23,15 @@ class TestHelp(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`!compact` (or `!summarize`)", text)
         self.assertIn("`!join [voice channel]`: Joins the voice room", text)
         self.assertIn("\u201cstop\u201d, \u201cnever mind\u201d, \u201ccancel\u201d: Stops the reply", text)
-        self.assertIn("`[claim <agent>]`: Hands <agent> to the dev instance", text)
+        self.assertIn("`!claim <agent>`: Hands <agent> to the dev instance", text)
+        self.assertIn("`!release`: Hands every agent back to prod.", text)
+        self.assertNotIn("[claim", text)
 
     def test_one_command_by_name(self):
         self.assertTrue(self.help.text("!join").startswith("`!join [voice channel]`: "))
         self.assertTrue(self.help.text("summarize").startswith("`!compact` (or `!summarize`): "))
         self.assertTrue(self.help.text("Next agent").startswith("\u201cnext agent\u201d: "))
-        self.assertTrue(self.help.text("[claim]").startswith("`[claim <agent>]`: "))
+        self.assertTrue(self.help.text("!claim").startswith("`!claim <agent>`: "))
         self.assertEqual(self.help.text("nope"), "There's no command called `nope`. `!help` lists them all.")
 
     async def test_answered_in_the_channel_by_the_bot_that_answers_it(self):

@@ -10,13 +10,15 @@ The thread is an append-only log; state is the result of replaying it:
 
     🔒 claim <agent> @<host>     bot-posted: <host> (a dev instance) holds <agent>
     🔓 release <agent> @<host>   bot-posted: <host> gave <agent> back (clean exit)
-    [claim <agent>]              user command: dev takes <agent>; if no dev is
+    !claim <agent>               user command: dev takes <agent>; if no dev is
                                  running, prod still goes quiet for it
-    [release]                    user command: every agent back to prod
-    [status]                     user command: each instance reports its view
+    !release                     user command: every agent back to prod
+    !status                      user command: each instance reports its view
 
 The user commands are core/runtime/commands/control/: their phrasing, and
-their replies, which the Discord runner sends.
+their replies, which the Discord runner sends. Their old bracketed forms
+(`[claim <agent>]`, `[release]`, `[status]`) still count, so the lines already
+in the thread replay as they always did.
 
 Releasing is a *message*, never a deletion, so replaying history at startup
 always yields the same state as having watched it live.
@@ -41,7 +43,7 @@ from core.util.config import Config
 
 PROD = "prod"
 DEV = "dev"
-MANUAL = "manual"  # held by a user's [claim] with no dev instance answering yet
+MANUAL = "manual"  # held by a user's !claim with no dev instance answering yet
 
 HISTORY_LIMIT = 200
 DEV_MAX_MESSAGE_AGE = datetime.timedelta(minutes=2)
@@ -70,7 +72,7 @@ def parse(content: str) -> Optional[Event]:
         return Event("claim", m.group(1), m.group(2))
     if m := _RELEASE_RE.match(text):
         return Event("release", m.group(1), m.group(2))
-    # A user command: [claim <agent>], [release], [status] (core/runtime/commands/control/).
+    # A user command: !claim <agent>, !release, !status (core/runtime/commands/control/).
     found = CONTROL.match(text)
     if found:
         command, args = found
@@ -363,7 +365,7 @@ class Ownership:
                 except Exception as e:
                     print(
                         f"[Ownership:{self.label()}] ⚠️ could not release {agent_id}: {e}. "
-                        f"Post [release] in the control thread."
+                        f"Post !release in the control thread."
                     )
 
 
