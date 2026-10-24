@@ -13,12 +13,17 @@ def agent_lint(report: Report, agent_id: str = "") -> str:
     """Audit an agent's definition for what will fail or cost model round trips. Read-only.
     Call it at the start of a round-trip audit and after writing or changing an agent's files.
 
-    Reads: agents/, skills/, tools/ and graphs/, and each audited agent's RULES.md in pkm/agents/.
+    Reads: agents/, skills/, tools/ and graphs/, each audited agent's RULES.md in pkm/agents/,
+        the voice catalog in core/voice/foundation/settings.py and the routing table in
+        tests/core/runtime/foundation/test_routing.py.
     Computes: findings by kind, each citing a file and line: skills, tools, actions and paths
-        its text names that are missing or not granted; grants that resolve to nothing and
-        malformed `!` deny keys; tools without a WORKFLOW.md contract or a read grant for what
-        they read; RULES.md keys that don't match lib/rules.py; files the prompt never loads.
-        Then its budgets (persona, preloads, prompt, tool schemas), tools, skills and schedules.
+        its text names that are missing or not granted; grants that resolve to nothing, repeat
+        or spell out a bundle, and malformed `!` deny keys; channels the concierge doesn't host
+        or the routing table pins wrong; a voice missing, unknown or another agent's, with the
+        free ones; tools without a WORKFLOW.md contract or a read grant for what they read;
+        RULES.md keys that don't match lib/rules.py; files the prompt never loads, and persona
+        files out of shape. Then its budgets (persona, preloads, prompt, tool schemas), tools,
+        skills and schedules.
     Leaves out: whether a finding matters. Findings come from pattern matching: check the
         cited line before changing anything.
 

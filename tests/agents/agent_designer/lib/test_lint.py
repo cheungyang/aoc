@@ -297,6 +297,110 @@ class TestConfig(LintRepo):
         self.agent(WORKFLOW_md=WORKFLOW)
         self.assertEqual(self.found("unloaded_file"), [])
 
+    def test_persona_files_keep_their_shape(self):
+        self.agent(IDENTITY_md="name: Duckie\nid: test-agent\nemoji: 🦆",
+                   AGENTS_md="# test-agent Classification\n\n| Part | Classification | Details |\n| :--- | :--- | :--- |\n")
+        self.assertEqual(self.found("persona_format"), [
+            ("persona_format", "IDENTITY.md lacks its `Agent ID:`, `Name:`, `Emoji:`, `Description:` lines",
+             f"agents/{self.AGENT}/IDENTITY.md"),
+            ("persona_format", "AGENTS.md holds the classification table, which is for the plan and the report; "
+             "it should be the agent's operating instructions", f"agents/{self.AGENT}/AGENTS.md"),
+        ])
+        self.agent(IDENTITY_md="# IDENTITY.md\n\nAgent ID: test-agent\nName: T\nEmoji: 🦆\nDescription: Tests.\n",
+                   AGENTS_md="# AGENTS.md\n\n## Operating Instructions\n1. Every turn: answer briefly.\n")
+        self.assertEqual(self.found("persona_format"), [])
+
+
+class TestGrantsSayEachThingOnce(LintRepo):
+    """The bundle tests' two rules, on agent.json and its skills' skill.json."""
+
+    def test_a_repeated_or_spelled_out_bundle(self):
+        self.skill("notes", "Take notes.", {"filesystem": {"pkm/notes": ["read", "read_image", "ls", "find", "grep"]}})
+        self.agent({"skills": {"notes": {}}, "tools": {"filesystem": {
+            "pkm/inbox/": ["@read", "@write"], "pkm/log.md": ["@read", "append"], "pkm/vault/": ["@write"]}}})
+        self.assertEqual(self.found("redundant_grant"), [
+            ("redundant_grant", "`filesystem` [`pkm/inbox/`]: `@read` is already in `@write`",
+             f"agents/{self.AGENT}/agent.json"),
+            ("redundant_grant", "`filesystem` [`pkm/notes`]: it spells out `@read`: name it instead",
+             "skills/notes/skill.json"),
+        ])
+
+
+class TestChannelsAndVoices(LintRepo):
+    """The concierge's routing and the one voice room, as the config tests check them."""
+
+    TABLE = (
+        "class TestLiveRoutingTable:\n"
+        "    EXPECTED = {\n"
+        "        \"general\": None,\n"
+        "        \"day-planning\": \"day-planner\",\n"
+        "    }\n"
+    )
+    PUCK = {"name": "en-US-Chirp3-HD-Puck"}
+
+    def setUp(self):
+        super().setUp()
+        self.other("main", {"channels": ["*"], "channel_hosts": ["general", "day-planning", "note-taking"]})
+        self.other("day-planner", {"channels": ["day-planning", "general"], "voice": {"name": "en-US-Chirp3-HD-Zephyr"}})
+        self.file(lint.ROUTING_TABLE_TEST, self.TABLE)
+
+    def other(self, agent_id, config):
+        self.file(f"agents/{agent_id}/agent.json", json.dumps({"agent_id": agent_id, "name": agent_id, **config}))
+
+    def test_a_channel_the_concierge_does_not_host(self):
+        self.agent({"channels": ["note-keeping"], "voice": self.PUCK})
+        self.assertEqual(self.found(), [(
+            "channel_not_hosted",
+            "#note-keeping is not in the concierge's channel_hosts (agents/main/agent.json), so nothing routes it "
+            "to this agent", f"agents/{self.AGENT}/agent.json")])
+
+    def test_a_new_channel_the_routing_table_does_not_pin(self):
+        self.agent({"channels": ["note-taking"], "voice": self.PUCK})
+        self.assertEqual(self.messages("routing_table_stale"), [
+            '#note-taking goes to test-agent now: set `"note-taking": "test-agent"` in TestLiveRoutingTable.EXPECTED '
+            '(tests/core/runtime/foundation/test_routing.py)'])
+
+    def test_joining_another_agents_channel_changes_its_entry(self):
+        self.agent({"channels": ["Day-Planning"], "voice": self.PUCK})
+        self.assertEqual(self.messages("routing_table_stale"), [
+            '#day-planning goes to the concierge now: set `"day-planning": None` in TestLiveRoutingTable.EXPECTED '
+            '(tests/core/runtime/foundation/test_routing.py)'])
+
+    def test_a_shared_channel_needs_no_voice(self):
+        """Only in #general, which day-planner shares: the voice room never switches to it."""
+        self.agent({"channels": ["general"]})
+        self.assertEqual(self.found(), [])
+
+    def test_an_agent_the_voice_room_switches_to_needs_a_voice(self):
+        self.file(lint.ROUTING_TABLE_TEST, self.TABLE.replace('"general": None,', '"general": None, "note-taking": "test-agent",'))
+        self.agent({"channels": ["note-taking"]})
+        [message] = self.messages("voice_missing")
+        self.assertTrue(message.startswith("the voice room switches to it (#note-taking), so it needs a `voice` of "
+                                           "its own; free: Achernar (female, soft), Achird (male, friendly), "), message)
+        self.assertNotIn("Zephyr", message)
+        self.assertEqual(self.found("routing_table_stale"), [])
+
+    def test_a_voice_another_agent_has(self):
+        self.agent({"voice": {"name": "en-US-Chirp3-HD-Zephyr"}})
+        [message] = self.messages("voice_taken")
+        self.assertTrue(message.startswith("`en-US-Chirp3-HD-Zephyr` is already day-planner's, and every agent needs "
+                                           "its own voice; free: Achernar (female, soft), "), message)
+        self.assertNotIn("Zephyr (", message)
+
+    def test_a_voice_not_in_the_catalog(self):
+        self.agent({"voice": {"name": "en-US-Chirp3-HD-Duck"}})
+        [message] = self.messages("unknown_voice")
+        self.assertTrue(message.startswith("`en-US-Chirp3-HD-Duck` is not a Chirp 3 HD voice (CHIRP3_HD_VOICES in "
+                                           "core/voice/foundation/settings.py); free: Achernar (female, soft), "), message)
+
+    def test_no_routing_table_or_no_concierge_checks_nothing_of_channels(self):
+        os.remove(os.path.join(self.root, lint.ROUTING_TABLE_TEST))
+        self.agent({"channels": ["note-taking"], "voice": self.PUCK})
+        self.assertEqual(self.found(), [])
+        os.remove(os.path.join(self.root, "agents", "main", "agent.json"))
+        self.agent({"channels": ["note-keeping"]})
+        self.assertEqual(self.found(), [])
+
 
 class TestDenyKeys(LintRepo):
     """`!` keys refuse their actions under a path (core/permissions/denies.py); a malformed one refuses less."""
@@ -643,11 +747,21 @@ def thing(action: str = "search", other: str = "x"):
 class TestRealRepo(unittest.TestCase):
 
     def test_every_agent_lints(self):
+        """And the grant, channel, voice and persona checks find nothing: the real agents keep those rules
+        (the config tests check the first three)."""
+        mirrored = {"redundant_grant", "channel_not_hosted", "routing_table_stale", "voice_missing", "unknown_voice",
+                    "voice_taken", "persona_format"}
         reports = lint.lint_agents(measure_schemas=False)
         self.assertEqual([r.agent_id for r in reports], lint.agent_ids())
         for report in reports:
             with self.subTest(agent=report.agent_id):
                 self.assertTrue(report.render().startswith(report.agent_id))
+                self.assertEqual([f for f in report.findings if f.kind in mirrored], [])
+
+    def test_the_routing_table_is_read_where_the_tests_keep_it(self):
+        """TestLiveRoutingTable pins what channel_routes computes from the configs."""
+        self.assertIsNotNone(lint.routing_table(), lint.ROUTING_TABLE_TEST)
+        self.assertEqual(lint.routing_table(), lint.live_routes())
 
     def test_agent_designer_follows_its_own_rules(self):
         report = lint_agent("agent-designer", measure_schemas=False)

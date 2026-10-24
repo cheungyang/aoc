@@ -1,6 +1,6 @@
 """The focus directory: which agent and text channel each voice switch leads to.
 
-Pinned against the live agent configs, like the routing table in
+Pinned against the live agent configs, through the routing table in
 tests/core/runtime/foundation/test_routing.py: a channel gaining an agent, or an agent its
 first channel, changes what "switch me to <name>" does with no code change.
 If a test here fails, confirm the config change was intended first.
@@ -15,6 +15,7 @@ from core.runtime.foundation.sessions import SessionManager
 from core.runtime.commands.spoken.words import alias_key
 from core.voice.room.aliases import build_aliases
 from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, spoken_label
+from tests.core.runtime.foundation import test_routing as routing
 
 
 def _live():
@@ -51,28 +52,10 @@ SMALL = {
 
 class TestLiveDirectory(unittest.TestCase):
 
-    # channel -> who answers there. Matches graphs/main's routing table: every
-    # channel is Concierge's, handed to its one agent when it has one.
-    EXPECTED = {
-        "agent-management": "agent-designer",
-        "aoc-debug": "main",
-        "content-creation": "main",
-        "day-planning": "day-planner",
-        "fitness-coach": "fitness-coach",
-        "general": "main",
-        "home-automation": "home-steward",
-        "lifestyle-perk": "reward-travel",
-        "market-scout": "market-scout",
-        "meal-planning": "meal-planner",
-        "pkm-wiki": "wiki-gardener",
-        "project-planning": "goal-setter",
-        "real-estate": "property-scout",
-        "receipts": "receipt-processor",
-        "software-dev": "software-planner",
-        "topic-research": "topic-researcher",
-        "weekend-planning": "excursion-planner",
-        "weekly-planning": "day-planner",
-    }
+    # channel -> who answers there: graphs/main's routing table, pinned once in
+    # test_routing.py. Every channel is Concierge's, handed to its one agent when
+    # it has one (None there: Concierge answers itself).
+    EXPECTED = {channel: agent or "main" for channel, agent in routing.TestLiveRoutingTable.EXPECTED.items()}
 
     @classmethod
     def setUpClass(cls):

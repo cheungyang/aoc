@@ -25,6 +25,40 @@ True
 ['ls', 'read']
 ```
 
+A filesystem grant list says each thing once, as the bundle tests require, in agent.json and in its skills' skill.json: a bundle beside one that holds it, or a bundle's every action instead of its name, is `redundant_grant`:
+
+```python
+>>> from agents.agent_designer.lib.lint import grant_redundancies
+>>> grant_redundancies(["@read", "@write"])
+['`@read` is already in `@write`']
+>>> grant_redundancies(["read", "read_image", "ls", "find", "grep"])
+['it spells out `@read`: name it instead']
+>>> grant_redundancies(["@read", "append"])
+[]
+```
+
+### Channels and voices
+
+The concierge hosts every channel and hands each to the one agent that lists it; a channel several agents list, or none, it answers itself. A worker listing `*` never counts:
+
+```python
+>>> from agents.agent_designer.lib.lint import channel_routes
+>>> channel_routes(["general", "note-taking"], {"day-planner": ["day-planning", "general"],
+...                "excursion-planner": ["weekend-planning", "general"],
+...                "note-taker": ["note-taking"], "graph-worker": ["*"]})
+{'general': None, 'note-taking': 'note-taker'}
+```
+
+- A channel in `channels` that `channel_hosts` in agents/main/agent.json lacks is `channel_not_hosted`.
+- The tests pin these routes in one table, `TestLiveRoutingTable.EXPECTED` in tests/core/runtime/foundation/test_routing.py; the voice room's focus test reads the same table. An entry for one of the agent's channels that is missing, or says another agent, is `routing_table_stale`, which names the line to write.
+- An agent the voice room switches to, the one agent of a hosted channel, needs a Chirp 3 HD voice no other agent has: one missing is `voice_missing`, one not in `CHIRP3_HD_VOICES` is `unknown_voice`, and another agent's is `voice_taken`. Each lists the free voices, with the gender and style to match the persona against:
+
+```python
+>>> from agents.agent_designer.lib.lint import free_voices
+>>> free_voices({"Achernar", "Puck"})[:2]
+['Achird (male, friendly)', 'Algenib (male, gravelly)']
+```
+
 ### What exists
 
 A skill exists when `skills/<id>/skill.json` does. A tool exists when it is in `tools/` (shared) or in the agent's own `tools/`. A tool's actions and bundles are read from its source, never by importing it: comparisons against `action`, the default of its `action` argument, literal action tables, and the keys and members of its `PERMISSION_BUNDLES`. A tool with no actions takes no action names, and actions named for it aren't checked:
@@ -58,6 +92,7 @@ The agent's own files (the persona files the prompt loads, and its schedule prom
 - A bundle the loader can't expand grants nothing: `unresolved_bundle`.
 - A schedule precondition must be a core type or one of the agent's own scans (`preconditions/<type>.py`): `unknown_precondition`.
 - A markdown file in the agent folder that the prompt never loads is `unloaded_file`. WORKFLOW.md is read on demand, so it is allowed.
+- The persona files keep their shape (agent_creation: Persona Files): an IDENTITY.md without its `Agent ID:`, `Name:`, `Emoji:` and `Description:` lines, or an AGENTS.md holding the design's classification table instead of operating instructions, is `persona_format`.
 
 ### Deny keys
 

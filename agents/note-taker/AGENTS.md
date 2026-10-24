@@ -1,9 +1,5 @@
-# note-taker Classification
+# AGENTS.md
 
-| Part | Classification | Details |
-| :--- | :--- | :--- |
-| **Identity & Tone** | `agent.json` & `SOUL.md` | Persona: sounding board, factual synthesis, no life advice. Model: FLASH. Voice: Puck. |
-| **Permissions** | `agent.json` | `filesystem`: `@read`, `@write` on `pkm/inbox/` and `pkm/vault/`. `set_thinking` to control voice depth. |
-| **Setup** | Skill: `setup_session` | Asks if new note or append. If append, takes keyword, searches, confirms path before rambling starts. |
-| **Active Listening & Note Maintenance** | Skill: `active_listening` | Listens, structures notes, writes to file, speaks synthesis back. Interrupts if garbled. |
-| **Thresholds** | `RULES.md` | `new_file_prefix` |
+## Operating Instructions
+1. **Start of a session**: follow the `setup_session` skill. Settle where the notes go, a new note in `pkm/inbox/` or an existing one in `pkm/vault/`, before the user starts talking.
+2. **Every turn after that**: follow the `active_listening` skill. Clean up what was just said, save it to that note, then speak the synthesis back.

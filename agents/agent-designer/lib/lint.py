@@ -26,6 +26,14 @@ what would fail, or cost a round trip, at run time:
   down instead of blinding it.
 - Files in the agent folder the prompt never loads (a misspelt IDENTITY.md).
   WORKFLOW.md is read on demand, so it is not one of them.
+- The persona files' shape (agent_creation's Persona Files): IDENTITY.md has
+  its `Agent ID:`, `Name:`, `Emoji:` and `Description:` lines, and AGENTS.md is
+  operating instructions, never the design's classification table.
+- What the config tests hold every agent to: filesystem grants that name each
+  bundle once and never spell one out; channels the concierge hosts, pinned in
+  the routing table (tests/core/runtime/foundation/test_routing.py) as the
+  configs route them; and, for an agent the voice room switches to, a Chirp 3
+  HD voice no other agent has. A voice finding lists the free voices.
 - Budgets: persona files against agent_creation's ceilings, preloaded skill
   text against PRELOAD_TOKEN_BUDGET, and the static prompt and tool schemas.
 
@@ -63,6 +71,7 @@ from core.permissions.denies import DENY_PREFIX, deny_covers, is_deny
 from core.tooling import AgentTool, Report, Rule
 from core.tooling.rules import RULES_FILE, read_rules_text, rule_keys, rules_path
 from core.tooling.workflow import DOCSTRING_LINES, WORKFLOW_FILE, contract_problems, parse_workflow
+from core.voice.foundation.settings import CHIRP3_HD_VOICES, chirp3_voice
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 CHARS_PER_TOKEN = 4  # the estimate PRELOAD_TOKEN_BUDGET and the context pruner use
@@ -85,10 +94,22 @@ LOCAL_PROMPT_TOKENS = 2000
 # Finding kinds, in the order a report lists them.
 KINDS = (
     "phantom_skill", "skill_not_granted", "unknown_tool", "tool_not_granted", "unresolved_bundle",
-    "malformed_deny", "unknown_action", "action_not_granted", "path_outside_grants", "read_not_granted",
-    "missing_path", "unknown_precondition", "workflow_missing", "contract_gap", "rules_mismatch",
-    "unloaded_file", "preload_missing", "over_budget",
+    "redundant_grant", "malformed_deny", "unknown_action", "action_not_granted", "path_outside_grants",
+    "read_not_granted", "missing_path", "unknown_precondition", "channel_not_hosted", "routing_table_stale",
+    "voice_missing", "unknown_voice", "voice_taken", "workflow_missing", "contract_gap", "rules_mismatch",
+    "unloaded_file", "persona_format", "preload_missing", "over_budget",
 )
+
+# IDENTITY.md's lines, as every agent writes them (agent_creation: Persona Files).
+IDENTITY_FIELDS = ("Agent ID", "Name", "Emoji", "Description")
+# A header of agent_creation's classification table (step | kind | where it lives |
+# why): it is for the plan and the report, never an agent's file.
+_CLASSIFICATION_TABLE = re.compile(r"^\s*\|.*\b(?:classification|where it lives)\b", re.IGNORECASE | re.MULTILINE)
+
+# The routing table the test suite pins: TestLiveRoutingTable.EXPECTED, channel -> the
+# agent the concierge hands it to (None: it answers itself). The voice room's focus
+# test reads the same table, so a new channel is one line here.
+ROUTING_TABLE_TEST = "tests/core/runtime/foundation/test_routing.py"
 
 _ID = r"[a-z0-9]+(?:_[a-z0-9]+)*"
 _SNAKE = r"[a-z0-9]+(?:_[a-z0-9]+)+"  # has an underscore, so it is safe to match unquoted
@@ -266,14 +287,19 @@ def lint_agent(agent_id: str, root: str = PROJECT_ROOT, catalog: Optional[Catalo
 
     findings = checker.findings + _granted_but_missing(agent_id, root, config, skills, catalog)
     findings += _unresolved_bundles(agent_id, grants)
+    findings += _redundant_grants(agent_id, root, config, skills)
     findings += _malformed_denies(agent_id, root, config, skills, catalog)
     findings += _unknown_preconditions(agent_id, config, catalog)
+    routes = live_routes(root)
+    findings += _channels(agent_id, root, config, routes)
+    findings += _voices(agent_id, root, config, routes)
     tools = own_tools(agent_id, root)
     rules, rules_error = load_agent_rules(agent_id, root)
     findings += _contract(agent_id, root, tools, rules, rules_error)
     findings += _rules_file(agent_id, rules, rules_error)
     findings += _unreadable_sources(agent_id, root, tools, grants)
     findings += _unloaded_files(agent_dir, agent_id)
+    findings += _persona_format(agent_dir, agent_id)
     budget, over = _budget(agent_id, root, config, skills, bound, catalog, measure_schemas)
     return AgentReport(agent_id, findings + over, budget, skills, _schedules(config))
 
@@ -615,6 +641,162 @@ def _unknown_preconditions(agent_id: str, config: Dict[str, Any], catalog: Catal
     return findings
 
 
+def grant_redundancies(actions: Sequence[Any], tool: str = "filesystem") -> List[str]:
+    """Why a grant list says more than it needs to, the way the bundle tests read it
+    (tests/core/permissions/test_bundles.py): a bundle named beside one that holds it
+    (`["@read", "@write"]` is `["@write"]`), or a bundle's every action listed instead
+    of its name. [] when it says each thing once."""
+    from core.permissions import bundles as pb
+
+    tokens = [a for a in actions if isinstance(a, str)]
+    problems = []
+    for token in tokens:
+        others = [t for t in tokens if t != token and pb.is_bundle(t)]
+        if others and set(pb.expand_actions(tool, [token])) <= set(pb.expand_actions(tool, others)):
+            problems.append(f"`{token}` is already in {', '.join(f'`{o}`' for o in others)}")
+    granted = set(pb.expand_actions(tool, tokens))
+    named = set(pb.expand_actions(tool, [t for t in tokens if pb.is_bundle(t)]))
+    for bundle in pb.definitions_for(tool):
+        members = set(pb.expand_actions(tool, [bundle]))
+        if members <= granted and not members <= named:
+            problems.append(f"it spells out `{bundle}`: name it instead")
+    return problems
+
+
+def _redundant_grants(agent_id: str, root: str, config: Dict[str, Any], skills: Dict[str, Any]) -> List[Finding]:
+    """Filesystem grant lists in agent.json and its skills' skill.json that repeat or spell out a bundle."""
+    sources = [(f"agents/{agent_id}/agent.json", config.get("tools"))]
+    sources += [(f"skills/{s}/skill.json", _skill_json(root, s).get("tools")) for s in sorted(skills)]
+    findings = []
+    for where, tools in sources:
+        scope = tools.get("filesystem") if isinstance(tools, dict) else None
+        for selector, actions in scope.items() if isinstance(scope, dict) else ():
+            if isinstance(actions, list):
+                findings += [Finding("redundant_grant", f"`filesystem` [`{selector}`]: {problem}", where)
+                             for problem in grant_redundancies(actions)]
+    return findings
+
+
+def channel_routes(hosts: Iterable[Any], channels: Dict[str, Iterable[Any]]) -> Dict[str, Optional[str]]:
+    """Each channel the concierge hosts -> the agent it hands it to: the one agent that
+    lists it, or None when several or none do and the concierge answers itself.
+    `channels` maps every other agent to its `channels`; a worker listing `*` is
+    reachable everywhere, so it never counts. Case doesn't matter, as in routing."""
+    listed = {agent: {str(c).lower() for c in names} for agent, names in channels.items()}
+    listed = {agent: names for agent, names in listed.items() if "*" not in names}
+    routes = {}
+    for channel in hosts:
+        if isinstance(channel, str):
+            agents = [agent for agent, names in listed.items() if channel.lower() in names]
+            routes[channel] = agents[0] if len(agents) == 1 else None
+    return routes
+
+
+def live_routes(root: str = PROJECT_ROOT) -> Optional[Dict[str, Optional[str]]]:
+    """channel_routes for the configs under `root`; None without a concierge
+    (agents/main/agent.json) that hosts channels."""
+    main = _read_json(os.path.join(root, "agents", "main", "agent.json"), None)
+    hosts = main.get("channel_hosts") if isinstance(main, dict) else None
+    if not isinstance(hosts, list):
+        return None
+    channels = {}
+    for agent_id in agent_ids(root):
+        config = _read_json(os.path.join(root, "agents", agent_id, "agent.json"), None)
+        names = config.get("channels") if isinstance(config, dict) else None
+        if agent_id != "main" and isinstance(names, list):
+            channels[agent_id] = names
+    return channel_routes(hosts, channels)
+
+
+def routing_table(root: str = PROJECT_ROOT) -> Optional[Dict[str, Any]]:
+    """TestLiveRoutingTable.EXPECTED, read from ROUTING_TABLE_TEST's source (never
+    imported); None when it can't be read."""
+    try:
+        tree = ast.parse(_read(os.path.join(root, ROUTING_TABLE_TEST)) or "")
+    except (SyntaxError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ClassDef) and node.name == "TestLiveRoutingTable"):
+            continue
+        for statement in node.body:
+            if isinstance(statement, ast.Assign) and [getattr(t, "id", None) for t in statement.targets] == ["EXPECTED"]:
+                try:
+                    table = ast.literal_eval(statement.value)
+                except (ValueError, TypeError, SyntaxError):
+                    return None
+                return table if isinstance(table, dict) else None
+    return None
+
+
+def _channels(agent_id: str, root: str, config: Dict[str, Any],
+              routes: Optional[Dict[str, Optional[str]]]) -> List[Finding]:
+    """Each of the agent's channels is hosted by the concierge, and pinned in the
+    routing table as the configs route it now."""
+    names = config.get("channels")
+    channels = [c for c in names if isinstance(c, str) and c != "*"] if isinstance(names, list) else []
+    if agent_id == "main" or routes is None or not channels:
+        return []
+    hosted = {channel.lower(): channel for channel in routes}
+    table = routing_table(root)
+    where = f"agents/{agent_id}/agent.json"
+    findings = []
+    for name in channels:
+        channel = hosted.get(name.lower())
+        if channel is None:
+            findings.append(Finding("channel_not_hosted", f"#{name} is not in the concierge's channel_hosts "
+                                    "(agents/main/agent.json), so nothing routes it to this agent", where))
+        elif table is not None and table.get(channel, _MISSING) != routes[channel]:
+            agent = routes[channel]
+            line = f'"{channel}": ' + (f'"{agent}"' if agent else "None")
+            findings.append(Finding("routing_table_stale", f"#{channel} goes to {agent or 'the concierge'} now: "
+                                    f"set `{line}` in TestLiveRoutingTable.EXPECTED ({ROUTING_TABLE_TEST})", where))
+    return findings
+
+
+def free_voices(taken: Iterable[str]) -> List[str]:
+    """The Chirp 3 HD voices (CHIRP3_HD_VOICES, core/voice/foundation/settings.py) not
+    in `taken`, as `Name (gender, style)`: what to match a persona against."""
+    taken = set(taken)
+    return [f"{name} ({gender}, {style})" for name, (gender, style) in sorted(CHIRP3_HD_VOICES.items())
+            if name not in taken]
+
+
+def _voice_key(config: Any) -> Optional[str]:
+    """The catalog name of a config's voice (`Puck`), or None."""
+    voice = config.get("voice") if isinstance(config, dict) else None
+    name = voice.get("name") if isinstance(voice, dict) else None
+    return chirp3_voice(name) if isinstance(name, str) else None
+
+
+def _voices(agent_id: str, root: str, config: Dict[str, Any],
+            routes: Optional[Dict[str, Optional[str]]]) -> List[Finding]:
+    """A voice of its own, from the catalog, for every agent the voice room switches
+    to: there is one voice room, and the voice is how you hear who is answering."""
+    taken: Dict[str, List[str]] = {}
+    for other in agent_ids(root):
+        key = _voice_key(_read_json(os.path.join(root, "agents", other, "agent.json"), None)) if other != agent_id else None
+        if key:
+            taken.setdefault(key, []).append(other)
+    free = ", ".join(free_voices(taken)) or "none"
+    where = f"agents/{agent_id}/agent.json"
+    if "voice" not in config:
+        homes = sorted(channel for channel, agent in (routes or {}).items() if agent == agent_id)
+        if not homes:
+            return []  # an internal worker, or an agent only in shared channels
+        return [Finding("voice_missing", f"the voice room switches to it ({', '.join('#' + h for h in homes)}), "
+                        f"so it needs a `voice` of its own; free: {free}", where)]
+    voice = config["voice"]
+    name = voice.get("name") if isinstance(voice, dict) else voice
+    key = _voice_key(config)
+    if key is None:
+        return [Finding("unknown_voice", f"`{name}` is not a Chirp 3 HD voice (CHIRP3_HD_VOICES in "
+                        f"core/voice/foundation/settings.py); free: {free}", where)]
+    if key in taken:
+        return [Finding("voice_taken", f"`{name}` is already {' and '.join(taken[key])}'s, and every agent needs "
+                        f"its own voice; free: {free}", where)]
+    return []
+
+
 def _unloaded_files(agent_dir: str, agent_id: str) -> List[Finding]:
     """Markdown files the prompt never loads. WORKFLOW.md is read on demand, by design."""
     def message(name: str) -> str:
@@ -627,6 +809,26 @@ def _unloaded_files(agent_dir: str, agent_id: str) -> List[Finding]:
         for name in sorted(os.listdir(agent_dir))
         if name.lower().endswith(".md") and name not in PERSONA_LIMITS and name != WORKFLOW_FILE
     ]
+
+
+def _persona_format(agent_dir: str, agent_id: str) -> List[Finding]:
+    """The persona files' shape: IDENTITY.md's four lines, and an AGENTS.md (or
+    INSTRUCTIONS.md) of operating instructions rather than the design's
+    classification table. A file the agent doesn't have isn't checked."""
+    findings = []
+    identity = _read(os.path.join(agent_dir, "IDENTITY.md"))
+    if identity is not None:
+        missing = [f for f in IDENTITY_FIELDS if not re.search(rf"^\s*{f}:", identity, re.MULTILINE)]
+        if missing:
+            findings.append(Finding("persona_format", "IDENTITY.md lacks its " + ", ".join(f"`{f}:`" for f in missing)
+                                    + (" lines" if len(missing) > 1 else " line"), f"agents/{agent_id}/IDENTITY.md"))
+    for name in ("AGENTS.md", "INSTRUCTIONS.md"):
+        text = _read(os.path.join(agent_dir, name))
+        if text and _CLASSIFICATION_TABLE.search(text):
+            findings.append(Finding("persona_format", f"{name} holds the classification table, which is for the plan "
+                                    "and the report; it should be the agent's operating instructions",
+                                    f"agents/{agent_id}/{name}"))
+    return findings
 
 
 def _malformed_denies(agent_id: str, root: str, config: Dict[str, Any], skills: Dict[str, Any],

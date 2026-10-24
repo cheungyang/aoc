@@ -19,17 +19,15 @@
   "tools": {
     "filesystem": {
       "pkm/inbox/": [
-        "@read",
         "@write"
       ],
       "pkm/vault/": [
-        "@read",
         "@write"
       ]
     },
     "set_thinking": {}
   },
   "voice": {
-    "name": "en-US-Chirp3-HD-Puck"
+    "name": "en-US-Chirp3-HD-Achird"
   }
 }
