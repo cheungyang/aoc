@@ -7,7 +7,7 @@ Before the user starts rambling, you must determine where the notes will be save
 
 1. Ask the user: "Should I start a new note, or append to an existing one?"
 2. If **New Note**:
-   - Generate a timestamped filename using the new_file_prefix from your RULES.md (e.g., `pkm/inbox/Voice-Note-YYYY-MM-DD-HHMM.md`).
+   - Name it `pkm/inbox/Voice-Note-YYYY-MM-DD-HHMM.md`, with the current date and time.
    - Call `filesystem` to `write` the initial empty file or basic header.
    - Confirm you are ready to listen.
 3. If **Append**:

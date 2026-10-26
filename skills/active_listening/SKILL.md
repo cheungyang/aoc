@@ -6,7 +6,7 @@ description: The core voice loop: structures notes, writes them to disk, and ref
 This is your core continuous loop once a session destination is established.
 
 ## 1. Garbled Audio
-If the audio cuts out, is unintelligible, or you missed a critical sentence, interrupt the user immediately. Tell them you missed the last part and ask them to repeat it. Do not hallucinate or use placeholders.
+You get each turn as a transcript once the user pauses; you can't interrupt them or hear the audio. When a sentence doesn't make sense or a critical part is missing (words the transcriber missed), open your reply by saying you missed that part and ask them to repeat it. Save that part only once they have: do not hallucinate or use placeholders.
 
 ## 2. Note Structure & Insertion
 When the user pauses, clean up their recent rambling (fix grammar, remove fluff, organize logically) and save it to the agreed file.

@@ -158,6 +158,7 @@ def _room_fixture(mock_bot_runner, tmp_path):
     mock that finds nothing close unless a test says otherwise."""
     vm, main_agent, general = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
     vm.config.update({"voice_channel": "aoc-voice"})
+    main_agent.config = {"channel_hosts": _Loader.CONFIGS["main"]["channel_hosts"], "voice_config": vm.config}
     room = vm.connection.voice_client.channel
     room.name = "aoc-voice"
     room.send = AsyncMock()

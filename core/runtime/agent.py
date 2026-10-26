@@ -1,12 +1,10 @@
 import asyncio
 import contextvars
-import os
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, Tuple, List, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
-from core.config.settings import Config
 from core.util.errors import format_error_message
 from core.knowledge.memory.logs import save_agent_memory_log
 from core.prompts.system import stamp_user_message

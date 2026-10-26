@@ -38,12 +38,10 @@ from core.voice.listening.gate_commands import gate_command, mark_from_reaction,
 from core.voice.listening.speaker_gate import SpeakerGate
 from core.voice.listening.vad_sink import VADSink
 from core.voice.room.connection import (
-    AUTO_JOIN_FALLBACK,
     VoiceConnection,
-    configured_room,
-    hosted_voice_channels,
     is_channel,
     pick_voice_channel,
+    voice_rooms,
 )
 from core.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
 from core.voice.room.room_switch import FocusSwitcher, Say
@@ -120,16 +118,22 @@ class VoiceManager:
     # --- joining and leaving ------------------------------------------------------
 
     async def join(self, room: Optional[str] = None, focus_channel=None) -> bool:
-        """Joins `room` (default: the voice room in voice_config) and, given a
-        text channel, starts in its conversation: `!join` typed in
-        #day-planning starts you with Daisy."""
-        if not await self.connection.join(room or configured_room(self.config)):
+        """Joins `room` (default: `default_room()`) and, given a text channel,
+        starts in its conversation: `!join` typed in #day-planning starts you
+        with Daisy."""
+        if not await self.connection.join(room or self.default_room()):
             return False
         if focus_channel is not None:
             target = self.directory().for_channel(focus_channel)
             if target is not None:
                 self.set_focus(target)
         return True
+
+    def default_room(self) -> str:
+        """Where `!join` without a name and auto-join go: the first of this
+        agent's voice rooms (connection.voice_rooms) that the server has."""
+        agent = self.agent()
+        return pick_voice_channel(self.connection.bot.guilds, voice_rooms(agent.config if agent else None))
 
     async def leave(self) -> None:
         await self.connection.leave()
@@ -200,7 +204,7 @@ class VoiceManager:
         if not voice_config.get("enabled"):
             return
 
-        vc_targets = hosted_voice_channels(agent.config)
+        vc_targets = voice_rooms(agent.config)
 
         if after.channel and any(is_channel(after.channel.name, vc) for vc in vc_targets):
             if self.room() != after.channel:
@@ -212,21 +216,20 @@ class VoiceManager:
                 await self.welcome()
 
     def auto_join(self) -> None:
-        """With voice_config `auto_join` on, joins this bot's voice channel once
-        Discord is ready: the first hosted one that exists, else the first one."""
+        """With voice_config `auto_join` on, joins `default_room()` once Discord
+        is ready."""
         agent = AgentsLoader().get_agent(self.agent_id)
         if not agent:
             return
         voice_config = agent.config.get("voice_config", {})
         if not (voice_config.get("enabled") and voice_config.get("auto_join")):
             return
-        vc_targets = hosted_voice_channels(agent.config)
 
         async def _auto_join():
             bot = self.connection.bot
             await bot.wait_until_ready()
             await asyncio.sleep(AUTO_JOIN_DELAY_S)
-            target = pick_voice_channel(bot.guilds, vc_targets if vc_targets else [AUTO_JOIN_FALLBACK])
+            target = self.default_room()
             print(f"Agent {self.agent_id} auto-joining voice channel '{target}'...")
             await self.join(target)
 

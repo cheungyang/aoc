@@ -74,7 +74,7 @@ class Case:
 CASES = (
     Case("names_daisy", ("Ask Daisy what's on my calendar tomorrow.",), terms=("Daisy",)),
     Case("names_frankie", ("Tell Frankie I did thirty push-ups this morning.",), terms=("Frankie",)),
-    Case("names_sophie", ("Have Sophie draft a plan for the garage shelves.",), terms=("Sophie",)),
+    Case("names_elephant", ("Have Elephant draft a plan for the garage shelves.",), terms=("Elephant",)),
     Case("names_aki", ("Aki, design a new agent for my reading list.",), terms=("Aki",)),
     Case("command", ("Turn off the kitchen lights.",)),
     Case("timer", ("Set a timer for twenty five minutes.",)),

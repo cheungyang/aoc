@@ -231,7 +231,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.os.path.exists')
+    @patch('core.channel.discord.dispatcher.os.path.exists')
     @patch('discord.File')
     async def test_execute_sends_images(self, mock_discord_file, mock_exists, mock_logging_handler_class):
         mock_exists.return_value = True
@@ -266,7 +266,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.os.path.exists')
+    @patch('core.channel.discord.dispatcher.os.path.exists')
     async def test_execute_sends_missing_image_message(self, mock_exists, mock_logging_handler_class):
         mock_exists.return_value = False
 
@@ -298,7 +298,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.send.assert_any_call("Image file not found: assets/test.png")
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.os.path.exists')
+    @patch('core.channel.discord.dispatcher.os.path.exists')
     @patch('discord.File')
     async def test_execute_sends_images_only(self, mock_discord_file, mock_exists, mock_logging_handler_class):
         mock_exists.return_value = True
@@ -332,7 +332,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.os.path.exists')
+    @patch('core.channel.discord.dispatcher.os.path.exists')
     @patch('discord.File')
     async def test_execute_sends_videos(self, mock_discord_file, mock_exists, mock_logging_handler_class):
         mock_exists.return_value = True
@@ -367,7 +367,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_discord_file.assert_called_once_with(expected_path)
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.os.path.exists')
+    @patch('core.channel.discord.dispatcher.os.path.exists')
     async def test_execute_sends_missing_video_message(self, mock_exists, mock_logging_handler_class):
         mock_exists.return_value = False
 

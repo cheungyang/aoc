@@ -28,40 +28,26 @@ def normalize_channel_name(name: str) -> str:
 
 # --- which voice channel -------------------------------------------------------
 #
-# Three readings of the agent's voice_config, each with its own fallback, kept
-# as they were: `!join` without a name goes to `configured_room`; following you
-# in and auto-joining look among `hosted_voice_channels`; auto-join falls back
-# to AUTO_JOIN_FALLBACK when the bot hosts none.
+# One list of the agent's voice rooms, used three ways: the bot follows you into
+# any of them, and `!join` without a name and auto-join both go to the first of
+# them the server has (VoiceManager.default_room).
 
-# Where auto-join goes when the bot hosts no voice channel.
-AUTO_JOIN_FALLBACK = "general-voice"
-
-
-def configured_room(voice_config: dict) -> Optional[str]:
-    """`!join`'s room when none is named: voice_config's `voice_channel`, else
-    the first of its `voice_channels`. None leaves it to the connection, which
-    joins the first voice channel it finds."""
-    room = voice_config.get("voice_channel")
-    if isinstance(room, str) and room.strip():
-        return room.strip()
-    rooms = voice_config.get("voice_channels")
-    if isinstance(rooms, list) and rooms and isinstance(rooms[0], str):
-        return rooms[0]
-    return None
+# The room of an agent that names no voice channel and hosts no text channel.
+DEFAULT_ROOM = "general-voice"
 
 
-def hosted_voice_channels(agent_config: Optional[dict]) -> list:
-    """The voice channels the bot follows you into and auto-joins: voice_config's
-    `voice_channels`, else its `voice_channel`, else `<channel>-voice` for each
-    text channel the agent hosts."""
-    if not agent_config:
-        return []
-    voice_config = agent_config.get("voice_config", {})
-    if "voice_channels" in voice_config:
-        return voice_config["voice_channels"]
-    if "voice_channel" in voice_config:
-        return [voice_config["voice_channel"]]
-    return [f"{ch}-voice" for ch in agent_config.get("channel_hosts", [])]
+def voice_rooms(agent_config: Optional[dict]) -> list:
+    """The agent's voice rooms, best first: voice_config's `voice_channel`, then
+    its `voice_channels`; with neither, `<channel>-voice` for each text channel
+    the agent hosts; with no hosted channel either, DEFAULT_ROOM."""
+    config = agent_config or {}
+    voice_config = config.get("voice_config") or {}
+    listed = voice_config.get("voice_channels")
+    named = [voice_config.get("voice_channel"), *(listed if isinstance(listed, (list, tuple)) else ())]
+    rooms = list(dict.fromkeys(str(room).strip() for room in named if room is not None and str(room).strip()))
+    if not rooms:
+        rooms = [f"{channel}-voice" for channel in config.get("channel_hosts", [])]
+    return rooms or [DEFAULT_ROOM]
 
 
 def is_channel(name: str, target) -> bool:

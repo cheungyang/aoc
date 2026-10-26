@@ -137,6 +137,24 @@ async def test_auto_join_picks_a_hosted_voice_channel_the_guild_has(mock_bot_run
     vm.join.assert_called_with("day-planning-voice")
 
 
+@pytest.mark.asyncio
+async def test_join_without_a_name_follows_and_auto_join_share_one_list(mock_bot_runner):
+    """`!join` with no name goes where auto-join would, and both go to a room
+    the bot would also follow you into."""
+    vm, room = _following_vm(mock_bot_runner)
+    voice_channel = MagicMock()
+    voice_channel.name = "day-planning-voice"
+    mock_bot_runner.bot.guilds = [MagicMock(voice_channels=[voice_channel])]
+    vm.connection.join = AsyncMock(return_value=True)
+    with _hosting({"enabled": True}, channel_hosts=["general", "day-planning"]):
+        assert vm.default_room() == "day-planning-voice"
+        await VoiceManager.join(vm)
+        await vm.member_moved(MagicMock(bot=False, display_name="Sam"), MagicMock(channel=None),
+                              MagicMock(channel=voice_channel))
+    vm.connection.join.assert_awaited_once_with("day-planning-voice")
+    vm.join.assert_awaited_once_with("day-planning-voice")  # followed you in
+
+
 def test_auto_join_needs_voice_and_auto_join_on(mock_bot_runner):
     vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
     for voice_config in ({"enabled": True}, {"auto_join": True}):
