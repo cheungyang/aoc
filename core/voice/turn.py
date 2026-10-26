@@ -39,6 +39,7 @@ class TurnRoom(VoiceControls, Protocol):
     VoiceControls, which the spoken commands use."""
 
     agent_id: str              # this bot's agent: the voice host, whose turn it runs
+    turn_output: Optional[Any]  # channel -> the turn's output port, from the host; None for none
     stt: SpeechRecognizer
     reply: ReplyStreamer
     floor: Floor
@@ -196,6 +197,7 @@ class VoiceTurn:
             source="discord",
             channel=channel,
             surface="voice",
+            output=room.turn_output(channel) if room.turn_output and channel is not None else None,
         )
         self.session_id = session.session_id
         self.answered = await room.reply.stream(

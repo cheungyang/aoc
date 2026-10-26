@@ -6,6 +6,7 @@ import base64
 from collections import OrderedDict
 from typing import List
 from discord.ext import commands
+from core.channel.discord.output import DiscordOutput
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.commands.base import ControlContext, TypedContext
 from core.runtime.commands.registry import CONTROL, TYPED
@@ -93,7 +94,8 @@ class BotRunner:
         self._init_bot()
         # The voice room, with the inbox's briefings plugged in as a hook, and
         # replies written into the focus's channel as a typed message's are.
-        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()], text_output=self._voice_text_output)
+        self.voice_manager = VoiceManager(self, hooks=[VoiceBriefing()], text_output=self._voice_text_output,
+                                          turn_output=DiscordOutput)
         Ownership().add_listener(self._on_ownership_change)
 
     @staticmethod
@@ -263,7 +265,8 @@ class BotRunner:
             channel=message.channel,
             author=message.author,
             agent_id=self.agent_id,
-            session=SessionManager().get_session(self.agent_id, source="discord", channel=message.channel),
+            session=SessionManager().get_session(self.agent_id, source="discord", channel=message.channel,
+                                                 output=DiscordOutput(message.channel)),
             answers_here=self._answers(message, self._hosts(message.channel)),
             voice=self.voice_manager,
         )
@@ -367,7 +370,8 @@ class BotRunner:
                 content_payload = content_parts
 
         # Get an immutable session object for this request
-        session = SessionManager().get_session(self.agent_id, source="discord", channel=message.channel)
+        session = SessionManager().get_session(self.agent_id, source="discord", channel=message.channel,
+                                               output=DiscordOutput(message.channel))
 
         # For newly opened threads, ensure the thread's starter message context is seeded
         if session.is_thread():

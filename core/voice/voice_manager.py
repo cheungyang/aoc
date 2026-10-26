@@ -25,11 +25,12 @@ it, and forwards what Discord tells it: you moving between voice channels
 (`member_moved`), and the bot being ready (`auto_join`).
 """
 import asyncio
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import discord
 
 from core.loaders.agents_loader import AgentsLoader
+from core.runtime.foundation.output import TurnOutput
 from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
 from core.voice.hooks import VoiceHook
 from core.voice.listening.enrollment import EnrollmentFlow
@@ -49,6 +50,9 @@ from core.voice.speech.audio_queue import AudioStreamQueue
 from core.voice.speech.reply import ReplyStreamer, TextOutputFactory
 from core.voice.turn import VoiceTurn
 
+# What the host passes for a turn's output in a text channel (foundation/output.py).
+TurnOutputFactory = Callable[[Any], TurnOutput]
+
 
 # `say_when_idle` waits for the pipeline to be idle: checked this often, for
 # at most this long.
@@ -61,10 +65,13 @@ AUTO_JOIN_DELAY_S = 1.5
 class VoiceManager:
     """Orchestrates one bot's voice: the parts above, and the turns between them."""
 
-    def __init__(self, bot_runner, hooks: Sequence[VoiceHook] = (), *, text_output: TextOutputFactory):
+    def __init__(self, bot_runner, hooks: Sequence[VoiceHook] = (), *, text_output: TextOutputFactory,
+                 turn_output: Optional[TurnOutputFactory] = None):
         """`text_output(channel)` is where a turn's reply is written in its text
         channel: the Discord runner, which hosts the voice room, passes its
-        stream buffer."""
+        stream buffer. `turn_output(channel)` is the turn's output port
+        (core/runtime/foundation/output.py), for its errors."""
+        self.turn_output = turn_output
         self.agent_id = bot_runner.agent_id
         agent = AgentsLoader().get_agent(self.agent_id)
         # A copy: the loader caches agent configs, and this one is per-bot state.

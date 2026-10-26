@@ -24,6 +24,7 @@ class SessionManager:
         record_memory: bool = True,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        output: Optional[Any] = None,
     ) -> ExecutionContext:
         """
         Creates an ExecutionContext instance.
@@ -41,6 +42,8 @@ class SessionManager:
         is non-recording too. `model` overrides the agent's model tier for this call.
         `thinking_level` overrides the agent's reasoning depth for this call (a schedule
         entry's `thinking_level`); like `model`, it is never inherited.
+        `output` is where the turn's output goes (foundation/output.py): the
+        adapter starting the turn passes its own.
         """
         if surface is None:
             surface = inherited_surface()
@@ -56,6 +59,7 @@ class SessionManager:
             record_memory=record_memory,
             model=model,
             thinking_level=thinking_level,
+            output=output,
         )
 
     def clear_session(self, session: ExecutionContext) -> str:

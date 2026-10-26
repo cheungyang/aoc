@@ -4,6 +4,7 @@
   sessions   SessionManager, the only way to mint a context; clears and archives sessions
   jobs       JobManager: what's running, and the kill handshake
   events     what a turn streams, and what it leaves for its caller
+  output     where a turn's output goes: the port the adapter starting it fills
   routing    who answers an untagged message in a channel (pure policy)
 
 The foundation imports nothing else from the runtime, and it is the only part of

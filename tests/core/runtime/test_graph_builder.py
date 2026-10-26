@@ -13,7 +13,7 @@ from tests.helpers import make_context
 class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      def setUp(self):
          # Create a patcher for GraphsLoader to avoid filesystem scans
-         self.graphs_loader_patcher = patch('core.loaders.graphs_loader.GraphsLoader')
+         self.graphs_loader_patcher = patch('core.runtime.graph_builder.GraphsLoader')
          self.mock_graphs_loader_class = self.graphs_loader_patcher.start()
          self.mock_graphs_loader = MagicMock()
          self.mock_graphs_loader_class.return_value = self.mock_graphs_loader
@@ -35,7 +35,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.chat.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_success(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -73,7 +73,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.chat.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_filtering(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
          # Setup mocks
@@ -105,7 +105,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
      @patch('core.runtime.graph_builder.ToolsLoader')
-     @patch('core.runtime.model.retry.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.model.chat.RetryingChatGoogleGenerativeAI')
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      @patch('core.runtime.graph_builder.try_context')
      @patch('core.runtime.graph_builder.JobManager')

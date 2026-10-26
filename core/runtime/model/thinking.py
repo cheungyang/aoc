@@ -25,6 +25,9 @@ of the call in flight.
 from typing import Optional
 
 from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS, VOICE_THINKING_CAP, clamp_thinking_level
+from core.loaders.agents_loader import AgentsLoader
+from core.runtime.foundation.context import require_context, try_context
+from core.runtime.observability.turn_trace import current_turn_trace
 
 PICK_KEY = "thinking_pick"
 
@@ -35,9 +38,6 @@ def pick_thinking(level: str, reason: str) -> str:
     Called by the `set_thinking` tool. Every pick is logged with its reason, and
     added to the voice turn's trace when there is one.
     """
-    from core.runtime.foundation.context import require_context
-    from core.runtime.observability.turn_trace import current_turn_trace
-
     if level not in THINKING_LEVELS:
         raise ValueError(f"Unknown thinking level {level!r}; expected one of {list(THINKING_LEVELS)}.")
     ctx = require_context()
@@ -65,13 +65,10 @@ def resolve_thinking_level(model_id: str) -> Optional[str]:
     wrapper calls this once per call, before its retry loop, so a retried call
     keeps the level it started with.
     """
-    from core.runtime.foundation.context import try_context
-
     ctx = try_context()
     if ctx is None:
         return None
 
-    from core.loaders.agents_loader import AgentsLoader
     config = AgentsLoader().get_agent_config(ctx.agent_id) or {}
     if config.get("stateless"):
         return None

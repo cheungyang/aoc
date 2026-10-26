@@ -17,7 +17,7 @@ class ThinkingCase(unittest.TestCase):
         loader = MagicMock()
         loader.get_agent_config.side_effect = lambda aid: self.configs.get(aid, {})
         self.configs = {"coach": {}}
-        patcher = patch("core.loaders.agents_loader.AgentsLoader", return_value=loader)
+        patcher = patch("core.runtime.model.thinking.AgentsLoader", return_value=loader)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(detach_turn_trace)

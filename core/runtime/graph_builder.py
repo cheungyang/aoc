@@ -7,8 +7,8 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.messages import SystemMessage, convert_to_messages
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
+from core.loaders.graphs_loader import GraphsLoader
 from core.config.settings import Config
-from core.config.models import resolve_model
 from core.prompts.system import (
     get_agent_memory_prompt,
     get_agent_static_prompt,
@@ -22,6 +22,7 @@ from core.runtime.history.budget import cap_tool_output
 from langgraph.types import interrupt
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context
+from core.runtime.model.chat import chat_model
 
 class GraphBuilder:
     def __init__(self):
@@ -43,7 +44,6 @@ class GraphBuilder:
             skills_prompt = skills_loader.get_skills_overview(ctx)
 
             # 2.5. Subgraphs Prompt
-            from core.loaders.graphs_loader import GraphsLoader
             graphs_loader = GraphsLoader()
             subgraphs_prompt = graphs_loader.get_graphs_overview(ctx)
 
@@ -99,9 +99,6 @@ class GraphBuilder:
         agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agents"))
         agent_path = os.path.join(agents_dir, agent_id)
 
-        provider = config.get("provider", "google")
-        model_name = resolve_model(ctx.model or config.get("model"), provider=provider)
-        
         loader = ToolsLoader()
         allowed_tools = loader.get_tools(ctx)
 
@@ -153,47 +150,12 @@ class GraphBuilder:
 
         allowed_tools = [make_interruptible(t) for t in allowed_tools]
 
-        if provider == "ollama":
-            from langchain_ollama import ChatOllama
-            llm = ChatOllama(model=model_name)
-        elif provider == "local":
-            # An on-device server speaking the OpenAI wire format. ChatOpenAI is
-            # a protocol client here, not a route to the hosted API.
-            from langchain_openai import ChatOpenAI
-
-            cfg = Config()
-            llm = ChatOpenAI(
-                model=model_name,
-                base_url=cfg.local_llm_base_url,
-                # Load-bearing, despite the server ignoring it. Omitting the
-                # argument makes ChatOpenAI fall back to OPENAI_API_KEY from the
-                # environment -- which .env exports -- so a machine holding a
-                # real key would post that paid credential to an
-                # unauthenticated local socket. A constant makes that
-                # impossible. The client also rejects an empty string, so this
-                # cannot simply be "".
-                api_key="not-needed",
-                timeout=cfg.local_llm_timeout,
-                # The client's default of 2 assumes an elastic hosted service.
-                # This server handles one request at a time, so a retry does not
-                # find spare capacity -- it joins the back of the queue every
-                # other agent is already waiting in.
-                max_retries=0,
-                # Sends stream_options.include_usage, without which the usage
-                # metadata LoggingHandler records is absent under streaming.
-                stream_usage=True,
-            )
-        else:
-            # 503s are retried (and resumed mid-stream) by the subclass; the SDK
-            # keeps the other retriable codes. See core/runtime/model/retry.py.
-            from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
-            llm = RetryingChatGoogleGenerativeAI(model=model_name, max_retries=Config().llm_max_retries)
+        llm = chat_model(ctx, config)
         checkpointer = SqliteCheckpointer()
 
         prompt = self._get_prompt_template(ctx)
 
         graph_name = config.get("graph", "main")
-        from core.loaders.graphs_loader import GraphsLoader
         graphs_loader = GraphsLoader()
         graph_info = graphs_loader.get_graph(graph_name)
         if not graph_info or "create_graph" not in graph_info or not graph_info["create_graph"]:

@@ -21,8 +21,11 @@ from typing import Any, List, Optional, Union
 
 from langchain_core.callbacks import adispatch_custom_event
 
+from core.loaders.agents_loader import AgentsLoader
 from core.prompts.base import WORKER_LOW
 from core.runtime.foundation import events
+from core.runtime.foundation.context import try_context
+from core.runtime.foundation.sessions import SessionManager
 
 Prompt = Union[str, list]
 
@@ -128,11 +131,6 @@ async def stream_delegate(
     `<system_memory_log>` from being saved (and is inherited by anything it
     delegates to); `model` overrides the callee's model tier for this call.
     """
-    from core.runtime.foundation.context import try_context
-    from core.runtime.foundation.sessions import SessionManager
-    from core.loaders.agents_loader import AgentsLoader
-    from core.channel.discord.loader import BotsLoader
-
     if not agent_id or prompt is None or not channel:
         return DelegationResult(
             agent_id=agent_id or "",
@@ -155,11 +153,15 @@ async def stream_delegate(
             ),
         )
 
+    # The callee writes where the caller's surface is: in the caller's channel
+    # (or thread) when it's the same one, else wherever that surface finds
+    # `channel` (foundation/output.py).
     active_sess = try_context()
     if active_sess and active_sess.matches_channel(channel):
-        discord_channel = active_sess.channel_obj
+        target_channel, output = active_sess.channel_obj, active_sess.output
     else:
-        discord_channel = BotsLoader().find_channel(channel)
+        output = active_sess.output.to(channel) if active_sess and active_sess.output else None
+        target_channel = output.channel if output is not None else None
 
     triggering_agent = caller or (active_sess.agent_id if active_sess else None)
     formatted_prompt = with_caller(prompt, triggering_agent)
@@ -170,11 +172,12 @@ async def stream_delegate(
     target_session = SessionManager().get_session(
         agent_id=agent_id,
         source="tool",
-        channel=discord_channel or channel,
+        channel=target_channel or channel,
         stateless=is_stateless,
         graph_id=active_sess.graph_id if active_sess else None,
         record_memory=record_memory,
         model=model,
+        output=output,
     )
 
     # The reaction is dispatched from here, not from the callers, so the concierge

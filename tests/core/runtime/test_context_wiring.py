@@ -33,7 +33,7 @@ class TestGraphBindingIsolation(unittest.IsolatedAsyncioTestCase):
         JobManager._instance = None
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.graph_builder.GraphBuilder')
+    @patch('core.runtime.agent.GraphBuilder')
     async def test_agent_compiles_one_graph_per_graph_binding(self, mock_builder_class, _mock_logging):
         built_for = []
 
@@ -58,7 +58,7 @@ class TestGraphBindingIsolation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(agent._graphs.keys()), ["coding", "content_creation"])
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.graph_builder.GraphBuilder')
+    @patch('core.runtime.agent.GraphBuilder')
     async def test_graph_is_constructed_inside_the_execution_context(self, mock_builder_class, _mock_logging):
         seen = {}
 
@@ -81,7 +81,7 @@ class TestGraphBindingIsolation(unittest.IsolatedAsyncioTestCase):
         self.assertIs(seen["ambient"], session)
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.graph_builder.GraphBuilder')
+    @patch('core.runtime.agent.GraphBuilder')
     async def test_job_reaches_running_despite_the_reordering(self, mock_builder_class, _mock_logging):
         """`add_job` inserts the job as "queued", so the "running" transition has to happen
         after preparation. When the context (which used to stamp "running") moved ahead of

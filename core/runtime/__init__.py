@@ -7,10 +7,11 @@
     agent_factory.py     build_agent: which class an agent's config becomes
     graph_builder.py     GraphBuilder: the agent's compiled LangGraph graph
     streaming.py         LangGraph's events turned into the turn's events
+    hooks.py             the turn's side work: pruning, the job, the memory log
   delegation.py          one agent's turn handed to another
   bootstrap.py           plugs the runtime into the packages below it, at startup
   foundation/            what everything shares: context, sessions, jobs, events, routing
-  model/                 the model call: thinking level, retry
+  model/                 the model call: which model (chat.py), thinking level, retry
   history/               a session's history across turns
   observability/         the transcript, token usage, latency marks
   commands/              every command, typed or spoken: !new, !help, !join, "stop",
@@ -21,7 +22,7 @@ it, never above (checked by tests/test_layers.py):
 
   foundation   foundation/: imports nothing else from the runtime
   services     commands/, model/, history/, observability/
-  turn         agent, base_agent, script_executor, agent_factory, graph_builder, streaming
+  turn         agent, base_agent, script_executor, agent_factory, graph_builder, streaming, hooks
   delegation   delegation
   bootstrap    bootstrap
 

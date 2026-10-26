@@ -96,38 +96,33 @@ class TestDelegationHelpers(unittest.TestCase):
 
 class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_success_returns_text(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_success_returns_text(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value = _streaming_agent(
             {"channels": ["software-dev"], "emoji": "💻", "name": "Software Developer"}
         )
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         result = await stream_delegate("agent1", "hello", "software-dev")
 
         mock_loader.get_agent.assert_called_once_with("agent1")
-        mock_bots_loader.return_value.find_channel.assert_called_once_with("software-dev")
         self.assertTrue(result.ok)
         self.assertEqual(result.text, "agent response")
         self.assertEqual(result.agent_id, "agent1")
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_wildcard_channel_allowed(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_wildcard_channel_allowed(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value = _streaming_agent({"channels": ["*"]})
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         result = await stream_delegate("main", "hello", "any-channel")
 
         self.assertTrue(result.ok)
         self.assertEqual(result.text, "agent response")
 
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_channel_restriction_is_an_error_not_an_exception(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -152,16 +147,14 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result.ok)
                 self.assertIn("requires 'agent_id', 'prompt', and 'channel'", result.error)
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_run_async_starts_a_background_task(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_run_async_starts_a_background_task(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         agent = MagicMock()
         agent.config = {"channels": ["software-dev"]}
         agent.execute = AsyncMock(return_value="agent response")
         mock_loader.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         result = await stream_delegate("agent1", "hello", "software-dev", run_async=True)
 
@@ -171,24 +164,21 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Successfully triggered agent 'agent1'", result.text)
         self.assertIsNotNone(result.job_id)
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_explicit_caller_is_tagged(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_explicit_caller_is_tagged(self, mock_agents_loader):
         capture = {}
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         mock_loader.get_agent.return_value = _streaming_agent(
             {"channels": ["software-dev"]}, capture=capture
         )
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         await stream_delegate("agent1", "hello", "software-dev", caller="main")
 
         self.assertEqual(capture["prompt"], "<caller>main</caller>\nhello")
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_caller_inferred_from_context(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_caller_inferred_from_context(self, mock_agents_loader):
         from core.runtime.foundation.context import current_execution_context
         from core.runtime.foundation.sessions import SessionManager
 
@@ -198,7 +188,6 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         mock_loader.get_agent.return_value = _streaming_agent(
             {"channels": ["software-dev"]}, capture=capture
         )
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         sess = SessionManager.get_session(
             agent_id="software-orchestrator", source="discord", channel="software-dev"
@@ -211,9 +200,8 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(capture["prompt"], "<caller>software-orchestrator</caller>\nhello")
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_thread_context_is_preserved(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_thread_context_is_preserved(self, mock_agents_loader):
         import discord
         from core.runtime.foundation.context import current_execution_context
         from core.runtime.foundation.sessions import SessionManager
@@ -231,8 +219,9 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         mock_thread.parent = MagicMock(spec=discord.TextChannel)
         mock_thread.parent.name = "topic-research"
 
+        output = MagicMock(channel=mock_thread)
         caller_sess = SessionManager.get_session(
-            agent_id="test-caller", source="discord", channel=mock_thread
+            agent_id="test-caller", source="discord", channel=mock_thread, output=output
         )
         token = current_execution_context.set(caller_sess)
         try:
@@ -244,17 +233,55 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
 
         # The active thread is reused rather than re-resolved by name, which is
         # what keeps the callee inside the thread instead of its parent channel.
-        mock_bots_loader.return_value.find_channel.assert_not_called()
+        output.to.assert_not_called()
         session = capture["session"]
+        self.assertIs(session.output, output)
         self.assertEqual(session.agent_id, "topic-researcher")
         self.assertEqual(session.channel_name, "topic-research")
         self.assertEqual(session.discord_thread_id, "123456789012345678")
         self.assertEqual(session.channel_obj, mock_thread)
         self.assertEqual(result.text, "agent thread response")
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_stateless_agent_uses_execute(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_another_channel_is_reached_through_the_callers_output(self, mock_agents_loader):
+        """The caller's surface finds the other channel; the callee writes there."""
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
+
+        capture = {}
+        mock_agents_loader.return_value.get_agent.return_value = _streaming_agent(
+            {"channels": ["software-dev"]}, capture=capture
+        )
+        elsewhere = MagicMock()
+        elsewhere.channel.name = "software-dev"
+        output = MagicMock()
+        output.to.return_value = elsewhere
+        caller = SessionManager.get_session(agent_id="main", source="discord", channel="general", output=output)
+        token = current_execution_context.set(caller)
+        try:
+            await stream_delegate("agent1", "hello", "software-dev")
+        finally:
+            current_execution_context.reset(token)
+
+        output.to.assert_called_once_with("software-dev")
+        session = capture["session"]
+        self.assertIs(session.output, elsewhere)
+        self.assertIs(session.channel_obj, elsewhere.channel)
+        self.assertEqual(session.channel_name, "software-dev")
+
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_without_an_output_the_callee_gets_the_channel_name(self, mock_agents_loader):
+        """A script or job delegating: nobody sees the turn, so nothing to find."""
+        capture = {}
+        mock_agents_loader.return_value.get_agent.return_value = _streaming_agent(
+            {"channels": ["software-dev"]}, capture=capture
+        )
+        await stream_delegate("agent1", "hello", "software-dev")
+        self.assertIsNone(capture["session"].output)
+        self.assertEqual(capture["session"].channel, "software-dev")
+
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_stateless_agent_uses_execute(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
         agent = MagicMock()
@@ -267,7 +294,6 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         agent.execute = AsyncMock(return_value="<worker_handoff>output</worker_handoff>")
         agent.execute_stream = MagicMock()
         mock_loader.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         result = await stream_delegate("graph-worker", "run task", "coding-pipeline")
 
@@ -275,9 +301,8 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         agent.execute_stream.assert_not_called()
         self.assertEqual(result.text, "<worker_handoff>output</worker_handoff>")
 
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
-    async def test_a_stateless_agent_returns_its_parsed_reply_too(self, mock_agents_loader, mock_bots_loader):
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_a_stateless_agent_returns_its_parsed_reply_too(self, mock_agents_loader):
         """As the streaming path does: Python callers read `<speech>` from it."""
         from core.channel.response_parser import AgentResponse
 
@@ -291,7 +316,6 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         agent.config = {"channels": ["*"], "stateless": True}
         agent.execute = AsyncMock(side_effect=execute)
         mock_agents_loader.return_value.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = None
 
         result = await stream_delegate("graph-worker-low", "speak this", "topic-research")
         self.assertIs(result.response, parsed)
@@ -327,10 +351,9 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await ask_worker("t", channel="general", caller="test", timeout=0.01))
 
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_streaming_events_are_dispatched(
-        self, mock_agents_loader, mock_bots_loader, mock_dispatch
+        self, mock_agents_loader, mock_dispatch
     ):
         from core.channel.response_parser import AgentResponse
 
@@ -348,7 +371,6 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
 
         agent.execute_stream = fake_stream
         mock_loader.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         result = await stream_delegate("software-planner", "create plan", "software-dev")
 
@@ -363,10 +385,9 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(header_calls[0].args[1]["content"], "🛠️ Software Planner: ")
 
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_a_callee_error_is_flagged_as_an_error_token(
-        self, mock_agents_loader, mock_bots_loader, mock_dispatch
+        self, mock_agents_loader, mock_dispatch
     ):
         """`is_error` lets voice show the error in the channel without reading it out."""
         mock_loader = MagicMock()
@@ -380,7 +401,6 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
 
         agent.execute_stream = failing_stream
         mock_loader.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         await stream_delegate("home-steward", "thermostat?", "home-automation")
 
@@ -389,10 +409,9 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t["content"] for t in tokens if not t.get("is_error")], ["🛎️ Butler: ", "Checking"])
 
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_reaction_is_announced_before_any_output(
-        self, mock_agents_loader, mock_bots_loader, mock_dispatch
+        self, mock_agents_loader, mock_dispatch
     ):
         """The emoji has to come from here, not from a tool callback, or the
         deterministic path loses it entirely."""
@@ -401,7 +420,6 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         mock_loader.get_agent.return_value = _streaming_agent(
             {"channels": ["receipts"], "emoji": "🧾", "name": "Receipt Processor"}
         )
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         await stream_delegate("receipt-processor", "scan this", "receipts")
 
@@ -413,10 +431,9 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["emoji"], "🧾")
 
     @patch('core.runtime.delegation.safe_dispatch_custom_event')
-    @patch('core.channel.discord.loader.BotsLoader')
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_reaction_announced_for_async_delegation_too(
-        self, mock_agents_loader, mock_bots_loader, mock_dispatch
+        self, mock_agents_loader, mock_dispatch
     ):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader
@@ -424,7 +441,6 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         agent.config = {"channels": ["receipts"], "emoji": "🧾"}
         agent.execute = AsyncMock(return_value="ok")
         mock_loader.get_agent.return_value = agent
-        mock_bots_loader.return_value.find_channel.return_value = MagicMock()
 
         await stream_delegate("receipt-processor", "scan", "receipts", run_async=True)
         await asyncio.sleep(0.05)
@@ -432,7 +448,7 @@ class TestAskWorker(unittest.IsolatedAsyncioTestCase):
         dispatched = [call.args[0] for call in mock_dispatch.call_args_list]
         self.assertIn(ROUTE_REACTION, dispatched)
 
-    @patch('core.loaders.agents_loader.AgentsLoader')
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_unknown_agent_is_reported(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader

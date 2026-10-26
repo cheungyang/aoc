@@ -116,6 +116,9 @@ class ExecutionContext:
     - `thinking_level` is an authority field: the reasoning depth for this
       call's model requests, overriding the agent's per-surface level (a
       schedule entry's `thinking_level`). Not inherited, like `model`.
+    - `output` is where the turn's output goes (foundation/output.py): set by
+      the adapter that starts the turn, kept by derived contexts, and handed on
+      by delegation. None for a turn nobody sees (a job, a script).
     - `turn_hints` is the one mutable field: scratch state for the turn in
       flight, shared by the turn's tools and the model wrapper (the agent's own
       `set_thinking` pick lives here). The runtime clears it when a turn starts.
@@ -133,6 +136,7 @@ class ExecutionContext:
     record_memory: bool = True
     model: Optional[str] = None
     thinking_level: Optional[str] = None
+    output: Optional[Any] = field(default=None, repr=False, compare=False)
     turn_hints: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _secret: Any = field(default=None, repr=False, compare=False)
 
@@ -191,6 +195,7 @@ class ExecutionContext:
         record_memory: bool = True,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        output: Optional[Any] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
         return cls(
@@ -204,6 +209,7 @@ class ExecutionContext:
             record_memory=record_memory,
             model=model,
             thinking_level=thinking_level,
+            output=output,
             _secret=_CONTEXT_SECRET,
         )
 

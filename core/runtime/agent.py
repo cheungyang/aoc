@@ -1,35 +1,32 @@
-import asyncio
-import contextvars
 import sys
-import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, Union
 
 from core.util.errors import format_error_message
-from core.knowledge.memory.logs import save_agent_memory_log
 from core.prompts.system import stamp_user_message
 from core.runtime.base_agent import BaseAgent
-from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.observability.transcript import LoggingHandler
-from core.runtime.history.pruner import ContextPruner
 from core.channel.response_parser import AgentResponse
-from core.channel.discord.dispatcher import dispatch_discord_output
 from core.runtime.foundation.context import ExecutionContext
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from core.runtime.foundation import events
+from core.runtime.graph_builder import GraphBuilder
+from core.runtime.hooks import Turn, turn_hooks
 from core.runtime.streaming import StreamHandler
 
 
 class Agent(BaseAgent):
+    """Runs one turn: binds the context, finds the graph, runs it, recovers a
+    corrupt checkpoint, and parses the reply. The side work (the job, pruning,
+    the memory log) is the turn hooks' (hooks.py); where the output goes is the
+    adapter's (foundation/output.py)."""
+
     def __init__(self, agent_id: str, config: Dict[str, Any]):
         super().__init__(agent_id, config)
         # Compiled graphs are cached per graph binding: the same agent invoked under two
         # different graphs gets two different tool rosters, so it needs two compiled graphs.
         self._graphs: Dict[str, Any] = {}
-        # History pruning runs after a turn, in the background (see _schedule_prune).
-        # Keyed by session id so the session's next turn can wait for it.
-        self._prune_tasks: Dict[str, asyncio.Task] = {}
 
     @staticmethod
     def _is_empty_prompt(prompt: str | list) -> bool:
@@ -48,42 +45,34 @@ class Agent(BaseAgent):
         if ctx.model:
             cache_key += f"|{ctx.model}"
         if cache_key not in self._graphs:
-            from core.runtime.graph_builder import GraphBuilder
             self._graphs[cache_key] = await GraphBuilder().build_graph(ctx, self.config)
         return self._graphs[cache_key]
 
     async def _prepare_execution(
         self,
-        prompt: str | list,
-        session: ExecutionContext,
+        turn: Turn,
         callbacks: Optional[list] = None,
         role: str = "user"
     ) -> Tuple[Dict[str, Any], Dict[str, Any], Any]:
         """
-        Waits for any pending post-turn prune of this session, ensures graph
-        compilation, and returns (config, inputs, graph).
+        Ensures graph compilation, runs the hooks' `before` (a pending prune is
+        waited for, the job registered), and returns (config, inputs, graph).
         """
+        session = turn.ctx
+        prompt = turn.prompt
         session_id = session.session_id
         channel_name = session.channel_name
         job_id = session.job_id
-
-        # History is pruned after each turn (see _schedule_prune), not here: a
-        # summary call before the model's first token was audible on voice. If the
-        # previous turn's prune is still rewriting this checkpoint, wait for it.
-        await self._await_pending_prune(session)
 
         # Turn hints (a set_thinking pick) are scratch state for one turn.
         session.turn_hints.clear()
 
         # Lazy load langgraph graph object via GraphBuilder
         graph = await self._get_graph(session)
+        turn.graph = graph
 
-        prompt_str = prompt if isinstance(prompt, str) else str(prompt)
-        # add_job inserts the job as "queued"; the transition to "running" has to happen after it,
-        # otherwise the insert clobbers the status back to "queued" for the whole run.
-        JobManager().add_job(session=session, prompt=prompt_str)
-        if job_id:
-            JobManager().update_job(job_id, "running")
+        for hook in turn_hooks():
+            await hook.before(turn)
 
         logging_handler = LoggingHandler(session=session, role=role, human_message=prompt)
         config = {
@@ -106,6 +95,7 @@ class Agent(BaseAgent):
                 "role": role,
             }
         }
+        turn.config = config
 
         # The time of day rides on the user's message rather than in the system
         # prompt, where it would break the cached prefix every minute.
@@ -113,98 +103,24 @@ class Agent(BaseAgent):
         inputs = {"messages": [{"role": role, "content": content}]}
         return config, inputs, graph
 
-    def _schedule_prune(self, session: ExecutionContext) -> None:
-        """Prunes the session's history after the turn, in the background.
+    async def _after(self, turn: Turn) -> None:
+        """The hooks' `after`. One that fails is logged: the turn already ran."""
+        for hook in turn_hooks():
+            try:
+                await hook.after(turn)
+            except Exception as e:
+                print(f"[Agent:{self.agent_id}] {type(hook).__name__}.after failed: {e}", file=sys.stderr)
 
-        Pruning summarises old messages with a model call once history passes its
-        thresholds. Run before a turn, that call sat between the user and the
-        first token; run after, it overlaps the time the user spends reading or
-        listening. The turn that crosses the threshold runs over budget once.
-        """
-        if session.is_stateless():
-            return
-        pending = self._prune_tasks.get(session.session_id)
-        if pending is not None and not pending.done():
-            return
-        try:
-            from core.runtime.observability.turn_trace import detach_turn_trace
-            context = contextvars.copy_context()
-            # Run as the session being pruned, wherever this is called from, and
-            # outside the voice turn's trace: the summariser's model calls are not
-            # part of the turn being measured.
-            context.run(current_execution_context.set, session)
-            context.run(detach_turn_trace)
-            task = asyncio.get_running_loop().create_task(self._prune_after_turn(session), context=context)
-        except RuntimeError:
-            return  # no running loop (a generator closed during shutdown): skip this time
-        session_id = session.session_id
-        self._prune_tasks[session_id] = task
+    def _ended(self, turn: Turn) -> None:
+        """The hooks' `ended`, however the turn ended. One that fails is logged."""
+        for hook in turn_hooks():
+            try:
+                hook.ended(turn)
+            except Exception as e:
+                print(f"[Agent:{self.agent_id}] {type(hook).__name__}.ended failed: {e}", file=sys.stderr)
 
-        def _forget(done: asyncio.Task) -> None:
-            if self._prune_tasks.get(session_id) is done:
-                del self._prune_tasks[session_id]
-
-        task.add_done_callback(_forget)
-
-    async def _prune_after_turn(self, session: ExecutionContext) -> None:
-        try:
-            await ContextPruner(
-                provider=self.config.get("provider")
-            ).aauto_prune_session(session=session)
-        except Exception as e:
-            print(f"[Agent:{self.agent_id}] Warning: auto_prune_session failed for session '{session.session_id}': {e}", file=sys.stderr)
-
-    async def _await_pending_prune(self, session: ExecutionContext) -> None:
-        """Waits for the previous turn's prune of this session, if it is still running.
-
-        Shielded: cancelling the new turn (a barge-in) must not abandon a
-        checkpoint rewrite halfway.
-        """
-        pending = self._prune_tasks.get(session.session_id)
-        if pending is None or pending.done():
-            return
-        if pending.get_loop() is not asyncio.get_running_loop():
-            # Started on another of the process's event loops: it can't be
-            # awaited from here. Same-session turns on two loops are rare enough
-            # that proceeding beats failing the turn.
-            return
-        from core.runtime.observability.turn_trace import current_turn_trace
-        started = time.monotonic()
-        try:
-            await asyncio.shield(pending)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            pass  # _prune_after_turn already logged it
-        finally:
-            trace = current_turn_trace()
-            if trace is not None:
-                trace.event("prune_wait", ms=round((time.monotonic() - started) * 1000))
-
-    def _update_job_status(self, session: ExecutionContext, config: Dict[str, Any], graph: Any = None):
-        """Updates job status based on final graph state."""
-        job_id = session.job_id
-        if not job_id:
-            return
-
-        if JobManager().is_killed(job_id):
-            return
-
-        state = graph.get_state(config) if (graph is not None and hasattr(graph, "get_state")) else None
-        if state and getattr(state, "next", None):
-            JobManager().update_job(job_id, "partial")
-        else:
-            JobManager().update_job(job_id, "completed")
-
-    def _records_memory(self, session: Optional[ExecutionContext]) -> bool:
-        """Stateless agents keep nothing between runs, so their logs would never
-        be consumed; a non-recording call (a dream) must not log about itself."""
-        if self.config.get("stateless"):
-            return False
-        return session is None or session.record_memory
-
-    def _parse_final_response(self, raw_reply: Any, session: Optional[ExecutionContext] = None) -> AgentResponse:
-        """Normalizes list content, parses XML AgentResponse, and persists in-band memory logs."""
+    def _parse_final_response(self, raw_reply: Any) -> AgentResponse:
+        """Normalizes list content and parses the XML AgentResponse."""
         if isinstance(raw_reply, list):
             texts = []
             for part in raw_reply:
@@ -217,32 +133,19 @@ class Agent(BaseAgent):
         elif not isinstance(raw_reply, str):
             raw_reply = str(raw_reply) if raw_reply is not None else ""
 
-        response = AgentResponse.from_string(raw_reply)
-        if response.system_memory_log and self._records_memory(session):
-            save_agent_memory_log(self.agent_id, response.system_memory_log)
+        return AgentResponse.from_string(raw_reply)
 
-        return response
+    async def _deliver(self, session: ExecutionContext, response: AgentResponse):
+        """Hands a batch turn's reply to the output the adapter supplied (foundation/output.py)."""
+        if session.output is not None:
+            await session.output.deliver(session, response)
 
-    async def _dispatch_discord_output(
-        self,
-        session: ExecutionContext,
-        response: AgentResponse
-    ):
-        """Dispatches response output to Discord via the channel adapter."""
-        await dispatch_discord_output(
-            channel=session.channel_obj,
-            response=response,
-            source=session.source
-        )
-
-    async def _handle_empty_content(
-        self, channel: Optional[Any], source: str
-    ) -> str:
+    async def _handle_empty_content(self, session: ExecutionContext) -> str:
         """Emits warning for empty user prompts."""
         msg = "I cannot process empty messages. Please provide some text."
-        if channel is not None:
+        if session.output is not None:
             try:
-                await channel.send(msg)
+                await session.output.notify(msg)
             except Exception as e:
                 print(
                     f"[Agent:{self.agent_id}] Error sending empty warning: {e}"
@@ -273,18 +176,17 @@ class Agent(BaseAgent):
         SqliteCheckpointer().rollback_last_step(session_id)
         print(f"[Agent:{self.agent_id}] Rolled back corrupt checkpoint for session: {session_id}, retrying...")
 
-    async def _handle_execution_error(
-        self,
-        session: ExecutionContext,
-        error: Exception
-    ) -> str:
-        """Updates job status to error, formats error message, and dispatches to channel."""
-        JobManager().update_job(session.job_id, "error")
+    async def _handle_execution_error(self, turn: Turn, error: Exception) -> str:
+        """Runs the hooks' `failed` (the job is marked as errored), formats the
+        error, and tells the output when a person or a schedule started the turn."""
+        session = turn.ctx
+        for hook in turn_hooks():
+            await hook.failed(turn, error)
         err_msg = format_error_message(error)
         print(f"[Agent:{self.agent_id}] Error executing graph: {err_msg}")
-        if session.channel is not None and session.source in ["discord", "scheduled"]:
+        if session.output is not None and session.source in ["discord", "scheduled"]:
             try:
-                await session.channel.send(err_msg)
+                await session.output.notify(err_msg)
             except Exception as se:
                 print(f"[Agent:{self.agent_id}] Error sending failure message: {se}")
         return err_msg
@@ -298,15 +200,16 @@ class Agent(BaseAgent):
     ) -> str:
         """Executes the agent graph in batch mode and returns full response text."""
         if self._is_empty_prompt(prompt):
-            return await self._handle_empty_content(session.channel_obj, session.source)
+            return await self._handle_empty_content(session)
 
+        turn = Turn(self.agent_id, self.config, session, prompt)
         # The context is entered *before* preparation: _prepare_execution builds the graph, and
         # graph construction resolves this agent's tool roster and skills. Entering afterwards
         # meant construction ran under the caller's identity (or none at all).
         prepared = False
         try:
             async with self._execution_context(session):
-                config, inputs, graph = await self._prepare_execution(prompt, session, callbacks, role)
+                config, inputs, graph = await self._prepare_execution(turn, callbacks, role)
                 prepared = True
 
                 try:
@@ -319,20 +222,21 @@ class Agent(BaseAgent):
                             result = await graph.ainvoke(inputs, config=config)
                         else:
                             raise e
-                    self._update_job_status(session, config, graph)
                 except Exception as e:
-                    return await self._handle_execution_error(session, e)
+                    return await self._handle_execution_error(turn, e)
 
             reply_message = result["messages"][-1]
-            response = self._parse_final_response(reply_message.content, session)
+            response = self._parse_final_response(reply_message.content)
+            turn.response = response
+            await self._after(turn)
             # For callers that need more than the text: a scheduled run reads
             # the speech version and its question from here (schedule_runner).
             session.turn_hints[events.RESPONSE_HINT] = response
-            await self._dispatch_discord_output(session, response)
+            await self._deliver(session, response)
             return response.text
         finally:
             if prepared:
-                self._schedule_prune(session)
+                self._ended(turn)
 
     async def execute_stream(
         self,
@@ -350,7 +254,7 @@ class Agent(BaseAgent):
           - {"type": "final_response", "text": str, "poll_data": dict, "image_paths": list, "video_paths": list, "system_memory_log": str, "response": AgentResponse}
         """
         if self._is_empty_prompt(prompt):
-            msg = await self._handle_empty_content(session.channel_obj, session.source)
+            msg = await self._handle_empty_content(session)
             yield {
                 "type": events.FINAL_RESPONSE,
                 "text": msg,
@@ -362,13 +266,14 @@ class Agent(BaseAgent):
             }
             return
 
+        turn = Turn(self.agent_id, self.config, session, prompt)
         accumulated_tokens = []
         subagent_final_response = None
         prepared = False
         try:
             # Context entered before preparation — see the note in execute().
             async with self._execution_context(session):
-                config, inputs, graph = await self._prepare_execution(prompt, session, callbacks, role)
+                config, inputs, graph = await self._prepare_execution(turn, callbacks, role)
                 prepared = True
 
                 try:
@@ -387,9 +292,8 @@ class Agent(BaseAgent):
                         elif event.get("type") == events.SUBAGENT_FINAL:
                             subagent_final_response = event.get("response")
                         yield event
-                    self._update_job_status(session, config, graph)
                 except Exception as e:
-                    err_msg = await self._handle_execution_error(session, e)
+                    err_msg = await self._handle_execution_error(turn, e)
                     yield {"type": events.ERROR, "content": err_msg}
                     return
 
@@ -400,8 +304,11 @@ class Agent(BaseAgent):
                     graph=graph,
                     config=config,
                     accumulated_tokens=accumulated_tokens,
-                    parse_fn=lambda raw: self._parse_final_response(raw, session)
+                    parse_fn=self._parse_final_response
                 )
+                # The agent's own reply; one a delegated agent sent back is not its to log.
+                turn.response = response
+            await self._after(turn)
 
             yield {
                 "type": events.FINAL_RESPONSE,
@@ -416,4 +323,4 @@ class Agent(BaseAgent):
             # After the final response was read from the checkpoint, or when the
             # consumer stopped early (a voice barge-in closes the stream).
             if prepared:
-                self._schedule_prune(session)
+                self._ended(turn)

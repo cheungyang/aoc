@@ -24,6 +24,6 @@ class ScriptExecutorAgent(BaseAgent):
     ) -> str:
         """Refuses any prompt: a message routed or delegated here is a mistake,
         and the sender should be told rather than left without a reply."""
-        if session.channel_obj is not None:
-            await session.channel_obj.send(NO_PROMPTS)
+        if session.output is not None:
+            await session.output.notify(NO_PROMPTS)
         return NO_PROMPTS

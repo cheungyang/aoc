@@ -68,6 +68,7 @@ if not hasattr(sys.modules['discord'], 'SelectOption'):
     sys.modules['discord'].SelectOption = MockSelectOption
 
 import discord
+from core.channel.discord.output import DiscordOutput
 from core.runtime.agent import Agent
 from core.runtime.foundation.sessions import SessionManager
 
@@ -112,7 +113,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         # Run
         reply = await agent.execute("hello", session=session)
         
@@ -251,7 +252,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         
         # Run
         reply = await agent.execute("hello", session=session)
@@ -283,7 +284,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         
         # Run
         reply = await agent.execute("hello", session=session)
@@ -317,7 +318,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         
         # Run
         reply = await agent.execute("hello", session=session)
@@ -352,7 +353,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         
         # Run
         reply = await agent.execute("hello", session=session)
@@ -384,7 +385,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         
         # Run
         reply = await agent.execute("hello", session=session)
@@ -400,7 +401,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.runtime.agent.LoggingHandler')
     @patch('core.runtime.agent.current_execution_context')
-    @patch('core.runtime.agent.JobManager')
+    @patch('core.runtime.hooks.JobManager')
     async def test_execute_handles_killed_status(self, mock_job_manager_class, mock_current_execution_context, mock_logging_handler_class):
         # Setup mocks
         mock_graph = MagicMock()
@@ -432,7 +433,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("completed", status_updates)
 
     @patch('core.runtime.agent.LoggingHandler')
-    @patch('core.runtime.agent.JobManager')
+    @patch('core.runtime.hooks.JobManager')
     async def test_execute_passes_prompt_to_job_manager(self, mock_job_manager_class, mock_logging_handler_class):
         mock_job_manager = MagicMock()
         mock_job_manager_class.return_value = mock_job_manager
@@ -463,13 +464,13 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.name = "general"
 
         # 1. When source="tool" (e.g., invoked via agent_call)
-        session_tool = SessionManager.get_session("sub-agent", source="tool", channel=mock_channel)
+        session_tool = SessionManager.get_session("sub-agent", source="tool", channel=mock_channel, output=DiscordOutput(mock_channel))
         tool_reply = await agent.execute("run subtask", session=session_tool)
         self.assertEqual(tool_reply, "Subagent internal response")
         mock_channel.send.assert_not_called()
 
         # 2. When source="subgraph" (e.g., invoked within a graph node)
-        session_subgraph = SessionManager.get_session("sub-agent", source="subgraph", channel=mock_channel)
+        session_subgraph = SessionManager.get_session("sub-agent", source="subgraph", channel=mock_channel, output=DiscordOutput(mock_channel))
         subgraph_reply = await agent.execute("critique prompt", session=session_subgraph)
         self.assertEqual(subgraph_reply, "Subagent internal response")
         mock_channel.send.assert_not_called()
@@ -486,7 +487,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         mock_channel.name = "general"
 
         # 1. When source="scheduled"
-        session_sched = SessionManager.get_session("cron-agent", source="scheduled", channel=mock_channel)
+        session_sched = SessionManager.get_session("cron-agent", source="scheduled", channel=mock_channel, output=DiscordOutput(mock_channel))
         reply = await agent.execute("daily check", session=session_sched)
         self.assertEqual(reply, "Scheduled report")
         mock_channel.send.assert_called_once_with("Scheduled report")
@@ -494,7 +495,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         # 2. When source="discord"
         mock_channel.reset_mock()
         mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Direct user response")]})
-        session_disc = SessionManager.get_session("cron-agent", source="discord", channel=mock_channel)
+        session_disc = SessionManager.get_session("cron-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         reply_discord = await agent.execute("user query", session=session_disc)
         self.assertEqual(reply_discord, "Direct user response")
         mock_channel.send.assert_called_once_with("Direct user response")
@@ -510,7 +511,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         agent._graphs[""] = mock_graph
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
 
         self.assertEqual(await agent.execute("!new", session=session), "A reply")
         mock_graph.ainvoke.assert_awaited_once()
@@ -536,7 +537,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         reply = await agent.execute("run", session=session)
 
         self.assertEqual(reply, "Here are the options:")
@@ -564,7 +565,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         # First call with view raises HTTPException, second call without view succeeds
         mock_channel.send.side_effect = [
             discord.HTTPException(response=MagicMock(status=400), message="Bad Request"),
@@ -576,7 +577,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Here are the options:")
         self.assertEqual(mock_channel.send.call_count, 2)
 
-    @patch('core.runtime.agent.save_agent_memory_log')
+    @patch('core.runtime.hooks.save_agent_memory_log')
     @patch('core.runtime.agent.LoggingHandler')
     async def test_execute_with_system_memory_log(self, mock_logging_handler_class, mock_save_memory_log):
         mock_graph = MagicMock()
@@ -590,7 +591,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel, output=DiscordOutput(mock_channel))
         reply = await agent.execute("run", session=session)
 
         self.assertEqual(reply, "Task completed successfully.")

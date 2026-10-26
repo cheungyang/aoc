@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from croniter import croniter
 
 from core.channel.discord.loader import BotsLoader
+from core.channel.discord.output import DiscordOutput
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation import events
 from core.runtime.history.channel_posts import record_channel_post
@@ -346,6 +347,7 @@ class ScheduleRunner:
             source="scheduled",
             channel=channel or spec.channel,
             thinking_level=spec.thinking_level,
+            output=DiscordOutput(channel) if channel is not None else None,
         )
         if spec.session_policy is SessionPolicy.STATELESS:
             try:

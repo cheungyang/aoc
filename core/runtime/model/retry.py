@@ -39,6 +39,9 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from core.runtime.foundation import events
+from core.runtime.foundation.context import try_context
+from core.runtime.model.thinking import resolve_thinking_level
+from core.runtime.observability.turn_trace import current_turn_trace
 
 RETRY_EMOJI = "🔁"
 
@@ -96,7 +99,6 @@ def backoff_delay(retry_index: int) -> float:
 
 def _agent_id() -> Optional[str]:
     try:
-        from core.runtime.foundation.context import try_context
         ctx = try_context()
         return getattr(ctx, "agent_id", None) if ctx else None
     except Exception:
@@ -185,11 +187,9 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         if "thinking_level" in kwargs or "reasoning_effort" in kwargs:
             level = kwargs.get("thinking_level", kwargs.get("reasoning_effort"))
         else:
-            from core.runtime.model.thinking import resolve_thinking_level
             level = resolve_thinking_level(self.model)
             if level:
                 kwargs = {**kwargs, "thinking_level": level}
-        from core.runtime.observability.turn_trace import current_turn_trace
         trace = current_turn_trace()
         if trace is not None:
             trace.model_call(_agent_id(), self.model, level)

@@ -4,7 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from core.scheduler import schedule_runner as runner_mod
 from core.scheduler.limiter import ScheduleLimiter
@@ -231,8 +231,10 @@ class TestPromptDispatch(RunnerCase):
         self.assertTrue(await runner.run_schedule(spec))
         self.agent.execute.assert_awaited_once_with("do it", session=self.session, role="user")
         self.get_session.assert_called_once_with(
-            agent_id="agent1", source="scheduled", channel=self.channel, thinking_level=None
+            agent_id="agent1", source="scheduled", channel=self.channel, thinking_level=None, output=ANY
         )
+        # The run's output is its Discord channel (core/runtime/foundation/output.py).
+        self.assertIs(self.get_session.call_args.kwargs["output"].channel, self.channel)
         self.assertIsNotNone(self.state.get_last_success(spec.schedule_id))
 
     async def test_a_scans_findings_reach_the_agent(self):

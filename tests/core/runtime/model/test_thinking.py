@@ -21,7 +21,7 @@ class ResolverCase(unittest.TestCase):
             "goal-setter": {"model": "PRO", "thinking": {"text": "high"}},
             "graph-worker-low": {"model": "FLASH_LITE", "stateless": True},
         }
-        loader = patch("core.loaders.agents_loader.AgentsLoader").start()
+        loader = patch("core.runtime.model.thinking.AgentsLoader").start()
         loader.return_value.get_agent_config.side_effect = self.configs.get
         self.addCleanup(patch.stopall)
 

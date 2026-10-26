@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+from core.channel.discord.output import DiscordOutput
 from core.runtime.agent import Agent
 from core.runtime.foundation.sessions import SessionManager
 
@@ -73,7 +74,8 @@ class TestAgentStream(unittest.IsolatedAsyncioTestCase):
 
         mock_channel = AsyncMock()
         mock_channel.name = "general"
-        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel)
+        session = SessionManager.get_session("test-agent", source="discord", channel=mock_channel,
+                                             output=DiscordOutput(mock_channel))
         events = []
         async for event in agent.execute_stream("Hi", session=session):
             events.append(event)

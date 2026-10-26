@@ -84,7 +84,7 @@ class TestPromptCacheLayout(unittest.TestCase):
         patchers = [
             patch.object(system, "_agent_prompt_files", side_effect=self.agent.files),
             patch("core.runtime.graph_builder.SkillsLoader"),
-            patch("core.loaders.graphs_loader.GraphsLoader"),
+            patch("core.runtime.graph_builder.GraphsLoader"),
             patch("core.runtime.graph_builder.get_knowledge_prompt", return_value="KNOWLEDGE"),
             patch("core.runtime.graph_builder.get_channel_prompt"),
         ]

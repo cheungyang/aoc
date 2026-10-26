@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+from core.channel.discord.output import DiscordOutput
 from core.runtime.script_executor import NO_PROMPTS, ScriptExecutorAgent
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation.sessions import SessionManager
@@ -34,7 +35,8 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         channel.name = "general"
 
         agent = ScriptExecutorAgent("script-executor")
-        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel=channel)
+        session = SessionManager.get_session(agent_id="script-executor", source="discord", channel=channel,
+                                             output=DiscordOutput(channel))
         await agent.execute("hello", session=session)
 
         channel.send.assert_awaited_once_with(NO_PROMPTS)

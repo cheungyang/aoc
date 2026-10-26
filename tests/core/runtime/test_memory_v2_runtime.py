@@ -1,4 +1,5 @@
 """Memory v2 runtime plumbing: non-recording calls and per-call model floors."""
+import asyncio
 import os
 import sys
 import unittest
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.agent import Agent
+from core.runtime.hooks import MemoryLogHook, Turn
 from core.runtime.foundation.context import current_execution_context, inherited_record_memory
 from core.runtime.foundation.sessions import SessionManager
 from core.config.models import DEFAULT_AGENT_TIER, tier_floor
@@ -52,16 +54,19 @@ class TestRecordMemory(unittest.TestCase):
         session = SessionManager.get_session("a", "discord", "general", model="PRO")
         self.assertIsNone(session.with_agent("b").model)
 
-    @patch("core.runtime.agent.save_agent_memory_log")
+    @patch("core.runtime.hooks.save_agent_memory_log")
     def test_agent_saves_logs_only_when_recording(self, save):
-        raw = "hi<system_memory_log>- learned</system_memory_log>"
-        agent = Agent("a", {})
-        agent._parse_final_response(raw, SessionManager.get_session("a", "discord", "general", record_memory=False))
+        response = Agent("a", {})._parse_final_response("hi<system_memory_log>- learned</system_memory_log>")
+
+        def after(config, session):
+            asyncio.run(MemoryLogHook().after(Turn("a", config, session, "hi", response=response)))
+
+        after({}, SessionManager.get_session("a", "discord", "general", record_memory=False))
         save.assert_not_called()
-        Agent("a", {"stateless": True})._parse_final_response(raw)
+        after({"stateless": True}, SessionManager.get_session("a", "job"))
         save.assert_not_called()
-        agent._parse_final_response(raw, SessionManager.get_session("a", "discord", "general"))
-        save.assert_called_once()
+        after({}, SessionManager.get_session("a", "discord", "general"))
+        save.assert_called_once_with("a", "- learned")
 
 
 class TestModelOverrideGraphCache(unittest.IsolatedAsyncioTestCase):
@@ -70,7 +75,7 @@ class TestModelOverrideGraphCache(unittest.IsolatedAsyncioTestCase):
         agent = Agent("a", {})
         builder = MagicMock()
         builder.return_value.build_graph = AsyncMock(side_effect=lambda ctx, cfg: f"graph:{ctx.model}")
-        with patch("core.runtime.graph_builder.GraphBuilder", builder):
+        with patch("core.runtime.agent.GraphBuilder", builder):
             plain = await agent._get_graph(SessionManager.get_session("a", "discord", "general"))
             floored = await agent._get_graph(SessionManager.get_session("a", "discord", "general", model="FLASH"))
             again = await agent._get_graph(SessionManager.get_session("a", "discord", "general"))

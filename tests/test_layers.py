@@ -44,7 +44,8 @@ LAYERS = (
     FOUNDATION,
     ("core.runtime.commands", "core.runtime.model", "core.runtime.history", "core.runtime.observability"),
     ("core.runtime.agent", "core.runtime.base_agent", "core.runtime.script_executor",
-     "core.runtime.agent_factory", "core.runtime.graph_builder", "core.runtime.streaming"),
+     "core.runtime.agent_factory", "core.runtime.graph_builder", "core.runtime.streaming",
+     "core.runtime.hooks"),
     ("core.runtime.delegation",),
     ("core.runtime.bootstrap",),
 )
@@ -69,11 +70,7 @@ HEAVY = (
 
 # "importer -> imported", or for R4 the package whose __init__.py imports.
 ALLOWED: Dict[str, Set[str]] = {
-    "R1": {
-        # Phase 3: the adapter passes the channel it resolved, and an output port renders.
-        "core.runtime.delegation -> core.channel.discord.loader",
-        "core.runtime.agent -> core.channel.discord.dispatcher",
-    },
+    "R1": set(),
     "R2": set(),
     "R3": {
         # Not yet scheduled: a config reload tells the Discord bots itself; it
@@ -93,23 +90,6 @@ ALLOWED: Dict[str, Set[str]] = {
         "core.tooling",
     },
     "R5": {
-        # Phase 3: Agent's side work moves into turn hooks.
-        "core.runtime.agent -> core.runtime.observability.turn_trace",
-        "core.runtime.agent -> core.runtime.graph_builder",
-        # Phase 3: delegation stops resolving Discord channels.
-        "core.runtime.delegation -> core.channel.discord.loader",
-        "core.runtime.delegation -> core.loaders.agents_loader",
-        "core.runtime.delegation -> core.runtime.foundation.context",
-        "core.runtime.delegation -> core.runtime.foundation.sessions",
-        # Phase 3: model construction moves out of GraphBuilder into model/chat.py.
-        "core.runtime.graph_builder -> core.loaders.graphs_loader",
-        "core.runtime.graph_builder -> core.runtime.model.retry",
-        "core.runtime.model.retry -> core.runtime.foundation.context",
-        "core.runtime.model.retry -> core.runtime.model.thinking",
-        "core.runtime.model.retry -> core.runtime.observability.turn_trace",
-        "core.runtime.model.thinking -> core.loaders.agents_loader",
-        "core.runtime.model.thinking -> core.runtime.foundation.context",
-        "core.runtime.model.thinking -> core.runtime.observability.turn_trace",
         # Not yet scheduled. Tests patch most of these at their source module, so
         # moving one to the top of its file means re-pointing those patches too.
         "core.runtime.history.channel_posts -> core.knowledge.memory.sqlite_checkpointer",
