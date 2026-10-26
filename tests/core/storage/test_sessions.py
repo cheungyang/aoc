@@ -58,6 +58,27 @@ class TestSessionStore(unittest.TestCase):
         self.assertEqual(history[1]["from"], "bot")
         self.assertEqual(history[1]["message"], "hi")
 
+    def test_recent_history_reads_the_last_rows_oldest_first(self):
+        for i in range(5):
+            self.store.append_message("session1", "user", f"m{i}")
+        recent = self.store.recent_history("session1", limit=3)
+        self.assertEqual([r["message"] for r in recent], ["m2", "m3", "m4"])
+        self.assertEqual(set(recent[0]), {"from", "message", "ts"})
+        self.assertEqual(self.store.recent_history("missing", limit=3), [])
+
+    def test_recent_history_leaves_out_rows_over_max_bytes(self):
+        """A tool's output logged whole can be many megabytes; where SQLite can,
+        it's skipped without being read, and either way it isn't returned."""
+        import core.storage.sessions as sessions
+
+        self.store.append_message("session1", "user", "question")
+        self.store.append_message("session1", "system", "Tool Output: " + "x" * 5000)
+        self.store.append_message("session1", "ai", "answer")
+        for unread in (True, False):
+            with self.subTest(octet_length=unread), patch.object(sessions, "_HAS_OCTET_LENGTH", unread):
+                recent = self.store.recent_history("session1", limit=10, max_bytes=1000)
+                self.assertEqual([r["message"] for r in recent], ["question", "answer"])
+
     def test_append_and_load_token_usage(self):
         session_id = "session1"
         self.store.append_token_usage(session_id, "gemini-pro", 100, 50, 20.0, execution_time=2.45)

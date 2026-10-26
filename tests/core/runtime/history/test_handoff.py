@@ -40,13 +40,14 @@ def at(hour, minute, days_ago=0):
 
 
 class _Store:
-    """SessionStore.load_history, from rows given up front."""
+    """SessionStore.recent_history, from rows given up front."""
 
     def __init__(self, rows):
         self.rows = rows
 
-    def load_history(self, session_id, limit=50):
-        return self.rows[-limit:] if limit else list(self.rows)
+    def recent_history(self, session_id, limit, max_bytes=None):
+        rows = [r for r in self.rows if max_bytes is None or len(r["message"].encode()) <= max_bytes]
+        return rows[-limit:]
 
 
 class _Checkpointer:

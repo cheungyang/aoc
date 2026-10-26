@@ -26,10 +26,11 @@ lists the files the agent's tools named during them. The capsule is capped at
 about CAPSULE_TOKENS tokens: lines are shortened first, then the summary goes,
 then the oldest exchanges. A session with nothing in it gives no capsule.
 
-The source session is only read: its transcript (core/storage/sessions.py),
-which keeps timestamps and tool calls, and its checkpoint, for the summary. The
-capsule reaches the callee once, as part of your message, in the callee's own
-session. Nothing about the hand-off is written where it came from.
+The source session is only read: the end of its transcript
+(core/storage/sessions.py, `recent_history`), which keeps timestamps and tool
+calls, and its checkpoint, for the summary. The capsule reaches the callee
+once, as part of your message, in the callee's own session. Nothing about the
+hand-off is written where it came from.
 """
 import ast
 import json
@@ -59,6 +60,10 @@ SUMMARY_CHARS = 1200
 MAX_TOUCHED = 8
 # Transcript rows read from the end: room for MAX_EXCHANGES exchanges with tool calls between.
 HISTORY_ROWS = 400
+# A transcript row longer than this is skipped unread: in practice, a tool's
+# output logged whole (one Home Assistant check ran to 150 MB). Outputs never go
+# into a capsule; a tool call this large only loses its `touched` line.
+ROW_BYTES = 64 * 1024
 YOU = "You"
 
 _POST = re.compile(r"^\[Posted to this channel by scheduled job '(?P<origin>[^']*)' at [^\]]*\]\s*")
@@ -125,7 +130,7 @@ def build_capsule(session: Any, *, agent_name: Optional[str] = None, store: Any 
     """
     name = agent_name or session.agent_id
     store = store or SessionStore()
-    rows = store.load_history(session.session_id, limit=HISTORY_ROWS)
+    rows = store.recent_history(session.session_id, limit=HISTORY_ROWS, max_bytes=ROW_BYTES)
     exchanges = _exchanges(rows, name)[-MAX_EXCHANGES:]
     summary = _summary(session, checkpointer)
     if not exchanges and not summary:

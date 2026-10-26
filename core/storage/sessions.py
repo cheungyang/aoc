@@ -34,6 +34,8 @@ KEEP_CHECKPOINTS = 10
 # Rows written before the column existed stay NULL: their surface is unknown, not "text".
 _ADDED_COLUMNS = (("execution_time", "REAL DEFAULT 0.0"), ("surface", "TEXT"))
 _INDEX = re.compile(r'CREATE INDEX IF NOT EXISTS "([^"]+)"')
+# octet_length() gives a value's size from the row header, without reading it (SQLite 3.43+).
+_HAS_OCTET_LENGTH = sqlite3.sqlite_version_info >= (3, 43, 0)
 
 
 def sanitize_table_name(session_id: str) -> str:
@@ -186,6 +188,31 @@ class SessionStore(Store):
             if limit and limit > 0:
                 return data[-limit:]
             return data
+
+    def recent_history(self, session_id: str, limit: int, max_bytes: Optional[int] = None) -> List[Dict[str, Any]]:
+        """The last `limit` transcript rows, oldest first, shaped as `load_history`'s.
+
+        Reads only those rows, where load_history reads every one. With
+        `max_bytes`, a row longer than that is left out: a tool's output logged
+        whole can run to many megabytes. On an SQLite with octet_length() (3.43+)
+        such a row is skipped without being read; an older one reads it and
+        drops it after.
+        """
+        table_name = sanitize_table_name(session_id)
+        skip_unread = max_bytes is not None and _HAS_OCTET_LENGTH
+        with self.connect() as conn:
+            if not table_exists(conn, table_name):
+                return []
+            rows = self.query(
+                f"SELECT from_role, message, created_at FROM {ident(table_name)} WHERE entry_type = 'message'"
+                f"{' AND octet_length(message) <= ?' if skip_unread else ''} ORDER BY id DESC LIMIT ?",
+                [max_bytes, limit] if skip_unread else [limit],
+                conn=conn,
+            )
+        data = [{"from": r["from_role"], "message": r["message"], "ts": int(r["created_at"])} for r in reversed(rows)]
+        if max_bytes is not None and not skip_unread:
+            data = [d for d in data if len((d["message"] or "").encode("utf-8")) <= max_bytes]
+        return data
 
     def load_token_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         table_name = sanitize_table_name(session_id)
