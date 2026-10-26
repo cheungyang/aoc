@@ -41,7 +41,6 @@ KNOWN_KEYS = frozenset({
     "stateless",
     "channels",
     "channel_hosts",
-    "concierge_prefixes",
     "discord_token_key",
     "memory_topics",
     "tools",

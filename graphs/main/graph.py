@@ -3,16 +3,19 @@
 Previously this was `create_react_agent` and nothing else, so every message in
 every channel cost at least one model call on the orchestrator -- including the
 ones whose answer was fixed by configuration. The graph now opens with a
-deterministic `route` step and only falls through to the ReAct agent when the
-routing question has more than one possible answer.
+deterministic `route` step. A channel's one agent gets the turn with no model
+call on the host (`direct_call`); a message in a channel no single agent answers
+gets a fixed line, with no model call at all (`fixed`); and the ReAct agent runs
+only for turns that are the executing agent's own (`concierge`).
 
 Two things to know before editing:
 
 1. This graph is the default for *every* agent (`GraphBuilder` falls back to
    "main" and no agent.json overrides it). The router is therefore inert unless
-   the executing agent both holds `agent_call` and hosts the channel -- see
-   `router.routing_enabled`. Any change here must keep the specialist agents on
-   the concierge path.
+   the turn arrived in a channel the executing agent hosts and doesn't answer
+   in itself; a delegation, a job or a scheduled run is never routed -- see
+   `routing.routing_enabled`. Any change here must keep the specialist agents
+   on the concierge path.
 2. The checkpointer belongs to this outer graph. The inner ReAct agent is
    compiled without one, or the two would write the same thread from two levels.
 """
@@ -23,8 +26,16 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
-from core.runtime.delegation import agent_header, prompt_to_text, stream_delegate
-from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, decide
+from core.config.settings import Config
+from core.runtime.delegation import agent_header, prompt_to_text, safe_dispatch_custom_event, stream_delegate
+from core.runtime.foundation import events
+from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, decide
+
+# What the `fixed` node answers: a message in a channel no single agent answers
+# (#general). Typed, it points at what #general is used for -- the agents' own
+# channels and the commands. Spoken, at how the voice room reaches an agent.
+UNADDRESSED_TEXT = "No agent picks up here. Post in the agent's own channel, or type `!help` for commands."
+UNADDRESSED_SPEECH = "Who's it for? Say 'switch to Daisy'."
 
 
 def _record_turn(session, user_prompt, reply_text: str):
@@ -46,6 +57,17 @@ def _record_turn(session, user_prompt, reply_text: str):
             store.append_message(session.session_id, "ai", reply_text)
     except Exception as e:
         print(f"[graphs.main] Warning: could not record routed turn: {e}", file=sys.stderr)
+
+
+def fixed_reply(surface: str) -> str:
+    """The fixed line, as `surface` needs it.
+
+    A voice turn gets only a <speech> block: the voice speaks it, and the
+    channel shows it too, since it is the whole reply (DiscordStreamBuffer.finalize).
+    """
+    if surface == "voice":
+        return f"<speech>{UNADDRESSED_SPEECH}</speech>"
+    return UNADDRESSED_TEXT
 
 
 def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, config=None, **kwargs):
@@ -70,25 +92,20 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             channel_name=(ctx.channel_name if ctx else ""),
             agent_config=agent_config,
             loader=AgentsLoader(),
+            source=(ctx.source if ctx else ""),
+            llm_fallback=Config().routing_llm_fallback,
         )
 
-        update: Dict[str, Any] = {
+        if decision.is_direct:
+            print(f"[graphs.main] Routing to '{decision.agent_id}' ({decision.reason})")
+        elif decision.target == FIXED:
+            print(f"[graphs.main] Fixed line ({decision.reason})")
+
+        return {
             "route": decision.target,
             "route_agent_id": decision.agent_id,
             "route_reason": decision.reason,
         }
-
-        # An escape prefix is consumed here rather than downstream, so the
-        # concierge is handed the request and not the routing syntax.
-        if decision.target == CONCIERGE and decision.prompt != latest and messages:
-            trimmed = list(messages)
-            trimmed[-1] = trimmed[-1].model_copy(update={"content": decision.prompt})
-            update["messages"] = trimmed
-
-        if decision.is_direct:
-            print(f"[graphs.main] Routing to '{decision.agent_id}' ({decision.reason})")
-
-        return update
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
         """Hands the turn to the one agent allowed to answer here."""
@@ -125,8 +142,29 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
         return {"messages": [AIMessage(content=attributed or result.text)]}
 
+    async def _fixed(state: Dict[str, Any]) -> Dict[str, Any]:
+        """Answers a message no single agent answers with a fixed line. No model runs."""
+        from core.runtime.foundation.context import try_context
+
+        ctx = try_context()
+        messages = state.get("messages") or []
+        user_prompt = messages[-1].content if messages else ""
+        reply = fixed_reply(ctx.get_surface() if ctx else "text")
+
+        # Streamed as well as returned: the channel would show the reply from
+        # the final state anyway, but the voice speaks only what streams.
+        await safe_dispatch_custom_event(
+            events.NODE_STREAM_TOKEN,
+            {"content": reply, "agent_id": (ctx.agent_id if ctx else owner_agent_id)},
+        )
+
+        if ctx is not None:
+            _record_turn(ctx, user_prompt, reply)
+
+        return {"messages": [AIMessage(content=reply)]}
+
     async def _concierge(state: MessagesState, config_: Optional[dict] = None) -> Dict[str, Any]:
-        """The existing ReAct behaviour, for turns with a real decision in them."""
+        """The ReAct behaviour, for turns that are this agent's own."""
         existing = state.get("messages") or []
         result = await concierge_agent.ainvoke({"messages": existing}, config_)
         produced = (result.get("messages") or [])[len(existing):]
@@ -140,15 +178,17 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
     workflow = StateGraph(RouterState)
     workflow.add_node("route", _decide)
     workflow.add_node(DIRECT_CALL, _direct_call)
+    workflow.add_node(FIXED, _fixed)
     workflow.add_node(CONCIERGE, _concierge)
 
     workflow.add_edge(START, "route")
     workflow.add_conditional_edges(
         "route",
         lambda state: state.get("route") or CONCIERGE,
-        {DIRECT_CALL: DIRECT_CALL, CONCIERGE: CONCIERGE},
+        {DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, CONCIERGE: CONCIERGE},
     )
     workflow.add_edge(DIRECT_CALL, END)
+    workflow.add_edge(FIXED, END)
     workflow.add_edge(CONCIERGE, END)
 
     return workflow.compile(checkpointer=checkpointer)

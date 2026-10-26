@@ -106,6 +106,18 @@ class StreamHandler:
                             "response": data.get("response"),
                             "text": data.get("text", "")
                         }
+                    elif event_name == events.NODE_STREAM_TOKEN:
+                        # A graph node's own text, with no model behind it
+                        # (graphs/main's fixed line). It is the owner's words,
+                        # so it neither suppresses nor is suppressed by anything.
+                        data = event.get("data", {})
+                        content_delta = data.get("content", "")
+                        if content_delta:
+                            yield {
+                                "type": events.TOKEN,
+                                "content": content_delta,
+                                "agent_id": data.get("agent_id"),
+                            }
                     elif event_name in (events.ROUTE_REACTION, events.LLM_RETRY_REACTION):
                         # Deliberately does not set `has_subagent_streamed`: this
                         # announces *that* a delegation happened, before any of the

@@ -140,7 +140,7 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
             ch_str = f"#{channel_name}" if channel_name else "default channel"
             payload = (
                 f"No active or paused subgraphs found in the current conversation context ({ch_str}).\n"
-                "Messages sent by the user will be processed normally by Concierge / main orchestrator."
+                "Messages sent by the user will be answered normally by this channel's agent."
             )
             return format_tool_response("graph_status", payload=payload, errors="None")
 

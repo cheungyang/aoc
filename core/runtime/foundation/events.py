@@ -8,6 +8,7 @@ names, so a renamed event fails at import rather than silently in production.
 Stream events, and their fields besides "type":
   TOKEN            content. Relayed from a delegated agent, also agent_id,
                    is_header (the "🌼 Daisy: " attribution) and is_error (its failure).
+                   Written by a graph node itself, also agent_id.
   TOOL_START       tool_name, tool_args, run_id
   TOOL_END         tool_name, output, run_id
   REACTION         agent_id, emoji: an acknowledgement for the user's message
@@ -21,6 +22,8 @@ Custom events are dispatched inside the graph with `adispatch_custom_event`;
 core/runtime/streaming.py turns them into the stream events above:
   SUBAGENT_STREAM_TOKEN   a delegated agent's token -> TOKEN
   SUBAGENT_STREAM_FINAL   a delegated agent's reply -> SUBAGENT_FINAL
+  NODE_STREAM_TOKEN       text a graph node writes itself, with no model behind it
+                          (graphs/main's fixed line) -> TOKEN
   ROUTE_REACTION          the turn was handed to another agent (delegation) -> REACTION
   LLM_RETRY_REACTION      a Gemini 503 was retried (model/retry) -> REACTION
 """
@@ -35,6 +38,11 @@ FINAL_RESPONSE = "final_response"
 
 SUBAGENT_STREAM_TOKEN = "subagent_stream_token"
 SUBAGENT_STREAM_FINAL = "subagent_stream_final"
+
+# Emitted by a graph node that answers without a model (graphs/main's `fixed`
+# node). Its reply reaches the channel from the final state either way, but
+# the voice speaks only what streams, so a node's own text has to stream too.
+NODE_STREAM_TOKEN = "node_stream_token"
 
 # Emitted by `core.runtime.delegation` when a turn is handed to another agent.
 #

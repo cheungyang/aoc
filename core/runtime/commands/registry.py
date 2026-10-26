@@ -16,7 +16,10 @@ from core.runtime.commands.typed.enroll import EnrollCommand
 from core.runtime.commands.typed.gate import GateCommand
 from core.runtime.commands.typed.help import HelpCommand
 from core.runtime.commands.typed.inbox import InboxCommand
+from core.runtime.commands.typed.job import JobCommand
+from core.runtime.commands.typed.jobs import JobsCommand
 from core.runtime.commands.typed.join import JoinCommand
+from core.runtime.commands.typed.kill import KillCommand
 from core.runtime.commands.typed.leave import LeaveCommand
 from core.runtime.commands.typed.new import NewCommand
 from core.runtime.commands.typed.new_all import NewAllCommand
@@ -70,7 +73,7 @@ class CommandRegistry:
 
 # `!name`, typed to the Discord bot (core/channel/discord/runner.py).
 TYPED = CommandRegistry([
-    NewCommand(), NewAllCommand(), CompactCommand(), RestartCommand(),
+    NewCommand(), NewAllCommand(), CompactCommand(), RestartCommand(), JobsCommand(), JobCommand(), KillCommand(),
     JoinCommand(), LeaveCommand(), InboxCommand(), EnrollCommand(), VoiceprintCommand(), GateCommand(),
 ])
 

@@ -241,5 +241,30 @@ class TestOnlyTheOwningAgentsTokensAreStreamed(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(tokens, ["orchestrator token"])
 
 
+class TestANodesOwnText(unittest.IsolatedAsyncioTestCase):
+    """graphs/main's fixed line has no model behind it. The voice speaks only
+    what streams, so the node dispatches its text, and it must arrive as the
+    owner's token -- in the owner's voice, and suppressing nothing."""
+
+    async def test_it_streams_as_a_token_from_its_agent(self):
+        from core.runtime.foundation.events import NODE_STREAM_TOKEN
+
+        graph = MagicMock()
+
+        async def astream_events(*args, **kwargs):
+            yield {"event": "on_custom_event", "name": NODE_STREAM_TOKEN,
+                   "data": {"content": "<speech>Who's it for?</speech>", "agent_id": "main"}}
+            yield {"event": "on_custom_event", "name": NODE_STREAM_TOKEN, "data": {"content": ""}}
+            yield {"event": "on_chat_model_stream", "data": {"chunk": MagicMock(content="later")}}
+
+        graph.astream_events = astream_events
+        streamed = [ev async for ev in StreamHandler.stream_graph_events(graph, {}, {})]
+
+        self.assertEqual(streamed, [
+            {"type": "token", "content": "<speech>Who's it for?</speech>", "agent_id": "main"},
+            {"type": "token", "content": "later"},
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

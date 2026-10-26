@@ -1,0 +1,17 @@
+{
+  "agent_id": "content-creator",
+  "channels": [
+    "content-creation"
+  ],
+  "name": "Coco",
+  "emoji": "🎬",
+  "description": "Content producer: starts content_creation runs for your projects and carries your replies through their two approval gates.",
+  "model": "FLASH",
+  "tools": {
+    "graph_call": {},
+    "graph_status": {}
+  },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Autonoe"
+  }
+}

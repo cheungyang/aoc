@@ -39,7 +39,7 @@ A filesystem grant list says each thing once, as the bundle tests require, in ag
 
 ### Channels and voices
 
-The concierge hosts every channel and hands each to the one agent that lists it; a channel several agents list, or none, it answers itself. A worker listing `*` never counts:
+The concierge hosts every channel and hands each to the one agent that lists it; a channel several agents list, or none, gets the concierge's fixed line instead. A worker listing `*` never counts:
 
 ```python
 >>> from agents.agent_designer.lib.lint import channel_routes

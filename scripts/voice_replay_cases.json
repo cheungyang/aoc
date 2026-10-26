@@ -230,13 +230,11 @@
     "room": "general",
     "utterance": "Hey, what can you help me with?",
     "expect": {
-      "reply_excludes": [
-        "error"
-      ],
+      "agent": "main",
       "tools_none": [
         "home_assistant"
       ],
-      "max_model_calls": 3
+      "max_model_calls": 0
     }
   }
 ]

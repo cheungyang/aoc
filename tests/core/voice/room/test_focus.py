@@ -90,6 +90,7 @@ class TestLiveDirectory(unittest.TestCase):
             "rio": "real-estate",
             "marvin": "market-scout",
             "receipt processor": "receipts",
+            "coco": "content-creation",       # "switch to Coco"
         }
         for alias, channel in expected.items():
             self.assertEqual(self.aliases.get(alias), channel, alias)
@@ -108,20 +109,20 @@ class TestLiveDirectory(unittest.TestCase):
         self.assertEqual(d.greeting(d.lobby), "Concierge here.")
         self.assertEqual(d.greeting(t["day-planning"]), "Daisy here.")
         self.assertEqual(d.greeting(t["agent-management"]), "Aki here.")
-        self.assertEqual(d.greeting(t["aoc-debug"]), "You're in aoc debug.")
+        self.assertEqual(d.greeting(t["content-creation"]), "Coco here.")
         self.assertEqual(d.role(t["fitness-coach"]), "fitness coach Frankie")
         self.assertEqual(d.role(t["receipts"]), "Receipt Processor")  # its id says the same
-        self.assertEqual(d.role(t["aoc-debug"]), "aoc debug")
+        self.assertEqual(d.role(t["content-creation"]), "content creator Coco")
         self.assertEqual(d.role(d.lobby), "the concierge")
         self.assertEqual(d.whereabouts(t["day-planning"]), "You're in day planning, with Daisy.")
         self.assertEqual(d.whereabouts(d.lobby), "You're in general, with the concierge.")
         self.assertEqual(d.already(t["day-planning"]), "You're already with Daisy.")
-        self.assertEqual(d.already(t["aoc-debug"]), "You're already in aoc debug.")
+        self.assertEqual(d.already(t["content-creation"]), "You're already with Coco.")
         self.assertEqual(d.already(d.lobby), "You're already with the concierge.")
         # The words "Do you mean …?" and the digest tell you to say.
         self.assertEqual(d.words_to_switch(t["fitness-coach"]), "switch to Frankie")
         self.assertEqual(d.words_to_switch(t["day-planning"]), "switch to Daisy")
-        self.assertEqual(d.words_to_switch(t["aoc-debug"]), "switch to aoc debug")
+        self.assertEqual(d.words_to_switch(t["content-creation"]), "switch to Coco")
         self.assertEqual(d.words_to_switch(d.lobby), "switch to concierge")
 
     def test_the_words_to_switch_always_lead_back_to_the_same_focus(self):
@@ -139,6 +140,16 @@ class TestDirectoryRules(unittest.TestCase):
         self.assertEqual({k: t.agent_id for k, t in directory.targets.items()},
                          {"general": "main", "day-planning": "day-planner", "aoc-debug": "main"})
         self.assertEqual(directory.homes, {"day-planner": "day-planning"})  # Helper has no channel of its own
+
+    def test_a_channel_the_concierge_answers_is_spoken_of_by_its_name(self):
+        """No live channel but the lobby is like this since #aoc-debug left; the
+        phrasing still has to hold for one that comes back."""
+        directory = FocusDirectory.build(_Loader(SMALL), voice_host="main")
+        focus = directory.targets["aoc-debug"]
+        self.assertEqual(directory.greeting(focus), "You're in aoc debug.")
+        self.assertEqual(directory.role(focus), "aoc debug")
+        self.assertEqual(directory.already(focus), "You're already in aoc debug.")
+        self.assertEqual(directory.words_to_switch(focus), "switch to aoc debug")
 
     def test_the_lobby_channel_can_be_configured(self):
         directory = FocusDirectory.build(_Loader(SMALL), voice_host="main", lobby_channel="#AOC-Debug")

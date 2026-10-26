@@ -2,9 +2,9 @@
 
 Includes a snapshot of the live routing table. That test is the tripwire for the
 main hazard of deriving routing from configuration: adding an agent to a channel
-flips that channel from deterministic to LLM with no code change and no other
-signal. If it fails, the question is whether the config change was intended --
-not whether the test should be updated.
+flips that channel from its agent to the fixed line with no code change and no
+other signal. If it fails, the question is whether the config change was
+intended -- not whether the test should be updated.
 """
 import json
 import os
@@ -15,23 +15,18 @@ from unittest.mock import MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
 from core.runtime.foundation.routing import (
+    CHANNEL_MESSAGE,
     CONCIERGE,
     DIRECT_CALL,
-    PREFIX_CONFIG_KEY,
-    concierge_prefixes,
+    FIXED,
+    answering_agent,
     decide,
-    is_bracketed,
-    leading_text,
-    match_concierge_prefix,
     routing_enabled,
 )
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-PREFIXES = ["[main]", "[concierge]", "list all jobs", "jobs", "kill"]
-ORCHESTRATOR = {
-    "tools": {"agent_call": {}, "job_list": {}},
-    PREFIX_CONFIG_KEY: PREFIXES,
-}
+# The Concierge's shape: reachable everywhere, owning no channel, holding no tools.
+HOST = {"channels": ["*"], "tools": {}}
 
 
 def _loader(hosts=(), eligible=()):
@@ -55,189 +50,123 @@ def _load_agent_configs():
     return configs
 
 
-def _match(text, prefixes=None):
-    return match_concierge_prefix(text, PREFIXES if prefixes is None else prefixes)
-
-
-class TestPromptInspection(unittest.TestCase):
-
-    def test_leading_text_of_multimodal(self):
-        payload = [
-            {"type": "text", "text": "what is this?"},
-            {"type": "image_url", "image_url": {"url": "data:..."}},
-        ]
-        self.assertEqual(leading_text(payload), "what is this?")
-
-    def test_bracketed_prefix_is_stripped(self):
-        for raw in ("[main] do the thing", "[concierge] do the thing", "  [MAIN]   do the thing"):
-            with self.subTest(raw=raw):
-                matched = _match(raw)
-                self.assertIsNotNone(matched)
-                self.assertEqual(matched[1], "do the thing")
-
-    def test_bare_prefix_is_kept(self):
-        """The concierge needs the verb: "kill job abc123" minus "kill" is not
-        an instruction it can act on."""
-        matched = _match("kill job abc123")
-        self.assertIsNotNone(matched)
-        self.assertEqual(matched[1], "kill job abc123")
-
-    def test_no_prefix_returns_none(self):
-        self.assertIsNone(_match("main, do the thing"))
-        self.assertIsNone(_match("do the thing"))
-        self.assertIsNone(_match(""))
-
-    def test_bracketed_prefix_preserves_attachments(self):
-        payload = [
-            {"type": "text", "text": "[main] look at this"},
-            {"type": "image_url", "image_url": {"url": "data:..."}},
-        ]
-        matched = _match(payload)
-        self.assertIsNotNone(matched)
-        self.assertEqual(matched[1][0], {"type": "text", "text": "look at this"})
-        self.assertEqual(matched[1][1], payload[1])
-
-    def test_bare_prefixes_match_only_at_the_start(self):
-        for text in ("jobs", "kill job abc123", "list all jobs"):
-            with self.subTest(text=text):
-                self.assertIsNotNone(_match(text))
-
-    def test_the_matched_prefix_is_reported(self):
-        """`decide` puts this in its reason, so it has to be the entry that
-        actually fired rather than merely 'something matched'."""
-        self.assertEqual(_match("kill job abc123")[0], "kill")
-        self.assertEqual(_match("[main] hello")[0], "[main]")
-
-    def test_longer_bare_prefixes_win_when_ordered_first(self):
-        """Matching is first-wins, so config order is what distinguishes
-        "list all jobs" from the broader "jobs"."""
-        self.assertEqual(_match("list all jobs")[0], "list all jobs")
-
-    def test_cancel_is_deliberately_not_a_prefix(self):
-        """`cancel` is a synonym for `job_kill`, but as a message opener it is
-        far more often domain content -- "cancel the 7pm table", "cancel my
-        meal plan" -- and stealing those from the specialist is worse than
-        making the rare job-kill go through `[main]`."""
-        for text in ("cancel the sync", "cancel the 7pm reservation"):
-            with self.subTest(text=text):
-                self.assertIsNone(_match(text))
-
-    def test_bare_prefixes_do_not_steal_ordinary_messages(self):
-        """The anchoring is the point: these are the sentences a loose keyword
-        list would misroute away from the specialist."""
-        for text in (
-            "what jobs did I log this week?",
-            "the cancel policy on this hotel is strict",
-            "should I kill this project?",
-            "killing time before the flight",
-        ):
-            with self.subTest(text=text):
-                self.assertIsNone(_match(text))
-
-    def test_bracketed_form_is_what_selects_the_behaviour(self):
-        self.assertTrue(is_bracketed("[main]"))
-        self.assertFalse(is_bracketed("kill"))
-        self.assertFalse(is_bracketed("[unclosed"))
-
-
-class TestPrefixConfig(unittest.TestCase):
-    """Reading the list out of `agent.json`."""
-
-    def test_missing_key_yields_no_prefixes(self):
-        self.assertEqual(concierge_prefixes({}), [])
-        self.assertEqual(concierge_prefixes({PREFIX_CONFIG_KEY: None}), [])
-
-    def test_blanks_and_non_strings_are_ignored(self):
-        config = {PREFIX_CONFIG_KEY: ["[main]", "  ", "", None, 7, " kill "]}
-        self.assertEqual(concierge_prefixes(config), ["[main]", "kill"])
-
-    def test_a_bare_string_is_accepted_as_one_entry(self):
-        self.assertEqual(concierge_prefixes({PREFIX_CONFIG_KEY: "[main]"}), ["[main]"])
-
-    def test_without_config_nothing_is_claimed_for_the_concierge(self):
-        """An orchestrator that declares no prefixes routes everything. The
-        escape hatch is a config feature, not a built-in."""
-        self.assertIsNone(_match("[main] do the thing", prefixes=[]))
-        self.assertIsNone(_match("kill job abc123", prefixes=[]))
-
-
 class TestRoutingEnabled(unittest.TestCase):
 
-    def test_requires_agent_call_and_hosting(self):
-        loader = _loader(hosts=("receipts",))
-        self.assertTrue(routing_enabled("main", "receipts", ORCHESTRATOR, loader))
+    def test_hosting_the_channel_is_enough(self):
+        """No tool is required: the Concierge holds none."""
+        self.assertTrue(routing_enabled("main", "receipts", HOST, _loader(hosts=("receipts",))))
 
-    def test_specialist_without_agent_call_never_routes(self):
+    def test_a_turn_addressed_to_the_agent_is_never_routed(self):
+        """A delegation, a job, a scheduled run or a graph's worker is the agent's
+        own turn. The dream standup reaches the Concierge by delegation, in
+        #general: routed, it would get the fixed line instead of the model."""
+        loader = _loader(hosts=("general",))
+        for source in ("tool", "job", "scheduled", "graph"):
+            with self.subTest(source=source):
+                self.assertFalse(routing_enabled("main", "general", HOST, loader, source=source))
+
+    def test_a_message_in_the_channel_is_routed_typed_spoken_or_replayed(self):
+        """Voice turns run on the channel's `discord` session, and the voice
+        replay (scripts/voice_dryrun.py) takes their path under its own source."""
+        loader = _loader(hosts=("general",))
+        for source in (CHANNEL_MESSAGE, "voice_replay"):
+            with self.subTest(source=source):
+                self.assertTrue(routing_enabled("main", "general", HOST, loader, source=source))
+
+    def test_an_agent_that_answers_in_the_channel_does_not_route_it(self):
+        """An agent hosting a channel it lists itself has nobody to hand it to.
+        Routing it would give the agent's own channel the fixed line."""
+        loader = _loader(hosts=("software-dev",))
+        config = {"channels": ["general", "software-dev"], "tools": {"graph_call": {}}}
+        self.assertFalse(routing_enabled("software-planner", "software-dev", config, loader))
+
+    def test_specialist_that_hosts_nothing_never_routes(self):
         """Every agent shares this graph, so a specialist must fall straight
         through to its own ReAct behaviour."""
-        loader = _loader(hosts=("agent-management",))
-        self.assertFalse(
-            routing_enabled("agent-designer", "agent-management", {"tools": {"filesystem": {}}}, loader)
-        )
+        config = {"channels": ["receipts", "general"], "tools": {"filesystem": {}}}
+        self.assertFalse(routing_enabled("receipt-processor", "receipts", config, _loader(hosts=())))
 
     def test_non_hosted_channel_does_not_route(self):
-        loader = _loader(hosts=("receipts",))
-        self.assertFalse(routing_enabled("main", "some-other-channel", ORCHESTRATOR, loader))
+        self.assertFalse(routing_enabled("main", "some-other-channel", HOST, _loader(hosts=("receipts",))))
 
     def test_missing_channel_does_not_route(self):
-        self.assertFalse(routing_enabled("main", "", ORCHESTRATOR, _loader()))
+        self.assertFalse(routing_enabled("main", "", HOST, _loader()))
 
 
 class TestDecide(unittest.TestCase):
 
     def test_sole_eligible_agent_is_called_directly(self):
         loader = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        decision = decide("scan this", "main", "receipts", ORCHESTRATOR, loader)
+        decision = decide("scan this", "main", "receipts", HOST, loader)
 
         self.assertEqual(decision.target, DIRECT_CALL)
         self.assertEqual(decision.agent_id, "receipt-processor")
         self.assertTrue(decision.is_direct)
 
-    def test_two_eligible_agents_fall_back_to_the_model(self):
-        loader = _loader(hosts=("weekend-planning",), eligible=["day-planner", "excursion-planner"])
-        decision = decide("plan my weekend", "main", "weekend-planning", ORCHESTRATOR, loader)
+    def test_a_shared_channel_gets_the_fixed_line(self):
+        loader = _loader(hosts=("general",), eligible=["day-planner", "meal-planner"])
+        decision = decide("what's for dinner?", "main", "general", HOST, loader)
 
-        self.assertEqual(decision.target, CONCIERGE)
+        self.assertEqual(decision.target, FIXED)
         self.assertIsNone(decision.agent_id)
+        self.assertEqual(decision.reason, "2 eligible agents in #general")
 
-    def test_no_eligible_agent_falls_back_to_the_model(self):
+    def test_a_channel_nobody_lists_gets_the_fixed_line(self):
         loader = _loader(hosts=("aoc-debug",), eligible=[])
-        decision = decide("hello", "main", "aoc-debug", ORCHESTRATOR, loader)
+        self.assertEqual(decide("hello", "main", "aoc-debug", HOST, loader).target, FIXED)
+
+    def test_the_llm_fallback_brings_the_model_back_where_no_single_agent_answers(self):
+        """The rollback switch changes shared channels only: a channel's one
+        agent is still reached without a model."""
+        shared = _loader(hosts=("general",), eligible=["day-planner", "meal-planner"])
+        decision = decide("plan my week", "main", "general", HOST, shared, llm_fallback=True)
         self.assertEqual(decision.target, CONCIERGE)
+        self.assertIn("ROUTING_LLM_FALLBACK", decision.reason)
 
-    def test_bracketed_prefix_wins_over_a_sole_agent(self):
+        sole = _loader(hosts=("receipts",), eligible=["receipt-processor"])
+        self.assertEqual(decide("scan", "main", "receipts", HOST, sole, llm_fallback=True).target, DIRECT_CALL)
+
+    def test_what_used_to_be_a_concierge_prefix_is_just_a_message(self):
+        """`[main]`, `jobs` and `kill` once claimed a message for the concierge.
+        They retired with its tools -- job verbs are typed commands now -- so
+        these words go to the channel's agent like any others, unchanged."""
         loader = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        decision = decide("[main] what did we decide?", "main", "receipts", ORCHESTRATOR, loader)
+        for text in ("[main] what did we decide?", "jobs", "kill job abc123", "list all jobs"):
+            with self.subTest(text=text):
+                decision = decide(text, "main", "receipts", HOST, loader)
+                self.assertEqual(decision.target, DIRECT_CALL)
+                self.assertEqual(decision.prompt, text)
+
+    def test_a_delegated_turn_reaches_the_agent_it_addresses(self):
+        loader = _loader(hosts=("general",), eligible=["day-planner", "meal-planner"])
+        decision = decide("<dream prompt>", "main", "general", HOST, loader, source="tool")
 
         self.assertEqual(decision.target, CONCIERGE)
-        self.assertEqual(decision.prompt, "what did we decide?")
-        self.assertEqual(decision.reason, "concierge prefix '[main]'")
-
-    def test_bare_prefix_wins_over_a_sole_agent(self):
-        loader = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        decision = decide("jobs", "main", "receipts", ORCHESTRATOR, loader)
-        self.assertEqual(decision.target, CONCIERGE)
-        self.assertEqual(decision.prompt, "jobs")
-        self.assertEqual(decision.reason, "concierge prefix 'jobs'")
-
-    def test_prefixes_come_from_config_not_code(self):
-        """The same message routes differently under a different config, which
-        is the whole point of moving the list into `agent.json`."""
-        loader = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        config = {"tools": {"agent_call": {}}, PREFIX_CONFIG_KEY: ["[boss]"]}
-
-        self.assertEqual(
-            decide("[boss] hello", "main", "receipts", config, loader).target, CONCIERGE
-        )
-        # `[main]` is not declared here, so it is just text.
-        self.assertEqual(
-            decide("[main] hello", "main", "receipts", config, loader).target, DIRECT_CALL
-        )
+        loader.eligible_agents_for_channel.assert_not_called()
 
     def test_the_caller_excludes_itself(self):
         loader = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        decide("scan", "main", "receipts", ORCHESTRATOR, loader)
+        decide("scan", "main", "receipts", HOST, loader)
         loader.eligible_agents_for_channel.assert_called_once_with("receipts", exclude_agent_id="main")
+
+
+class TestAnsweringAgent(unittest.TestCase):
+    """The voice focus and the channel inbox ask who answers a channel."""
+
+    def _loader(self):
+        loader = _loader(hosts=("general", "receipts"))
+        loader.get_agent_config.return_value = HOST
+        loader.eligible_agents_for_channel.side_effect = lambda channel, exclude_agent_id=None: {
+            "general": ["day-planner", "meal-planner"],
+            "receipts": ["receipt-processor"],
+        }[channel]
+        return loader
+
+    def test_a_channel_with_one_agent_is_answered_by_it(self):
+        self.assertEqual(answering_agent("main", "receipts", self._loader()), "receipt-processor")
+
+    def test_a_shared_channel_is_answered_by_the_host(self):
+        self.assertEqual(answering_agent("main", "general", self._loader()), "main")
 
 
 class TestLiveRoutingTable(unittest.TestCase):
@@ -245,11 +174,10 @@ class TestLiveRoutingTable(unittest.TestCase):
 
     EXPECTED = {
         "agent-management": "agent-designer",  # Aki: an ordinary specialist, no bot of his own
-        "aoc-debug": None,
-        "content-creation": None,
+        "content-creation": "content-creator",  # Coco: starts content runs, as Elephant starts coding
         "day-planning": "day-planner",
         "fitness-coach": "fitness-coach",
-        "general": None,
+        "general": None,  # nearly every agent lists it: the fixed line
         "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
         "market-scout": "market-scout",
@@ -269,102 +197,6 @@ class TestLiveRoutingTable(unittest.TestCase):
     def setUpClass(cls):
         cls.configs = _load_agent_configs()
 
-    def _sole_eligible(self, channel):
-        eligible = []
-        for agent_id, config in self.configs.items():
-            if agent_id == "main":
-                continue
-            channels = [str(c).lower() for c in (config.get("channels") or [])]
-            if "*" in channels:
-                continue
-            if channel.lower() in channels:
-                eligible.append(agent_id)
-        return eligible[0] if len(eligible) == 1 else None
-
-    def test_hosted_channels_match_the_expected_table(self):
-        hosts = self.configs["main"]["channel_hosts"]
-        actual = {channel: self._sole_eligible(channel) for channel in hosts}
-        self.assertEqual(
-            actual,
-            self.EXPECTED,
-            "The routing table changed. A channel gaining or losing an agent silently "
-            "switches it between deterministic routing and the LLM concierge -- confirm "
-            "that was intended before updating EXPECTED.",
-        )
-
-    def test_goal_planning_is_not_hosted(self):
-        """It is not a real Discord channel; hosting it only widened main's surface."""
-        self.assertNotIn("goal-planning", self.configs["main"]["channel_hosts"])
-
-    def test_wildcard_workers_never_count_as_eligible(self):
-        """`graph-worker` is reachable everywhere. Counting it would make every
-        channel look crowded and disable routing across the board."""
-        for worker in ("graph-worker", "graph-worker-low"):
-            self.assertEqual(self.configs[worker]["channels"], ["*"])
-        self.assertEqual(self._sole_eligible("receipts"), "receipt-processor")
-
-    def test_most_hosted_channels_are_deterministic(self):
-        hosts = self.configs["main"]["channel_hosts"]
-        deterministic = [c for c in hosts if self._sole_eligible(c)]
-        self.assertGreaterEqual(len(deterministic), 11)
-
-    def test_main_declares_its_concierge_prefixes(self):
-        """Now that the list lives in config, deleting the key would remove the
-        only way to reach the concierge in the 11 deterministic channels -- and
-        would do it silently, since routing would simply carry on working."""
-        declared = concierge_prefixes(self.configs["main"])
-        self.assertIn("[main]", declared)
-        self.assertIn("[concierge]", declared)
-
-    def test_bare_prefixes_correspond_to_tools_main_actually_holds(self):
-        """A bare verb earns its place by naming something main can do. `kill`
-        without `job_kill` would route the message to an agent that then has to
-        explain it cannot help."""
-        main = self.configs["main"]
-        bare = [p for p in concierge_prefixes(main) if not is_bracketed(p)]
-        self.assertTrue(bare, "precondition: main declares at least one bare verb")
-        self.assertTrue(
-            any(t.startswith("job_") for t in main["tools"]),
-            f"main declares {bare} but holds no job tools to service them",
-        )
-
-    def test_longer_bare_prefixes_are_declared_before_their_substrings(self):
-        """Matching is first-wins, so "jobs" listed above "list all jobs" would
-        make the longer entry unreachable and misreport the rule in the log."""
-        declared = concierge_prefixes(self.configs["main"])
-        for i, prefix in enumerate(declared):
-            for longer in declared[i + 1:]:
-                self.assertFalse(
-                    longer.startswith(prefix + " "),
-                    f"'{longer}' can never match: '{prefix}' precedes it",
-                )
-
-    def test_only_the_orchestrator_declares_prefixes(self):
-        """`graphs/main` is every agent's default graph. A specialist declaring
-        prefixes would suggest it routes, which `routing_enabled` denies."""
-        for agent_id, config in self.configs.items():
-            if agent_id == "main":
-                continue
-            with self.subTest(agent=agent_id):
-                self.assertEqual(concierge_prefixes(config), [])
-
-
-class TestGraphToolsDoNotLeak(unittest.TestCase):
-    """`graph_call` must stay invisible wherever routing is deterministic.
-
-    Main keeps `graph_call`/`graph_status` only for `content_creation`, whose
-    channel has no eligible agent and so still reaches the concierge. Those
-    grants are held by main's *LLM*; a deterministic turn never constructs it,
-    so the tools are never offered. This pins that by construction rather than
-    by inspection -- the failure it guards against is a future channel losing
-    its sole specialist and quietly handing an unrelated conversation a tool
-    that can start a multi-hour graph run.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        cls.configs = _load_agent_configs()
-
     def _eligible(self, channel):
         found = []
         for agent_id, config in self.configs.items():
@@ -377,36 +209,80 @@ class TestGraphToolsDoNotLeak(unittest.TestCase):
                 found.append(agent_id)
         return found
 
+    def _sole_eligible(self, channel):
+        eligible = self._eligible(channel)
+        return eligible[0] if len(eligible) == 1 else None
+
     def _decision_for(self, channel):
         main = self.configs["main"]
         loader = MagicMock()
-        loader.hosts_channel.side_effect = (
-            lambda agent_id, ch: ch in main["channel_hosts"]
-        )
+        loader.hosts_channel.side_effect = lambda agent_id, ch: ch in main["channel_hosts"]
         loader.eligible_agents_for_channel.return_value = self._eligible(channel)
         return decide("plan the week", "main", channel, main, loader)
 
-    def test_deterministic_channels_never_reach_the_concierge(self):
-        main = self.configs["main"]
-        self.assertIn("graph_call", main["tools"], "precondition: main still holds graph_call")
+    def test_hosted_channels_match_the_expected_table(self):
+        hosts = self.configs["main"]["channel_hosts"]
+        actual = {channel: self._sole_eligible(channel) for channel in hosts}
+        self.assertEqual(
+            actual,
+            self.EXPECTED,
+            "The routing table changed. A channel gaining or losing an agent silently "
+            "switches it between its agent and the fixed line -- confirm that was "
+            "intended before updating EXPECTED.",
+        )
 
-        for channel in main["channel_hosts"]:
-            if len(self._eligible(channel)) != 1:
+    def test_general_is_the_only_hosted_channel_without_one_agent(self):
+        hosts = self.configs["main"]["channel_hosts"]
+        self.assertEqual([c for c in hosts if self._sole_eligible(c) is None], ["general"])
+
+    def test_general_gives_the_fixed_line(self):
+        self.assertEqual(self._decision_for("general").target, FIXED)
+
+    def test_every_other_hosted_channel_goes_straight_to_its_agent(self):
+        for channel in self.configs["main"]["channel_hosts"]:
+            if channel == "general":
                 continue
             with self.subTest(channel=channel):
                 decision = self._decision_for(channel)
-                self.assertEqual(
-                    decision.target,
-                    DIRECT_CALL,
-                    f"#{channel} would build main's LLM, exposing graph_call",
-                )
+                self.assertEqual(decision.target, DIRECT_CALL)
+                self.assertEqual(decision.agent_id, self.EXPECTED[channel])
 
-    def test_concierge_channels_are_the_only_holders_of_graph_tools(self):
-        main = self.configs["main"]
-        concierge_channels = [
-            c for c in main["channel_hosts"] if self._decision_for(c).target == CONCIERGE
-        ]
-        self.assertEqual(sorted(concierge_channels), ["aoc-debug", "content-creation", "general"])
+    def test_aoc_debug_is_not_hosted(self):
+        """Unused since dev mode, and hosting it gave the concierge a channel with no agent."""
+        self.assertNotIn("aoc-debug", self.configs["main"]["channel_hosts"])
+
+    def test_goal_planning_is_not_hosted(self):
+        """It is not a real Discord channel; hosting it only widened main's surface."""
+        self.assertNotIn("goal-planning", self.configs["main"]["channel_hosts"])
+
+    def test_wildcard_workers_never_count_as_eligible(self):
+        """`graph-worker` is reachable everywhere. Counting it would make every
+        channel look shared and give each the fixed line."""
+        for worker in ("graph-worker", "graph-worker-low"):
+            self.assertEqual(self.configs[worker]["channels"], ["*"])
+        self.assertEqual(self._sole_eligible("receipts"), "receipt-processor")
+
+    def test_the_concierge_holds_no_tools(self):
+        """Its model runs only under ROUTING_LLM_FALLBACK, in #general. When it
+        does, it must not be able to start a multi-hour graph or delegate."""
+        self.assertEqual(self.configs["main"].get("tools"), {})
+
+    def test_the_concierge_lists_no_channel_of_its_own(self):
+        """`["*"]` is reachability, not ownership. Listing a channel it hosts
+        would make the concierge answer it itself (`routing_enabled`)."""
+        self.assertEqual(self.configs["main"]["channels"], ["*"])
+
+    def test_no_agent_declares_concierge_prefixes(self):
+        """Retired with the concierge's tools; the schema now rejects the key."""
+        for agent_id, config in self.configs.items():
+            with self.subTest(agent=agent_id):
+                self.assertNotIn("concierge_prefixes", config)
+
+    def test_coco_owns_the_content_graph(self):
+        coco = self.configs["content-creator"]
+        self.assertEqual(coco["channels"], ["content-creation"])
+        self.assertIn("graph_call", coco["tools"])
+        self.assertIn("graph_status", coco["tools"])
 
     def test_the_coding_graph_owner_holds_both_graph_tools(self):
         """Split ownership -- one agent starting a run, another reporting on it --

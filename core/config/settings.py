@@ -140,6 +140,16 @@ class Config:
     control_thread_id = Setting("CONTROL_THREAD_ID", "", strip=True)
 
     # -------------------------------------------------------------------------
+    # Routing
+    # -------------------------------------------------------------------------
+    # What a message gets in a channel no single agent answers (#general).
+    # Off: a fixed line from the host, with no model call
+    # (core/runtime/foundation/routing.py). On: the host's model answers it, as
+    # before routing became deterministic-only. A rollback switch;
+    # `ROUTING_LLM_FALLBACK`.
+    routing_llm_fallback = Setting("ROUTING_LLM_FALLBACK", False, bool)
+
+    # -------------------------------------------------------------------------
     # LangSmith / Observability settings
     # -------------------------------------------------------------------------
     langsmith_tracing = Setting("LANGSMITH_TRACING", False, bool, fallback_env="LANGCHAIN_TRACING_V2")

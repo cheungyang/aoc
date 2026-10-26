@@ -32,7 +32,7 @@ Call `load_skill("update_permissions")` for the bundle expansions, deny examples
 This skill safely modifies `agent.json` or `skill.json` to manage `tools` and `skills` permissions. It enforces a strict programmatic permission framework to prevent routing failures or execution errors.
 
 ### agent.json Top-Level Keys
-Validation accepts only: `agent_id`, `id`, `name`, `emoji`, `description`, `model`, `provider`, `graph`, `stateless`, `channels`, `channel_hosts`, `concierge_prefixes`, `discord_token_key`, `memory_topics`, `tools`, `skills`, `schedules`, `thinking`, `voice`, `voice_config`. When updating a file, change only `tools`, `skills` and `channels` (plus the concierge's `channel_hosts`); a new `agent.json` starts from the `agent_creation` template. Schedules belong to `update_schedule`; `thinking` and `voice` come from the approved plan.
+Validation accepts only: `agent_id`, `id`, `name`, `emoji`, `description`, `model`, `provider`, `graph`, `stateless`, `channels`, `channel_hosts`, `discord_token_key`, `memory_topics`, `tools`, `skills`, `schedules`, `thinking`, `voice`, `voice_config`. When updating a file, change only `tools`, `skills` and `channels` (plus the concierge's `channel_hosts`); a new `agent.json` starts from the `agent_creation` template. Schedules belong to `update_schedule`; `thinking` and `voice` come from the approved plan.
 
 *Note on channels:* only the concierge (`main`) has `channel_hosts` and `discord_token_key`: it runs the system's only Discord bot and hosts every channel, and hands each channel to its agent (rule 10). No other agent defines them.
 

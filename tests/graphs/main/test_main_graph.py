@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import unittest
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -9,16 +10,34 @@ from langchain_core.messages import AIMessage, HumanMessage
 # Add root directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
+from core.channel.response_parser import AgentResponse
+from core.config.settings import Config
 from core.runtime.delegation import DelegationResult
-from graphs.main.graph import create_graph, format_output, prepare_input
+from core.runtime.foundation import events
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
+from graphs.main.graph import (
+    UNADDRESSED_SPEECH,
+    UNADDRESSED_TEXT,
+    create_graph,
+    fixed_reply,
+    format_output,
+    prepare_input,
+)
 
-ORCHESTRATOR = {
-    "agent_id": "main",
-    "tools": {"agent_call": {}},
-    # Read from config now, so the fixture has to declare them to exercise the
-    # escape hatch at all.
-    "concierge_prefixes": ["[main]", "[concierge]", "jobs", "kill"],
-}
+# The Concierge's shape: reachable everywhere, owning no channel, holding no tools.
+ORCHESTRATOR = {"agent_id": "main", "channels": ["*"], "tools": {}}
+
+
+@contextmanager
+def _session(agent_id="main", source="discord", channel="receipts", surface=None):
+    """Runs the block inside the context a turn of that shape would get."""
+    ctx = SessionManager.get_session(agent_id=agent_id, source=source, channel=channel, surface=surface)
+    token = current_execution_context.set(ctx)
+    try:
+        yield ctx
+    finally:
+        current_execution_context.reset(token)
 
 
 class TestMainGraph(unittest.TestCase):
@@ -58,6 +77,27 @@ class TestMainGraph(unittest.TestCase):
         self.assertTrue(hasattr(graph, "ainvoke"))
 
 
+class TestFixedReply(unittest.TestCase):
+    """What a message gets where no single agent answers, as each surface needs it."""
+
+    def test_typed_it_points_at_the_agents_channels_and_the_commands(self):
+        self.assertEqual(fixed_reply("text"), UNADDRESSED_TEXT)
+        self.assertIn("!help", UNADDRESSED_TEXT)
+
+    def test_spoken_it_is_all_speech(self):
+        """The voice speaks only <speech>. With no other text, the channel shows
+        the speech as the reply (DiscordStreamBuffer.finalize), and no
+        missing-speech alert fires."""
+        response = AgentResponse.from_string(fixed_reply("voice"))
+        self.assertEqual(response.speech, UNADDRESSED_SPEECH)
+        self.assertEqual(response.text, "")
+
+    def test_it_never_offers_addressing_an_agent_by_name_in_text(self):
+        """Hand-offs ("Daisy, ...") don't exist yet; offering them would send the
+        user straight back to this line."""
+        self.assertNotIn("Daisy", UNADDRESSED_TEXT)
+
+
 class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
     """Exercises the compiled graph, not just the decision function."""
 
@@ -69,36 +109,42 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         return loader
 
     def _concierge(self, reply="concierge reply"):
-        """Stands in for the compiled ReAct agent."""
+        """Stands in for the compiled ReAct agent, and counts its turns."""
         agent = MagicMock()
+        agent.calls = 0
 
         async def ainvoke(state, config=None):
+            agent.calls += 1
             return {"messages": list(state["messages"]) + [AIMessage(content=reply)]}
 
         agent.ainvoke = ainvoke
         return agent
 
-    async def _run(self, prompt, loader, delegate_result=None, concierge_reply="concierge reply"):
+    async def _run(self, prompt, loader, delegate_result=None, concierge_reply="concierge reply",
+                   agent_id="main", config=ORCHESTRATOR, source="discord", channel="receipts", surface=None):
         """Builds the graph with doubles and runs one turn inside a context."""
-        from tests.helpers import execution_context
-
         delegate = AsyncMock(
             return_value=delegate_result
             or DelegationResult(agent_id="receipt-processor", text="Logged $12.40.")
         )
+        concierge = self._concierge(concierge_reply)
 
-        with patch("graphs.main.graph.create_react_agent", return_value=self._concierge(concierge_reply)), \
+        with patch("graphs.main.graph.create_react_agent", return_value=concierge), \
              patch("graphs.main.graph.stream_delegate", delegate), \
+             patch("graphs.main.graph.safe_dispatch_custom_event", new_callable=AsyncMock) as dispatch, \
              patch("core.loaders.agents_loader.AgentsLoader", return_value=loader), \
              patch("graphs.main.graph._record_turn") as record:
-            graph = create_graph(llm=MagicMock(), tools=[], agent_id="main", config=ORCHESTRATOR)
-            with execution_context(agent_id="main", source="discord", channel="receipts", stateless=False):
+            graph = create_graph(llm=MagicMock(), tools=[], agent_id=agent_id, config=config)
+            with _session(agent_id=agent_id, source=source, channel=channel, surface=surface):
                 state = await graph.ainvoke({"messages": [HumanMessage(content=prompt)]})
 
-        return state, delegate, record
+        return state, delegate, record, dispatch, concierge
+
+    def _shared(self, channel="general"):
+        return self._loader(hosts=(channel,), eligible=("day-planner", "meal-planner"))
 
     async def test_sole_eligible_agent_is_called_without_a_model(self):
-        state, delegate, _ = await self._run("scan this receipt", self._loader())
+        state, delegate, _, _, concierge = await self._run("scan this receipt", self._loader())
 
         delegate.assert_awaited_once()
         kwargs = delegate.await_args.kwargs
@@ -106,56 +152,80 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["prompt"], "scan this receipt")
         self.assertEqual(kwargs["channel"], "receipts")
         self.assertEqual(kwargs["caller"], "main")
+        self.assertEqual(concierge.calls, 0)
 
     async def test_delegated_reply_is_attributed_in_history(self):
         """Unattributed, a later concierge turn would read the specialist's words
         as its own and defend them as its own reasoning."""
-        state, _, _ = await self._run("scan this receipt", self._loader())
+        state, _, _, _, _ = await self._run("scan this receipt", self._loader())
 
         self.assertEqual(state["messages"][-1].content, "🧾 Receipt Processor: Logged $12.40.")
 
-    async def test_ambiguous_channel_reaches_the_concierge(self):
-        loader = self._loader(
-            hosts=("weekend-planning",), eligible=("day-planner", "excursion-planner")
+    async def test_a_shared_channel_gets_the_fixed_line_without_a_model(self):
+        state, delegate, record, dispatch, concierge = await self._run(
+            "what's for dinner?", self._shared(), channel="general"
         )
-        loader.hosts_channel.side_effect = lambda agent_id, channel: True
-
-        state, delegate, _ = await self._run("plan my weekend", loader)
 
         delegate.assert_not_awaited()
+        self.assertEqual(concierge.calls, 0)
+        self.assertEqual(state["messages"][-1].content, UNADDRESSED_TEXT)
+        # Streamed, so a surface that reads only the stream gets it too.
+        dispatch.assert_awaited_once_with(
+            events.NODE_STREAM_TOKEN, {"content": UNADDRESSED_TEXT, "agent_id": "main"}
+        )
+        # And logged, since no model callback will log it.
+        record.assert_called_once()
+        _session_ctx, user_prompt, reply = record.call_args.args
+        self.assertEqual((user_prompt, reply), ("what's for dinner?", UNADDRESSED_TEXT))
+
+    async def test_the_voice_lobby_hears_the_spoken_line(self):
+        state, _, _, dispatch, concierge = await self._run(
+            "what's for dinner?", self._shared(), channel="general", surface="voice"
+        )
+
+        self.assertEqual(concierge.calls, 0)
+        spoken = f"<speech>{UNADDRESSED_SPEECH}</speech>"
+        self.assertEqual(state["messages"][-1].content, spoken)
+        self.assertEqual(dispatch.await_args.args[1]["content"], spoken)
+
+    async def test_the_llm_fallback_brings_the_concierge_back(self):
+        with Config().overriding(routing_llm_fallback=True):
+            state, delegate, _, dispatch, concierge = await self._run(
+                "plan my weekend", self._shared(), channel="general"
+            )
+
+        delegate.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        self.assertEqual(concierge.calls, 1)
         self.assertEqual(state["messages"][-1].content, "concierge reply")
 
-    async def test_escape_prefix_reaches_the_concierge_without_the_prefix(self):
-        loader = self._loader()
-        captured = {}
+    async def test_a_former_concierge_prefix_is_delegated_like_any_message(self):
+        """`[main]` was routing syntax; now it is just the user's words."""
+        state, delegate, _, _, concierge = await self._run("[main] what did we decide?", self._loader())
 
-        from tests.helpers import execution_context
+        delegate.assert_awaited_once()
+        self.assertEqual(delegate.await_args.kwargs["prompt"], "[main] what did we decide?")
+        self.assertEqual(concierge.calls, 0)
 
-        concierge = MagicMock()
-
-        async def ainvoke(state, config=None):
-            captured["messages"] = list(state["messages"])
-            return {"messages": list(state["messages"]) + [AIMessage(content="ok")]}
-
-        concierge.ainvoke = ainvoke
-
-        with patch("graphs.main.graph.create_react_agent", return_value=concierge), \
-             patch("graphs.main.graph.stream_delegate", AsyncMock()) as delegate, \
-             patch("core.loaders.agents_loader.AgentsLoader", return_value=loader):
-            graph = create_graph(llm=MagicMock(), tools=[], agent_id="main", config=ORCHESTRATOR)
-            with execution_context(agent_id="main", source="discord", channel="receipts", stateless=False):
-                await graph.ainvoke({"messages": [HumanMessage(content="[main] what did we decide?")]})
+    async def test_a_turn_addressed_to_the_concierge_reaches_its_model(self):
+        """The dream standup delegates to the Concierge in #general. Routing that
+        would answer the dream with the fixed line."""
+        state, delegate, _, dispatch, concierge = await self._run(
+            "<dream prompt>", self._shared(), source="tool", channel="general", concierge_reply="<dream_response/>"
+        )
 
         delegate.assert_not_awaited()
-        self.assertEqual(captured["messages"][-1].content, "what did we decide?")
+        dispatch.assert_not_awaited()
+        self.assertEqual(concierge.calls, 1)
+        self.assertEqual(state["messages"][-1].content, "<dream_response/>")
 
     async def test_routed_turn_is_recorded_for_later_fallback(self):
         """The session log is written by LLM callbacks that never fire on this
         path, so the node has to record the turn itself."""
-        _, _, record = await self._run("scan this receipt", self._loader())
+        _, _, record, _, _ = await self._run("scan this receipt", self._loader())
 
         record.assert_called_once()
-        _session, user_prompt, reply = record.call_args.args
+        _session_ctx, user_prompt, reply = record.call_args.args
         self.assertEqual(user_prompt, "scan this receipt")
         self.assertEqual(reply, "🧾 Receipt Processor: Logged $12.40.")
 
@@ -164,33 +234,41 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
             agent_id="receipt-processor",
             error="Agent 'receipt-processor' cannot be called in channel 'receipts'.",
         )
-        state, _, _ = await self._run("scan this", self._loader(), delegate_result=result)
+        state, _, _, _, _ = await self._run("scan this", self._loader(), delegate_result=result)
 
         self.assertIn("Could not reach `receipt-processor`", state["messages"][-1].content)
 
     async def test_specialist_agents_never_route(self):
         """Every agent shares this graph. A specialist must behave exactly as it
         did before the router existed."""
-        from tests.helpers import execution_context
-
-        loader = self._loader(hosts=(), eligible=())
-
-        with patch("graphs.main.graph.create_react_agent", return_value=self._concierge("specialist reply")), \
-             patch("graphs.main.graph.stream_delegate", AsyncMock()) as delegate, \
-             patch("core.loaders.agents_loader.AgentsLoader", return_value=loader):
-            graph = create_graph(
-                llm=MagicMock(),
-                tools=[],
-                agent_id="receipt-processor",
-                config={"agent_id": "receipt-processor", "tools": {"filesystem": {}}},
-            )
-            with execution_context(
-                agent_id="receipt-processor", source="discord", channel="receipts", stateless=False
-            ):
-                state = await graph.ainvoke({"messages": [HumanMessage(content="scan this")]})
+        state, delegate, _, dispatch, _ = await self._run(
+            "scan this",
+            self._loader(hosts=(), eligible=()),
+            concierge_reply="specialist reply",
+            agent_id="receipt-processor",
+            config={"agent_id": "receipt-processor", "channels": ["receipts", "general"], "tools": {"filesystem": {}}},
+            source="tool",
+        )
 
         delegate.assert_not_awaited()
+        dispatch.assert_not_awaited()
         self.assertEqual(state["messages"][-1].content, "specialist reply")
+
+    async def test_an_agent_hosting_its_own_channel_answers_it_itself(self):
+        """Were a specialist to run its own bot and host its channel, its
+        channel's messages must reach its model, not the fixed line."""
+        state, delegate, _, dispatch, _ = await self._run(
+            "design the auth flow",
+            self._loader(hosts=("software-dev",), eligible=()),
+            concierge_reply="elephant reply",
+            agent_id="software-planner",
+            config={"agent_id": "software-planner", "channels": ["general", "software-dev"], "tools": {}},
+            channel="software-dev",
+        )
+
+        delegate.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        self.assertEqual(state["messages"][-1].content, "elephant reply")
 
 
 if __name__ == "__main__":

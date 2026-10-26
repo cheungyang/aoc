@@ -5,7 +5,6 @@
   ],
   "channel_hosts": [
     "agent-management",
-    "aoc-debug",
     "content-creation",
     "day-planning",
     "fitness-coach",
@@ -24,29 +23,14 @@
     "weekend-planning",
     "weekly-planning"
   ],
-  "concierge_prefixes": [
-    "[main]",
-    "[concierge]",
-    "list all jobs",
-    "jobs",
-    "kill"
-  ],
-  "description": "Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.",
+  "description": "Host of every channel: hands each message to the channel's agent, without a model call. #general is for commands.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",
   "emoji": "🛎️",
   "model": "FLASH",
   "name": "Concierge",
   "schedules": [],
   "skills": {},
-  "tools": {
-    "agent_call": {},
-    "agent_list": {},
-    "job_list": {},
-    "job_kill": {},
-    "job_status": {},
-    "graph_call": {},
-    "graph_status": {}
-  },
+  "tools": {},
   "voice": {
     "name": "en-US-Chirp3-HD-Aoede"
   },

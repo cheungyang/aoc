@@ -3,4 +3,4 @@
 Agent ID: main
 Name: Concierge
 Emoji: 🛎️
-Description: Agent Orchestrator & Router: triages and delegates tasks verbatim to specialized agents.
+Description: Host of every channel: hands each message to the channel's agent, without a model call. #general is for commands.
