@@ -59,6 +59,10 @@ class TurnRoom(VoiceControls, Protocol):
     def turn_starting(self, focus: VoiceFocus) -> None:
         """Tells the hooks a turn is about to run in `focus`'s channel."""
 
+    def handed_off(self, event: dict) -> Any:
+        """The words named another agent (a HANDOFF event): moves the focus to
+        its channel. Returns that text channel, or None to stay."""
+
 
 class VoiceTurn:
     """One turn: its utterances, its trace, and whether it was answered."""
@@ -203,4 +207,5 @@ class VoiceTurn:
         self.answered = await room.reply.stream(
             agent, transcript, author, session, channel, self.speech,
             is_current=is_current, on_final=room.floor.set_reply, speaker=focus.agent_id,
+            on_handoff=room.handed_off,
         )

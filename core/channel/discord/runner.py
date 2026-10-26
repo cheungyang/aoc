@@ -15,6 +15,7 @@ from core.runtime.foundation.sessions import SessionManager
 from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
+from core.channel.handoff import channel_named, pointer_line, request_line
 from core.channel.inbox import mark_read, record_reply
 from core.util.errors import format_error_message
 from core.voice.briefing.hook import VoiceBriefing
@@ -50,9 +51,9 @@ def posted_at(message):
 
 
 def append_reply_context(payload, reply_context: str):
-    """Adds the block *after* the user's text: the router matches concierge
-    prefixes (`[main]`, `kill`) at the start of the message, so the user's own
-    words must stay first."""
+    """Adds the block *after* the user's text: the router reads who a message
+    is for from its first words ("Ted, …", core/runtime/foundation/addressing.py),
+    so the user's own words must stay first."""
     if isinstance(payload, list):
         return list(payload) + [{"type": "text", "text": f"\n\n{reply_context}"}]
     return f"{payload}\n\n{reply_context}" if payload else reply_context
@@ -402,6 +403,9 @@ class BotRunner:
             content_payload = append_reply_context(content_payload, reply_context)
 
         final_text = ""
+        # Where the reply lands, and whose it is: here and this bot's agent,
+        # unless the message named another agent (a hand-off, below).
+        reply_channel, reply_agent = message.channel, self.agent_id
         try:
             async with message.channel.typing():
                 from core.channel.discord.stream_buffer import DiscordStreamBuffer
@@ -415,6 +419,16 @@ class BotRunner:
                     event_type = event.get("type")
                     if event_type == events.TOKEN:
                         await stream_buffer.append_token(event.get("content", ""))
+                    elif event_type == events.HANDOFF:
+                        # The message named another agent (graphs/main): this
+                        # channel keeps the pointer, and the reply streams in
+                        # that agent's channel, under what was asked.
+                        target = channel_named(getattr(message, "guild", None), event.get("channel"))
+                        if target is not None:
+                            await stream_buffer.finalize(final_text=pointer_line(event, target))
+                            await self._post_request(target, message, event)
+                            stream_buffer = DiscordStreamBuffer(target, edit_interval=1.5)
+                            reply_channel, reply_agent = target, event.get("agent_id") or self.agent_id
                     elif event_type == events.REACTION:
                         # Delegation acknowledgement. This arrives from the
                         # delegation path itself rather than from a tool
@@ -446,7 +460,15 @@ class BotRunner:
         # it asks you something: a candidate for the channel inbox, judged only
         # once you join voice. No model call here.
         if is_host and isinstance(final_text, str) and final_text.strip():
-            record_reply(message.channel, final_text, asked_at=posted_at(message), agent_id=self.agent_id)
+            record_reply(reply_channel, final_text, asked_at=posted_at(message), agent_id=reply_agent)
+
+    async def _post_request(self, target, message, event) -> None:
+        """What was asked, at the top of the channel a hand-off continues in."""
+        author = getattr(message.author, "display_name", None) or "You"
+        try:
+            await target.send(request_line(author, message.channel, event))
+        except Exception as e:
+            print(f"[BotRunner:{self.agent_id}] Could not post the hand-off's request in #{event.get('channel')}: {e}")
 
     def _touch_heartbeat(self):
         try:

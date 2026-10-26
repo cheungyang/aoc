@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 
 import discord
 
+from core.channel.handoff import pointer_line, request_line
 from core.runtime.foundation import events
 from core.runtime.observability.turn_trace import Stage
 from core.voice.engines.tts import TTSEngine, Voice, agent_voice
@@ -156,7 +157,8 @@ class ReplyStreamer:
 
     async def stream(self, agent, transcript: str, author: str, session, channel, speech: TurnSpeech,
                      is_current: IsCurrent, on_final: Callable[[str], None],
-                     speaker: Optional[str] = None) -> bool:
+                     speaker: Optional[str] = None,
+                     on_handoff: Optional[Callable[[dict], Any]] = None) -> bool:
         """Streams the agent and fans its events out to a text lane and a speech lane.
 
         Speech and text diverge here, deliberately. The speaker gets the
@@ -170,6 +172,12 @@ class ReplyStreamer:
         `speaker` is the agent you're talking to (the focus's): whose voice is
         heard until a delegate's tokens say otherwise, and who says the error
         line. Defaults to this bot's own agent.
+
+        `on_handoff(event)` is called when the words named another agent
+        (graphs/main's HANDOFF): the room moves its focus to that agent's
+        channel and returns it. The text lane then ends the reply here with the
+        pointer and goes on there, under what was said; the named agent's
+        reply is heard in its own voice, as any delegate's is.
 
         Returns whether the agent answered: False if a newer turn took over
         first, leaving the words unanswered. `on_final` gets what the user
@@ -215,6 +223,15 @@ class ReplyStreamer:
 
                 elif event_type == events.TOOL_END:
                     trace.event("tool_end", tool=event.get("tool_name", ""))
+
+                elif event_type == events.HANDOFF:
+                    # The words named another agent: the room follows them to
+                    # its channel, and so does the text lane.
+                    target = on_handoff(event) if on_handoff is not None else None
+                    if target is not None:
+                        trace.event("handoff", agent=event.get("agent_id", ""))
+                        text_lane.put_nowait(("handoff", (pointer_line(event, target), target,
+                                                          request_line(author, channel, event, spoken=True))))
 
                 elif event_type == events.TOKEN:
                     token = event.get("content", "")
@@ -276,7 +293,8 @@ class ReplyStreamer:
             self._log(f"Error posting to the channel: {e}")
 
     async def _run_text_lane(self, channel, buffer, lane: asyncio.Queue, mirror_task):
-        """Writes the agent's reply to the text channel as it streams, then any note under it."""
+        """Writes the agent's reply to the text channel as it streams, then any
+        note under it. After a hand-off, that is the named agent's channel."""
         if mirror_task is not None:
             # The transcript goes above the reply; only this lane waits for it.
             try:
@@ -290,6 +308,11 @@ class ReplyStreamer:
             kind, payload = item
             if kind == "token":
                 await buffer.append_token(payload)
+            elif kind == "handoff":
+                pointer, target, request = payload
+                await buffer.finalize(final_text=pointer)
+                await self._post(target, request)
+                channel, buffer = target, self.text_output(target)
             elif kind == "final":
                 await buffer.finalize(
                     final_text=payload.get("text", "") or "",

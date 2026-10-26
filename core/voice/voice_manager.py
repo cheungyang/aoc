@@ -310,6 +310,23 @@ class VoiceManager:
                 return channel
         return None
 
+    def handed_off(self, event: dict):
+        """The words named another agent (graphs/main's HANDOFF): the room
+        follows the conversation to that agent's channel, as "switch to …"
+        would, but with no greeting -- the agent's reply is the greeting.
+        Returns the text channel the reply goes on in; None leaves the turn
+        where it is."""
+        directory = self.directory()
+        focus = directory.for_channel(event.get("channel"))
+        channel = self.focus_channel(focus) if focus is not None else None
+        if channel is None:
+            self._log(f"Hand-off to #{event.get('channel')}: no such focus or channel; the reply stays here.")
+            return None
+        self._log(f"🎧 Hand-off: now with {directory.who(focus)} in #{focus.channel_name}.")
+        # The turn being answered is the one handing off; it must not cancel itself.
+        self.set_focus(focus, interrupt=False)
+        return channel
+
     async def _announce_focus(self, focus: VoiceFocus) -> None:
         """Shows where the room is now, for a glance at Discord: a line in the
         voice channel's own chat (which holds no conversation, only this log),

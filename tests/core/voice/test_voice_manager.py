@@ -352,6 +352,69 @@ async def test_take_me_to_concierge_continues_generals_conversation(mock_bot_run
     channels["room"].send.assert_any_await("🎧 Now with the concierge · #general")
 
 
+HANDOFF = {"type": "handoff", "agent_id": "day-planner", "name": "Daisy", "emoji": "🌼", "channel": "day-planning",
+           "pointer": "→ 🌼 Daisy has this in #day-planning", "request": "Daisy, we're in Tahoe this weekend"}
+
+
+def _handing_off(agent, reply="Got it, I'll plan around Tahoe."):
+    """The turn's words named Daisy (graphs/main): the stream says so, then
+    carries her reply, as stream_delegate relays it. Returns the prompts asked."""
+    from tests.core.voice.voice_room import _final, _spoken_reply
+
+    calls = []
+
+    async def stream(prompt, session=None):
+        calls.append((prompt, session))
+        if len(calls) == 1:
+            yield HANDOFF
+            yield {"type": "token", "content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True}
+        yield {"type": "token", "content": _spoken_reply(reply), "agent_id": "day-planner"}
+        yield _final(_spoken_reply(reply))
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+    return calls
+
+
+def _shown(channel):
+    message = channel.send.return_value
+    return [c.args[0] for c in channel.send.call_args_list if c.args] + \
+           [c.kwargs.get("content", "") for c in message.edit.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_hand_off_moves_the_room_to_the_named_agents_channel(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    channels["day-planning"].mention = "<#42>"
+    calls = _handing_off(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Daisy, we're in Tahoe this weekend")
+        await _turn(vm, "Anything indoors if it rains?")
+
+    assert vm.focus().key == "day-planning", "the room follows the conversation"
+    general, daisy = _shown(channels["general"]), _shown(channels["day-planning"])
+    assert general == ["🎤 **Sam (Voice):** Daisy, we're in Tahoe this weekend",
+                       "→ 🌼 Daisy has this in <#42>"], "the lobby keeps only the pointer"
+    assert daisy[0] == "↪️ 🎤 **Sam** in #general: Daisy, we're in Tahoe this weekend"
+    assert any(s.startswith("🌼 Daisy: Got it, I'll plan around Tahoe.") for s in daisy), daisy
+    assert vm.reply.tts.said()[0] == "Got it, I'll plan around Tahoe."
+    assert _voices(vm)[0] == DAISY_VOICE, "heard in Daisy's voice, with no greeting first"
+    channels["room"].send.assert_any_await("🎧 Now with Daisy · #day-planning")
+    (_first, _), (_prompt, session) = calls
+    assert session.session_id == "main:discord:day-planning", "the next turn is Daisy's channel's"
+
+
+@pytest.mark.asyncio
+async def test_a_hand_off_to_a_channel_the_room_cant_find_stays_put(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    _handing_off(main_agent)
+    channels["room"].guild.text_channels = [channels["general"]]
+    with _focused(loader):
+        await _turn(vm, "Daisy, we're in Tahoe this weekend")
+
+    assert vm.focus().is_lobby
+    assert any(s.startswith("🌼 Daisy: Got it") for s in _shown(channels["general"]))
+
+
 @pytest.mark.asyncio
 async def test_who_are_you_is_answered_by_the_agent_you_are_with(mock_bot_runner, tmp_path):
     """An ordinary turn in Daisy's channel: she introduces herself as she would there."""

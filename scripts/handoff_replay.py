@@ -138,7 +138,9 @@ def withhold_side_effects() -> None:
 
     def refuse(self, ctx, tool_id, action_name=None, path=None, **kwargs):
         if tool_id in WITHHELD_TOOLS or (tool_id, action_name) in REFUSED_ACTIONS:
-            if not kwargs.get("probe"):
+            # Asked with no action, it's "may the agent use it at all?": no,
+            # but no write was attempted either.
+            if action_name is not None and not kwargs.get("probe"):
                 BLOCKED_WRITES.append((tool_id, action_name, path))
                 print(f"[handoff-replay] refused {tool_id}.{action_name} (replay)", file=sys.stderr)
             return False
