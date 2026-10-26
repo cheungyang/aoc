@@ -19,8 +19,11 @@ from core.runtime.foundation.routing import (
     CONCIERGE,
     DIRECT_CALL,
     FIXED,
+    HANDOFF,
+    addressable_agents,
     answering_agent,
     decide,
+    home_channel,
     routing_enabled,
 )
 
@@ -290,6 +293,134 @@ class TestLiveRoutingTable(unittest.TestCase):
         planner = self.configs["software-planner"]["tools"]
         self.assertIn("graph_call", planner)
         self.assertIn("graph_status", planner)
+
+
+class _ConfigLoader:
+    """What the router asks of AgentsLoader, answered from agent configs."""
+
+    def __init__(self, configs):
+        self.configs = configs
+
+    def list_agent_ids(self):
+        return list(self.configs)
+
+    def get_agent_config(self, agent_id):
+        return self.configs.get(agent_id)
+
+    def hosts_channel(self, agent_id, channel):
+        hosts = [str(h).lower() for h in (self.configs.get(agent_id) or {}).get("channel_hosts") or []]
+        return str(channel).lower() in hosts
+
+    def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
+        found = []
+        for agent_id, config in self.configs.items():
+            channels = [str(c).lower() for c in (config.get("channels") or [])]
+            if agent_id != exclude_agent_id and "*" not in channels and str(channel).lower() in channels:
+                found.append(agent_id)
+        return sorted(found)
+
+
+class TestHandoffs(unittest.TestCase):
+    """A message calling another agent by name goes to that agent's home channel."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.configs = _load_agent_configs()
+        cls.loader = _ConfigLoader(cls.configs)
+
+    def _decide(self, prompt, channel, handoffs=True, **kwargs):
+        return decide(prompt, "main", channel, self.configs["main"], self.loader, handoffs=handoffs, **kwargs)
+
+    def test_off_by_default(self):
+        """`HANDOFF_ENABLED` ships off: the channel's agent gets the message, as before."""
+        decision = decide("Ted, create a syllabus on THIS topic", "main", "pkm-wiki", self.configs["main"], self.loader)
+        self.assertEqual((decision.target, decision.agent_id), (DIRECT_CALL, "wiki-gardener"))
+
+    def test_naming_another_agent_hands_the_message_to_its_home_channel(self):
+        decision = self._decide("Ted create a syllabus on THIS topic", "pkm-wiki")
+        self.assertEqual(decision.target, HANDOFF)
+        self.assertTrue(decision.is_handoff)
+        self.assertEqual((decision.agent_id, decision.channel), ("topic-researcher", "topic-research"))
+        self.assertEqual(decision.prompt, "Ted create a syllabus on THIS topic")
+        self.assertIn("continues in #topic-research", decision.reason)
+
+    def test_naming_an_agent_in_general_hands_off_instead_of_the_fixed_line(self):
+        decision = self._decide("Daisy, I'm on a trip to Tahoe with my family", "general")
+        self.assertEqual((decision.target, decision.agent_id, decision.channel),
+                         (HANDOFF, "day-planner", "day-planning"))
+
+    def test_an_unaddressed_message_in_general_still_gets_the_fixed_line(self):
+        self.assertEqual(self._decide("what's for dinner?", "general").target, FIXED)
+
+    def test_naming_the_agent_that_answers_here_is_a_message_for_it(self):
+        decision = self._decide("William, how does it relate to memory?", "pkm-wiki")
+        self.assertEqual((decision.target, decision.agent_id), (DIRECT_CALL, "wiki-gardener"))
+
+    def test_naming_an_agent_without_speaking_to_it(self):
+        decision = self._decide("William said it leans on caching", "topic-research")
+        self.assertEqual((decision.target, decision.agent_id), (DIRECT_CALL, "topic-researcher"))
+
+    def test_a_second_channel_of_the_agent_hands_off_to_its_home(self):
+        """Eric lists #general too, but his conversation lives in #weekend-planning."""
+        decision = self._decide("Eric, what should we do there?", "weekly-planning")
+        self.assertEqual((decision.agent_id, decision.channel), ("excursion-planner", "weekend-planning"))
+
+    def test_an_agent_that_answers_no_channel_of_its_own_is_not_handed_to(self):
+        """Terminator lists only #general, where the host answers."""
+        self.assertEqual(self._decide("Terminator, run the backup", "general").target, FIXED)
+
+    def test_the_hosts_and_workers_cannot_be_addressed(self):
+        self.assertEqual(self._decide("Concierge, restart", "pkm-wiki").target, DIRECT_CALL)
+        aliases = addressable_agents(self.loader)
+        for agent_id in ("main", "graph-worker", "graph-worker-low"):
+            with self.subTest(agent=agent_id):
+                self.assertNotIn(agent_id, aliases.values())
+
+    def test_a_turn_addressed_to_the_agent_never_hands_off(self):
+        """A delegation that happens to start with a name is still the callee's own turn."""
+        for source in ("tool", "job", "scheduled", "graph"):
+            with self.subTest(source=source):
+                self.assertEqual(self._decide("Ted, go", "pkm-wiki", source=source).target, CONCIERGE)
+
+    def test_a_spoken_turn_hands_off_like_a_typed_one(self):
+        """Voice turns run on the channel's `discord` session; the replay has its own source."""
+        for source in (CHANNEL_MESSAGE, "voice_replay"):
+            with self.subTest(source=source):
+                self.assertEqual(self._decide("hey ted, take this one", "pkm-wiki", source=source).target, HANDOFF)
+
+    def test_who_answers_a_channel_is_unchanged(self):
+        """The voice focus and the channel inbox ask about a channel, not a message."""
+        self.assertEqual(answering_agent("main", "pkm-wiki", self.loader), "wiki-gardener")
+        self.assertEqual(answering_agent("main", "general", self.loader), "main")
+
+
+class TestHomeChannels(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.configs = _load_agent_configs()
+        cls.loader = _ConfigLoader(cls.configs)
+
+    def test_the_first_channel_the_agent_answers(self):
+        cases = {
+            "day-planner": "day-planning",      # before #weekly-planning and #general
+            "software-planner": "software-dev",  # #general comes first but the host answers it
+            "content-creator": "content-creation",
+            "script-executor": None,             # only #general
+            "main": None,                        # ["*"]
+        }
+        for agent_id, home in cases.items():
+            with self.subTest(agent=agent_id):
+                self.assertEqual(home_channel(agent_id, self.loader), home)
+
+    def test_text_and_voice_agree_on_every_agents_home(self):
+        """\"Ted, ...\" typed continues where \"switch to Ted\" spoken goes."""
+        from core.voice.room.focus import FocusDirectory
+
+        voice_homes = FocusDirectory.build(self.loader, voice_host="main").homes
+        for agent_id in sorted(set(addressable_agents(self.loader).values())):
+            with self.subTest(agent=agent_id):
+                self.assertEqual(home_channel(agent_id, self.loader), voice_homes.get(agent_id))
 
 
 if __name__ == "__main__":

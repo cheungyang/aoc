@@ -93,8 +93,8 @@ class TestFixedReply(unittest.TestCase):
         self.assertEqual(response.text, "")
 
     def test_it_never_offers_addressing_an_agent_by_name_in_text(self):
-        """Hand-offs ("Daisy, ...") don't exist yet; offering them would send the
-        user straight back to this line."""
+        """Hand-offs ("Daisy, ...") ship off (`HANDOFF_ENABLED`); while they
+        are, offering them would send the user straight back to this line."""
         self.assertNotIn("Daisy", UNADDRESSED_TEXT)
 
 
@@ -269,6 +269,165 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         delegate.assert_not_awaited()
         dispatch.assert_not_awaited()
         self.assertEqual(state["messages"][-1].content, "elephant reply")
+
+
+# A small team, as configured: the Concierge hosts every channel; each
+# specialist answers its own and lists #general.
+TEAM = {
+    "main": {"agent_id": "main", "name": "Concierge", "channels": ["*"], "tools": {},
+             "channel_hosts": ["general", "pkm-wiki", "topic-research", "day-planning"]},
+    "wiki-gardener": {"name": "William", "emoji": "🌿", "channels": ["pkm-wiki", "general"]},
+    "topic-researcher": {"name": "Ted", "emoji": "🔬", "channels": ["topic-research", "general"]},
+    "day-planner": {"name": "Daisy", "emoji": "🌼", "channels": ["day-planning", "general"]},
+}
+
+
+class _TeamLoader:
+    """What the router and the capsule builder ask of AgentsLoader, from TEAM."""
+
+    def list_agent_ids(self):
+        return list(TEAM)
+
+    def get_agent_config(self, agent_id):
+        return TEAM.get(agent_id)
+
+    def hosts_channel(self, agent_id, channel):
+        return channel in (TEAM.get(agent_id) or {}).get("channel_hosts", [])
+
+    def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
+        return sorted(a for a, c in TEAM.items()
+                      if a != exclude_agent_id and "*" not in c["channels"] and channel in c["channels"])
+
+
+class TestHandoffNode(unittest.IsolatedAsyncioTestCase):
+    """A message that names another agent goes to that agent's own channel."""
+
+    async def _run(self, prompt, channel="pkm-wiki", handoffs=True, surface=None, capsule="<handoff_context/>",
+                   delegate_result=None, record=True):
+        delegate = AsyncMock(return_value=delegate_result or DelegationResult(
+            agent_id="topic-researcher", text="Starting a syllabus on prompt caching."))
+        concierge = TestMainGraphRouting._concierge(self)
+        patches = [
+            patch("graphs.main.graph.create_react_agent", return_value=concierge),
+            patch("graphs.main.graph.stream_delegate", delegate),
+            patch("graphs.main.graph.safe_dispatch_custom_event", new_callable=AsyncMock),
+            patch("core.loaders.agents_loader.AgentsLoader", return_value=_TeamLoader()),
+        ]
+        if capsule is not None:
+            patches.append(patch("graphs.main.graph.capsule_for", return_value=capsule))
+        if record:
+            patches.append(patch("graphs.main.graph._record_turn"))
+        started = [p.start() for p in patches]
+        try:
+            dispatch = started[2]
+            recorder = started[-1] if record else None
+            graph = create_graph(llm=MagicMock(), tools=[], agent_id="main", config=TEAM["main"])
+            with Config().overriding(handoff_enabled=handoffs):
+                with _session(channel=channel, surface=surface):
+                    state = await graph.ainvoke({"messages": [HumanMessage(content=prompt)]})
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        return state, delegate, dispatch, recorder, concierge
+
+    async def test_off_the_channels_own_agent_gets_the_message(self):
+        _, delegate, _, _, _ = await self._run("Ted, create a syllabus on THIS topic", handoffs=False)
+        self.assertEqual(delegate.await_args.kwargs["agent_id"], "wiki-gardener")
+        self.assertEqual(delegate.await_args.kwargs["channel"], "pkm-wiki")
+
+    async def test_the_named_agent_answers_in_its_own_channel_with_the_capsule(self):
+        state, delegate, _, _, concierge = await self._run("Ted create a syllabus on THIS topic")
+
+        kwargs = delegate.await_args.kwargs
+        self.assertEqual((kwargs["agent_id"], kwargs["channel"], kwargs["caller"]),
+                         ("topic-researcher", "topic-research", "main"))
+        self.assertEqual(kwargs["prompt"], "Ted create a syllabus on THIS topic\n\n<handoff_context/>")
+        self.assertEqual(concierge.calls, 0)
+
+    async def test_the_readers_are_told_before_the_reply_streams(self):
+        _, _, dispatch, _, _ = await self._run(
+            'Ted, take THIS\n\n<replying_to author="William">Ingested an article</replying_to>')
+
+        dispatch.assert_awaited_once_with(events.ROUTE_HANDOFF, {
+            "agent_id": "topic-researcher",
+            "name": "Ted",
+            "emoji": "🔬",
+            "channel": "topic-research",
+            "pointer": "→ 🔬 Ted has this in #topic-research",
+            "request": "Ted, take THIS",
+        })
+
+    async def test_this_turn_keeps_only_the_message_and_the_pointer(self):
+        """The checkpoint and the host's log of #pkm-wiki: never Ted's reply."""
+        state, _, _, recorder, _ = await self._run("Ted, take this one")
+
+        pointer = "→ 🔬 Ted has this in #topic-research"
+        self.assertEqual([m.content for m in state["messages"]], ["Ted, take this one", pointer])
+        _ctx, user_prompt, reply = recorder.call_args.args
+        self.assertEqual((user_prompt, reply), ("Ted, take this one", pointer))
+
+    async def test_naming_an_agent_in_general_hands_off(self):
+        _, delegate, _, _, _ = await self._run("Daisy, I'm on a trip to Tahoe with my family", channel="general")
+        self.assertEqual((delegate.await_args.kwargs["agent_id"], delegate.await_args.kwargs["channel"]),
+                         ("day-planner", "day-planning"))
+
+    async def test_a_spoken_hand_off_takes_the_same_path(self):
+        _, delegate, dispatch, _, _ = await self._run("hey ted, take this one", surface="voice")
+        self.assertEqual(delegate.await_args.kwargs["agent_id"], "topic-researcher")
+        self.assertEqual(dispatch.await_args.args[0], events.ROUTE_HANDOFF)
+
+    async def test_without_a_capsule_the_message_goes_as_typed(self):
+        _, delegate, _, _, _ = await self._run("Ted, take this one", capsule="")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], "Ted, take this one")
+
+    async def test_a_failed_hand_off_is_reported(self):
+        failed = DelegationResult(agent_id="topic-researcher", error="Unknown agent 'topic-researcher'")
+        state, _, _, recorder, _ = await self._run("Ted, take this one", delegate_result=failed)
+        self.assertIn("Could not hand this to `topic-researcher`", state["messages"][-1].content)
+        recorder.assert_not_called()
+
+
+class TestHandoffLeavesTheSourceUntouched(unittest.IsolatedAsyncioTestCase):
+    """The checkpoint comparison: a hand-off out of #pkm-wiki reads William's
+    session for the capsule, and William's session is byte-for-byte what it
+    was. Real session store and checkpointer, on conftest's throwaway memory.db."""
+
+    def _snapshot(self, session):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        from core.storage.sessions import SessionStore
+
+        found = SqliteCheckpointer().get_tuple(
+            {"configurable": {"thread_id": session.get_session_thread_id(), "checkpoint_ns": ""}})
+        return (SessionStore().load_history(session.session_id, limit=0), found.checkpoint["id"],
+                [(m.type, m.content) for m in found.checkpoint["channel_values"]["messages"]])
+
+    async def test_the_source_session_is_untouched(self):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        from core.runtime.history.channel_posts import append_to_session
+        from core.storage.sessions import SessionStore
+
+        william = SessionManager.get_session("wiki-gardener", source="tool", channel="pkm-wiki")
+        store = SessionStore()
+        store.append_message(william.session_id, "user", "<caller>main</caller>\nhow does it relate to memory?")
+        store.append_message(william.session_id, "ai", "Close cousins: compaction versus prompt caching.")
+        for message in (HumanMessage("how does it relate to memory?"),
+                        AIMessage("Close cousins: compaction versus prompt caching.")):
+            append_to_session(william, message, checkpointer=SqliteCheckpointer())
+        before = self._snapshot(william)
+
+        state, delegate, _, _, _ = await TestHandoffNode._run(self, "Ted create a syllabus on THIS topic",
+                                                              capsule=None, record=False)
+
+        self.assertEqual(self._snapshot(william), before)
+        prompt = delegate.await_args.kwargs["prompt"]
+        self.assertTrue(prompt.startswith("Ted create a syllabus on THIS topic\n\n<handoff_context "))
+        self.assertIn("William: Close cousins: compaction versus prompt caching.", prompt)
+        # The host's own log of #pkm-wiki gets the message and the pointer, no more.
+        host_log = store.load_history(SessionManager.get_session("main", source="discord", channel="pkm-wiki")
+                                      .session_id, limit=0)
+        self.assertEqual([(r["from"], r["message"]) for r in host_log],
+                         [("user", "Ted create a syllabus on THIS topic"),
+                          ("ai", "→ 🔬 Ted has this in #topic-research")])
 
 
 if __name__ == "__main__":

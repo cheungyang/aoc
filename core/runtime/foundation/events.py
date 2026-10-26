@@ -12,6 +12,11 @@ Stream events, and their fields besides "type":
   TOOL_START       tool_name, tool_args, run_id
   TOOL_END         tool_name, output, run_id
   REACTION         agent_id, emoji: an acknowledgement for the user's message
+  HANDOFF          agent_id, name, emoji, channel, pointer, request: the message
+                   named another agent (graphs/main), so what streams after this
+                   is that agent's reply, for `channel`. `pointer` is all the
+                   channel the message came from shows; `request` is the user's
+                   words, for the channel the reply goes to.
   SUBAGENT_FINAL   agent_id, response, text: a delegated agent's parsed reply
   ERROR            content: the formatted error. The turn ends here.
   FINAL_RESPONSE   text, response (the AgentResponse), poll_data, image_paths,
@@ -25,6 +30,7 @@ core/runtime/streaming.py turns them into the stream events above:
   NODE_STREAM_TOKEN       text a graph node writes itself, with no model behind it
                           (graphs/main's fixed line) -> TOKEN
   ROUTE_REACTION          the turn was handed to another agent (delegation) -> REACTION
+  ROUTE_HANDOFF           the message named another agent (graphs/main) -> HANDOFF
   LLM_RETRY_REACTION      a Gemini 503 was retried (model/retry) -> REACTION
 """
 
@@ -32,6 +38,7 @@ TOKEN = "token"
 TOOL_START = "tool_start"
 TOOL_END = "tool_end"
 REACTION = "reaction"
+HANDOFF = "handoff"
 SUBAGENT_FINAL = "subagent_final"
 ERROR = "error"
 FINAL_RESPONSE = "final_response"
@@ -52,6 +59,12 @@ NODE_STREAM_TOKEN = "node_stream_token"
 # calling a tool, and the emoji silently disappeared. Announcing it from the
 # delegation path itself makes the signal independent of who decided to delegate.
 ROUTE_REACTION = "route_reaction"
+
+# Emitted by graphs/main's hand-off node before the named agent's reply streams:
+# the readers (the Discord runner, voice's reply) end the reply in the channel
+# the message came from with the pointer, and show what follows in the named
+# agent's channel. A reader that doesn't know it shows everything in place.
+ROUTE_HANDOFF = "route_handoff"
 
 # Emitted by `core.runtime.model.retry` each time a Gemini 503 is retried, so the
 # channel can show that a retry happened even though the error itself is hidden.

@@ -266,5 +266,31 @@ class TestANodesOwnText(unittest.IsolatedAsyncioTestCase):
         ])
 
 
+class TestHandoffEvent(unittest.IsolatedAsyncioTestCase):
+    """graphs/main announces a hand-off before the named agent's reply streams;
+    the readers move what follows to that agent's channel."""
+
+    async def test_it_arrives_as_a_handoff_and_suppresses_nothing(self):
+        from core.runtime.foundation.events import ROUTE_HANDOFF, SUBAGENT_STREAM_TOKEN
+
+        announced = {"agent_id": "topic-researcher", "name": "Ted", "emoji": "🔬", "channel": "topic-research",
+                     "pointer": "→ 🔬 Ted has this in #topic-research", "request": "Ted, take THIS"}
+        graph = MagicMock()
+
+        async def astream_events(*args, **kwargs):
+            yield {"event": "on_custom_event", "name": ROUTE_HANDOFF, "data": announced}
+            yield {"event": "on_custom_event", "name": SUBAGENT_STREAM_TOKEN,
+                   "data": {"content": "Starting.", "agent_id": "topic-researcher"}}
+
+        graph.astream_events = astream_events
+        streamed = [ev async for ev in StreamHandler.stream_graph_events(graph, {}, {})]
+
+        self.assertEqual(streamed, [
+            {"type": "handoff", **announced},
+            {"type": "token", "content": "Starting.", "agent_id": "topic-researcher",
+             "is_header": False, "is_error": False},
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -129,6 +129,19 @@ class StreamHandler:
                             "agent_id": data.get("agent_id"),
                             "emoji": data.get("emoji")
                         }
+                    elif event_name == events.ROUTE_HANDOFF:
+                        # Announces, like a reaction: where the reply that
+                        # streams next belongs. The readers move it there.
+                        data = event.get("data", {})
+                        yield {
+                            "type": events.HANDOFF,
+                            "agent_id": data.get("agent_id"),
+                            "name": data.get("name"),
+                            "emoji": data.get("emoji"),
+                            "channel": data.get("channel"),
+                            "pointer": data.get("pointer", ""),
+                            "request": data.get("request", ""),
+                        }
         else:
             result = await graph.ainvoke(inputs, config=config)
             reply_message = result["messages"][-1]

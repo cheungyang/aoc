@@ -148,6 +148,12 @@ class Config:
     # before routing became deterministic-only. A rollback switch;
     # `ROUTING_LLM_FALLBACK`.
     routing_llm_fallback = Setting("ROUTING_LLM_FALLBACK", False, bool)
+    # Hand-offs: a message that calls another agent by name ("Ted, create a
+    # syllabus on THIS topic") goes to that agent in its own channel, with a
+    # capsule of the conversation it came from (graphs/main,
+    # core/runtime/history/handoff.py). Off: the message goes to whoever
+    # answers the channel, as before. `HANDOFF_ENABLED`.
+    handoff_enabled = Setting("HANDOFF_ENABLED", False, bool)
 
     # -------------------------------------------------------------------------
     # LangSmith / Observability settings

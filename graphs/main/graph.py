@@ -5,8 +5,11 @@ every channel cost at least one model call on the orchestrator -- including the
 ones whose answer was fixed by configuration. The graph now opens with a
 deterministic `route` step. A channel's one agent gets the turn with no model
 call on the host (`direct_call`); a message in a channel no single agent answers
-gets a fixed line, with no model call at all (`fixed`); and the ReAct agent runs
-only for turns that are the executing agent's own (`concierge`).
+gets a fixed line, with no model call at all (`fixed`); a message that calls
+another agent by name goes to that agent in its own channel, with a capsule of
+the conversation it came from (`handoff`, behind `HANDOFF_ENABLED`); and the
+ReAct agent runs only for turns that are the executing agent's own
+(`concierge`).
 
 Two things to know before editing:
 
@@ -20,6 +23,7 @@ Two things to know before editing:
    compiled without one, or the two would write the same thread from two levels.
 """
 import sys
+import time
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import AIMessage
@@ -29,7 +33,9 @@ from langgraph.prebuilt import create_react_agent
 from core.config.settings import Config
 from core.runtime.delegation import agent_header, prompt_to_text, safe_dispatch_custom_event, stream_delegate
 from core.runtime.foundation import events
-from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, decide
+from core.runtime.foundation.addressing import message_text
+from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, decide
+from core.runtime.history.handoff import capsule_for, with_capsule
 
 # What the `fixed` node answers: a message in a channel no single agent answers
 # (#general). Typed, it points at what #general is used for -- the agents' own
@@ -70,6 +76,11 @@ def fixed_reply(surface: str) -> str:
     return UNADDRESSED_TEXT
 
 
+def handoff_pointer(agent_config: dict, agent_id: str, channel: str) -> str:
+    """What the channel a hand-off came from shows: "→ 🔬 Ted has this in #topic-research"."""
+    return f"→ {agent_config.get('emoji', '🤖')} {agent_config.get('name', agent_id)} has this in #{channel}"
+
+
 def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, config=None, **kwargs):
     """Compiles the router in front of the conversational ReAct agent."""
     agent_config = config or {}
@@ -86,6 +97,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         messages = state.get("messages") or []
         latest = messages[-1].content if messages else ""
 
+        settings = Config()
         decision = decide(
             prompt=latest,
             agent_id=(ctx.agent_id if ctx else owner_agent_id),
@@ -93,11 +105,14 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             agent_config=agent_config,
             loader=AgentsLoader(),
             source=(ctx.source if ctx else ""),
-            llm_fallback=Config().routing_llm_fallback,
+            llm_fallback=settings.routing_llm_fallback,
+            handoffs=settings.handoff_enabled,
         )
 
         if decision.is_direct:
             print(f"[graphs.main] Routing to '{decision.agent_id}' ({decision.reason})")
+        elif decision.is_handoff:
+            print(f"[graphs.main] Handing off to '{decision.agent_id}' ({decision.reason})")
         elif decision.target == FIXED:
             print(f"[graphs.main] Fixed line ({decision.reason})")
 
@@ -105,6 +120,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             "route": decision.target,
             "route_agent_id": decision.agent_id,
             "route_reason": decision.reason,
+            "route_channel": decision.channel,
         }
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,6 +179,59 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
         return {"messages": [AIMessage(content=reply)]}
 
+    async def _handoff(state: Dict[str, Any]) -> Dict[str, Any]:
+        """Hands the message to the agent it names, in that agent's home channel.
+
+        The named agent answers on the session its own channel's messages use,
+        so the conversation continues there, and the message carries a capsule
+        of the one it came from (core/runtime/history/handoff.py), built
+        without a model. The readers of the stream (the Discord runner, voice)
+        learn of the move from the HANDOFF event and show the reply in that
+        channel; one that doesn't know the event shows it here. This turn's
+        own record -- the checkpoint, the host's log -- keeps the user's words
+        and the pointer, never the named agent's reply.
+        """
+        from core.runtime.foundation.context import try_context
+        from core.loaders.agents_loader import AgentsLoader
+
+        started = time.perf_counter()
+        ctx = try_context()
+        messages = state.get("messages") or []
+        user_prompt = messages[-1].content if messages else ""
+        target, home = state.get("route_agent_id"), state.get("route_channel")
+        loader = AgentsLoader()
+        target_config = loader.get_agent_config(target) or {}
+
+        source_channel = None
+        if ctx is not None:
+            source_channel = ctx.channel_obj if ctx.channel_obj is not None else ctx.channel_name
+        capsule = capsule_for(source_channel, loader=loader) if source_channel else ""
+        pointer = handoff_pointer(target_config, target, home)
+        await safe_dispatch_custom_event(events.ROUTE_HANDOFF, {
+            "agent_id": target,
+            "name": target_config.get("name", target),
+            "emoji": target_config.get("emoji", "🤖"),
+            "channel": home,
+            "pointer": pointer,
+            "request": message_text(user_prompt),
+        })
+        print(f"[graphs.main] Hand-off to '{target}' in #{home} ready in "
+              f"{(time.perf_counter() - started) * 1000:.0f} ms, with {len(capsule)} chars of context")
+
+        result = await stream_delegate(
+            agent_id=target,
+            prompt=with_capsule(user_prompt, capsule),
+            channel=home,
+            caller=(ctx.agent_id if ctx else owner_agent_id),
+        )
+        if not result.ok:
+            print(f"[graphs.main] Hand-off to '{target}' failed: {result.error}", file=sys.stderr)
+            return {"messages": [AIMessage(content=f"Could not hand this to `{target}`: {result.error}")]}
+
+        if ctx is not None:
+            _record_turn(ctx, user_prompt, pointer)
+        return {"messages": [AIMessage(content=pointer)]}
+
     async def _concierge(state: MessagesState, config_: Optional[dict] = None) -> Dict[str, Any]:
         """The ReAct behaviour, for turns that are this agent's own."""
         existing = state.get("messages") or []
@@ -174,21 +243,24 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         route: str
         route_agent_id: Optional[str]
         route_reason: str
+        route_channel: Optional[str]
 
     workflow = StateGraph(RouterState)
     workflow.add_node("route", _decide)
     workflow.add_node(DIRECT_CALL, _direct_call)
     workflow.add_node(FIXED, _fixed)
+    workflow.add_node(HANDOFF, _handoff)
     workflow.add_node(CONCIERGE, _concierge)
 
     workflow.add_edge(START, "route")
     workflow.add_conditional_edges(
         "route",
         lambda state: state.get("route") or CONCIERGE,
-        {DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, CONCIERGE: CONCIERGE},
+        {DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE},
     )
     workflow.add_edge(DIRECT_CALL, END)
     workflow.add_edge(FIXED, END)
+    workflow.add_edge(HANDOFF, END)
     workflow.add_edge(CONCIERGE, END)
 
     return workflow.compile(checkpointer=checkpointer)
