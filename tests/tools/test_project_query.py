@@ -7,7 +7,7 @@ import json
 from tools.project_query import project_query
 from tests.helpers import execution_context
 from core.storage.projects import ProjectsStore
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class TestProjectQueryTool(unittest.TestCase):

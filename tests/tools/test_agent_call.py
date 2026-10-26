@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from core.runtime.delegation import DelegationResult
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from tools.agent_call import agent_call
 
 

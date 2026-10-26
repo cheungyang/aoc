@@ -1,6 +1,6 @@
 from core.loaders.agents_loader import AgentsLoader
 from core.channel.discord.runner import BotRunner
-from core.util.config import Config
+from core.config.settings import Config
 
 class BotsLoader:
     _instance = None

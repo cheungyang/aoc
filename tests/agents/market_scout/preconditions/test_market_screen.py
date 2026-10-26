@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 from core.scheduler.preconditions import PreconditionError, build_precondition
 from core.scheduler.spec import Findings, Problems, ScheduleContext
-from core.util.config import Config
-from core.util.time_util import get_local_timezone
+from core.config.settings import Config
+from core.util.local_time import get_local_timezone
 from agents.market_scout.preconditions.market_screen import MarketScreen
 
 AGENT = "market-scout"

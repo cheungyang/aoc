@@ -30,7 +30,7 @@ from core.tooling import (
     require_permission,
     tool_grant,
 )
-from core.util.config import Config
+from core.config.settings import Config
 from tests.helpers import envelope, execution_context
 
 

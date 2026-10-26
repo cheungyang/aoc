@@ -130,7 +130,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         cache = os.path.join(tempfile.mkdtemp(), "owner__repo")
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(return_value=(0, "", ""))) as mock_run:
             root, error = await ensure_repo_available({"mode": "existing", "slug": "owner/repo"})
 
@@ -145,7 +145,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         os.makedirs(os.path.join(cache, ".git"))
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(return_value=(0, "", ""))) as mock_run:
             root, error = await ensure_repo_available({"mode": "existing", "slug": "owner/repo"})
 
@@ -160,7 +160,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         os.makedirs(os.path.join(cache, ".git"))
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(return_value=(1, "", "no network"))):
             root, error = await ensure_repo_available({"mode": "existing", "slug": "owner/repo"})
 
@@ -171,7 +171,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         cache = os.path.join(tempfile.mkdtemp(), "owner__repo")
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(return_value=(1, "", "repository not found"))):
             root, error = await ensure_repo_available({"mode": "existing", "slug": "owner/repo"})
 
@@ -183,7 +183,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         os.makedirs(os.path.join(cache, ".git"))
         # `gh repo view` succeeding means it is already there.
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(return_value=(0, "", ""))) as mock_run:
             root, error = await ensure_repo_available({"mode": "create", "slug": "owner/repo"})
 
@@ -197,7 +197,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         results = [(1, "", "not found")] + [(0, "", "")] * 5
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(side_effect=results)) as mock_run:
             root, error = await ensure_repo_available({"mode": "create", "slug": "owner/repo"})
 
@@ -212,7 +212,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
         results = [(1, "", "not found")] + [(0, "", "")] * 5
 
         with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
-             patch("core.util.git_ops.run_cmd_async",
+             patch("core.git.ops.run_cmd_async",
                    new=AsyncMock(side_effect=results)) as mock_run:
             await ensure_repo_available({"mode": "create", "slug": "owner/repo"})
 
@@ -221,7 +221,7 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
     async def test_a_failed_creation_stops_before_cloning(self):
         results = [(1, "", "not found"), (1, "", "name already taken")]
 
-        with patch("core.util.git_ops.run_cmd_async", new=AsyncMock(side_effect=results)):
+        with patch("core.git.ops.run_cmd_async", new=AsyncMock(side_effect=results)):
             root, error = await ensure_repo_available({"mode": "create", "slug": "owner/repo"})
 
         self.assertEqual(root, "")

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from core.prompts.base import Prompt
-from core.util.time_util import format_timezone_label, get_local_now
+from core.util.local_time import format_timezone_label, get_local_now
 
 
 class FormattingPrompt(Prompt):
@@ -202,7 +202,7 @@ def get_tool_rules_prompt(agent_id: str) -> str:
 
 def user_path(agent_id: str) -> str:
     """`<pkm>/agents/<agent_id>/USER.md`: the agent's one USER.md, about its human. It never enters the repo."""
-    from core.util.config import Config
+    from core.config.settings import Config
 
     return os.path.join(Config().pkm_dir, "agents", agent_id, "USER.md")
 

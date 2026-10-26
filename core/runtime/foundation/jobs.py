@@ -6,7 +6,7 @@ import os
 import json
 from core.runtime.foundation.context import ExecutionContext
 from core.storage.jobs import JobsStore
-from core.util.config import Config
+from core.config.settings import Config
 
 
 # Jobs that are still in flight. Rows stuck here past a max age are reaped.

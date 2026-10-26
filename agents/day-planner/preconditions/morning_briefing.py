@@ -16,7 +16,7 @@ class MorningBriefing(Scan):
     def scan(self, ctx: ScheduleContext, report: Report) -> WorkDecision:
         from datetime import datetime
 
-        from core.util.time_util import get_local_timezone
+        from core.util.local_time import get_local_timezone
         from agents.day_planner.lib.briefing import build_briefing
         from agents.day_planner.lib.rules import RULES
 

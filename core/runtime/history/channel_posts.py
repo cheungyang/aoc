@@ -30,6 +30,7 @@ from langchain_core.messages import AIMessage
 
 from core.channel.names import channel_name
 from core.runtime.foundation.routing import channel_hosts_for, decide
+from core.util.local_time import get_local_now
 
 # A script can dump a lot of output; the channel already shows all of it, so
 # the session only needs enough to know what the post was about.
@@ -74,8 +75,6 @@ def reply_sessions(channel: Any, loader: Any = None) -> list:
 
 def format_post(text: str, origin: str, posted_at: Optional[Any] = None) -> str:
     """The attributed body stored in the session."""
-    from core.util.time_util import get_local_now
-
     posted_at = posted_at or get_local_now()
     body = text.strip()
     if len(body) > MAX_RECORDED_CHARS:

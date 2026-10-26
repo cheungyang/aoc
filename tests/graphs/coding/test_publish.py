@@ -10,7 +10,7 @@ thirty minutes. It also refuses to open a PR for a commit verify did not pass.
 import time
 from unittest.mock import AsyncMock, patch
 
-from core.util.privacy_guard import NotesMissing
+from core.git.privacy import NotesMissing
 from graphs.coding.nodes.publish import MAX_PUBLISH_ATTEMPTS, NOT_CHECKED, WITHHELD, publish_node
 from tests.graphs.coding.fixtures import ManifestFixture, _task as _base_task
 

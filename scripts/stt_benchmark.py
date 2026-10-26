@@ -411,7 +411,7 @@ def render(runs: List[CaseRun], meta: Dict) -> str:
 # --- main -----------------------------------------------------------------------------
 
 async def run(args) -> int:
-    from core.util.config import Config
+    from core.config.settings import Config
     from core.voice.engines.stt import SpeechRecognizer
     from tts_benchmark import API_KEY_ENV_VAR, Options, make_chirp_client
 

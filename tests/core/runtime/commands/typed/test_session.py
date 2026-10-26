@@ -81,7 +81,7 @@ class TestSessionCommands(unittest.IsolatedAsyncioTestCase):
     @patch('core.knowledge.memory.sqlite_checkpointer.SqliteCheckpointer.get_tuple')
     async def test_compact(self, mock_get_tuple, mock_put, mock_worker):
         from langchain_core.messages import HumanMessage
-        from core.util.config import Config
+        from core.config.settings import Config
         Config().context_window_messages = 5
         mock_tuple = MagicMock()
         mock_tuple.config = {"configurable": {"thread_id": "test:discord:general"}}

@@ -23,7 +23,7 @@ class TestPaths(unittest.TestCase):
         self.assertEqual(normalize_path(""), "")
 
     @patch('os.path.exists')
-    @patch('core.util.config.Config')
+    @patch('core.config.settings.Config')
     def test_normalize_project_path_with_pkm_dir(self, mock_config, mock_exists):
         mock_instance = MagicMock()
         mock_instance.pkm_dir = "/mock/pkm"

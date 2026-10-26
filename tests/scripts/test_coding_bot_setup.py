@@ -6,9 +6,9 @@ whole product: 0 must mean "the graph can push and open PRs as this account",
 and nothing weaker. A false 0 here is expensive, because the next failure
 surfaces after an LLM has already written a diff.
 
-The other contract is secrecy. `push_identity` deliberately hides the token from
-`repr()`; this script prints an identity summary, so it is exactly the place a
-token would leak into a terminal or a scrollback buffer.
+The other contract is secrecy. `PushIdentity` (core/git/identity.py) deliberately
+hides the token from `repr()`; this script prints an identity summary, so it is
+exactly the place a token would leak into a terminal or a scrollback buffer.
 """
 import importlib.util
 import io
@@ -18,7 +18,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.util.push_identity import PushIdentity
+from core.git.identity import PushIdentity
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SCRIPT_PATH = os.path.join(PROJECT_ROOT, "scripts", "coding_bot_setup.py")

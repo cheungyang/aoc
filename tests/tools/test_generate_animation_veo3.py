@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.generate_animation_veo3 import generate_animation_veo3
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestGenerateAnimationVeo3Tool(unittest.IsolatedAsyncioTestCase):
 

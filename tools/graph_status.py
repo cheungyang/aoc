@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 from core.loaders.graphs_loader import GraphsLoader
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 def _coding_queue_status() -> str:
     """The coding graph's status, read from the manifests rather than a checkpoint.

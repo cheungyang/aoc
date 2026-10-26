@@ -3,7 +3,7 @@ from datetime import date, datetime
 from unittest import mock
 from zoneinfo import ZoneInfo
 
-from core.util.config import Config
+from core.config.settings import Config
 from tests.agents.day_planner import NEW_DAILY_NOTE, PlanningCase
 from tests.helpers import envelope, execution_context
 from agents.day_planner.tools.day_briefing import day_briefing

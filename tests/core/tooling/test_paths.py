@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from core.tooling import display_path, pkm_path
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class TestPaths(unittest.TestCase):

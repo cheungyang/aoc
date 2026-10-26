@@ -8,7 +8,7 @@ import base64
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.generate_animation_runway import generate_animation_runway
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestGenerateAnimationRunwayTool(unittest.IsolatedAsyncioTestCase):
 

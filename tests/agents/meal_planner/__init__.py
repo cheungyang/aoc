@@ -13,8 +13,8 @@ import unittest
 from datetime import date, datetime
 from unittest.mock import patch
 
-from core.util.config import Config
-from core.util.time_util import get_local_timezone
+from core.config.settings import Config
+from core.util.local_time import get_local_timezone
 
 TODAY = date(2026, 10, 16)
 

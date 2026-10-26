@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.util.privacy_guard import NotesMissing
+from core.git.privacy import NotesMissing
 from graphs.coding.utils import outgoing
 
 NOTE = "The blue heron waited by the canal until the ferry bell rang twice.\n"

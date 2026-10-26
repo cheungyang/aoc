@@ -93,7 +93,7 @@ class TestNodeSeparation(unittest.TestCase):
             for path in pathlib.Path(root).rglob("*.py")
             if "commit_and_push(" in path.read_text(encoding="utf-8")
         )
-        self.assertEqual(callers, ["core/util/git_ops.py", "graphs/coding/nodes/push.py"])
+        self.assertEqual(callers, ["core/git/ops.py", "graphs/coding/nodes/push.py"])
 
 
 class TestTickEndToEnd(ManifestFixture):

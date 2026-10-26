@@ -10,7 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools import gog as gog_module
 from tools.gog import GogError, gog
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestGogTool(unittest.TestCase):
 
@@ -158,7 +158,7 @@ class TestGogTool(unittest.TestCase):
         mock_result.returncode = 0
         mock_run.return_value = mock_result
 
-        from core.util.config import Config
+        from core.config.settings import Config
         cfg = Config()
         cfg.gog_keyring_password = "configured_password"
 

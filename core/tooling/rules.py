@@ -84,7 +84,7 @@ class Rule:
 def rules_path(agent_id: str, pkm_dir: Optional[str] = None) -> str:
     """Where `agent_id`'s RULES.md lives: `pkm/agents/<agent_id>/RULES.md`."""
     if pkm_dir is None:
-        from core.util.config import Config
+        from core.config.settings import Config
 
         pkm_dir = Config().pkm_dir
     return os.path.join(pkm_dir, "agents", agent_id, RULES_FILE)

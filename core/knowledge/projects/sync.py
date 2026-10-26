@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from core.knowledge.projects.parser import parse_project_file
 from core.storage.projects import ProjectsStore
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def get_pkm_dir() -> str:

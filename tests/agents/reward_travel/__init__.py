@@ -67,7 +67,7 @@ class CardFilesCase(unittest.TestCase):
     """A temp PKM with the card files in wallet/credit-card/, set as Config().pkm_dir."""
 
     def setUp(self):
-        from core.util.config import Config
+        from core.config.settings import Config
 
         self._tmp = tempfile.TemporaryDirectory()
         self.pkm = self._tmp.name

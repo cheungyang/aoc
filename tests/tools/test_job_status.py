@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.job_status import job_status
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestJobStatusTool(unittest.TestCase):
 

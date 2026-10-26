@@ -9,8 +9,8 @@ from core.channel.discord import ownership as own
 from core.channel.discord.ownership import DEV, MANUAL, PROD, Event, Ownership, parse
 
 T0 = datetime.datetime(2026, 9, 30, 12, 0, tzinfo=datetime.timezone.utc)
-# Made up, and set for every test here: config.py loads .env at import, so
-# reading the real value would make these tests depend on the machine.
+# Made up, and set for every test here: core/config/settings.py loads .env at
+# import, so reading the real value would make these tests depend on the machine.
 CONTROL = "123456789012345678"
 _control_env = patch.dict(os.environ, {"CONTROL_THREAD_ID": CONTROL})
 

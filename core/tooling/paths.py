@@ -9,7 +9,7 @@ def pkm_path(*parts: str) -> str:
 
     Raises ValueError for a path that would leave the PKM (an absolute part, `..`).
     """
-    from core.util.config import Config
+    from core.config.settings import Config
 
     root = os.path.abspath(Config().pkm_dir)
     path = os.path.abspath(os.path.join(root, *parts))
@@ -26,7 +26,7 @@ def display_path(path: str) -> str:
     """
     if not path or not os.path.isabs(path):
         return path
-    from core.util.config import Config
+    from core.config.settings import Config
 
     real = os.path.realpath(path)
     for root, prefix in ((os.path.realpath(Config().pkm_dir), "pkm"), (os.path.realpath(PROJECT_ROOT), "")):

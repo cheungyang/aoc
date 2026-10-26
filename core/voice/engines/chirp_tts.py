@@ -13,8 +13,8 @@ import queue
 import threading
 from typing import Callable, List, Optional
 
-from core.util.config import Config
-from core.util.error_util import format_error_message
+from core.config.settings import Config
+from core.util.errors import format_error_message
 from core.voice.foundation import settings
 
 _client = None

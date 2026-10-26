@@ -5,20 +5,10 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.util.error_util import (
-    format_tool_response,
-    format_error_message,
-    is_service_error,
-)
+from core.util.errors import format_error_message, is_service_error
 
 
 class TestErrorUtil(unittest.TestCase):
-
-    def test_format_tool_response(self):
-        response = format_tool_response("test_tool", "test_payload", "test_errors")
-        self.assertIn("<test_tool_response>", response)
-        self.assertIn("<payload>test_payload</payload>", response)
-        self.assertIn("<errors>test_errors</errors>", response)
 
     def test_format_error_message(self):
         # Google 503 UNAVAILABLE format
@@ -116,7 +106,7 @@ class TestUnreachableLocalLlm(unittest.TestCase):
     """
 
     def setUp(self):
-        from core.util.config import Config
+        from core.config.settings import Config
 
         self.config = Config()
         self.config.local_llm_base_url = "http://localhost:9379/v1"

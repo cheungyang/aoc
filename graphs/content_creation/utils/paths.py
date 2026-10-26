@@ -27,7 +27,7 @@ def normalize_path(path: Optional[str]) -> str:
     norm = os.path.normpath(str(path).strip())
     if not os.path.isabs(norm):
         try:
-            from core.util.config import Config
+            from core.config.settings import Config
             pkm_dir = Config().pkm_dir
             if pkm_dir:
                 cand = os.path.join(pkm_dir, norm)

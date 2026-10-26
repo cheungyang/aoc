@@ -57,7 +57,7 @@ def _backend(handle: Any = None):
 
 def get_knowledge_db_path() -> str:
     """Returns the configured store directory, defaulting to ~/pkm/.lancedb."""
-    from core.util.config import Config
+    from core.config.settings import Config
     return Config().knowledge_db_path
 
 
@@ -109,7 +109,7 @@ def init_knowledge_db(
 ) -> StoreHandle:
     """Opens (or creates) the vault chunk store and returns a handle to it."""
     if dim is None:
-        from core.util.config import Config
+        from core.config.settings import Config
         dim = Config().embedding_dimensions
 
     backend = _backend()

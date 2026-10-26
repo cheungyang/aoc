@@ -8,7 +8,7 @@ from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core.storage.base import Row, Store
 from core.storage.util import placeholders
-from core.util.config import Config
+from core.config.settings import Config
 
 _COLUMNS = ("job_id", "agent_id", "session_id", "started", "updated", "status", "prompt")
 

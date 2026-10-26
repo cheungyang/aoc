@@ -21,7 +21,7 @@ class HaAudit(Scan):
     type_name = "ha_audit"
 
     def scan(self, ctx: ScheduleContext, report: Report) -> WorkDecision:
-        from core.util.time_util import get_local_timezone
+        from core.util.local_time import get_local_timezone
         from agents.home_steward.lib.homeassistant import audit
 
         since = ctx.last_success_at

@@ -14,6 +14,8 @@ renders the envelope from it:
     </tool_name_response>
 
 Status and issues come first, so they survive when a long payload is cut.
+Shared tools (tools/) have no Report: `format_tool_response` renders theirs,
+the same envelope with only the payload and errors.
 
 - `ok`: everything the tool needed was read.
 - `partial`: something optional couldn't be read (`report.problem`), or some
@@ -132,7 +134,7 @@ class Report:
         """Notes a source read, for explain mode. A file path adds the file's modified time."""
         modified = None
         if source and os.path.isabs(source) and os.path.exists(source):
-            from core.util.time_util import get_local_timezone
+            from core.util.local_time import get_local_timezone
 
             mtime = datetime.fromtimestamp(os.path.getmtime(source), get_local_timezone())
             modified = mtime.strftime("%Y-%m-%d %H:%M")
@@ -204,3 +206,11 @@ def render_envelope(tool_name: str, report: Report, payload: str = "", errors: O
         f"</{tool_name}_response>",
     ]
     return "\n".join(parts)
+
+
+def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> str:
+    """The envelope a shared tool (tools/) returns: no Report, so only the payload and errors."""
+    return f"""<{tool_name}_response>
+  <payload>{payload}</payload>
+  <errors>{errors}</errors>
+</{tool_name}_response>"""

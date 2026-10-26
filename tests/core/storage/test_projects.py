@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from core.storage import base
 from core.storage.projects import ProjectsStore
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class TestProjectDb(unittest.TestCase):
@@ -236,13 +236,8 @@ class TestProjectsSchema(unittest.TestCase):
             self.assertEqual(self.store.count_with_status("done", conn=conn), 0)
 
     def test_the_default_path_is_the_config_one(self):
-        config = Config()
-        saved = config._projects_db_path  # the override, not the env default
-        config.projects_db_path = "/tmp/elsewhere/projects.db"
-        try:
+        with Config().overriding(projects_db_path="/tmp/elsewhere/projects.db"):
             self.assertEqual(ProjectsStore().path, "/tmp/elsewhere/projects.db")
-        finally:
-            config._projects_db_path = saved
 
     def test_reads_work_over_a_read_only_connection(self):
         self.store.init()

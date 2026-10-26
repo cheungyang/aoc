@@ -7,7 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import ANY, patch
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.util.fx import FxError, Rate
 from tests.helpers import envelope, execution_context
 from agents.receipt_processor.tools import ledger_append as module

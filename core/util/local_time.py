@@ -1,4 +1,11 @@
-"""Local wall-clock time and UTC, DST-safe.
+"""The user's local time: their zone and "now", and DST-safe conversions.
+
+The process normally runs inside the Docker container, whose system clock is
+UTC. Anything that called `datetime.now()` therefore spoke UTC while the human
+reading the output lives in PST/PDT -- visible as the agent claiming "today" was
+already tomorrow for the whole evening, and as cron schedules firing 7-8 hours
+early. These helpers resolve the user's zone from config so callers get wall
+clock time the user recognises regardless of where the process runs.
 
 The model speaks local time ("Saturday, 9 to 1"); Google Calendar wants an
 instant. Converting by hand is where daylight saving bites: in Los Angeles,
@@ -8,8 +15,51 @@ Sun Nov 1 2026 has 25 hours and 01:30 happens twice, and Sun Mar 14 2027 has
 import re
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Optional, Tuple, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from core.config.settings import Config
 
 _LOCAL_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$")
+
+
+def get_local_timezone() -> tzinfo:
+    """Timezone every user-facing date/time should be expressed in."""
+    tz_name = None
+    try:
+        tz_name = Config().timezone
+    except Exception:
+        pass
+
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+
+    # Last resort: the host's own zone, resolved to a fixed offset so callers
+    # still get an aware datetime rather than a silently naive one.
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+def get_local_now() -> datetime:
+    """Current time as an aware datetime in the user's timezone."""
+    return datetime.now(get_local_timezone())
+
+
+def format_timezone_label(now: datetime = None) -> str:
+    """Human/LLM readable zone label, e.g. 'America/Los_Angeles (PDT, UTC-07:00)'.
+
+    Includes the numeric offset because that, not the abbreviation, is what
+    lets a reader convert a UTC timestamp without knowing the DST rules.
+    """
+    if now is None:
+        now = get_local_now()
+
+    abbr = now.strftime("%Z") or "UTC"
+    offset = now.strftime("%z") or "+0000"
+    offset_label = f"UTC{offset[:3]}:{offset[3:]}"
+    name = str(getattr(now.tzinfo, "key", "") or abbr)
+    return f"{name} ({abbr}, {offset_label})"
 
 
 class LocalTimeError(ValueError):

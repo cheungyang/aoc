@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.util.models import TRANSCRIBE_LIVE
+from core.config.models import TRANSCRIBE_LIVE
 from core.voice.foundation import settings
 from core.voice.engines.stt import SpeechRecognizer
 from core.voice.foundation.utterance import Utterance

@@ -6,7 +6,7 @@ import unittest
 
 from agents.market_scout.lib.tickers import followed_tickers, list_path, parse_list, requested_tickers
 from core.tooling import Report, ToolError
-from core.util.config import Config
+from core.config.settings import Config
 
 PORTFOLIO = "# Stock Portfolio\n\n- KO\n- PEP\n- IBM\n"
 WATCHLIST = "# Watchlist\n\n- XOM\n- CAT\n- JNJ\n- WMT\n- F\n- PEP\n"

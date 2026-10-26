@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.filesystem import filesystem
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from tests.helpers import execution_context, make_context
 
 class TestFilesystemTool(unittest.TestCase):

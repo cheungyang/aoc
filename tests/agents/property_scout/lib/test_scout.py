@@ -166,7 +166,7 @@ class TestRunScreen(PkmCase):
 
     def test_a_missing_key_fails_before_any_request(self):
         zillow = FakeZillow().install(self)
-        from core.util.config import Config
+        from core.config.settings import Config
         Config().rapidapi_key = ""
         with self.assertRaisesRegex(ValueError, "RAPIDAPI_KEY"):
             run_screen(self.report)

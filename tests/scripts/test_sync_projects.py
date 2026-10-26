@@ -13,7 +13,7 @@ spec = importlib.util.spec_from_file_location("sync_projects_script", script_pat
 sp_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sp_module)
 
-from core.util.config import Config  # noqa: E402
+from core.config.settings import Config  # noqa: E402
 
 
 class TestSyncProjectsScript(unittest.TestCase):

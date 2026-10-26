@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from core.util.config import Config
+from core.config.settings import Config
 from tests.helpers import envelope, execution_context
 from tools.gog import GogError
 from agents.excursion_planner.tools.weekend_availability import weekend_availability

@@ -212,7 +212,7 @@ class TestIsolation:
         from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
         from core.runtime.foundation.jobs import JobManager
         from core.storage.sessions import SessionStore
-        from core.util.config import Config
+        from core.config.settings import Config
         db = isolate_sessions(str(tmp_path / "replay"))
         assert SessionStore().path == db
         assert SqliteCheckpointer().store.path == db

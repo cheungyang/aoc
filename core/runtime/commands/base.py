@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional, Tuple
 
 from core.runtime.commands.ports import ControlThread, Say, SpokenTurn, VoiceControls
 from core.runtime.foundation.context import ExecutionContext
-from core.util.message_util import safe_chunks
+from core.channel.chunks import safe_chunks
 
 # Where a typed command is for, as `!help` groups them.
 CHANNEL = "channel"

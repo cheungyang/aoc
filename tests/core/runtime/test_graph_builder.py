@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.runtime.agent import Agent
-from core.util import Config
+from core.config.settings import Config
 from tests.helpers import make_context
 
 class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
@@ -233,7 +233,7 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
      @patch('core.runtime.graph_builder.SqliteCheckpointer')
      async def test_build_graph_local_provider(self, mock_sqlite_checkpointer, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
           """A tier under provider: local resolves to the on-device model."""
-          from core.util import models
+          from core.config import models
 
           mock_tool1, mock_openai, mock_openai_class = self._local_provider_mocks(
               mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt

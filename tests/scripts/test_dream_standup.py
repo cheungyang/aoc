@@ -19,8 +19,8 @@ from core.knowledge.memory import dream_ops, store
 from core.knowledge.memory import state as mstate
 from core.knowledge.memory.entries import PRIVATE, PROFILE, Entry, MemoryFile
 from core.runtime.delegation import DelegationResult
-from core.util import format_tool_response
-from core.util.config import Config
+from core.tooling import format_tool_response
+from core.config.settings import Config
 from scripts import dream_standup as ds
 from scripts.dream_standup import (
     build_compaction_prompt,

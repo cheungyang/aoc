@@ -36,7 +36,7 @@ COVERED_MODULES = [
 ]
 
 # Test files live flat under here regardless of the module's subpackage.
-TEST_DIRS = ["tests/graphs/coding", "tests/scripts", "tests/core/util"]
+TEST_DIRS = ["tests/graphs/coding", "tests/scripts", "tests/core/git"]
 
 EXEMPT = {
     # Package markers hold no logic.

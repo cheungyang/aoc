@@ -19,7 +19,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from core.storage.base import Store
 from core.storage.util import placeholders
-from core.util.config import Config
+from core.config.settings import Config
 
 # Every row is skipped, and never mentioned, 24 hours after its post.
 TTL_S = 24 * 3600

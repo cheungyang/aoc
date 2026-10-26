@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 
 from core.tooling import Report
-from core.util.config import Config
+from core.config.settings import Config
 from tests.agents.fitness_coach.lib.workout_fixture import NOW, ExerciseDir
 from agents.fitness_coach.lib.rules import defaults
 from agents.fitness_coach.lib.workout_data import load_data

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core.util.push_identity import (
+from core.git.identity import (
     PushIdentity,
     PushIdentityError,
     TOKEN_ENV_VAR,

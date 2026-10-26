@@ -8,7 +8,7 @@
       "agents": ["@manage"],
       "pkm/agents": ["@manage"],
       "pkm/wiki/memory/TAGS.md": ["@read"],
-      "core/util/models.py": ["@read"],
+      "core/config/models.py": ["@read"],
       "core/voice/foundation/settings.py": ["@read"]
     },
     "set_thinking": {},

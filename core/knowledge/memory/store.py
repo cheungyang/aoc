@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 from core.knowledge.memory.entries import (
     FEEDBACK, PRIVATE, PROFILE, Entry, MemoryFile, TagsError, format_file, parse_file, parse_tags,
 )
-from core.util.config import Config
+from core.config.settings import Config
 
 BUDGET_PROFILE = 2000
 BUDGET_TOPIC = 1000

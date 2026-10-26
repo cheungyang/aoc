@@ -9,7 +9,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.job_kill import job_kill
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestJobKillTool(unittest.TestCase):
 

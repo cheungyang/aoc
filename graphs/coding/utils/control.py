@@ -24,7 +24,7 @@ from graphs.coding.utils.repo import (
     project_root,
     resolve_repo_root,
 )
-from core.util import git_ops
+from core.git import ops as git_ops
 
 # What a reset wipes. Keeping the list in one place is what stops a reset from
 # leaving a digest behind that would make the next tick skip the implement.

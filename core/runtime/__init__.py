@@ -30,9 +30,11 @@ Rules:
      core.scheduler, graphs, tools, scripts). Adapters import the runtime.
   2. Inside the runtime, imports point down the layers above.
   3. The packages the runtime builds on (core.prompts, loaders, storage,
-     knowledge, util, tooling, permissions, channel) import nothing above
-     them: no adapter, and from the runtime only core.runtime.foundation.
-     When one of them has to call up, it declares a port and bootstrap fills it.
+     knowledge, tooling, permissions, channel, util, config), and core.git,
+     import nothing above them: no adapter, and from the runtime only
+     core.runtime.foundation. When one of them has to call up, it declares a
+     port and bootstrap fills it. config, util and git are stricter still:
+     see their __init__.py.
   4. A package __init__.py is a docstring: no imports, no side effects.
   5. An import inside a function is for an optional heavy dependency, never to
      dodge a cycle.

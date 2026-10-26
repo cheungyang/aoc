@@ -18,7 +18,7 @@ from graphs.coding.utils.digest import compute_worktree_digest, digest_matches
 from graphs.coding.utils.token_opt import sanitize_traceback
 from graphs.coding.utils.worker import call_worker
 from graphs.coding.utils.xml_parsers import parse_worker_handoff_xml
-from core.util import git_ops
+from core.git import ops as git_ops
 
 MAX_IMPLEMENT_ATTEMPTS = 3
 

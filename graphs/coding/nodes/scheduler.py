@@ -25,7 +25,7 @@ from graphs.coding.utils.preflight import preflight_tick
 from graphs.coding.utils.repo import ensure_repo_available, get_repo_descriptor
 from graphs.coding.utils.sandbox import resolve_backend
 from graphs.coding.utils.shell import run_in_worktree
-from core.util import git_ops
+from core.git import ops as git_ops
 
 # Routes the scheduler can emit. `done` ends the tick.
 ROUTE_IMPLEMENT = "implement"

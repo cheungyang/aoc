@@ -7,8 +7,8 @@ a full implementation run that dies at the push — the failure mode that produc
 """
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.util import git_ops
-from core.util.push_identity import PushIdentity
+from core.git import ops as git_ops
+from core.git.identity import PushIdentity
 from graphs.coding.utils.repo import resolve_push_identity
 from graphs.coding.utils.worker import WORKER_AGENT_ID, worker_session
 

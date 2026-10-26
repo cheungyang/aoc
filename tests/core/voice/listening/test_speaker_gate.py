@@ -148,7 +148,7 @@ def test_a_missing_or_broken_voiceprint_is_none(tmp_path):
 
 
 def test_the_voiceprint_lives_beside_memory_db_unless_told_otherwise(monkeypatch, tmp_path):
-    from core.util.config import Config
+    from core.config.settings import Config
     assert sg.voiceprint_path() == os.path.join(os.path.dirname(Config().memory_db_path),
                                                 "voice", "voiceprint.json")
     monkeypatch.setenv("AOC_VOICE_DATA_DIR", str(tmp_path))

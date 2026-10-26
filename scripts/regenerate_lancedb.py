@@ -45,7 +45,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.knowledge.vector.db import (
     init_knowledge_db,
     build_fts_index,

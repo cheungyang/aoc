@@ -13,7 +13,7 @@ import tempfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from core.util.config import Config
+from core.config.settings import Config
 from agents.fitness_coach.lib.exercise_library import GROUPS
 
 TZ = ZoneInfo("America/Los_Angeles")

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from datetime import date
 
-from core.util.config import Config
+from core.config.settings import Config
 
 TODAY = date(2026, 10, 16)  # a Friday in ISO week 42 and vault week 42
 

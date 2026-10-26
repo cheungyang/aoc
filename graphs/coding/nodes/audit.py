@@ -21,7 +21,7 @@ from graphs.coding.utils.repo import get_repo_descriptor
 from graphs.coding.utils.token_opt import sanitize_diff
 from graphs.coding.utils.worker import call_worker
 from graphs.coding.utils.xml_parsers import parse_critic_verdict_xml
-from core.util import git_ops
+from core.git import ops as git_ops
 
 
 async def audit_node(state: CodingState) -> Dict[str, Any]:

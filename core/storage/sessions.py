@@ -21,7 +21,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core.storage.base import Row, Store, load_schema
 from core.storage.util import ident, placeholders, table_exists, table_names, where_clause
-from core.util.config import Config
+from core.config.settings import Config
 
 PREFIX = "ctx_"
 # What archiving puts in a table's name: `<table>_archived_<epoch>`.

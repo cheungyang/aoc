@@ -8,7 +8,7 @@ import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.seats_aero import seats_aero
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 
 class TestSeatsAeroTool(unittest.TestCase):

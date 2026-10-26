@@ -7,7 +7,7 @@ import json
 from tools.task_query import task_query
 from tests.helpers import execution_context
 from core.storage.tasks import TasksStore
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def use_tasks_db(case: unittest.TestCase, path: str) -> None:

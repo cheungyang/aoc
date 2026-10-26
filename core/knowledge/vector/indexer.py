@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def extract_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:

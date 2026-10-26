@@ -4,8 +4,8 @@ import tempfile
 import unittest
 
 from core.tooling import FAILED, OK, PARTIAL, DataProblem, Report
-from core.tooling.report import MAX_ISSUES, render_envelope
-from core.util.config import Config
+from core.tooling.report import MAX_ISSUES, format_tool_response, render_envelope
+from core.config.settings import Config
 
 
 class TestReport(unittest.TestCase):
@@ -118,6 +118,17 @@ class TestEnvelope(unittest.TestCase):
         out = render_envelope("demo", report)
         self.assertIn("<status>failed</status>", out)
         self.assertIn("<issues>- pkm/criteria.md: names no state (required)</issues>", out)
+
+
+
+class TestSharedToolEnvelope(unittest.TestCase):
+    """format_tool_response: the envelope a shared tool returns, without a Report."""
+
+    def test_format_tool_response(self):
+        response = format_tool_response("test_tool", "test_payload", "test_errors")
+        self.assertIn("<test_tool_response>", response)
+        self.assertIn("<payload>test_payload</payload>", response)
+        self.assertIn("<errors>test_errors</errors>", response)
 
 
 if __name__ == "__main__":

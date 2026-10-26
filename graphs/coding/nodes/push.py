@@ -36,8 +36,8 @@ from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils import outgoing
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
-from core.util import git_ops, privacy_guard
-from core.util.config import Config
+from core.git import ops as git_ops, privacy as privacy_guard
+from core.config.settings import Config
 
 MAX_PUSH_ATTEMPTS = 3
 # Hits listed in the tick report; the manifest and the worker get up to

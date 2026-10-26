@@ -5,7 +5,7 @@ import unittest
 
 from core.tooling import Report, Rule, load_rules, render_rules_file, rules_path
 from core.tooling.rules import coerce, read_rules_text, rule_keys
-from core.util.config import Config
+from core.config.settings import Config
 
 RULES = (
     Rule("move_pct", 4.0, "price move, in %, that triggers research"),

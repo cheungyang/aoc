@@ -1,6 +1,6 @@
 """HTTP access to Home Assistant.
 
-Two rules shape this module, mirroring `core.util.push_identity`:
+Two rules shape this module, mirroring `core.git.identity`:
 
 1. The token never enters the repository's history, the environment, a log line,
    a URL or an exception message. It is read from an untracked file that both git
@@ -31,7 +31,7 @@ import requests
 # Reading os.environ straight would work inside the running app -- something else
 # always imports Config first -- but would fail for any script, probe or test that
 # imports this module on its own, which is a trap worth closing here.
-from core.util.config import Config
+from core.config.settings import Config
 
 # The token sits at the project root: one file serves both the host and, through
 # the `.:/app` bind mount, the container at /app/home_assistant_token. Living

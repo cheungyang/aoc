@@ -17,7 +17,7 @@ from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
 from core.channel.inbox import mark_read, record_reply
-from core.util import format_error_message
+from core.util.errors import format_error_message
 from core.voice.briefing.hook import VoiceBriefing
 from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS
 from core.voice.room.connection import normalize_channel_name
@@ -36,7 +36,7 @@ def format_reply_context(author: str, posted_at, content: str) -> str:
     stamp = ""
     if posted_at is not None:
         try:
-            from core.util.time_util import get_local_timezone
+            from core.util.local_time import get_local_timezone
             stamp = posted_at.astimezone(get_local_timezone()).strftime("%Y-%m-%d %H:%M %Z")
         except Exception:
             stamp = str(posted_at)
@@ -352,7 +352,7 @@ class BotRunner:
             for attachment in attachments:
                 if attachment.content_type and attachment.content_type.startswith("image/"):
                     try:
-                        from core.util import compress_image_bytes
+                        from core.channel.discord.images import compress_image_bytes
                         image_data = await attachment.read()
                         compressed_data, content_type = compress_image_bytes(image_data, max_dim=1560, quality=80)
                         base64_image = base64.b64encode(compressed_data).decode('utf-8')

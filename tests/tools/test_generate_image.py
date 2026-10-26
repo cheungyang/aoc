@@ -7,7 +7,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.generate_image import generate_image
-from core.util import format_tool_response, IMAGE
+from core.tooling import format_tool_response
+from core.config.models import IMAGE
 
 class TestGenerateImageTool(unittest.IsolatedAsyncioTestCase):
 

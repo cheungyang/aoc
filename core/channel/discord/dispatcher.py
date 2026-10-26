@@ -4,7 +4,7 @@ from typing import Optional, List
 import discord
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
-from core.util import safe_chunks
+from core.channel.chunks import safe_chunks
 
 
 async def dispatch_discord_output(

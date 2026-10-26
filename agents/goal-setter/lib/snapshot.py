@@ -16,7 +16,7 @@ from core.storage import StoreMissing
 from core.storage.projects import ProjectsStore
 from core.storage.tasks import TasksStore
 from core.tooling import Report
-from core.util.config import Config
+from core.config.settings import Config
 
 
 @dataclass(frozen=True)

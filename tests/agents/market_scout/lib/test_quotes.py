@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 
 from core.tooling import Report, ToolError
-from core.util.config import Config
+from core.config.settings import Config
 from tests.tools.test_yfinance import _hist, _ticker, _today
 from agents.market_scout.lib.quotes import screen_quotes
 from agents.market_scout.lib.rules import RULES

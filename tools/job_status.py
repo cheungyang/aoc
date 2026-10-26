@@ -4,7 +4,7 @@ import re
 from langchain_core.tools import tool
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from core.storage.sessions import SessionStore
 from tools.agent_call import agent_call
 

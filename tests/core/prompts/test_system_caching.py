@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from core.prompts import system
-from core.util.config import Config
+from core.config.settings import Config
 from core.prompts.system import (
     get_agent_memory_prompt,
     get_agent_static_prompt,

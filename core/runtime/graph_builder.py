@@ -7,7 +7,8 @@ from core.loaders.tools_loader import ToolsLoader
 from langchain_core.messages import SystemMessage, convert_to_messages
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
-from core.util import Config, resolve_model
+from core.config.settings import Config
+from core.config.models import resolve_model
 from core.prompts.system import (
     get_agent_memory_prompt,
     get_agent_static_prompt,
@@ -17,7 +18,7 @@ from core.prompts.system import (
     get_tool_rules_prompt,
 )
 from core.prompts.voice import get_voice_mode_prompt
-from core.util.message_util import cap_tool_output
+from core.runtime.history.budget import cap_tool_output
 from langgraph.types import interrupt
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context

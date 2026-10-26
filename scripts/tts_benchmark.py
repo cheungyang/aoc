@@ -127,8 +127,8 @@ BASELINE = "edge"
 
 API_KEY_ENV_VAR = "GOOGLE_TTS_API_KEY"
 
-from core.util.models import TRANSCRIBE as TRANSCRIBE_MODEL  # noqa: E402
-from core.util.models import TTS_FLASH_LITE as GEMINI_TTS_MODEL  # noqa: E402
+from core.config.models import TRANSCRIBE as TRANSCRIBE_MODEL  # noqa: E402
+from core.config.models import TTS_FLASH_LITE as GEMINI_TTS_MODEL  # noqa: E402
 INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
 # The edge voice main spoke in before Chirp; also the fallback's female voice.
@@ -1080,7 +1080,7 @@ def classify_error(exc: BaseException) -> str:
 
 
 class Transcriber:
-    """The transcription model (core.util.models.TRANSCRIBE) over the Interactions API, for the pronunciation proxy."""
+    """The transcription model (core.config.models.TRANSCRIBE) over the Interactions API, for the pronunciation proxy."""
 
     def __init__(self, api_key: str, model: str = TRANSCRIBE_MODEL, timeout: float = 60.0):
         import httpx
@@ -1966,7 +1966,7 @@ def options_from_args(args: argparse.Namespace) -> Options:
     if not chirp3_voice(args.voice):
         raise SystemExit(f"--voice must be a Chirp 3: HD voice like {DEFAULT_VOICE}, got {args.voice!r}")
     # Importing Config loads .env, which is where both credentials are configured.
-    from core.util.config import Config
+    from core.config.settings import Config
     config = Config()
     return Options(
         candidates=candidates,

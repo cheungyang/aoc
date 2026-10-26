@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from core.storage import base
 from core.storage.tasks import TasksStore
-from core.util.config import Config
+from core.config.settings import Config
 
 COLUMNS = [
     "id", "title", "raw_title", "status", "priority", "priority_rank", "tags", "scheduled_date", "due_date",
@@ -89,13 +89,8 @@ class TestSchema(TasksCase):
             self.assertEqual([r[1] for r in conn.execute("PRAGMA table_info(tasks)")], ["status", "priority", "tags"])
 
     def test_the_default_path_is_the_config_one(self):
-        config = Config()
-        saved = config._tasks_db_path  # the override, not the env default
-        config.tasks_db_path = "/tmp/elsewhere/tasks.db"
-        try:
+        with Config().overriding(tasks_db_path="/tmp/elsewhere/tasks.db"):
             self.assertEqual(TasksStore().path, "/tmp/elsewhere/tasks.db")
-        finally:
-            config._tasks_db_path = saved
 
 
 class TestTasksStore(TasksCase):

@@ -4,9 +4,9 @@ from typing import Any, List, Optional, Union
 from langchain_core.tools import tool
 import requests
 
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from core.runtime.foundation.context import try_context
-from core.util.config import Config
+from core.config.settings import Config
 
 
 BASE_URL = "https://seats.aero/partnerapi"

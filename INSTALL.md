@@ -234,7 +234,7 @@ exactly.
 ### 3. Register the model as a tier
 
 Add the server's model id to `LOCAL_TIERS` in
-[`core/util/models.py`](core/util/models.py), mapping each tier to whichever
+[`core/config/models.py`](core/config/models.py), mapping each tier to whichever
 build serves that intent. With a single on-device model, all three point at it.
 The id stays here rather than in agent configs because it is a date-stamped
 build artifact specific to one machine's weights.

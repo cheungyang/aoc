@@ -25,7 +25,7 @@ from core.runtime.commands.ports import VoiceControls
 from core.runtime.commands.registry import SPOKEN
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.observability.turn_trace import Outcome, Stage, start_turn_trace
-from core.util.error_util import format_error_message
+from core.util.errors import format_error_message
 from core.voice.engines.stt import SpeechRecognizer
 from core.voice.foundation.utterance import Utterance
 from core.voice.listening.floor import Floor

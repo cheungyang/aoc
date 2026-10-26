@@ -38,7 +38,7 @@ from core.knowledge.memory import store
 from core.knowledge.memory.entries import (
     FEEDBACK, PRIVATE, PROFILE, SCOPE_TAGS, Entry, MemoryFile, clean_text, normalise, parse_tags,
 )
-from core.util.config import Config
+from core.config.settings import Config
 
 SOURCE_FILES = ("MEMORY.md", "FEEDBACK.md", "CONTEXT.md")
 

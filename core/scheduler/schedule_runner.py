@@ -52,10 +52,10 @@ from core.storage.schedule_state import ScheduleState
 from core.storage.sessions import CHECKPOINT_ENTRIES, SessionStore, sanitize_table_name
 from core.channel.inbox import record_push
 from core.storage.channel_inbox import Priority
-from core.util import safe_chunks
+from core.channel.chunks import safe_chunks
 from core.prompts.voice import scheduled_speech_scope
 from core.channel.discord.ownership import PROD, Ownership
-from core.util.time_util import get_local_now
+from core.util.local_time import get_local_now
 
 TICK_SECONDS = 30
 # Job statuses that mean the scheduled turn did not do its work.

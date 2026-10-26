@@ -25,7 +25,7 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
-from core.util import git_ops
+from core.git import ops as git_ops
 
 DEFAULT_APPROVAL_SIGNALS = ["merged_manually", "review_approved", "label:approved", "comment:/approve"]
 DEFAULT_REJECTION_SIGNALS = ["changes_requested", "comment:/reject", "comment:/abort"]

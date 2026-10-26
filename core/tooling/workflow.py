@@ -203,20 +203,15 @@ def contract_problems(doc: WorkflowDoc, tools: Mapping[str, Any], rules: Optiona
 @contextmanager
 def _empty_pkm():
     """Points the PKM and its databases at an empty temporary folder, then back."""
-    from core.util.config import Config
+    from core.config.settings import Config
 
-    config = Config()
-    settings = ("pkm_dir", "tasks_db_path", "projects_db_path", "projects_dir")
-    saved = {name: getattr(config, f"_{name}") for name in settings}  # the overrides, not the env defaults
     with tempfile.TemporaryDirectory(prefix="workflow-examples-") as tmp:
         pkm = os.path.join(tmp, "pkm")
         os.makedirs(pkm)
-        config.pkm_dir = pkm
-        config.tasks_db_path = os.path.join(pkm, "tasks.db")
-        config.projects_db_path = os.path.join(pkm, "projects.db")
-        config.projects_dir = os.path.join(pkm, "vault", "projects")
-        try:
+        with Config().overriding(
+            pkm_dir=pkm,
+            tasks_db_path=os.path.join(pkm, "tasks.db"),
+            projects_db_path=os.path.join(pkm, "projects.db"),
+            projects_dir=os.path.join(pkm, "vault", "projects"),
+        ):
             yield
-        finally:
-            for name, value in saved.items():
-                setattr(config, f"_{name}", value)

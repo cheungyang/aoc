@@ -12,7 +12,7 @@ words, and halts the task as `privacy` once the implement budget is spent.
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from core.util.privacy_guard import NotesMissing
+from core.git.privacy import NotesMissing
 from graphs.coding.nodes.implement import MAX_IMPLEMENT_ATTEMPTS
 from graphs.coding.nodes.push import MAX_PUSH_ATTEMPTS, push_node
 from graphs.coding.utils.outgoing import OutgoingCheck

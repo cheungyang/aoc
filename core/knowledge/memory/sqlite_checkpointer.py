@@ -23,7 +23,7 @@ from langgraph.checkpoint.base import (
 )
 
 from core.storage.sessions import SessionStore, sanitize_table_name
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class UnreconstructableError(RuntimeError):

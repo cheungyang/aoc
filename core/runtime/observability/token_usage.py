@@ -2,7 +2,7 @@ import time
 
 from core.runtime.foundation.context import ExecutionContext
 from core.runtime.observability.transcript import LoggingHandler
-from core.util.logging_util import extract_model_name
+from core.runtime.observability.log_format import extract_model_name
 
 
 class TokenUsageHandler(LoggingHandler):

@@ -6,7 +6,7 @@ from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.model.thinking import PICK_KEY, pick_thinking, resolve_thinking_level
 from core.runtime.observability.turn_trace import detach_turn_trace, start_turn_trace
-from core.util.models import GOOGLE_TIERS
+from core.config.models import GOOGLE_TIERS
 
 FLASH = GOOGLE_TIERS["FLASH"]
 PRO = GOOGLE_TIERS["PRO"]

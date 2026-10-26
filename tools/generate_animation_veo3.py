@@ -2,8 +2,8 @@ import os
 import asyncio
 from typing import Optional
 from langchain_core.tools import tool
-from core.util import format_tool_response
-from core.util.config import Config
+from core.tooling import format_tool_response
+from core.config.settings import Config
 
 @tool
 async def generate_animation_veo3(

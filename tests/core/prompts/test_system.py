@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.prompts.system import (
     get_knowledge_prompt,
     get_formatting_prompt,

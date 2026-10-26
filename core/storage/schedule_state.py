@@ -17,7 +17,7 @@ import time
 from typing import Any, Dict, Optional
 
 from core.storage.base import Store
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class ScheduleState(Store):

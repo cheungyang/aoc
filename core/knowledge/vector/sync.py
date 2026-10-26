@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, List, Optional, Set, Tuple
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.knowledge.vector.db import (
     init_knowledge_db,
     upsert_chunks,

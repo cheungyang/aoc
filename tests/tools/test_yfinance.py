@@ -9,7 +9,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from core.util.time_util import get_local_now
+from core.util.local_time import get_local_now
 from tools.yfinance import yfinance, _normalize_tickers, _quote
 
 

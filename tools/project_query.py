@@ -3,7 +3,7 @@ import sqlite3
 from typing import Optional, List
 from langchain_core.tools import tool
 from core.loaders.tools_loader import ToolsLoader
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from core.runtime.foundation.context import try_context
 from core.storage.projects import ProjectsStore
 from core.knowledge.projects.sync import sync_projects

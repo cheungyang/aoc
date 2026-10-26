@@ -34,7 +34,7 @@ if project_root not in sys.path:
 
 from core.knowledge.vector.db import get_knowledge_db_path, init_knowledge_db, scan_by_category
 from core.knowledge.vector.sync import WIKI_FOLDER_MARKER, wiki_scope
-from core.util.config import Config
+from core.config.settings import Config
 
 PENDING_FILE = os.path.join("wiki", "pending_lint.json")
 STATE_FILE = os.path.join("wiki", "lint_state.json")

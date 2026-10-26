@@ -165,14 +165,14 @@ class CoachingPkm:
 
     def use_as_config(self):
         """Points Config at this PKM; undo with reset_config()."""
-        from core.util.config import Config
+        from core.config.settings import Config
 
         config = Config()
         config.pkm_dir, config.projects_db_path, config.tasks_db_path = self.pkm_dir, self.projects_db, self.tasks_db
 
     @staticmethod
     def reset_config():
-        from core.util.config import Config
+        from core.config.settings import Config
 
         config = Config()
         config.pkm_dir = config.projects_db_path = config.tasks_db_path = None

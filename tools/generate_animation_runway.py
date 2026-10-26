@@ -4,8 +4,8 @@ import base64
 from typing import Optional
 import httpx
 from langchain_core.tools import tool
-from core.util import format_tool_response
-from core.util.config import Config
+from core.tooling import format_tool_response
+from core.config.settings import Config
 
 RUNWAY_API_BASE = os.getenv("RUNWAY_API_BASE", "https://api.dev.runwayml.com")
 RUNWAY_API_VERSION = os.getenv("RUNWAY_API_VERSION", "2024-11-06")

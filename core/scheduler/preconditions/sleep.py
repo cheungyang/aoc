@@ -31,7 +31,7 @@ class SleepLoggedToday(Precondition):
 
     @staticmethod
     def _tz():
-        from core.util.time_util import get_local_timezone
+        from core.util.local_time import get_local_timezone
         return get_local_timezone()
 
     @staticmethod

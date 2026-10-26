@@ -40,7 +40,7 @@ from core.scheduler.spec import (
     ScriptSchedule,
     SessionPolicy,
 )
-from core.util.models import THINKING_LEVELS
+from core.config.models import THINKING_LEVELS
 from core.storage.channel_inbox import Priority
 
 KINDS = (KIND_PROMPT, KIND_SCRIPT)

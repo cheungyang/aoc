@@ -28,7 +28,7 @@ class TestDeclaration(unittest.TestCase):
             build_precondition({"type": "projects_attention"}, agent_id="excursion-planner")
 
 
-@patch("core.util.time_util.get_local_timezone", return_value=LA)
+@patch("core.util.local_time.get_local_timezone", return_value=LA)
 class TestScan(unittest.TestCase):
 
     def setUp(self):

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from agents.day_planner.lib.briefing import build_briefing
 from core.tooling import Report
-from core.util.config import Config
+from core.config.settings import Config
 from tests.agents.day_planner import DAILY_NOTE, NEW_DAILY_NOTE, WEEKLY_FOCUS_NOTE, PlanningCase
 
 ZONE = ZoneInfo("America/Los_Angeles")

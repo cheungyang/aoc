@@ -1,6 +1,6 @@
 """Local guard: nothing personal in any file git would push.
 
-The two checks and their rules are in core/util/privacy_guard.py. The coding
+The two checks and their rules are in core/git/privacy.py. The coding
 graph runs the same checks before it pushes; here they run over this checkout.
 Check 1 (copied from the user's notes) runs where the PKM is and skips
 elsewhere; check 2 (patterns) runs everywhere.
@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.util.config import Config
-from core.util.privacy_guard import (
+from core.config.settings import Config
+from core.git.privacy import (
     PERSONAL_DIRS,
     SELF,
     NotesMissing,

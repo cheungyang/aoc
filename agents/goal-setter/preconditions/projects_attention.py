@@ -25,7 +25,7 @@ class ProjectsAttention(Scan):
     type_name = "projects_attention"
 
     def scan(self, ctx: ScheduleContext, report: Report) -> WorkDecision:
-        from core.util.time_util import get_local_timezone
+        from core.util.local_time import get_local_timezone
         from agents.goal_setter.lib.attention import project_context, rank_projects
         from agents.goal_setter.lib.rules import RULES
         from agents.goal_setter.lib.snapshot import load_snapshot

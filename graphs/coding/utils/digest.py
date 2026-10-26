@@ -15,7 +15,7 @@ plus untracked files — so:
 import hashlib
 from typing import Optional
 
-from core.util import git_ops
+from core.git import ops as git_ops
 
 
 async def compute_worktree_digest(workspace_path: str) -> Optional[str]:

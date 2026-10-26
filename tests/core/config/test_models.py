@@ -7,7 +7,7 @@ from pathlib import Path
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.util import models
+from core.config import models
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -168,7 +168,7 @@ class TestNoInlineModelNames(unittest.TestCase):
     """
 
     SEARCH_DIRS = ("core", "tools", "graphs", "scripts")
-    ALLOWED = {Path("core/util/models.py")}
+    ALLOWED = {Path("core/config/models.py")}
     PATTERN = re.compile(r"[\"']gemini-[0-9][^\"']*[\"']")
 
     def test_no_python_source_hardcodes_a_model_name(self):
@@ -185,7 +185,7 @@ class TestNoInlineModelNames(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "Model names belong in core/util/models.py:\n" + "\n".join(offenders),
+            "Model names belong in core/config/models.py:\n" + "\n".join(offenders),
         )
 
     def test_agent_configs_name_a_tier(self):

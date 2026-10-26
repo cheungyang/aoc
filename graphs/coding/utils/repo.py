@@ -21,7 +21,7 @@ checkpoint.
 import os
 from typing import Any, Dict, Optional, Tuple
 
-from core.util.push_identity import PushIdentity, PushIdentityError, load_push_identity
+from core.git.identity import PushIdentity, PushIdentityError, load_push_identity
 
 DEFAULT_REPO_DESCRIPTOR: Dict[str, Any] = {
     "mode": "self",
@@ -190,8 +190,8 @@ async def _ensure_remote_exists(
     push_identity: Optional[PushIdentity]
 ) -> Tuple[bool, str]:
     """Creates the GitHub repository if it is not there yet."""
-    from core.util import git_ops
-    from core.util.push_identity import subprocess_env
+    from core.git import ops as git_ops
+    from core.git.identity import subprocess_env
 
     slug = descriptor["slug"]
     env = subprocess_env(push_identity) or None
@@ -222,8 +222,8 @@ async def _ensure_clone(
     push_identity: Optional[PushIdentity]
 ) -> Tuple[str, str]:
     """Clones the repo into the cache if needed, then fetches. Returns (path, error)."""
-    from core.util import git_ops
-    from core.util.push_identity import git_credential_args, subprocess_env
+    from core.git import ops as git_ops
+    from core.git.identity import git_credential_args, subprocess_env
 
     target = cache_path_for(slug)
     env = subprocess_env(push_identity) or None

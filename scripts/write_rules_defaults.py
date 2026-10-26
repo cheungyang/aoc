@@ -122,7 +122,7 @@ def main(argv=None) -> int:
     parser.add_argument("--agents-dir", default=AGENTS_DIR, help="where the agents live (default: this repo's)")
     args = parser.parse_args(argv)
     if args.pkm_dir is None:
-        from core.util.config import Config
+        from core.config.settings import Config
 
         args.pkm_dir = Config().pkm_dir
 

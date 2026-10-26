@@ -19,7 +19,7 @@ UTC = datetime.timezone.utc
 class TestFormat(unittest.TestCase):
     def test_block_has_author_time_and_excerpt(self):
         at = datetime.datetime(2026, 10, 1, 14, 0, tzinfo=UTC)
-        with patch("core.util.time_util.get_local_timezone", return_value=UTC):
+        with patch("core.util.local_time.get_local_timezone", return_value=UTC):
             block = format_reply_context("Concierge", at, "Today's plan")
         self.assertEqual(block, '<replying_to author="Concierge" posted="2026-10-01 14:00 UTC">\nToday\'s plan\n</replying_to>')
 

@@ -1,6 +1,6 @@
 """Which thinking level a Gemini model call runs at.
 
-The defaults live in `core.util.models` (`THINKING_BY_SURFACE`); this module
+The defaults live in `core.config.models` (`THINKING_BY_SURFACE`); this module
 decides, per call, which of the possible sources applies. First match wins:
 
   1. the agent's own pick (`set_thinking`), for its next model call only,
@@ -24,6 +24,8 @@ of the call in flight.
 """
 from typing import Optional
 
+from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS, VOICE_THINKING_CAP, clamp_thinking_level
+
 PICK_KEY = "thinking_pick"
 
 
@@ -35,7 +37,6 @@ def pick_thinking(level: str, reason: str) -> str:
     """
     from core.runtime.foundation.context import require_context
     from core.runtime.observability.turn_trace import current_turn_trace
-    from core.util.models import THINKING_LEVELS
 
     if level not in THINKING_LEVELS:
         raise ValueError(f"Unknown thinking level {level!r}; expected one of {list(THINKING_LEVELS)}.")
@@ -51,8 +52,6 @@ def pick_thinking(level: str, reason: str) -> str:
 
 
 def _capped(level: str, surface: str) -> str:
-    from core.util.models import THINKING_LEVELS, VOICE_THINKING_CAP
-
     if surface == "voice" and THINKING_LEVELS.index(level) > THINKING_LEVELS.index(VOICE_THINKING_CAP):
         return VOICE_THINKING_CAP
     return level
@@ -67,7 +66,6 @@ def resolve_thinking_level(model_id: str) -> Optional[str]:
     keeps the level it started with.
     """
     from core.runtime.foundation.context import try_context
-    from core.util.models import THINKING_BY_SURFACE, clamp_thinking_level
 
     ctx = try_context()
     if ctx is None:

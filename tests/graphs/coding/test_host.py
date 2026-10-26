@@ -89,20 +89,20 @@ class TestTickSwitch(HostTestCase):
 
 class TestSyncPkm(HostTestCase):
     def test_a_successful_sync_is_reported(self):
-        with patch("core.util.git_sync.sync_all", return_value={"success": True}) as mock_sync:
+        with patch("core.git.sync.sync_all", return_value={"success": True}) as mock_sync:
             ok, _ = host.sync_pkm()
         self.assertTrue(ok)
         self.assertTrue(mock_sync.call_args.kwargs["skip_codebase"])
 
     def test_a_failed_sync_carries_the_errors(self):
-        with patch("core.util.git_sync.sync_all",
+        with patch("core.git.sync.sync_all",
                    return_value={"success": False, "errors": ["conflict in build_request.json"]}):
             ok, message = host.sync_pkm()
         self.assertFalse(ok)
         self.assertIn("conflict", message)
 
     def test_an_exception_is_a_failed_sync_not_a_crash(self):
-        with patch("core.util.git_sync.sync_all", side_effect=OSError("no network")):
+        with patch("core.git.sync.sync_all", side_effect=OSError("no network")):
             ok, message = host.sync_pkm()
         self.assertFalse(ok)
         self.assertIn("no network", message)

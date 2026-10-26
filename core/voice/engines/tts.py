@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional, Protocol
 
 from core.loaders import agents_loader
-from core.util.config import Config
+from core.config.settings import Config
 from core.voice.engines import chirp_tts, edge_tts_stream
 from core.voice.foundation import settings
 

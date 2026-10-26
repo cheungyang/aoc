@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import tempfile
 
-from core.util.git_ops import (
+from core.git.ops import (
     commit_and_push,
     comment_pull_request,
     create_pull_request,
@@ -11,7 +11,7 @@ from core.util.git_ops import (
     merge_pull_request,
     preflight_push_access,
 )
-from core.util.push_identity import PushIdentity, TOKEN_ENV_VAR
+from core.git.identity import PushIdentity, TOKEN_ENV_VAR
 
 BOT = PushIdentity(
     login="owner-bot",
@@ -22,7 +22,7 @@ BOT = PushIdentity(
 
 
 class TestCommitAndPushAsMachineUser(unittest.IsolatedAsyncioTestCase):
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_commit_attributed_to_bot_and_push_authenticated(self, mock_run):
         mock_run.side_effect = [
             (0, "", ""),                          # git add .
@@ -51,7 +51,7 @@ class TestCommitAndPushAsMachineUser(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ghp_secret", " ".join(push_cmd))
         self.assertEqual(push_call[1]["env"][TOKEN_ENV_VAR], "ghp_secret")
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_without_identity_nothing_changes(self, mock_run):
         mock_run.side_effect = [(0, "", ""), (0, "", ""), (0, "", "")]
         with tempfile.TemporaryDirectory() as tmp_ws:
@@ -67,8 +67,8 @@ class TestCommitAndPushAsMachineUser(unittest.IsolatedAsyncioTestCase):
 
 
 class TestGhOperationsCarryToken(unittest.IsolatedAsyncioTestCase):
-    @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.discover_target_repo', new_callable=AsyncMock)
+    @patch('core.git.ops.run_cmd_async')
     async def test_create_pull_request(self, mock_run, mock_discover):
         mock_discover.return_value = "owner/repo"
         mock_run.return_value = (0, "https://github.com/owner/repo/pull/7", "")
@@ -80,17 +80,17 @@ class TestGhOperationsCarryToken(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(number, 7)
         self.assertEqual(mock_run.call_args[1]["env"][TOKEN_ENV_VAR], "ghp_secret")
 
-    @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.discover_target_repo', new_callable=AsyncMock)
+    @patch('core.git.ops.run_cmd_async')
     async def test_get_pull_request_status(self, mock_run, mock_discover):
         mock_discover.return_value = "owner/repo"
         mock_run.return_value = (0, '{"state": "OPEN"}', "")
         await get_pull_request_status(".", "7", push_identity=BOT)
         self.assertEqual(mock_run.call_args[1]["env"][TOKEN_ENV_VAR], "ghp_secret")
 
-    @patch('core.util.git_ops.get_pull_request_status', new_callable=AsyncMock)
-    @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.get_pull_request_status', new_callable=AsyncMock)
+    @patch('core.git.ops.discover_target_repo', new_callable=AsyncMock)
+    @patch('core.git.ops.run_cmd_async')
     async def test_merge_pull_request(self, mock_run, mock_discover, mock_status):
         mock_discover.return_value = "owner/repo"
         mock_run.return_value = (0, "merged", "")
@@ -102,8 +102,8 @@ class TestGhOperationsCarryToken(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_run.call_args[1]["env"][TOKEN_ENV_VAR], "ghp_secret")
         self.assertEqual(mock_status.call_args[1]["push_identity"], BOT)
 
-    @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.discover_target_repo', new_callable=AsyncMock)
+    @patch('core.git.ops.run_cmd_async')
     async def test_comment_pull_request(self, mock_run, mock_discover):
         mock_discover.return_value = "owner/repo"
         mock_run.return_value = (0, "", "")
@@ -114,7 +114,7 @@ class TestGhOperationsCarryToken(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_passes_when_the_dry_run_push_is_accepted(self, mock_run):
         mock_run.side_effect = [
             (0, "owner-bot\n", ""),   # gh api user
@@ -124,7 +124,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok, msg)
         self.assertIn("can push", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_the_probe_is_a_push_and_does_not_update_a_ref(self, mock_run):
         mock_run.side_effect = [(0, "owner-bot\n", ""), (0, "", "")]
         await preflight_push_access("owner/repo", push_identity=BOT)
@@ -133,14 +133,14 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         # Without --dry-run this gate would litter the remote with probe branches.
         self.assertIn("--dry-run", argv)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_fails_when_unauthenticated(self, mock_run):
         mock_run.return_value = (1, "", "gh: not logged in")
         ok, msg = await preflight_push_access("owner/repo", push_identity=BOT)
         self.assertFalse(ok)
         self.assertIn("not authenticated", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_fails_when_token_belongs_to_someone_else(self, mock_run):
         # The whole point of the machine user is that the PR is not authored by the
         # reviewer; a token that resolves to the human silently defeats that.
@@ -149,7 +149,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ok)
         self.assertIn("owner-bot", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_a_denied_push_is_caught_before_any_llm_work(self, mock_run):
         # Regression: the old gate asked the API for `.permissions.push`, which
         # reports the *account's* collaborator role. A fine-grained PAT that is
@@ -165,7 +165,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cannot push", msg)
         self.assertIn("denied", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_a_denied_push_names_the_fine_grained_pat_trap(self, mock_run):
         mock_run.side_effect = [
             (0, "owner-bot\n", ""),
@@ -177,7 +177,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertIn("fine-grained", msg)
         self.assertIn("classic PAT", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_an_unreachable_remote_is_not_reported_as_a_permission_problem(self, mock_run):
         mock_run.side_effect = [
             (0, "owner-bot\n", ""),
@@ -188,7 +188,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
         self.assertIn("could not reach", msg)
         self.assertNotIn("classic PAT", msg)
 
-    @patch('core.util.git_ops.discover_target_repo', new_callable=AsyncMock)
+    @patch('core.git.ops.discover_target_repo', new_callable=AsyncMock)
     async def test_fails_without_a_repo(self, mock_discover):
         mock_discover.return_value = None
         ok, msg = await preflight_push_access(None)
@@ -199,7 +199,7 @@ class TestPreflightPushAccess(unittest.IsolatedAsyncioTestCase):
 class TestEnsureLabel(unittest.IsolatedAsyncioTestCase):
     """The existence probe is a read, so a push-only token gets a real answer."""
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_creates_the_label_when_the_lookup_404s(self, mock_run):
         mock_run.side_effect = [(1, "", "Not Found"), (0, "", "")]
         ok, msg = await ensure_label("owner/repo")
@@ -207,7 +207,7 @@ class TestEnsureLabel(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Created label", msg)
         self.assertEqual(mock_run.await_count, 2)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_an_existing_label_is_never_written_to(self, mock_run):
         mock_run.return_value = (0, "", "")
         ok, msg = await ensure_label("owner/repo")
@@ -219,21 +219,21 @@ class TestEnsureLabel(unittest.IsolatedAsyncioTestCase):
         mock_run.assert_awaited_once()
         self.assertNotIn("create", mock_run.await_args.args[0])
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_the_lookup_reads_the_label_by_name(self, mock_run):
         mock_run.return_value = (0, "", "")
         await ensure_label("owner/repo", name="needs review")
         # Encoded, or gh reads the space as the start of the next argument.
         self.assertIn("repos/owner/repo/labels/needs%20review", mock_run.await_args.args[0])
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_a_creation_race_is_not_an_error(self, mock_run):
         mock_run.side_effect = [(1, "", "Not Found"), (1, "", "label already exists")]
         ok, msg = await ensure_label("owner/repo")
         self.assertTrue(ok)
         self.assertIn("already exists", msg)
 
-    @patch('core.util.git_ops.run_cmd_async')
+    @patch('core.git.ops.run_cmd_async')
     async def test_a_denied_creation_says_who_can_do_it(self, mock_run):
         mock_run.side_effect = [
             (1, "", "HTTP 404"),

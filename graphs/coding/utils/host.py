@@ -119,7 +119,7 @@ def pkm_dir() -> str:
     local = os.path.realpath(os.path.join(project_root(), SOFTWARE_ROOT.split("/")[0]))
     if os.path.isdir(os.path.join(local, ".git")):
         return local
-    from core.util.config import Config
+    from core.config.settings import Config
     return os.path.abspath(os.path.expanduser(Config().pkm_dir))
 
 
@@ -129,7 +129,7 @@ def sync_pkm() -> Tuple[bool, str]:
     A handoff is only as good as the manifest the other host reads, and the
     scheduled sync could be up to an hour away.
     """
-    from core.util.git_sync import sync_all
+    from core.git.sync import sync_all
 
     try:
         result = sync_all(pkm_dir=pkm_dir(), skip_codebase=True)

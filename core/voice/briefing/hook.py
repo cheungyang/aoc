@@ -25,7 +25,7 @@ from typing import Callable, Iterable, List, Optional, Set, Tuple
 
 from core.channel.inbox import mark_heard, mark_read, subscribe
 from core.storage.channel_inbox import InboxRow, InboxStore, Priority, Source, Status, Via
-from core.util.time_util import get_local_now
+from core.util.local_time import get_local_now
 from core.voice.briefing.speech_writer import SpeechWriter
 from core.voice.hooks import Say, Speak, VoiceHook, VoiceRoom
 from core.voice.room.focus import FocusDirectory, VoiceFocus, spoken_label

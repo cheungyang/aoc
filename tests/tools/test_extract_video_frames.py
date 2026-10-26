@@ -14,7 +14,7 @@ from tools.extract_video_frames import (
     _parse_all_timestamps,
     _get_ffmpeg_executable,
 )
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 
 class TestExtractVideoFrames(unittest.TestCase):

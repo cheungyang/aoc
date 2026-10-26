@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 
 from core.tooling import Report, Rule, agent_tool
 from core.tooling.workflow import agent_workflows, contract_problems, parse_workflow, read_workflow, run_examples
-from core.util.config import Config
+from core.config.settings import Config
 
 # The fake agent's lib/: what its examples call.
 FAKE_LIB = '''
@@ -19,7 +19,7 @@ def recovery_now(stored, hours, per_hour):
 
 
 def pkm_dir():
-    from core.util.config import Config
+    from core.config.settings import Config
     return Config().pkm_dir
 '''
 

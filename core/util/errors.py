@@ -1,8 +1,17 @@
+"""Readable text for an exception, and whether a service raised it.
+
+`format_error_message` turns what a model provider, a TTS client or anything
+else raised into one line a user can act on: the provider's own message when
+there is one, the endpoint when an on-device server can't be reached.
+`is_service_error` says whether trying again later might help.
+"""
 import re
 import ast
 import json
 from typing import Any
 from urllib.parse import urlparse
+
+from core.config.settings import Config
 
 # Messages a client substitutes when it cannot find the server's own text.
 # Carrying one of these means the exception's real diagnostic, if any, is
@@ -10,13 +19,6 @@ from urllib.parse import urlparse
 _PLACEHOLDER_MESSAGES = frozenset({
     "An error occurred during streaming",
 })
-
-
-def format_tool_response(tool_name: str, payload: str, errors: str = "None") -> str:
-    return f"""<{tool_name}_response>
-  <payload>{payload}</payload>
-  <errors>{errors}</errors>
-</{tool_name}_response>"""
 
 
 def _describe_unreachable_local_llm(error: Any) -> str:
@@ -53,8 +55,6 @@ def _describe_unreachable_local_llm(error: Any) -> str:
             continue
 
         try:
-            from core.util.config import Config
-
             base_url = Config().local_llm_base_url
         except Exception:
             return ""

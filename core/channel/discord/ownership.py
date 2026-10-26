@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from core.runtime.commands.registry import CONTROL
-from core.util.config import Config
+from core.config.settings import Config
 
 PROD = "prod"
 DEV = "dev"

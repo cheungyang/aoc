@@ -2,9 +2,9 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.util.logging_util import extract_model_name, format_tool_extra_str
+from core.runtime.observability.log_format import extract_model_name, format_tool_extra_str
 from tests.helpers import LLM_USAGE as USAGE, llm_result as _llm_result
 
 

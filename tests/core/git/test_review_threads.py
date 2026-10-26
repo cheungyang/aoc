@@ -9,7 +9,7 @@ import json
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from core.util.git_ops import get_unresolved_review_threads
+from core.git.ops import get_unresolved_review_threads
 
 
 def _payload(threads):
@@ -34,7 +34,7 @@ def _thread(body, resolved=False, outdated=False, login="alice", db_id=1, path="
 
 class TestUnresolvedReviewThreads(unittest.IsolatedAsyncioTestCase):
     async def _run(self, stdout, code=0, **kwargs):
-        with patch("core.util.git_ops.run_cmd_async",
+        with patch("core.git.ops.run_cmd_async",
                    AsyncMock(return_value=(code, stdout, ""))) as mock_run:
             result = await get_unresolved_review_threads(
                 kwargs.pop("workspace_path", "/ws"),
@@ -93,7 +93,7 @@ class TestUnresolvedReviewThreads(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
 
     async def test_no_call_is_made_without_a_pr_number_or_repo(self):
-        with patch("core.util.git_ops.run_cmd_async", AsyncMock()) as mock_run:
+        with patch("core.git.ops.run_cmd_async", AsyncMock()) as mock_run:
             self.assertEqual(
                 await get_unresolved_review_threads("/ws", target_repo="org/repo", pr_number=None), []
             )

@@ -6,7 +6,7 @@ import discord
 from typing import Optional, List
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
-from core.util import safe_chunks
+from core.channel.chunks import safe_chunks
 
 
 class DiscordStreamBuffer:

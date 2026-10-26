@@ -1,5 +1,6 @@
-"""The dependency rules in core/runtime/__init__.py and core/voice/__init__.py,
-checked against every import in core/.
+"""The dependency rules in core/runtime/__init__.py, core/voice/__init__.py and
+the __init__.py of core/config, core/util and core/git, checked against every
+import in core/.
 
   R1  The runtime never imports an adapter.
   R2  Inside the runtime, imports point down the layers.
@@ -17,6 +18,10 @@ checked against every import in core/.
   V5  Voice imports no project module inside a function, except one that loads
       an optional heavy dependency (HEAVY).
 
+  C1  core.config imports nothing else from the project.
+  U1  core.util imports only core.config.
+  G1  core.git imports only core.config and core.util.
+
 Today's violations are listed in ALLOWED, with what removes them. A new
 violation fails, and so does a listed one that no longer occurs: fixing one
 means deleting its line, so the list only shrinks.
@@ -31,7 +36,7 @@ PROJECT = ("core", "graphs", "tools", "scripts", "agents", "main")
 
 ADAPTERS = ("core.channel.discord", "core.voice", "core.scheduler", "graphs", "tools", "scripts", "agents", "main")
 BELOW_RUNTIME = ("core.prompts", "core.loaders", "core.storage", "core.knowledge", "core.util",
-                 "core.tooling", "core.permissions", "core.channel")
+                 "core.tooling", "core.permissions", "core.channel", "core.config", "core.git")
 FOUNDATION = ("core.runtime.foundation",)
 
 # The runtime's layers, lowest first.
@@ -74,8 +79,6 @@ ALLOWED: Dict[str, Set[str]] = {
         # Not yet scheduled: a config reload tells the Discord bots itself; it
         # should notify listeners that main.py registers.
         "core.loaders.agents_loader -> core.channel.discord.loader",
-        # Step 8: core/util.
-        "core.util.summarize_util -> tools.filesystem",
     },
     "R4": {
         "core.channel",
@@ -88,7 +91,6 @@ ALLOWED: Dict[str, Set[str]] = {
         "core.scheduler.preconditions",
         "core.storage",
         "core.tooling",
-        "core.util",
     },
     "R5": {
         # Phase 3: Agent's side work moves into turn hooks.
@@ -108,15 +110,12 @@ ALLOWED: Dict[str, Set[str]] = {
         "core.runtime.model.thinking -> core.loaders.agents_loader",
         "core.runtime.model.thinking -> core.runtime.foundation.context",
         "core.runtime.model.thinking -> core.runtime.observability.turn_trace",
-        "core.runtime.model.thinking -> core.util.models",
         # Not yet scheduled. Tests patch most of these at their source module, so
         # moving one to the top of its file means re-pointing those patches too.
-        "core.runtime.foundation.context -> core.util.models",
         "core.runtime.history.channel_posts -> core.knowledge.memory.sqlite_checkpointer",
         "core.runtime.history.channel_posts -> core.loaders.agents_loader",
         "core.runtime.history.channel_posts -> core.runtime.foundation.sessions",
         "core.runtime.history.channel_posts -> core.storage.sessions",
-        "core.runtime.history.channel_posts -> core.util.time_util",
         "core.runtime.history.pruner -> core.knowledge.memory.sqlite_checkpointer",
         "core.runtime.history.pruner -> core.prompts.memory",
         "core.runtime.observability.transcript -> core.runtime.foundation.context",
@@ -127,6 +126,9 @@ ALLOWED: Dict[str, Set[str]] = {
     "V2": set(),
     "V3": set(),
     "V5": set(),
+    "C1": set(),
+    "U1": set(),
+    "G1": set(),
 }
 
 
@@ -213,6 +215,9 @@ def violations() -> Dict[str, Set[str]]:
         importer = module_name(path)
         in_runtime = within(importer, ("core.runtime",))
         in_voice = within(importer, ("core.voice",))
+        in_config = within(importer, ("core.config",))
+        in_util = within(importer, ("core.util",))
+        in_git = within(importer, ("core.git",))
         below = within(importer, BELOW_RUNTIME) and not within(importer, ADAPTERS)
         for imported, in_function in imports(path):
             if imported == importer:
@@ -243,6 +248,12 @@ def violations() -> Dict[str, Set[str]]:
                 found["V3"].add(edge)
             if in_voice and in_function and not within(imported, HEAVY):
                 found["V5"].add(edge)
+            if in_config and not within(imported, ("core.config",)):
+                found["C1"].add(edge)
+            if in_util and not within(imported, ("core.config", "core.util")):
+                found["U1"].add(edge)
+            if in_git and not within(imported, ("core.config", "core.util", "core.git")):
+                found["G1"].add(edge)
         for source, name in private_names(path):
             if area(source) != area(importer):
                 found["R6"].add(f"{importer} -> {source}.{name}")
@@ -293,6 +304,18 @@ class TestLayers(unittest.TestCase):
     def test_v5_no_imports_inside_functions_in_voice(self):
         self.check("V5", "a voice function imports a project module; import it at the top of the file, "
                          "or list it in HEAVY if it loads an optional heavy dependency")
+
+    def test_c1_config_imports_nothing_from_the_project(self):
+        self.check("C1", "core.config imports from the project; everything reads settings, so they can't "
+                         "depend on anything")
+
+    def test_u1_util_imports_only_config(self):
+        self.check("U1", "a util imports more than core.config; it isn't a util: move it to the package "
+                         "that uses it")
+
+    def test_g1_git_imports_only_config_and_util(self):
+        self.check("G1", "core.git imports more than core.config and core.util; have the caller pass in "
+                         "what's needed")
 
     def test_every_runtime_module_has_a_layer(self):
         for path in sorted((REPO / "core" / "runtime").rglob("*.py")):

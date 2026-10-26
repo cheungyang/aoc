@@ -26,8 +26,8 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.util import git_ops
-from core.util.push_identity import PushIdentityError, describe, resolve_token_path
+from core.git import ops as git_ops
+from core.git.identity import PushIdentityError, describe, resolve_token_path
 from graphs.coding.utils.dag import (
     discover_manifests,
     load_manifest,

@@ -197,7 +197,7 @@ def usd_rate(currency: str, on: Optional[date] = None, today: Optional[date] = N
     if not re.fullmatch(r"[A-Z]{3}", code):
         raise FxError(f"{currency!r} is not an ISO currency code like 'EUR' or 'TWD'")
     if today is None:
-        from core.util.time_util import get_local_now
+        from core.util.local_time import get_local_now
         today = get_local_now().date()
     if on is not None and on > today + timedelta(days=1):
         raise FxError(f"{on.isoformat()} is in the future; no exchange rate exists for it yet")

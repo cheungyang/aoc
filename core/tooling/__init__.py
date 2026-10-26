@@ -2,7 +2,8 @@
 
 Agent tools (`agents/<agent_id>/tools/<name>.py`) and their scans import from
 core/ only this package, so it is the one place to change if tools move
-elsewhere (MCP, say). Shared tools in tools/ don't use it yet.
+elsewhere (MCP, say). Shared tools in tools/ use it for their envelope,
+`format_tool_response`, and import the rest of core/ directly.
 
     from core.tooling import (
         agent_tool, Report, DataProblem, ToolError,  # the decorator, the report, failures
@@ -14,7 +15,8 @@ elsewhere (MCP, say). Shared tools in tools/ don't use it yet.
 
 - agent_tool.py: `@agent_tool` (its docstring is the contract, with an
   example), the permission checks, `ToolError`.
-- report.py: `Report`, `DataProblem` and the envelope: status, issues, explain.
+- report.py: `Report`, `DataProblem` and the envelope: status, issues, explain;
+  `format_tool_response`, the shared tools' envelope.
 - rules.py: `Rule`, `load_rules`, RULES.md's format.
 - paths.py: `pkm_path`, `display_path`.
 - workflow.py: WORKFLOW.md, the contract each agent's tools keep: its format,
@@ -31,9 +33,9 @@ from core.tooling.agent_tool import (
     tool_grant,
 )
 from core.tooling.paths import display_path, pkm_path
-from core.tooling.report import FAILED, OK, PARTIAL, DataProblem, Issue, Report
+from core.tooling.report import FAILED, OK, PARTIAL, DataProblem, Issue, Report, format_tool_response
 from core.tooling.rules import Rule, load_rules, render_rules_file, rules_path
-from core.util.time_util import get_local_now, get_local_timezone
+from core.util.local_time import get_local_now, get_local_timezone
 
 __all__ = [
     "AgentTool",
@@ -49,6 +51,7 @@ __all__ = [
     "agent_tool",
     "current_agent_id",
     "display_path",
+    "format_tool_response",
     "get_local_now",
     "get_local_timezone",
     "has_permission",

@@ -6,7 +6,7 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.util.fx import FxError, Rate
 from tests.helpers import envelope, execution_context
 from agents.reward_travel.tools.award_value import award_value

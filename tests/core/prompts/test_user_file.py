@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from core.prompts import system
-from core.util.config import Config
+from core.config.settings import Config
 from core.prompts.system import get_agent_memory_prompt, user_path
 
 

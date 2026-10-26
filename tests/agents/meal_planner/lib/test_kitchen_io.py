@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 
-from core.util.config import Config
+from core.config.settings import Config
 from agents.meal_planner.lib.kitchen_io import INVENTORY, kitchen_path, locked, read_text, write_atomic
 
 

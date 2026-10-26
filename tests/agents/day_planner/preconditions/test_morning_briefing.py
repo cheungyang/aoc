@@ -5,7 +5,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from core.scheduler.spec import Findings, PromptSchedule, ScheduleContext
-from core.util.config import Config
+from core.config.settings import Config
 from tests.agents.day_planner import PlanningCase
 from agents.day_planner.preconditions.morning_briefing import MorningBriefing
 
@@ -17,7 +17,7 @@ class TestMorningBriefing(PlanningCase):
 
     def setUp(self):
         super().setUp()
-        patcher = mock.patch("core.util.time_util.get_local_timezone", return_value=ZONE)
+        patcher = mock.patch("core.util.local_time.get_local_timezone", return_value=ZONE)
         patcher.start()
         self.addCleanup(patcher.stop)
 

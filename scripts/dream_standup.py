@@ -50,9 +50,9 @@ from core.runtime import bootstrap
 from core.runtime.delegation import stream_delegate
 from core.runtime.foundation.context import surface_scope
 from core.scheduler.script_runner import default_timeout
-from core.util.config import Config
-from core.util.models import tier_floor
-from core.util.time_util import get_local_now
+from core.config.settings import Config
+from core.config.models import tier_floor
+from core.util.local_time import get_local_now
 from tools.agent_call import agent_call
 
 # The dream's rules are inlined from the skill (see `dream_rules`), so the

@@ -1,5 +1,5 @@
 """
-Discord channel provider: runner, loader, stream buffer, UI, and reactions.
+Discord channel provider: runner, loader, stream buffer, UI, reactions, and attached images (images.py).
 """
 from core.channel.discord.stream_buffer import DiscordStreamBuffer
 from core.channel.discord.ui import PollButtonView, PollSelectView

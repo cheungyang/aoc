@@ -10,8 +10,8 @@ decoding: it is the slow path, so it should at least not be slower than needed.
 import asyncio
 from typing import Callable, Iterable, List, Optional
 
-from core.util.config import Config
-from core.util.models import TRANSCRIBE_LIVE
+from core.config.settings import Config
+from core.config.models import TRANSCRIBE_LIVE
 from core.voice.foundation import settings
 from core.voice.engines.live_stt import LiveSTTSession
 from core.voice.foundation.utterance import Transcript, Utterance

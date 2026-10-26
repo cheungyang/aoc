@@ -17,7 +17,7 @@ from agents.home_steward.lib.homeassistant.entity_index import NOTICE, Entry
 from agents.home_steward.tools import device_list as module
 from agents.home_steward.tools.device_list import device_list
 from core.loaders.tools_loader import ToolsLoader
-from core.util.config import Config
+from core.config.settings import Config
 from tests.helpers import envelope, execution_context
 
 AGENT = "home-steward"

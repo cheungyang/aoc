@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 from zoneinfo import ZoneInfo
 
-from core.util.config import Config
+from core.config.settings import Config
 from tests.agents.day_planner import PlanningCase
 from tests.helpers import envelope, execution_context
 from agents.day_planner.tools.recurring_chores_due import recurring_chores_due

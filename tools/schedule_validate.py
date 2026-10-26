@@ -10,7 +10,7 @@ from typing import Any, List, Optional, Tuple
 
 from langchain_core.tools import tool
 
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 TOOL_NAME = "schedule_validate"
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

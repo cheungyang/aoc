@@ -6,7 +6,7 @@ import subprocess
 from typing import Tuple, Optional, List, Dict, Any
 from urllib.parse import quote
 
-from core.util.push_identity import (
+from core.git.identity import (
     PushIdentity,
     git_commit_args,
     git_credential_args,

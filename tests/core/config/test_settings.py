@@ -1,3 +1,4 @@
+import io
 import unittest
 from unittest.mock import patch, MagicMock
 import os
@@ -6,7 +7,7 @@ import sys
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.util.config import Config
+from core.config.settings import Config, Setting
 
 class TestConfig(unittest.TestCase):
 
@@ -18,7 +19,7 @@ class TestConfig(unittest.TestCase):
         self.config.reset()
 
     def test_max_concurrency_default_env_and_clamping(self):
-        from core.util.config import DEFAULT_MAX_CONCURRENCY
+        from core.config.settings import DEFAULT_MAX_CONCURRENCY
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AOC_MAX_CONCURRENCY", None)
             self.assertEqual(self.config.max_concurrency, DEFAULT_MAX_CONCURRENCY)
@@ -81,8 +82,8 @@ class TestConfig(unittest.TestCase):
         "LANGSMITH_API_KEY": "lsv2_pt_123",
         "LANGSMITH_WORKSPACE_ID": "ws-test"
     }, clear=False)
-    def test_load_from_env_langsmith(self):
-        self.config.load_from_env()
+    def test_langsmith_from_env(self):
+        self.config.reset()
         self.assertTrue(self.config.langsmith_tracing)
         self.assertEqual(self.config.langsmith_project, "project-test")
         self.assertEqual(self.config.langsmith_endpoint, "https://eu.api.smith.langchain.com")
@@ -95,8 +96,8 @@ class TestConfig(unittest.TestCase):
         "LANGCHAIN_ENDPOINT": "https://apac.api.smith.langchain.com",
         "LANGCHAIN_API_KEY": "lsv2_pt_v2",
     }, clear=True)
-    def test_load_from_env_langchain_v2_fallback(self):
-        self.config.load_from_env()
+    def test_langsmith_langchain_v2_fallback(self):
+        self.config.reset()
         self.assertTrue(self.config.langsmith_tracing)
         self.assertEqual(self.config.langsmith_project, "v2-project")
         self.assertEqual(self.config.langsmith_endpoint, "https://apac.api.smith.langchain.com")
@@ -271,6 +272,52 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(self.config.context_max_tokens, 15000)
             self.assertEqual(self.config.context_window_messages, 8)
             self.assertEqual(self.config.context_summary_max_tokens, 400)
+
+    def test_reset_forgets_every_override(self):
+        """Each setting is declared once, so reset can't miss one. It used to:
+        google_tts_api_key kept a test's override through a reset."""
+        settings = [name for name, value in vars(Config).items() if isinstance(value, Setting)]
+        self.assertGreater(len(settings), 30)
+        for name in settings:
+            setattr(self.config, name, "1")
+        self.config.reset()
+        with patch.dict(os.environ, {"GOOGLE_TTS_API_KEY": "env-key"}):
+            self.assertEqual(self.config.google_tts_api_key, "env-key")
+        self.assertEqual(self.config._overrides, {})
+
+    def test_every_setting_can_be_overridden_and_deleted(self):
+        with patch.dict(os.environ, {"LLM_MAX_RETRIES": "4", "TOOL_OUTPUT_MAX_CHARS": "10"}):
+            self.config.llm_max_retries = 0
+            self.assertEqual(self.config.llm_max_retries, 1)  # the minimum holds for an override too
+            self.config.tool_output_max_chars = 500
+            self.assertEqual(self.config.tool_output_max_chars, 500)
+            del self.config.llm_max_retries
+            self.assertEqual(self.config.llm_max_retries, 4)
+
+    def test_a_default_can_follow_another_setting(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.config.pkm_dir = "/elsewhere"
+            self.assertEqual(self.config.projects_dir, os.path.join("/elsewhere", "vault", "projects"))
+            self.config.local_llm_context_tokens = 8192
+            self.assertEqual(self.config.local_llm_history_tokens, 4096)
+
+    def test_overriding_puts_back_what_was_there(self):
+        self.config.pkm_dir = "/before"
+        with self.config.overriding(pkm_dir="/during", tasks_db_path="/during/tasks.db"):
+            self.assertEqual(self.config.pkm_dir, "/during")
+            self.assertEqual(self.config.tasks_db_path, "/during/tasks.db")
+        self.assertEqual(self.config.pkm_dir, "/before")  # the earlier override, back
+        self.assertNotIn("tasks_db_path", self.config._overrides)  # none before, none after
+        with self.assertRaises(AttributeError):
+            with self.config.overriding(pkm_dri="/typo"):
+                pass
+
+    def test_a_bad_concurrency_value_is_reported(self):
+        from core.config.settings import DEFAULT_MAX_CONCURRENCY
+        with patch.dict(os.environ, {"AOC_MAX_CONCURRENCY": "lots"}), \
+                patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(self.config.max_concurrency, DEFAULT_MAX_CONCURRENCY)
+        self.assertIn("ignoring non-integer AOC_MAX_CONCURRENCY='lots'", err.getvalue())
 
 if __name__ == '__main__':
     unittest.main()

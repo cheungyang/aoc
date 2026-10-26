@@ -20,7 +20,7 @@ import os
 import re
 from typing import Optional
 
-from core.util.config import Config
+from core.config.settings import Config
 
 # --- Speech to text --------------------------------------------------------
 # "gemini_live": each utterance streams to gemini-3.5-transcribe-live while the

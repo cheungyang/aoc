@@ -14,7 +14,7 @@ from agents.property_scout.lib.criteria import (
     with_overrides,
 )
 from core.tooling import DataProblem, Report
-from core.util.config import Config
+from core.config.settings import Config
 
 # Made up, in the shape of pkm/wallet/real-estate/criteria.md.
 CRITERIA_MD = """# Home Criteria

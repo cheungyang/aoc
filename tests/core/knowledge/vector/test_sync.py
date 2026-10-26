@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.knowledge.vector.sync import (
     scan_knowledge_markdown_files,
     sync_knowledge,

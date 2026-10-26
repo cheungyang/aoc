@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.model.thinking import resolve_thinking_level
-from core.util.models import FLASH, FLASH_LITE, PRO, THINKING_BY_SURFACE, clamp_thinking_level
+from core.config.models import FLASH, FLASH_LITE, PRO, THINKING_BY_SURFACE, clamp_thinking_level
 
 
 def _ctx(agent_id="day-planner", **kw):

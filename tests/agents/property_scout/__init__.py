@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from core.util.config import Config
+from core.config.settings import Config
 
 CRITERIA_MD = """# Home Criteria
 

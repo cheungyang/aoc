@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from tools import browser as browser_mod
 from tools.browser import browser
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 
 def _history(done=True, urls=("https://resy.com/", "https://resy.com/checkout"), result="Staged", errors=(), steps=4):

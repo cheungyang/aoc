@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from agents.home_steward.lib.homeassistant.client import HomeAssistantClient, HomeAssistantError
-from core.util.config import Config
+from core.config.settings import Config
 
 # The three object kinds HA exposes through its config API, and the path that
 # serves all of GET/POST/DELETE for each. `POST` with a fresh id creates and with

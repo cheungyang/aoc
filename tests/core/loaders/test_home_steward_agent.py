@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.tools_loader import ToolsLoader
-from core.util.config import Config
+from core.config.settings import Config
 from agents.home_steward.tools.home_assistant import home_assistant, READ_ACTIONS, WRITE_ACTIONS
 from tests.helpers import envelope, make_context, execution_context
 

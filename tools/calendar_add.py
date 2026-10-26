@@ -14,7 +14,7 @@ from langchain_core.tools import tool
 
 from core.loaders.tools_loader import ToolsLoader
 from core.runtime.foundation.context import try_context
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 from core.util.local_time import (
     LocalTimeError,
     clock_change,
@@ -25,7 +25,7 @@ from core.util.local_time import (
     parse_local,
     utc_text,
 )
-from core.util.time_util import get_local_timezone
+from core.util.local_time import get_local_timezone
 from tools import gog
 
 # Creating an event is this tool's only action, and it writes.

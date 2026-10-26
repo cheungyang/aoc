@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from core.runtime.agent import Agent
 from core.runtime.foundation.context import current_execution_context, inherited_record_memory
 from core.runtime.foundation.sessions import SessionManager
-from core.util.models import DEFAULT_AGENT_TIER, tier_floor
+from core.config.models import DEFAULT_AGENT_TIER, tier_floor
 
 
 class TestTierFloor(unittest.TestCase):

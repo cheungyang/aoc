@@ -15,14 +15,9 @@ from langchain_core.messages import (
 from core.runtime.history.pruner import ContextPruner
 from core.runtime.delegation import DelegationResult
 from core.runtime.foundation.sessions import SessionManager
-from core.util.message_util import (
-    estimate_total_tokens,
-)
-from core.util.summarize_util import (
-    SUMMARY_PREFIX,
-    SUMMARY_SUFFIX,
-)
-from core.util.config import Config
+from core.runtime.history.budget import estimate_total_tokens
+from core.runtime.history.summary import SUMMARY_PREFIX, SUMMARY_SUFFIX
+from core.config.settings import Config
 
 
 class TestContextPruner(unittest.IsolatedAsyncioTestCase):
@@ -363,7 +358,7 @@ class TestContextPruner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cfg.context_pruning_timeout, 45)
 
         with patch.dict(os.environ, {"CONTEXT_PRUNING_TIMEOUT": "60"}):
-            cfg.load_from_env()
+            cfg.reset()
             self.assertEqual(cfg.context_pruning_timeout, 60)
 
 

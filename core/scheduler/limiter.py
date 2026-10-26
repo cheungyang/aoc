@@ -13,7 +13,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def configured_limit() -> int:

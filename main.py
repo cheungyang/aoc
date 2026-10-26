@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import faulthandler
 import discord
-from core.util.config import Config
+from core.config.settings import Config
 from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.scheduler.schedule_runner import ScheduleRunner

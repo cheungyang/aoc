@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import requests
 
 from core.tooling import Report
-from core.util.config import Config  # the RapidAPI key; core.tooling has no settings
+from core.config.settings import Config  # the RapidAPI key; core.tooling has no settings
 from tools.zillow_query import BASE_URL, RAPIDAPI_HOST, _build_search_urls, _enrich_property
 from agents.property_scout.lib.archive import load_archive
 from agents.property_scout.lib.criteria import Criteria, criteria_path, load_criteria, with_overrides

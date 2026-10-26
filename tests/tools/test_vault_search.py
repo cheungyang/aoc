@@ -12,7 +12,7 @@ from core.knowledge.vector.db import (
     init_knowledge_db,
     upsert_chunks,
 )
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class TestVaultSearchTool(unittest.TestCase):

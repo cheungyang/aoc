@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import unittest
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.knowledge.vector import backends, probe
 from core.knowledge.vector.db import (
     get_knowledge_db_path,

@@ -36,7 +36,7 @@ def _load(backend_name: str):
 def resolve_backend_name(configured: Optional[str] = None) -> str:
     """Turns the configured value into a concrete backend name."""
     if configured is None:
-        from core.util.config import Config
+        from core.config.settings import Config
         configured = Config().knowledge_backend
 
     choice = (configured or AUTO).strip().lower()

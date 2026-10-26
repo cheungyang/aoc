@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.graph_call import graph_call
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestGraphCallTool(unittest.IsolatedAsyncioTestCase):
 

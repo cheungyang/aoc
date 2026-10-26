@@ -24,7 +24,7 @@ import os
 import re
 from typing import Any, Dict, Iterable, List, Set
 
-from core.util.models import THINKING_BY_SURFACE, THINKING_LEVELS
+from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS
 
 # Every top-level key an agent.json may use. A key outside this set is almost
 # always a typo or a stale field, and both are cheaper to catch here than to

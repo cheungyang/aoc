@@ -17,7 +17,7 @@ implementation before dying at the push.
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.util.push_identity import PushIdentity
+from core.git.identity import PushIdentity
 from graphs.coding.utils.preflight import (
     WORKER_AGENT_ID,
     check_required_tools,

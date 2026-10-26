@@ -24,8 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
-from core.util import privacy_guard
-from core.util.privacy_guard import Hit
+from core.git import privacy as privacy_guard
+from core.git.privacy import Hit
 
 
 class GitFailed(Exception):

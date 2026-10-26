@@ -7,7 +7,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.agent_list import agent_list
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 class TestAgentListTool(unittest.TestCase):
 

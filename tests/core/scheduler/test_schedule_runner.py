@@ -20,7 +20,7 @@ from core.scheduler.spec import (
     WorkDecision,
 )
 from core.storage.schedule_state import ScheduleState
-from core.util.time_util import get_local_now
+from core.util.local_time import get_local_now
 from tests.core.scheduler import use_real_croniter
 
 ALWAYS = {"type": "always", "reason": "test"}
@@ -128,7 +128,7 @@ class TestLoading(RunnerCase):
 
     def test_cron_follows_configured_timezone(self):
         from zoneinfo import ZoneInfo
-        from core.util.config import Config
+        from core.config.settings import Config
 
         Config().timezone = "Asia/Tokyo"
         try:

@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from core.scheduler.limiter import ScheduleLimiter, configured_limit
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class TestConfiguredLimit(unittest.TestCase):

@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.storage.base import Store
 from core.storage.util import decode_json
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def compute_content_hash(project: Dict[str, Any]) -> str:

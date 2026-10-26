@@ -296,7 +296,7 @@ previous task in the same tick cannot stand in for this one's commit), `lease_ow
 
 **Side effects.** Manifest: `reclaim_expired_leases`, `acquire_lease`, `persist_task` (status,
 stage, `run_id`, `branch_name`, `setup_done`, `impl_digest` reset, halts with `last_error`). Git:
-[`provision_worktree`](../../core/util/git_ops.py#L146-L208) (idempotent and
+[`provision_worktree`](../../core/git/ops.py#L146-L208) (idempotent and
 **remote-aware**: if `origin/<branch>` exists it is checked out with `worktree add -B`, so a task
 that pushed on another host resumes from its commits; otherwise it starts from the base. Skipped
 for `sync_review` — a review that needs the worker and finds no worktree hands the task back, and
@@ -369,7 +369,7 @@ task branch, straight after implement and before anything tests it. No LLM. A ta
 the moment it lands, so this is the last point where a line copied from the user's notes can still
 be stopped: nothing is committed until the privacy guard has checked what the push would send. The
 commit message is `feat(<project>): <task_id> (attempt n)`; once pushed, the new HEAD is recorded
-as `head_sha` via [`git_ops.rev_parse`](../../core/util/git_ops.py#L211-L216) and the task
+as `head_sha` via [`git_ops.rev_parse`](../../core/git/ops.py#L211-L216) and the task
 advances to stage `pushed`.
 
 **Reads:** `build_request_path`, `current_task` (`task_id`, `stage`, `head_sha`, `branch_name`,
@@ -391,7 +391,7 @@ after a privacy hit), `head_sha`, `impl_digest` (cleared after a hit), `privacy_
 **Side effects.** The privacy check ([`check_outgoing`](utils/outgoing.py)) reads the notes and
 folds commits GitHub doesn't have back into the worktree (`git reset --soft` to the task branch on
 GitHub, else to where it left the default branch), so the one commit pushed is exactly what was
-checked. Git/GitHub: [`commit_and_push`](../../core/util/git_ops.py#L282-L363) (treats "nothing to
+checked. Git/GitHub: [`commit_and_push`](../../core/git/ops.py#L282-L363) (treats "nothing to
 commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `bump_attempt`
 (`push`), `yield_task`, `persist_task` (stage `pushed` and `head_sha`, or stage `provisioned` after
 a hit; halts with `last_error`).
@@ -486,7 +486,7 @@ empty: the diff reviewed is the whole branch against the default branch it was c
 | `done` | Only when `current_task` has no `task_id`. |
 
 **Side effects.** Read-only git:
-[`get_branch_diff(ws, "origin/<default_branch>")`](../../core/util/git_ops.py#L219-L233)
+[`get_branch_diff(ws, "origin/<default_branch>")`](../../core/git/ops.py#L219-L233)
 (falls back to the uncommitted diff if the base cannot be resolved). Worker subprocess via
 `call_worker` for the critic verdict. Manifest: `persist_task(stage="audited", audited_sha=head_sha)`.
 
@@ -642,7 +642,7 @@ process's own repository, rooted by walking up to the `.git` marker — never `o
 every attempt is a commit on it, never on the default branch, and
 the PR squash-merges the history away. Verification fetches that commit (it will run remotely, on
 E2B, and never sees this host's disk), and the remote branch is the source of truth, so a tick on a
-*different host* can resume: [`provision_worktree`](../../core/util/git_ops.py#L146-L208)
+*different host* can resume: [`provision_worktree`](../../core/git/ops.py#L146-L208)
 checks out `origin/<branch>` (`worktree add -B`) when it exists and only starts from the base
 otherwise. `publish.py` writes the PR and review-context comment; `sync_review.py` reads it back
 (PR state, review decision, labels, issue comments, unresolved inline threads). Approval exists
@@ -682,7 +682,7 @@ on the host it ran on.
 | [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |
 | [digest.py](utils/digest.py) | SHA-256 over `git diff HEAD` plus sorted `git status --porcelain`, so "already implemented" is a claim with evidence. Only meaningful between implement and push — once committed, the diff is empty; past `pushed`, the commit SHA is the evidence. `None` means *no evidence* and must be treated as a cache miss. |
 | [preflight.py](utils/preflight.py) | Checks, before any token is spent, that the worker really receives the tools `graph.json` grants it and that the push identity can push. Resolves the roster through the same `worker_session` factory the real call uses. |
-| [outgoing.py](utils/outgoing.py) | What a push would send, checked before it leaves. Finds what GitHub already has (the task branch, else where it left the default branch), folds commits GitHub doesn't have back into the worktree so the one pushed commit is exactly what was checked, and runs the privacy guard — [core/util/privacy_guard.py](../../core/util/privacy_guard.py), the same checks as [tests/test_repo_privacy.py](../../tests/test_repo_privacy.py) — over every file the push changes. Raises `NotesMissing` rather than passing when the notes aren't there, and reports a git failure rather than guessing. |
+| [outgoing.py](utils/outgoing.py) | What a push would send, checked before it leaves. Finds what GitHub already has (the task branch, else where it left the default branch), folds commits GitHub doesn't have back into the worktree so the one pushed commit is exactly what was checked, and runs the privacy guard — [core/git/privacy.py](../../core/git/privacy.py), the same checks as [tests/test_repo_privacy.py](../../tests/test_repo_privacy.py) — over every file the push changes. Raises `NotesMissing` rather than passing when the notes aren't there, and reports a git failure rather than guessing. |
 | [token_opt.py](utils/token_opt.py) | Truncates tracebacks (head + tail) and diffs before they enter a prompt — the failing case produces the longest output and is exactly when the spec risks being crowded out. |
 | [xml_parsers.py](utils/xml_parsers.py) | Parses the `<worker_handoff>`, `<critic_verdict>` and `<spec_validation_result>` blocks. Verdicts match **exactly**, never as substrings, so an echoed placeholder reads as FAIL/REJECT. |
 

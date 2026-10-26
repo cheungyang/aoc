@@ -40,7 +40,8 @@ from browser_use.browser.profile import BrowserProfile
 from browser_use.browser.session import BrowserSession
 
 from core.prompts.browser import BrowserHandoffPrompt
-from core.util import format_tool_response, DEFAULT_BROWSER_MODEL
+from core.tooling import format_tool_response
+from core.config.models import DEFAULT_BROWSER_MODEL
 
 
 DEFAULT_CDP_URL_FILE = "/app/browser_cdp_url"

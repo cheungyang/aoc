@@ -11,7 +11,7 @@ from agents.agent_designer.lib import lint
 from agents.agent_designer.lib.lint import AgentReport, Budget, Catalog, Finding, actions_in_module, lint_agent, render
 from core.loaders.skills_loader import PRELOAD_TOKEN_BUDGET
 from core.permissions.bundles import expand_permissions
-from core.util.config import Config
+from core.config.settings import Config
 
 TASK_TOOL = '''
 from langchain_core.tools import tool

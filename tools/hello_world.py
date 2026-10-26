@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 
 @tool

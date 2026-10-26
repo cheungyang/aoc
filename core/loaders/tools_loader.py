@@ -99,7 +99,7 @@ class ToolsLoader:
         # There is deliberately no ambient fallback: a stale contextvar used to freeze the
         # tool roster of the first graph that happened to build this agent.
         active_graph = ctx.graph_id or config.get("graph")
-        from core.util.config import Config
+        from core.config.settings import Config
         pkm_dir = Config().pkm_dir
         cache_key = f"{agent_id}::{active_graph or ''}::{pkm_dir}"
         if cache_key in self._agent_permissions_cache:

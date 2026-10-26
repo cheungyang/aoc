@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 from langchain_core.tools import tool
 from core.runtime.foundation.jobs import JobManager
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 MAX_JOBS = 20
 PROMPT_MAX_CHARS = 80

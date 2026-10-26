@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Union
 import contextvars
 
 from core.channel.names import is_thread
+from core.config.models import THINKING_LEVELS
 
 _CONTEXT_SECRET = object()
 
@@ -159,7 +160,6 @@ class ExecutionContext:
                 f"Unknown surface '{self.surface}'; expected one of {sorted(SURFACES)}."
             )
         if self.thinking_level is not None:
-            from core.util.models import THINKING_LEVELS
             if self.thinking_level not in THINKING_LEVELS:
                 raise ValueError(
                     f"Unknown thinking_level '{self.thinking_level}'; expected one of {list(THINKING_LEVELS)}."

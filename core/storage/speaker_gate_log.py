@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.storage.base import Store
-from core.util.config import Config
+from core.config.settings import Config
 
 
 class Mode(str, Enum):

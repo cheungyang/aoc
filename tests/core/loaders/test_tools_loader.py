@@ -240,7 +240,7 @@ class TestCheckPermission(unittest.TestCase):
 
     @patch('core.loaders.agents_loader.AgentsLoader.get_agent')
     def test_default_pkm_workspace_permission(self, mock_get_agent):
-        from core.util.config import Config
+        from core.config.settings import Config
         mock_agent = MagicMock()
         mock_agent.config = {"tools": {}}
         mock_get_agent.return_value = mock_agent

@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from core.loaders.graphs_loader import GraphsLoader
 from core.runtime.foundation.context import current_execution_context
-from core.util import format_tool_response
+from core.tooling import format_tool_response
 
 @tool
 async def graph_call(graph_name: str = None, query: str = "", caller: Optional[str] = None, subgraph_name: Optional[str] = None) -> str:

@@ -8,7 +8,7 @@ explicit overrides.
 import unittest
 from unittest.mock import patch
 
-from core.util.config import Config
+from core.config.settings import Config
 from core.knowledge.vector import backends, probe
 
 

@@ -44,7 +44,7 @@ class TestScheduleState(unittest.TestCase):
         self.assertEqual(self.state.get_last_success("b"), 2.0)
 
     def test_default_path_is_memory_db(self):
-        from core.util.config import Config
+        from core.config.settings import Config
         self.assertEqual(ScheduleState().path, Config().memory_db_path)
 
     def test_a_notice_is_claimed_once_per_schedule_issue_and_day(self):

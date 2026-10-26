@@ -27,7 +27,7 @@ from agents.home_steward.lib.homeassistant.client import (
     read_token,
     redact,
 )
-from core.util.config import Config
+from core.config.settings import Config
 
 
 def _ws_url(base_url: str) -> str:

@@ -345,7 +345,7 @@ def merged_grants(config: Dict[str, Any], agent_id: str, root: str = PROJECT_ROO
                   skills: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Tool -> scope, bundles expanded: what ToolsLoader would grant this agent."""
     from core.permissions.bundles import expand_permissions
-    from core.util.config import Config
+    from core.config.settings import Config
 
     merged = copy.deepcopy(config.get("tools") or {})
     for skill_id in skills if skills is not None else granted_skills(config, root):
@@ -1053,7 +1053,7 @@ def _rule_value(default: Any) -> str:
 
 def _rules_file(agent_id: str, rules: Optional[tuple], rules_error: str) -> List[Finding]:
     """pkm/agents/<agent_id>/RULES.md, when it exists, against lib/rules.py."""
-    from core.util.config import Config
+    from core.config.settings import Config
 
     text = _read(rules_path(agent_id, Config().pkm_dir))
     if text is None:
