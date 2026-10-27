@@ -53,6 +53,8 @@ WRITE_ENABLED_ENV_VAR = "GOOGLE_HEALTH_WRITE_ENABLED"
 
 API_BASE = "https://health.googleapis.com/v4"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
+# Token-endpoint answers meaning the OAuth client itself is gone or wrong.
+OAUTH_CLIENT_ERRORS = frozenset({"invalid_client", "deleted_client", "disabled_client", "unauthorized_client"})
 
 # Least privilege: read only what the actions below expose, write only activity.
 # A scope that is never granted cannot be misused, whatever an agent.json says.
@@ -239,6 +241,23 @@ class GoogleHealthClient:
                     "expired: OAuth apps whose consent screen is in 'Testing' status get "
                     "refresh tokens that last only 7 days -- set it to 'In production' to "
                     f"avoid this. {AUTH_HINT}"
+                )
+            # Not always a string: Google's API-style errors nest an object here.
+            error = body.get("error") if isinstance(body, dict) else None
+            if isinstance(error, str) and error in OAUTH_CLIENT_ERRORS:
+                description = redact(body.get("error_description"), *self._secrets())[:200]
+                raise GoogleHealthAuthError(
+                    f"Google rejected the OAuth client ({error}: {description}). It was deleted or "
+                    "disabled in Google Cloud Console, or its secret changed: create a new Desktop "
+                    "app client, save its JSON as the only client_secret_*.json at the project "
+                    f"root, then re-authorise. {AUTH_HINT}"
+                )
+            # Any other 4xx is refused again on every retry; only a timeout (408) or a
+            # rate limit (429) can clear by itself.
+            if 400 <= response.status_code < 500 and response.status_code not in (408, 429):
+                raise GoogleHealthAuthError(
+                    f"Google OAuth token refresh was refused ({response.status_code}): "
+                    f"{redact(getattr(response, 'text', ''), *self._secrets())[:300]}. {AUTH_HINT}"
                 )
             raise GoogleHealthError(
                 f"Google OAuth token refresh failed ({response.status_code}): "

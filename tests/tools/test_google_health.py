@@ -424,9 +424,33 @@ class TestTokenRefresh(unittest.TestCase):
         for leaked in ("shh", "1//0gXYZ"):
             self.assertNotIn(leaked, message)
 
+    def test_deleted_client_is_an_auth_error(self):
+        """The real incident: no refresh works again until someone creates a new OAuth client."""
+        client = self.client(401, {"error": "deleted_client", "error_description": "The OAuth client was deleted."})
+        with self.assertRaises(gh.GoogleHealthAuthError) as ctx:
+            client.get("users/me/dataTypes/sleep/dataPoints")
+        message = str(ctx.exception)
+        for expected in ("deleted_client", "Desktop app", "client_secret_"):
+            self.assertIn(expected, message)
+        for leaked in ("shh", "1//0gXYZ"):
+            self.assertNotIn(leaked, message)
+
+    def test_refused_refresh_is_an_auth_error(self):
+        """Google refuses a 4xx request again on every retry."""
+        client = self.client(400, {"error": "invalid_request"})
+        with self.assertRaises(gh.GoogleHealthAuthError):
+            client.get("users/me/dataTypes/sleep/dataPoints")
+
     def test_server_error_is_not_an_auth_error(self):
         """A 503 from the token endpoint may clear by the next tick, so it is only logged."""
         client = self.client(503, {"error": "backendError"})
+        with self.assertRaises(gh.GoogleHealthError) as ctx:
+            client.get("users/me/dataTypes/sleep/dataPoints")
+        self.assertNotIsInstance(ctx.exception, gh.GoogleHealthAuthError)
+
+    def test_rate_limit_is_not_an_auth_error(self):
+        """A 429 is a 4xx that clears by itself, so it is only logged."""
+        client = self.client(429, {"error": "rate_limited"})
         with self.assertRaises(gh.GoogleHealthError) as ctx:
             client.get("users/me/dataTypes/sleep/dataPoints")
         self.assertNotIsInstance(ctx.exception, gh.GoogleHealthAuthError)
