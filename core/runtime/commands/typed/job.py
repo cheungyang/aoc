@@ -1,8 +1,8 @@
 """`!job <id>`: one background job -- its record, and the last thing it said --
 read from JobManager and the session log, with no model.
 
-It replaces the Concierge's `job_status` tool, which handed the session log to
-another agent to summarize (and named one that no longer exists).
+It took over from the Concierge's `job_status` tool, since deleted, which
+handed the session log to another agent to summarize.
 """
 import time
 from typing import Optional

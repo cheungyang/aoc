@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
-from core.runtime.observability.transcript import LoggingHandler
+from core.runtime.observability.transcript import LOGGED_OUTPUT_CHARS, LoggingHandler, logged_output
 from core.runtime.foundation.sessions import SessionManager
 from tests.helpers import LLM_USAGE as USAGE, llm_result as _llm_result
 
@@ -468,6 +468,32 @@ class TestToolHooks(unittest.TestCase):
         self.assertEqual(tool_status("plain text"), "ok")
         # Only the envelope's ends are read: a huge output costs nothing extra.
         self.assertEqual(tool_status("<status>ok</status>" + "x" * 10_000_000 + "<errors>None</errors>"), "ok")
+
+
+class TestLoggedOutput(unittest.TestCase):
+    """The session log keeps a huge tool reply's two ends, not all of it."""
+
+    def test_a_short_reply_is_kept_whole(self):
+        self.assertEqual(logged_output("<status>ok</status>done"), "<status>ok</status>done")
+
+    def test_a_huge_reply_keeps_its_status_and_its_errors(self):
+        reply = "<status>failed</status>" + "x" * 1_000_000 + "<errors>timeout</errors>"
+        kept = logged_output(reply, limit=1000)
+        self.assertTrue(kept.startswith("<status>failed</status>"))
+        self.assertTrue(kept.endswith("<errors>timeout</errors>"))
+        self.assertIn(f"[… {len(reply) - 1000:,} characters left out of the log …]", kept)
+        self.assertLess(len(kept), 1100)
+
+    def test_the_handler_logs_the_cut(self):
+        session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="session1")
+        handler = LoggingHandler(session=session)
+        handler.manager = MagicMock()
+        handler.on_tool_start(dict(name="home_assistant"), "", run_id="r9", inputs={})
+        handler.on_tool_end("<status>ok</status>" + "y" * 10 * LOGGED_OUTPUT_CHARS, run_id="r9")
+        logged = handler.manager.append_message.call_args.args[2]
+        self.assertTrue(logged.startswith("Tool Output"))
+        self.assertIn("characters left out of the log", logged)
+        self.assertLess(len(logged), LOGGED_OUTPUT_CHARS + 200)
 
 
 class TestHandlerModelName(unittest.TestCase):

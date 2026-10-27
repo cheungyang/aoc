@@ -155,7 +155,7 @@ class PruneHook(TurnHook):
 
 
 class JobHook(TurnHook):
-    """The turn's job: what `!jobs`, `job_status` and `job_kill` see."""
+    """The turn's job: what `!jobs`, `!job` and `!kill` see."""
 
     async def before(self, turn: Turn) -> None:
         prompt = turn.prompt if isinstance(turn.prompt, str) else str(turn.prompt)

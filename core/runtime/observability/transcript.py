@@ -16,6 +16,12 @@ _ERRORS = re.compile(r"<errors>(.*?)</errors>", re.DOTALL)
 # A tool's envelope opens with its status and closes with its errors
 # (core/tooling/report.py); only those ends are read, since an output can be huge.
 _ENVELOPE_END = 4000
+# How much of a tool's reply the session log keeps: its head and its tail,
+# with the size of what's left out between them. The log is read back (`!job`,
+# hand-off capsules, the health report), and one Home Assistant reply was
+# 150 MB. The model's own history (the checkpoint) is a separate copy, so the
+# cut changes nothing it sees.
+LOGGED_OUTPUT_CHARS = 64 * 1024
 
 
 def tool_status(content: str) -> str:
@@ -32,6 +38,15 @@ def tool_status(content: str) -> str:
     if errors and errors.group(1).strip() not in ("", "None"):
         return "failed"
     return "ok"
+
+
+def logged_output(content: str, limit: int = LOGGED_OUTPUT_CHARS) -> str:
+    """`content` as the session log keeps it: whole, or its two ends around a
+    note of how much was left out. The ends hold the envelope's status and errors."""
+    if len(content) <= limit:
+        return content
+    half = limit // 2
+    return f"{content[:half]}\n[… {len(content) - 2 * half:,} characters left out of the log …]\n{content[-half:]}"
 
 
 def _tool_args(inputs: Any, input_str: Any) -> dict:
@@ -241,7 +256,7 @@ class LoggingHandler(BaseCallbackHandler):
             latency_str = ""
             if start_t is not None:
                 latency_str = f" [{round(time.time() - start_t, 3)}s]"
-            self.manager.append_message(self.session_id, 'system', f"Tool Output{latency_str}: {content}")
+            self.manager.append_message(self.session_id, 'system', f"Tool Output{latency_str}: {logged_output(content)}")
 
     def on_tool_error(self, error, **kwargs):
         """A tool that raised: announced as failed. Its error reaches the model as the call's reply."""
