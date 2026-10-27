@@ -13,7 +13,8 @@ Rules every precondition here follows:
   One narrow exception: `sleep_logged_today` makes a free, read-only,
   deterministic Google Health read (no model). It checks its local
   once-a-day gate first and fails *closed* on any API error, so a broken
-  connection never turns into a paid agent turn.
+  connection never turns into a paid agent turn. Credentials only a person
+  can fix (expired, missing) are posted in the agent's channel, once a day.
   The scans (`Scan` subclasses: `market_screen`, `ha_audit`, ...) may make
   the same read-only calls the agent's own first step would; they also fail
   closed, pass what they found into the prompt, and post what they couldn't

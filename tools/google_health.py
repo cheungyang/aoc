@@ -65,13 +65,24 @@ SCOPES = (
 )
 
 AUTH_HINT = (
-    "Run `python scripts/google_health_auth.py` on a machine with a browser, or "
-    "`docker exec -it <container> python scripts/google_health_auth.py --no-browser`."
+    "Run `python scripts/google_health_auth.py --force` on a machine with a browser and copy the "
+    "google_health_credentials.json it writes to the bot's project root, or, on the bot's host, "
+    "`docker exec -it -u appuser aoc python scripts/google_health_auth.py --no-browser --force`."
 )
 
 
 class GoogleHealthError(Exception):
     """The API could not be reached, refused a request, or is not configured."""
+
+
+class GoogleHealthAuthError(GoogleHealthError):
+    """The credentials are missing, unreadable, or rejected by Google.
+
+    Unlike a network or API failure, retrying never fixes this: a person has to
+    re-run the auth script or repair the file. The sleep_logged_today
+    precondition posts it in the schedule's channel for that reason
+    (core/scheduler/preconditions/sleep.py).
+    """
 
 
 class GuardRejection(Exception):
@@ -91,11 +102,11 @@ def read_credentials(path: Optional[str] = None) -> Dict[str, str]:
     """Reads the OAuth credential file, refusing one that other users can read."""
     resolved = resolve_credentials_path(path)
     if not os.path.exists(resolved):
-        raise GoogleHealthError(f"Google Health credentials not found at {resolved}. {AUTH_HINT}")
+        raise GoogleHealthAuthError(f"Google Health credentials not found at {resolved}. {AUTH_HINT}")
 
     mode = os.stat(resolved).st_mode
     if mode & 0o077:
-        raise GoogleHealthError(
+        raise GoogleHealthAuthError(
             f"Google Health credentials file {resolved} is readable by other users "
             f"(mode {oct(mode & 0o777)}). Run: chmod 600 {resolved}"
         )
@@ -104,11 +115,20 @@ def read_credentials(path: Optional[str] = None) -> Dict[str, str]:
         with open(resolved, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except ValueError:
-        raise GoogleHealthError(f"Google Health credentials file {resolved} is not valid JSON.") from None
+        raise GoogleHealthAuthError(
+            f"Google Health credentials file {resolved} is not valid JSON. {AUTH_HINT}"
+        ) from None
+    except OSError as exc:
+        # Usually a 600 file owned by root, which passes the mode check above.
+        raise GoogleHealthAuthError(
+            f"Google Health credentials file {resolved} could not be opened ({exc.strerror or exc}). "
+            f"If root wrote it (`docker exec` without `-u appuser`), chown it to the owner of the "
+            f"project directory."
+        ) from None
 
     missing = [k for k in ("client_id", "client_secret", "refresh_token") if not data.get(k)]
     if missing:
-        raise GoogleHealthError(
+        raise GoogleHealthAuthError(
             f"Google Health credentials file {resolved} is missing {', '.join(missing)}. {AUTH_HINT}"
         )
     return data
@@ -214,7 +234,7 @@ class GoogleHealthClient:
         body = _parse(response)
         if response.status_code >= 400 or not isinstance(body, dict) or not body.get("access_token"):
             if isinstance(body, dict) and body.get("error") == "invalid_grant":
-                raise GoogleHealthError(
+                raise GoogleHealthAuthError(
                     "Google rejected the refresh token (invalid_grant). It was revoked, or it "
                     "expired: OAuth apps whose consent screen is in 'Testing' status get "
                     "refresh tokens that last only 7 days -- set it to 'In production' to "

@@ -45,7 +45,7 @@ fi
 if [ ! -f "$(pwd)/google_health_credentials.json" ]; then
     echo "Warning: google_health_credentials.json not found; the google_health tool will be unavailable."
     echo "         Create it once with: python scripts/google_health_auth.py"
-    echo "         (or inside the container: python scripts/google_health_auth.py --no-browser)"
+    echo "         (or in the running container: docker exec -it -u appuser <container> python scripts/google_health_auth.py --no-browser)"
 fi
 
 # Check for PKM directory (defaults to ../pkm on host machine)

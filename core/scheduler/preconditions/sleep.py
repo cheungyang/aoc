@@ -2,7 +2,7 @@
 from typing import Any, Dict
 
 from core.scheduler.preconditions.base import Precondition
-from core.scheduler.spec import WorkDecision
+from core.scheduler.spec import Problems, WorkDecision
 
 
 class SleepLoggedToday(Precondition):
@@ -22,6 +22,11 @@ class SleepLoggedToday(Precondition):
     Fails closed: any error reading Google Health is a "no" with the error as
     the reason. The runner fails open on exceptions, which here would mean an
     agent turn on every tick whenever the API is down.
+
+    Most errors are only logged, because the next tick retries them. Credentials
+    that are missing, unreadable or rejected (`GoogleHealthAuthError`: an expired
+    refresh token, say) never recover on their own, so that "no" carries
+    `Problems` and the runner posts it in the schedule's channel, once a day.
     """
     type_name = "sleep_logged_today"
     MIN_MINUTES_ASLEEP = 180
@@ -40,6 +45,15 @@ class SleepLoggedToday(Precondition):
         from tools.google_health import GoogleHealthClient, read_sleep
         return read_sleep(GoogleHealthClient(), {"days": 1})
 
+    @staticmethod
+    def _needs_a_person(error: Exception) -> bool:
+        """Whether only re-authorising (or repairing the credentials file) fixes `error`. Never raises."""
+        try:
+            from tools.google_health import GoogleHealthAuthError
+        except Exception:
+            return False
+        return isinstance(error, GoogleHealthAuthError)
+
     def evaluate(self, ctx):
         from datetime import datetime
 
@@ -52,7 +66,11 @@ class SleepLoggedToday(Precondition):
         try:
             data = self._read_sleep() or {}
         except Exception as e:  # fail closed: never pay for a broken check
-            return WorkDecision(False, f"could not read sleep data ({type(e).__name__}: {e})")
+            reason = f"could not read sleep data ({type(e).__name__}: {e})"
+            if self._needs_a_person(e):
+                issue = f"couldn't read sleep data from Google Health: {e}"
+                return WorkDecision(False, reason, detail=Problems(self.type_name, (issue,)))
+            return WorkDecision(False, reason)
 
         today_iso = today.isoformat()
         sessions = [s for s in data.get("sessions") or [] if s.get("wake_date") == today_iso]

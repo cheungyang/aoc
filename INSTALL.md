@@ -349,10 +349,11 @@ The `google_health` tool (`tools/google_health.py`) reads active minutes, exerci
    python scripts/google_health_auth.py
 
    # Headless host / inside the container: prints a URL, you paste back the redirect
-   docker exec -it <container> python scripts/google_health_auth.py --no-browser
+   docker exec -it -u appuser aoc python scripts/google_health_auth.py --no-browser
    ```
+   - Keep `-u appuser`: `docker exec` otherwise runs as root, and the bot (`appuser`) can't read a root-owned `600` file.
    - The file reaches the container through the `.:/app` mount. Both `.gitignore` and `.dockerignore` exclude it, and `entrypoint.sh` re-locks it to `600` on every start. The tool refuses to read it if other users can.
-   - To use it on another host, copy the file there (no re-auth needed). Re-run with `--force` only if the token is revoked or scopes change.
+   - To use it on another host, copy the file there (no re-auth needed). Re-run with `--force` only if the token expires or is revoked, or scopes change. When it expires or is revoked, schedules using the `sleep_logged_today` precondition post a ⚠️ notice in their channel once a day.
 3. **Configure `.env`**:
    ```bash
    # GOOGLE_HEALTH_CREDENTIALS_FILE=/app/google_health_credentials.json

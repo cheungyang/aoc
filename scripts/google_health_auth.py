@@ -11,7 +11,8 @@ Usage:
     python scripts/google_health_auth.py
 
     # Headless host or inside the container (prints a URL; paste the redirect back):
-    docker exec -it <container> python scripts/google_health_auth.py --no-browser
+    docker exec -it -u appuser aoc python scripts/google_health_auth.py --no-browser
+    # Without -u appuser it runs as root and writes a file the bot can't read.
 
 Options:
     --client-secret PATH   OAuth client JSON (default: the single client_secret_*.json

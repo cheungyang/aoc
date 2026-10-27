@@ -91,6 +91,28 @@ class TestSleepLoggedToday(unittest.TestCase):
         self.assertFalse(decision)
         self.assertIn("could not read sleep data", decision.reason)
 
+    def test_auth_error_is_posted_in_the_channel(self):
+        """Credentials only a person can fix carry Problems, which the runner posts."""
+        from core.scheduler.spec import Problems
+        from tools.google_health import GoogleHealthAuthError
+        self.error = GoogleHealthAuthError("Google rejected the refresh token (invalid_grant).")
+        decision = self.build().evaluate(self.ctx())
+        self.assertFalse(decision)
+        self.assertIn("could not read sleep data", decision.reason)
+        self.assertIsInstance(decision.detail, Problems)
+        self.assertEqual(len(decision.detail.issues), 1)
+        self.assertIn("invalid_grant", decision.detail.issues[0])
+
+    def test_other_errors_are_only_logged(self):
+        """The next tick retries these, so they stay a quiet skip."""
+        from tools.google_health import GoogleHealthError
+        for error in (GoogleHealthError("Could not reach the Google Health API"), TimeoutError("slow")):
+            with self.subTest(error=type(error).__name__):
+                self.error = error
+                decision = self.build().evaluate(self.ctx())
+                self.assertFalse(decision)
+                self.assertIsNone(decision.detail)
+
     def test_takes_no_params(self):
         for bad in ({"min_minutes_asleep": 60}, {"main_sleep_only": False}, {"path": "x"}):
             with self.subTest(bad=bad), self.assertRaises(PreconditionError):

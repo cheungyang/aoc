@@ -3,6 +3,7 @@
 No network: the HTTP client is replaced by `FakeClient`, and time and timezone
 are pinned so date ranges and the write guards are deterministic.
 """
+import json
 import os
 import stat
 import tempfile
@@ -318,6 +319,38 @@ class TestCredentials(unittest.TestCase):
             gh.read_credentials("/nonexistent/creds.json")
         self.assertIn("google_health_auth.py", str(ctx.exception))
 
+    def test_credential_problems_are_auth_errors(self):
+        """Retrying never fixes these, so they are what the sleep precondition posts."""
+        with self.subTest(case="missing file"), self.assertRaises(gh.GoogleHealthAuthError):
+            gh.read_credentials("/nonexistent/creds.json")
+        cases = {
+            "invalid_json": ("{", 0o600),
+            "missing_refresh_token": (json.dumps({"client_id": "a", "client_secret": "b"}), 0o600),
+            "readable_by_others": (json.dumps({"client_id": "a", "client_secret": "b", "refresh_token": "c"}), 0o644),
+        }
+        with tempfile.TemporaryDirectory() as d:
+            for name, (content, mode) in cases.items():
+                path = os.path.join(d, f"{name}.json")
+                with open(path, "w") as f:
+                    f.write(content)
+                os.chmod(path, mode)
+                with self.subTest(case=name), self.assertRaises(gh.GoogleHealthAuthError):
+                    gh.read_credentials(path)
+
+    def test_unopenable_file_is_an_auth_error(self):
+        """A root-owned 600 file passes the mode check, but the bot can't open it."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "creds.json")
+            with open(path, "w") as f:
+                f.write('{"client_id":"a","client_secret":"b","refresh_token":"c"}')
+            os.chmod(path, 0o600)
+            # Mocked rather than chmod 000, which root opens anyway: tests may run as root.
+            denied = PermissionError(13, "Permission denied")
+            with patch.object(gh, "open", side_effect=denied, create=True), \
+                 self.assertRaises(gh.GoogleHealthAuthError) as ctx:
+                gh.read_credentials(path)
+        self.assertIn("-u appuser", str(ctx.exception))
+
     def test_redact_strips_tokens(self):
         text = "Bearer ya29.abc refresh=1//0gXYZ secret=shh"
         out = gh.redact(text, "shh")
@@ -331,6 +364,72 @@ class TestCredentials(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         self.assertEqual(module.SCOPES, gh.SCOPES)
+
+    def test_every_docker_exec_auth_command_runs_as_appuser(self):
+        """The image has no USER, so a bare `docker exec` writes a root-owned file the bot can't read."""
+        for name in ("INSTALL.md", ".env.example", "install.sh",
+                     os.path.join("scripts", "google_health_auth.py"), os.path.join("tools", "google_health.py")):
+            with self.subTest(file=name):
+                with open(os.path.join(gh.PROJECT_ROOT, name), encoding="utf-8") as f:
+                    commands = [line for line in f if "docker exec" in line and "google_health_auth.py" in line]
+                self.assertTrue(commands, f"no `docker exec ... google_health_auth.py` line in {name}")
+                for line in commands:
+                    self.assertIn("-u appuser", line)
+
+
+class FakeResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+        self.text = json.dumps(body)
+
+    def json(self):
+        return self._body
+
+
+class FakeSession:
+    """Answers the OAuth token POST. Any API request is a test failure."""
+
+    def __init__(self, response):
+        self.response = response
+
+    def post(self, url, data=None, timeout=None):
+        return self.response
+
+    def request(self, **kw):
+        raise AssertionError("the API must not be called when the token refresh fails")
+
+
+class TestTokenRefresh(unittest.TestCase):
+    def setUp(self):
+        gh.reset_token_cache()
+        self.addCleanup(gh.reset_token_cache)
+
+    def client(self, status_code, body):
+        return gh.GoogleHealthClient(
+            credentials={"client_id": "a", "client_secret": "shh", "refresh_token": "1//0gXYZ"},
+            credentials_path="/nonexistent/creds.json",
+            timeout=5,
+            session=FakeSession(FakeResponse(status_code, body)),
+        )
+
+    def test_invalid_grant_is_an_auth_error(self):
+        """An expired or revoked refresh token: only re-running the auth script fixes it."""
+        client = self.client(400, {"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+        with self.assertRaises(gh.GoogleHealthAuthError) as ctx:
+            client.get("users/me/dataTypes/sleep/dataPoints")
+        message = str(ctx.exception)
+        self.assertIn("invalid_grant", message)
+        self.assertIn("google_health_auth.py", message)
+        for leaked in ("shh", "1//0gXYZ"):
+            self.assertNotIn(leaked, message)
+
+    def test_server_error_is_not_an_auth_error(self):
+        """A 503 from the token endpoint may clear by the next tick, so it is only logged."""
+        client = self.client(503, {"error": "backendError"})
+        with self.assertRaises(gh.GoogleHealthError) as ctx:
+            client.get("users/me/dataTypes/sleep/dataPoints")
+        self.assertNotIsInstance(ctx.exception, gh.GoogleHealthAuthError)
 
 
 if __name__ == "__main__":
