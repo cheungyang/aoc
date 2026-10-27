@@ -1,7 +1,8 @@
 """Outcome lines: what came of the Switchboard's routes, written to main's memory log.
 
-Code writes one line per outcome, whether a team radio label or a route you
-said was missed (core/proactive/README.md). That night, main's own dream
+Code writes one line per outcome: a team radio label, a route you said was
+missed, or what came of a live proactive post (core/proactive/outcomes.py);
+core/proactive/README.md has them all. That night, main's own dream
 (scripts/dream_standup.py) consolidates the lines into main's MEMORY
 (precedents) and FEEDBACK (corrections). The Switchboard runs as main, so it
 reads both on every run.
@@ -18,16 +19,31 @@ SWITCHBOARD = "main"
 REASONS = ("wrong agent", "wrong timing", "not worth it", "wrong fact")
 
 
-def route_line(route: Dict[str, Any], label: str, reason: Optional[str] = None, note: Optional[str] = None) -> str:
-    """The line for your label on a route: a precedent when it was right, feedback when wrong."""
-    what = (f"Switchboard #{route.get('decision_id')}: \"{route.get('gist')}\" from {route.get('source_agent')} "
+def _route_text(route: Dict[str, Any]) -> str:
+    """A route as its lines name it: the decision, the fact, who to whom, and how it was let through."""
+    return (f"Switchboard #{route.get('decision_id')}: \"{route.get('gist')}\" from {route.get('source_agent')} "
             f"to {route.get('to_agent')} ({route.get('verdict')}, {route.get('urgency')}"
             f"{', offer: ' + route['offer'] if route.get('offer') else ''})")
+
+
+def route_line(route: Dict[str, Any], label: str, reason: Optional[str] = None, note: Optional[str] = None) -> str:
+    """The line for your label on a route: a precedent when it was right, feedback when wrong."""
+    what = _route_text(route)
     if label == "good":
         return f"[MEMORY] {what} was right, the user said."
     why = f" Why: {reason}." if reason else ""
     said = f" They added: \"{note}\"." if note else ""
     return f"[FEEDBACK] {what} was wrong, the user said.{why}{said}"
+
+
+def outcome_line(route: Dict[str, Any], outcome: str, how: Optional[str] = None) -> str:
+    """The line for what came of a route's proactive post: a precedent when the user engaged
+    with it, feedback when they declined or ignored it. `how` says what showed it."""
+    what = _route_text(route)
+    seen = f" ({how})" if how else ""
+    if outcome == "engaged":
+        return f"[MEMORY] {what} was posted, and the user engaged with it{seen}."
+    return f"[FEEDBACK] {what} was posted, and the user {outcome} it{seen}."
 
 
 def missed_line(text: str) -> str:

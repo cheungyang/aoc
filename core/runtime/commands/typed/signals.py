@@ -2,7 +2,8 @@
 
     !signals                          the last 10 decisions
     !signals <id>                     one decision's trace: what it saw, its signals,
-                                      each route and the Governor's verdict, your labels
+                                      each route and the Governor's verdict, how its
+                                      delivery went and what came of it, your labels
     !signals <id> good                its routes were right
     !signals <id> bad [why] [— note]  its routes were wrong; why is one of wrong agent,
                                       wrong timing, not worth it, wrong fact
@@ -10,13 +11,16 @@
     !signals missed                   the ones you reported
     !signals stats                    the last 14 days: decisions, verdicts, the
                                       precision of your labels, tokens, each tap's
-                                      delay, and when deliveries would land
-    !signals why <message link>       the decision behind a team radio line
+                                      delay, when deliveries would land, and for G4,
+                                      what came of the posts and how fast they came
+    !signals why <message link>       the decision behind a team radio line, or
+                                      behind a proactive post
 
 Read from the Board (core/storage/signals.py), with no model. A label here is
-the same as a ✅/❌ on team radio: it counts toward acceptance at once, and
-it writes a line in main's memory log (core/knowledge/memory/outcomes.py).
-Dropped routes were never offered, so they take no label.
+the same as a ✅/❌ on team radio: it counts toward acceptance at once, in
+place of the route's outcome, and it writes a line in main's memory log
+(core/knowledge/memory/outcomes.py). Dropped routes were never offered, so
+they take no label.
 """
 import asyncio
 import re
@@ -27,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from core.knowledge.memory.outcomes import REASONS, missed_line, record_outcome, route_line
 from core.runtime.commands.base import ChannelCommand, TypedContext
-from core.storage.signals import SignalStore
+from core.storage.signals import APPROVED, DECLINED, ENGAGED, HANDED, IGNORED, OUTCOMES, RUNNING, SignalStore
 from core.util.local_time import get_local_timezone
 
 RECENT = 10
@@ -38,6 +42,12 @@ URGENCIES = ("now", "today", "next")
 # G3: at least this many labels, and at least this share of them right.
 LABELS_NEEDED = 30
 TARGET_PRECISION = 0.8
+# G4: at least this share of the posts engaged, at most this many declines per agent a
+# week, and a `now` route's reaction and post at most this long after the turn (p95).
+TARGET_ENGAGED = 0.5
+DECLINES_A_WEEK = 1
+REACTION_P95_S = 10
+POST_P95_S = 60
 _MARK = {"good": "✅", "bad": "❌"}
 _LINK_ID = re.compile(r"(\d{15,25})\D*$")
 
@@ -102,6 +112,29 @@ def recent_text(store: SignalStore, limit: int = RECENT) -> str:
     return "\n".join(lines)
 
 
+def delivery_text(delivery: Dict[str, Any], route: Dict[str, Any], decided_at: float) -> str:
+    """How a route's delivery went, timed from its decision, and what came of the post:
+    "posted +31 s · engaged". A `next` route's row is its scheduled run's."""
+    def after(at: Optional[float]) -> str:
+        return f" +{span(max(0.0, at - decided_at))}" if at else ""
+
+    status = delivery["status"]
+    if status == APPROVED:
+        text = f"approved, due {when(delivery['deliver_at'])}"
+    elif status == HANDED:
+        text = f"handed to a scheduled run{after(delivery.get('claimed_at'))}"
+    elif status == RUNNING:
+        text = f"running{after(delivery.get('claimed_at'))}"
+    else:
+        run = " on a scheduled run" if route.get("urgency") == "next" else ""
+        text = f"{status}{run}{after(delivery.get('finished_at'))}"
+        if delivery.get("error"):
+            text += f" ({delivery['error']})"
+    if route.get("outcome"):
+        text += f" · {route['outcome']}"
+    return text
+
+
 def trace_text(store: SignalStore, decision_id: int) -> str:
     d = store.decision(decision_id)
     if d is None:
@@ -130,11 +163,13 @@ def trace_text(store: SignalStore, decision_id: int) -> str:
             verdict = route["verdict"] if route["verdict"] != "deliver" else f"deliver {route['urgency']}"
             asked = f" (asked {route['asked']})" if route["asked"] != route["urgency"] else ""
             reason = f": {route['reason']}" if route.get("reason") else ""
+            delivery = store.delivery(route["id"]) if route["verdict"] == "deliver" else None
+            delivered = f" · {delivery_text(delivery, route, d['at'])}" if delivery else ""
             label = ""
             if route.get("label") in _MARK:
                 why = f", {route['label_reason']}" if route.get("label_reason") else ""
                 label = f" · you: {_MARK[route['label']]}{why}"
-            lines.append(f"  → {route['to_agent']} · \"{route['offer']}\" · {verdict}{asked}{reason}{label}")
+            lines.append(f"  → {route['to_agent']} · \"{route['offer']}\" · {verdict}{asked}{reason}{delivered}{label}")
     if d.get("errors") and d["signals"]:
         lines.append(f"Problems: {d['errors']}")
     return "\n".join(lines)
@@ -204,6 +239,10 @@ def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STAT
         f"Missed routes you reported: {stats['missed']}",
     ]
     lines += delivery_lines(store.would_deliver(now - days * 86400))
+    # Declines a week over the weeks posts went out: at least one, so a pilot's first days aren't scaled up.
+    weeks = max(1.0, (now - (stats["first_live_at"] or now)) / (7 * 86400))
+    lines += outcome_lines(stats["outcomes"], weeks)
+    lines += timing_lines(stats["acks"], stats["posts"])
     taps = []
     for tap, rows in sorted(stats["taps"].items()):
         delays = [delay for delay, _ in rows if delay is not None]
@@ -231,12 +270,51 @@ def delivery_lines(rows: List[Dict[str, Any]]) -> List[str]:
     return [f"Would deliver: {by_urgency}", f"  by time of day: {by_part} (night is 22:00-07:00)"]
 
 
+def outcome_lines(outcomes: Dict[str, Dict[str, int]], weeks: float) -> List[str]:
+    """What came of the proactive posts, in all and per recipient: G4's engagement, and
+    each agent's declines a week, over `weeks`."""
+    if not outcomes:
+        return []
+
+    def counted(counts: Dict[str, int]) -> str:
+        engaged, ignored, declined = (counts.get(outcome, 0) for outcome in OUTCOMES)
+        share = engaged / (engaged + ignored + declined)
+        return f"{engaged} {ENGAGED} · {ignored} {IGNORED} · {declined} {DECLINED} → {share:.0%} engaged"
+
+    every = {outcome: sum(counts.get(outcome, 0) for counts in outcomes.values()) for outcome in OUTCOMES}
+    lines = [f"Outcomes of the posts: {counted(every)} (G4 wants ≥ {TARGET_ENGAGED:.0%} engaged, and "
+             f"≤ {DECLINES_A_WEEK} decline per agent a week)"]
+    for agent_id, counts in sorted(outcomes.items()):
+        lines.append(f"  {agent_id}: {counted(counts)} · {counts.get(DECLINED, 0) / weeks:.1f} declines a week")
+    return lines
+
+
+def p95(values: List[float]) -> float:
+    """The 95th percentile, by nearest rank: of 20 values the 19th smallest, of 10 the largest."""
+    ordered = sorted(values)
+    return ordered[(95 * len(ordered) + 99) // 100 - 1]
+
+
+def timing_lines(acks: List[float], posts: List[float]) -> List[str]:
+    """How fast `now` routes came, from the end of the turn each came from (G4): the
+    recipient's emoji on your message, and its post."""
+    parts = []
+    if acks:
+        parts.append(f"reaction p95 {span(p95(acks))} after the turn (G4 wants ≤ {REACTION_P95_S} s; "
+                     f"{len(acks)} so far)")
+    if posts:
+        parts.append(f"post p95 {span(p95(posts))} (G4 wants ≤ {POST_P95_S} s; {len(posts)} so far)")
+    return ["`now` routes: " + " · ".join(parts)] if parts else []
+
+
 def why_text(store: SignalStore, link: str) -> str:
+    """The trace of the decision behind a message: a team radio line, or a proactive post."""
     match = _LINK_ID.search(link or "")
-    route = store.route_by_radio_message(match.group(1)) if match else None
-    if route is None:
-        return "That isn't a team radio line I know. Paste a radio line's link (Copy Message Link)."
-    return trace_text(store, route["decision_id"])
+    found = match and (store.route_by_radio_message(match.group(1)) or store.post_by_message(match.group(1)))
+    if not found:
+        return ("That isn't a team radio line or a proactive post I know. Paste its link "
+                "(Copy Message Link).")
+    return trace_text(store, found["decision_id"])
 
 
 def signals_text(args: str, store: Optional[SignalStore] = None) -> str:

@@ -860,6 +860,37 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
         finally:
             radio.clear_listeners()
 
+    async def test_a_mark_on_a_proactive_post_is_its_outcome_and_still_finishes_the_row(self, mock_bot_class,
+                                                                                        mock_loader_class, mark_read,
+                                                                                        record_reply):
+        import datetime
+        import tempfile
+        import discord
+        from core.channel.discord import radio
+        from core.proactive.outcomes import Outcomes
+        from core.storage.signals import SignalStore
+        posted = datetime.datetime(2026, 10, 22, 6, 0, tzinfo=datetime.timezone.utc)
+        message_id = discord.utils.time_snowflake(posted)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SignalStore(f"{tmp}/memory.db")
+            decision_id = store.start_decision(tap="effect", session_id="s1", first_turn_at=None, mode="live")
+            signal_id = store.add_signal({"decision_id": decision_id, "at": 1.0, "kind": "artifact",
+                                          "gist": "Groceries"})
+            route_id = store.add_route({"signal_id": signal_id, "decision_id": decision_id, "to_agent": "meal-planner",
+                                        "asked": "now", "urgency": "now", "verdict": "deliver"})
+            store.approve_delivery(route_id, to_agent="meal-planner", channel="meal-planning", deliver_at=1.0)
+            store.finish_delivery(route_id, "posted", at=posted.timestamp(), message_ids=[str(message_id)])
+            radio.on_reaction(Outcomes(store, clock=lambda: posted.timestamp() + 60, record=lambda line: None).reacted)
+            try:
+                runner, message = self._runner(mock_bot_class, mock_loader_class)
+                runner.bot.get_channel.return_value = message.channel
+                await runner.on_raw_reaction_add(MagicMock(emoji="✅", member=MagicMock(bot=False), channel_id=77,
+                                                           message_id=message_id))
+                self.assertEqual(store.route(route_id)["outcome"], "engaged")
+                mark_read.assert_called_once()  # and the ✅ still finishes the post's inbox row, as before
+            finally:
+                radio.clear_listeners()
+
     async def test_a_poll_vote_reaches_team_radio_but_not_the_bots_own(self, mock_bot_class, mock_loader_class,
                                                                        mark_read, record_reply):
         from core.channel.discord import radio

@@ -4,6 +4,8 @@ import asyncio
 import pytest
 
 from core.proactive import service as service_module
+from core.proactive.outcomes import Outcomes
+from core.proactive.radio import TeamRadio
 from core.proactive.service import ProactiveService
 from core.proactive.taps import TAP_CHAT, TAP_EFFECT, TAP_SCHEDULED, LedgerEntry
 from core.storage.signals import SignalStore
@@ -152,8 +154,27 @@ class TestInstall:
         # With the switch off (the default), each decision is recorded in shadow.
         assert isinstance(service.decide, Pipeline) and service.decide.current_mode() == "shadow"
         assert service.decide.radio is not None
-        # Team radio hears ✅/❌ and poll votes from the Discord runner.
-        assert len(discord_radio._reaction_listeners) == 1 and len(discord_radio._vote_listeners) == 1
+        # Team radio hears ✅/❌ and poll votes from the Discord runner; the posts' outcomes
+        # hear ✅/❌ after it, so a reaction on a radio line stays a label.
+        reacted = [listener.__self__ for listener in discord_radio._reaction_listeners]
+        assert [type(listener) for listener in reacted] == [TeamRadio, Outcomes]
+        assert len(discord_radio._vote_listeners) == 1
+
+    @pytest.mark.asyncio
+    async def test_its_sweep_resolves_the_times_then_settles_the_outcomes(self, hooks, monkeypatch):
+        from core.proactive.pipeline import Pipeline
+        swept = []
+
+        async def resolve(self):
+            swept.append("resolve")
+
+        async def settle(self):
+            swept.append("settle")
+
+        monkeypatch.setattr(Pipeline, "resolve", resolve)
+        monkeypatch.setattr(Outcomes, "settle", settle)
+        await service_module.install().sweep()
+        assert swept == ["resolve", "settle"]
 
     def test_the_schedule_runner_runs_the_deliveries_and_is_woken_for_them(self, hooks):
         from core.channel.discord.ack import DiscordAck

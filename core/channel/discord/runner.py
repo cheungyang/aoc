@@ -134,10 +134,11 @@ class BotRunner:
         await self.stop()
 
     async def on_raw_reaction_add(self, payload):
-        """✅ or ❌ on a team radio line labels that route (core/channel/discord/radio.py).
+        """✅ or ❌ on a team radio line labels that route, and on a proactive post
+        it is that post's outcome (the listeners in core/channel/discord/radio.py).
         On a `!gate review` post it marks that utterance as yours or not
-        (core/voice/listening/gate_commands.py). ✅ on any other post finishes
-        its channel's inbox row (core/voice/briefing)."""
+        (core/voice/listening/gate_commands.py). ✅ on any other post, a proactive
+        one too, finishes its channel's inbox row (core/voice/briefing)."""
         emoji = str(getattr(payload, "emoji", ""))
         if emoji not in GATE_REACTIONS:
             return

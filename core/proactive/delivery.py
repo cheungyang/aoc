@@ -32,7 +32,9 @@ The turn is the recipient's own, in its home channel, with source "proactive":
   - the taps mark it hops = 1, so the Governor absorbs any signal it starts:
     a delivery never starts another.
 
-The delivery is then finished: posted, silent or failed.
+The delivery is then finished: posted, silent or failed. A post keeps the ids
+of its messages, and gets one outcome: engaged, declined or ignored
+(outcomes.py).
 
 The next touchpoint: the runner asks SignalsForMe before each scheduled run
 that has a channel (`add_briefing`). It takes the agent's live `next` routes
@@ -50,6 +52,7 @@ import time
 from functools import partial
 from typing import Any, Dict, List, Optional, Set
 
+from core.channel.discord.dispatcher import dispatch_discord_output
 from core.channel.discord.output import DiscordOutput
 from core.channel.discord.ownership import PROD, Ownership
 from core.config.settings import Config
@@ -156,19 +159,23 @@ class DeliveryOutput:
     """The recipient's channel as a proactive turn's output (core/runtime/foundation/output.py).
 
     A DiscordOutput that posts nothing for a silent reply. `outcome` says what
-    reached the channel (posted or silent), so the delivery is finished right.
+    reached the channel (posted or silent), so the delivery is finished right,
+    and `message_ids` which messages it posted: your ✅ or ❌ on one of them is
+    the post's outcome (outcomes.py).
     """
 
     def __init__(self, channel: Any):
         self.channel = channel
         self.discord = DiscordOutput(channel)
         self.outcome: Optional[str] = None
+        self.message_ids: List[str] = []
 
     async def deliver(self, ctx: Any, response: Any) -> None:
         if is_silent(response):
             self.outcome = SILENT
             return
-        await self.discord.deliver(ctx, response)
+        sent = await dispatch_discord_output(channel=self.channel, response=response, source=ctx.source)
+        self.message_ids = [str(message.id) for message in sent or () if getattr(message, "id", None) is not None]
         self.outcome = POSTED
 
     async def notify(self, text: str) -> None:
@@ -232,7 +239,9 @@ class DeliverySchedule(PromptSchedule):
         self._finish(FAILED, "the turn failed")
 
     def _finish(self, status: str, error: str = "") -> None:
-        self.store.finish_delivery(self.route_id, status, error=error)
+        """Records how it ended, with the messages it posted, if any."""
+        message_ids = self.output.message_ids if self.output is not None else []
+        self.store.finish_delivery(self.route_id, status, error=error, message_ids=message_ids)
         print(f"[proactive] Delivery of route #{self.route_id} to {self.agent_id}: {status}"
               f"{f' ({error})' if error else ''}")
 

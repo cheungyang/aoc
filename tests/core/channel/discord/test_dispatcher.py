@@ -1,6 +1,8 @@
 """dispatch_discord_output sends replies through the markdown-safe splitter."""
+import itertools
 import re
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.channel.discord.dispatcher import dispatch_discord_output
@@ -41,6 +43,17 @@ class TestDispatchDiscordOutput(unittest.IsolatedAsyncioTestCase):
         channel = AsyncMock()
         await dispatch_discord_output(channel, AgentResponse(text="done"), source="job")
         channel.send.assert_not_called()
+
+    @patch("core.channel.discord.dispatcher.asyncio.sleep", new_callable=AsyncMock)
+    async def test_it_returns_the_messages_it_sent(self, _sleep):
+        """A proactive delivery keeps their ids: a ✅ or ❌ on one is the post's outcome."""
+        channel, ids = AsyncMock(), itertools.count(1)
+        channel.send.side_effect = lambda chunk, **kwargs: SimpleNamespace(id=next(ids), content=chunk)
+        sent = await dispatch_discord_output(channel, AgentResponse(text="Saw the 99 Ranch run. " * 120),
+                                             source="proactive")
+        self.assertEqual([m.id for m in sent], [1, 2])
+        self.assertEqual([m.content for m in sent], [c.args[0] for c in channel.send.call_args_list])
+        self.assertEqual(await dispatch_discord_output(channel, AgentResponse(text="done"), source="job"), [])
 
 
 if __name__ == "__main__":

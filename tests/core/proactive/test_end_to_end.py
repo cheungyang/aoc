@@ -9,8 +9,9 @@ line; a ✅ labels it.
 With the switch on, the same receipt goes on: the `now` route is approved for
 delivery, your receipt message gets Ramsay's emoji, and the schedule runner is
 woken → its tick claims the delivery → the runner runs Ramsay's proactive turn
-(stood in for) in #meal-planning → it posts there, or stays silent. A `next`
-route instead rides along on Ramsay's next scheduled run, in its prompt.
+(stood in for) in #meal-planning → it posts there, or stays silent → your ✅
+on the post is its outcome. A `next` route instead rides along on Ramsay's
+next scheduled run, in its prompt, and gets no outcome.
 """
 import asyncio
 import random
@@ -27,6 +28,7 @@ from core.proactive import radio as radio_module
 from core.proactive import service as service_module
 from core.proactive.cards import PeerCard
 from core.proactive.delivery import DeliverySchedule, DueDeliveries, SignalsForMe
+from core.proactive.outcomes import Outcomes
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import GOOD, TeamRadio
 from core.proactive.service import ProactiveService
@@ -149,7 +151,7 @@ async def test_a_saved_receipt_reaches_team_radio_and_takes_a_label(tmp_path, mo
 
 
 class MealPlanning:
-    """#meal-planning on Discord: what was posted in it."""
+    """#meal-planning on Discord: what was posted in it, as message 9001 and on."""
 
     name = "meal-planning"
 
@@ -158,6 +160,7 @@ class MealPlanning:
 
     async def send(self, text, **kwargs):
         self.sent.append(text)
+        return SimpleNamespace(id=9000 + len(self.sent))
 
 
 class Ramsay:
@@ -239,8 +242,12 @@ async def test_with_the_switch_on_the_receipt_becomes_ramsays_post(tmp_path, mon
         assert store.route(route["id"])["delivered_at"] is not None
         record_post.assert_called_once_with(meal_planning, reply, origin="proactive:meal-planner", loader=runner.loader)
         assert record_push.call_args.kwargs["label"] == "a suggestion"
+        # Your ✅ on his post is its outcome, and the runner still goes on to its inbox row.
+        assert delivery["message_ids"] == ["9001"]
+        assert not await Outcomes(store, record=lambda line: None).reacted("9001", GOOD)
+        assert store.route(route["id"])["outcome"] == "engaged"
     else:
-        assert meal_planning.sent == []
+        assert meal_planning.sent == [] and delivery["message_ids"] == []
         record_post.assert_not_called()
         record_push.assert_not_called()
 
@@ -281,3 +288,4 @@ async def test_with_the_switch_on_a_next_route_rides_along_on_ramsays_scheduled_
     assert "Groceries from 99 Ranch" in prompt and "receipt-processor" not in prompt and "ledger_append" not in prompt
     assert ramsay.sessions[0].source == "scheduled" and meal_planning.sent == [post]
     assert store.delivery(route["id"])["status"] == "posted"
+    assert store.unsettled_posts() == []  # the run's post says nothing about the item: no outcome

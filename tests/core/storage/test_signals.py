@@ -347,6 +347,118 @@ def test_an_old_deliveries_table_gets_acked_at(tmp_path):
     assert SignalStore(path).delivery(7)["acked_at"] == 2.0  # the next connection finds it there
 
 
+# -- outcomes of live posts ------------------------------------------------------
+
+def test_a_post_keeps_its_message_ids_and_any_of_them_finds_it(store):
+    route_id, waiting = _approved(store), _approved(store)
+    store.finish_delivery(route_id, "posted", at=250.0, message_ids=[7001, "7002"])
+    assert store.delivery(route_id)["message_ids"] == ["7001", "7002"]
+    assert store.delivery(waiting)["message_ids"] == []
+    post = store.post_by_message("7002")
+    assert (post["route_id"], post["to_agent"], post["status"], post["finished_at"], post["outcome"]) == (
+        route_id, "meal-planner", "posted", 250.0, None)
+    assert post["decision_id"] == store.route(route_id)["decision_id"]
+    assert store.post_by_message(7001)["route_id"] == route_id
+    assert store.post_by_message("700") is None and store.post_by_message("70012") is None  # whole ids only
+
+
+def test_unsettled_posts_are_the_proactive_posts_with_no_outcome_yet(store):
+    later, sooner, today = _approved(store), _approved(store), _approved(store, urgency="today")
+    silent, failed, settled, waiting = _approved(store), _approved(store), _approved(store), _approved(store)
+    store.finish_delivery(later, "posted", at=300.0)
+    store.finish_delivery(sooner, "posted", at=250.0)
+    store.finish_delivery(today, "posted", at=260.0)
+    store.finish_delivery(silent, "silent", at=250.0)
+    store.finish_delivery(failed, "failed", at=250.0)
+    store.finish_delivery(settled, "posted", at=250.0)
+    store.set_outcome(settled, "engaged", at=255.0)
+    handed = _next_route(store)  # its scheduled run posted: that says nothing about the item
+    store.hand_over([handed], to_agent="meal-planner", channel="meal-planning", now=200.0)
+    store.finish_delivery(handed, "posted", at=250.0)
+    assert [(p["route_id"], p["finished_at"]) for p in store.unsettled_posts()] == [
+        (sooner, 250.0), (today, 260.0), (later, 300.0)]
+
+
+def test_your_first_turn_with_an_agent_in_a_stretch(store):
+    store.record_turn(_turn(at=100.0, agent_id="meal-planner"))                    # before it
+    store.record_turn(_turn(at=110.0, agent_id="day-planner"))                     # another agent
+    store.record_turn(_turn(at=120.0, agent_id="meal-planner", caller=""))         # an agent asked
+    store.record_turn(_turn(at=130.0, agent_id="meal-planner", tap="scheduled"))   # a schedule
+    first = store.record_turn(_turn(at=140.0, agent_id="meal-planner", user_text="nope"))
+    store.record_turn(_turn(at=150.0, agent_id="meal-planner"))
+    turn = store.first_user_turn("meal-planner", after=100.0, until=200.0)
+    assert (turn["id"], turn["user_text"], turn["effects"][0]["tool"]) == (first, "nope", "ledger_append")
+    assert store.first_user_turn("meal-planner", after=100.0, until=139.0) is None
+    assert store.first_user_turn("meal-planner", after=150.0, until=200.0) is None
+
+
+def test_an_outcome_is_set_once_and_counted_once(store):
+    route_id = _approved(store)
+    assert store.set_outcome(route_id, "engaged", at=300.0)
+    assert not store.set_outcome(route_id, "engaged", at=310.0)   # a repeat changes nothing
+    assert not store.set_outcome(route_id, "ignored", at=320.0)   # the first sticks
+    assert (store.route(route_id)["outcome"], store.route(route_id)["outcome_at"]) == ("engaged", 300.0)
+    assert store.acceptance("meal-planner/artifact/food") == {"engaged": 1, "ignored": 0, "declined": 0}
+
+    assert store.set_outcome(route_id, "declined", at=400.0, replaces=("engaged",))   # ❌ within the day
+    assert not store.set_outcome(route_id, "declined", at=410.0, replaces=("engaged",))
+    assert (store.route(route_id)["outcome"], store.route(route_id)["outcome_at"]) == ("declined", 400.0)
+    assert store.acceptance("meal-planner/artifact/food") == {"engaged": 0, "ignored": 0, "declined": 1}
+    for wrong in ({"outcome": "missed"}, {"outcome": "declined", "replaces": ("good",)}):
+        with pytest.raises(ValueError):
+            store.set_outcome(route_id, **wrong)
+
+
+def test_a_label_wins_over_an_outcome_and_takes_its_count(store):
+    outcome_first, label_first = _approved(store), _approved(store, kind_key="excursion-planner/situation/travel")
+    store.set_outcome(outcome_first, "engaged", at=300.0)
+    store.label_routes([outcome_first], "bad")
+    assert store.acceptance("meal-planner/artifact/food") == {"engaged": 0, "ignored": 0, "declined": 1}
+    store.label_routes([outcome_first], "good")  # and a relabel moves it again
+    assert store.acceptance("meal-planner/artifact/food") == {"engaged": 1, "ignored": 0, "declined": 0}
+
+    store.label_routes([label_first], "good")
+    assert store.set_outcome(label_first, "declined", at=300.0)  # kept on the route, not counted
+    assert store.route(label_first)["outcome"] == "declined"
+    assert store.acceptance("excursion-planner/situation/travel") == {"engaged": 1, "ignored": 0, "declined": 0}
+
+
+def test_older_tables_get_message_ids_and_outcome_at(tmp_path):
+    """A dev database may hold the routes and deliveries tables as S4's third part left them."""
+    path = str(tmp_path / "memory.db")
+    route_id = _approved(SignalStore(path))
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE deliveries DROP COLUMN message_ids")
+    conn.execute("ALTER TABLE routes DROP COLUMN outcome_at")
+    conn.commit()
+    conn.close()
+
+    store = SignalStore(path)
+    assert store.delivery(route_id)["message_ids"] == []  # the row is kept, and the columns added
+    store.finish_delivery(route_id, "posted", at=250.0, message_ids=["7001"])
+    assert store.set_outcome(route_id, "engaged", at=300.0)
+    assert SignalStore(path).post_by_message("7001")["outcome"] == "engaged"
+    assert store.route(route_id)["outcome_at"] == 300.0
+
+
+def test_stats_have_the_outcomes_and_how_fast_now_routes_came(store):
+    shadow = _decision(store, at=50.0)  # before the first live decision
+    _route(store, _signal(store, shadow), shadow, verdict="absorb")
+    reacted, quiet = _approved(store), _approved(store, to_agent="excursion-planner")
+    for route_id in (reacted, quiet):
+        # The source turn the decision read ended at 100.
+        store.claim_turns([store.record_turn(_turn(at=100.0))], store.route(route_id)["decision_id"])
+    store.ack_delivery(reacted, at=103.0)
+    store.finish_delivery(reacted, "posted", at=141.0)
+    store.set_outcome(reacted, "engaged")
+    store.finish_delivery(quiet, "silent", at=130.0)
+    store.set_outcome(_approved(store, urgency="today"), "ignored")  # a `today` post: no timing
+    stats = store.stats(since=0.0)
+    assert stats["outcomes"] == {"meal-planner": {"engaged": 1, "ignored": 1}}
+    assert stats["first_live_at"] == 110.0
+    assert (stats["acks"], stats["posts"]) == ([3.0], [41.0])
+
+
 # -- the next touchpoint (live `next` routes) ---------------------------------------
 
 TODAY = "2026-10-24"

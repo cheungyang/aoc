@@ -7,19 +7,21 @@ labels land on the routes. core/proactive/README.md walks through the flow;
 the schema is core/storage/schemas/signals.sql. JSON columns are encoded and
 decoded here, so callers pass and get plain lists and dicts.
 
-Acceptance counts are per kind of nudge (`kind_key`, recipient/kind/tag).
-Until delivery outcomes are captured (stage S4), your team radio labels are
-the outcome: ✅ counts as engaged, ❌ as declined, and changing a label moves
-its count.
+Acceptance counts are per kind of nudge (`kind_key`, recipient/kind/tag), and
+a route counts once: your label if you gave one (✅ as engaged, ❌ as
+declined), else its outcome, once a live post has one (engaged, ignored or
+declined: core/proactive/outcomes.py). Labeling a route moves its outcome's
+count to the label, and changing a label moves it again.
 
 Live (`PROACTIVE_DELIVERY` on), a route approved for delivery gets a
 `deliveries` row: a schedule runner tick claims it once, and its proactive
-turn finishes it posted, silent or failed (core/proactive/delivery.py). A
-`now` route's row also keeps when the recipient's emoji went on your message
-(`ack_delivery`). A `next` route's row is made when the recipient's next
-scheduled run takes it (`pending_next`, `hand_over`), and that run finishes
-it. Live Context (core/prompts/live_context.py) shows agents the live
-situations (`live_situations`).
+turn finishes it posted, silent or failed (core/proactive/delivery.py), with
+the ids of the messages it posted (`post_by_message`). A `now` route's row
+also keeps when the recipient's emoji went on your message (`ack_delivery`).
+A `next` route's row is made when the recipient's next scheduled run takes it
+(`pending_next`, `hand_over`), and that run finishes it. Live Context
+(core/prompts/live_context.py) shows agents the live situations
+(`live_situations`).
 """
 import json
 import sqlite3
@@ -33,9 +35,13 @@ from core.storage.util import placeholders
 _JSON = {
     "turn_ledger": {"memory": [], "effects": [], "context": {}},
     "signals": {"payload": {}},
+    "deliveries": {"message_ids": []},
 }
 # A label, as the acceptance counts see it.
 _COUNTED_AS = {"good": "engaged", "bad": "declined"}
+# What came of a live post (core/proactive/outcomes.py): each is also its acceptance bucket.
+ENGAGED, IGNORED, DECLINED = "engaged", "ignored", "declined"
+OUTCOMES = (ENGAGED, IGNORED, DECLINED)
 # A delivery's statuses: approved → running → posted, silent or failed. A `next`
 # route's row starts handed (hand_over), and its scheduled run finishes it the same way.
 APPROVED, RUNNING, HANDED, POSTED, SILENT, FAILED = "approved", "running", "handed", "posted", "silent", "failed"
@@ -49,7 +55,11 @@ EXPIRED = "expired; not posted late"
 SENSITIVE_TAGS = frozenset({"health", "finance"})
 # Columns added to a table after it shipped, with their definitions. signals.sql
 # makes a missing table whole, but never changes one a database already holds.
-_ADDED_COLUMNS = (("deliveries", "acked_at", "REAL"),)
+_ADDED_COLUMNS = (
+    ("deliveries", "acked_at", "REAL"),
+    ("deliveries", "message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+    ("routes", "outcome_at", "REAL"),
+)
 
 
 def _encode(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -333,16 +343,20 @@ class SignalStore(Store):
         self.execute("UPDATE deliveries SET acked_at = ? WHERE route_id = ? AND acked_at IS NULL",
                      [time.time() if at is None else at, route_id])
 
-    def finish_delivery(self, route_id: int, status: str, *, error: str = "", at: Optional[float] = None) -> None:
+    def finish_delivery(self, route_id: int, status: str, *, error: str = "", at: Optional[float] = None,
+                        message_ids: Optional[Sequence[str]] = None) -> None:
         """Records how a delivery ended: posted, silent or failed. A proactive turn's, or a
         handed row's scheduled run's. A post also sets its route's `delivered_at`. A run that
-        outlived fail_stuck still records how it really ended."""
+        outlived fail_stuck still records how it really ended. `message_ids` are the messages a
+        proactive turn posted: a ✅ or ❌ on one of them is its outcome."""
         if status not in FINISHED:
             raise ValueError(f"a delivery finishes posted, silent or failed, not {status!r}")
         at = time.time() if at is None else at
+        values: Dict[str, Any] = {"status": status, "finished_at": at, "error": error or ""}
+        if message_ids is not None:
+            values["message_ids"] = [str(message_id) for message_id in message_ids]
         with self.connect() as conn:
-            self.update("deliveries", {"status": status, "finished_at": at, "error": error or ""},
-                        {"route_id": route_id}, conn=conn)
+            self.update("deliveries", _encode("deliveries", values), {"route_id": route_id}, conn=conn)
             if status == POSTED:
                 self.update("routes", {"delivered_at": at}, {"id": route_id}, conn=conn)
 
@@ -402,15 +416,77 @@ class SignalStore(Store):
         return handed
 
     def delivery(self, route_id: int) -> Optional[Dict[str, Any]]:
-        row = self.select_one("deliveries", {"route_id": route_id})
-        return dict(row) if row else None
+        return _decode("deliveries", self.select_one("deliveries", {"route_id": route_id}))
+
+    # -- outcomes of live posts (core/proactive/outcomes.py) ---------------------
+
+    def post_by_message(self, message_id: Any) -> Optional[Dict[str, Any]]:
+        """The proactive post that includes Discord message `message_id`: its delivery's route,
+        recipient, status and finish, with its route's decision and outcome. None for any other
+        message, a handed row's included: it keeps no message ids."""
+        rows = self.query(
+            "SELECT d.route_id, d.to_agent, d.status, d.finished_at, r.decision_id, r.outcome FROM deliveries d "
+            "JOIN routes r ON r.id = d.route_id WHERE instr(d.message_ids, ?) > 0 ORDER BY d.route_id LIMIT 1",
+            [json.dumps(str(message_id))])  # '"123"': a whole id in the JSON list, never part of one
+        return dict(rows[0]) if rows else None
+
+    def unsettled_posts(self) -> List[Dict[str, Any]]:
+        """The proactive posts with no outcome yet, oldest first: each delivery's route, recipient
+        and when it posted. Only a `now` or `today` route is delivered as a proactive turn: a
+        `next` route's row was handed to a scheduled run, whose post says nothing about the item."""
+        rows = self.query(
+            "SELECT d.route_id, d.to_agent, d.finished_at, r.outcome "
+            "FROM deliveries d JOIN routes r ON r.id = d.route_id "
+            "WHERE d.status = 'posted' AND r.outcome IS NULL AND r.urgency IN ('now', 'today') "
+            "ORDER BY d.finished_at ASC, d.route_id ASC")
+        return [dict(r) for r in rows]
+
+    def first_user_turn(self, agent_id: str, *, after: float, until: float) -> Optional[Dict[str, Any]]:
+        """Your first turn with `agent_id` that ended after `after`, and by `until`: a message or a
+        spoken turn routed to it (caller main), not a schedule. None if there was none."""
+        rows = self.query("SELECT * FROM turn_ledger WHERE agent_id = ? AND caller = 'main' AND tap != 'scheduled' "
+                          "AND at > ? AND at <= ? ORDER BY at ASC, id ASC LIMIT 1", [agent_id, after, until])
+        return _decode("turn_ledger", rows[0]) if rows else None
+
+    def set_outcome(self, route_id: int, outcome: str, *, at: Optional[float] = None,
+                    replaces: Sequence[str] = ()) -> bool:
+        """Sets what came of a route's post (engaged, ignored or declined): only while it has none,
+        or one of `replaces` (❌ turns engaged into declined). True if this call changed it. Each
+        change is one guarded UPDATE, so of two calls at once, or the same reaction offered by
+        every bot runner, only one does.
+
+        The change counts toward the route's kind of nudge, unless you labeled the route: a route
+        counts once, and your label wins. The outcome it replaces is taken off the count.
+        """
+        if outcome not in OUTCOMES or any(old not in OUTCOMES for old in replaces):
+            raise ValueError(f"an outcome is engaged, ignored or declined, not {outcome!r}")
+        at = time.time() if at is None else at
+        with self.connect() as conn:
+            before = None
+            changed = conn.execute("UPDATE routes SET outcome = ?, outcome_at = ? WHERE id = ? AND outcome IS NULL",
+                                   [outcome, at, route_id]).rowcount
+            for old in replaces:
+                if changed:
+                    break
+                if old != outcome and conn.execute("UPDATE routes SET outcome = ?, outcome_at = ? WHERE id = ? "
+                                                   "AND outcome = ?", [outcome, at, route_id, old]).rowcount:
+                    changed, before = 1, old
+            if not changed:
+                return False
+            row = conn.execute("SELECT kind_key, label FROM routes WHERE id = ?", [route_id]).fetchone()
+            if row["label"] not in _COUNTED_AS:
+                if before is not None:
+                    self._count(conn, row["kind_key"], before, -1, at)
+                self._count(conn, row["kind_key"], outcome, +1, at)
+        return True
 
     # -- labels and acceptance -------------------------------------------------
 
     def label_routes(self, route_ids: Iterable[int], label: str, *, reason: Optional[str] = None,
                      note: Optional[str] = None, at: Optional[float] = None) -> List[Dict[str, Any]]:
-        """Sets your label ("good" or "bad") on routes, and counts it toward each one's
-        kind of nudge; a route labeled before moves its count. Returns the routes as they were."""
+        """Sets your label ("good" or "bad") on routes, and counts it toward each one's kind of
+        nudge in place of what counted before: a label given earlier, or else the route's
+        outcome. Returns the routes as they were."""
         if label not in _COUNTED_AS:
             raise ValueError(f"label must be good or bad, not {label!r}")
         at = time.time() if at is None else at
@@ -423,6 +499,8 @@ class SignalStore(Store):
                 before.append(dict(row))
                 if row["label"] in _COUNTED_AS:
                     self._count(conn, row["kind_key"], _COUNTED_AS[row["label"]], -1, at)
+                elif row["outcome"] in OUTCOMES:  # its outcome counted until now
+                    self._count(conn, row["kind_key"], row["outcome"], -1, at)
                 self._count(conn, row["kind_key"], _COUNTED_AS[label], +1, at)
                 values: Dict[str, Any] = {"label": label, "labeled_at": at}
                 if label == "good":
@@ -477,7 +555,10 @@ class SignalStore(Store):
 
     def stats(self, since: float) -> Dict[str, Any]:
         """Counts since `since`: decisions (and when the first was), routes by verdict,
-        labels, tokens, and each tap's delay (its first turn to the decision's start) and run time."""
+        labels, tokens, and each tap's delay (its first turn to the decision's start) and run time.
+        For G4: each recipient's outcomes, when the first live decision was, and for each live
+        `now` route, how long after its source turn ended the recipient's emoji went on your
+        message (`acks`), and its post landed (`posts`)."""
         decisions = self.query("SELECT count(*), sum(tokens_in), sum(tokens_out), min(at) FROM decisions WHERE at >= ?",
                                [since])[0]
         verdicts = {r[0]: r[1] for r in self.query(
@@ -490,6 +571,16 @@ class SignalStore(Store):
         for row in self.query("SELECT tap, at - first_turn_at AS delay, took_ms FROM decisions "
                               "WHERE at >= ? AND first_turn_at IS NOT NULL ORDER BY tap", [since]):
             taps.setdefault(row["tap"], []).append((row["delay"], row["took_ms"]))
+        outcomes: Dict[str, Dict[str, int]] = {}
+        for row in self.query("SELECT r.to_agent, r.outcome, count(*) FROM routes r "
+                              "JOIN decisions d ON d.id = r.decision_id WHERE d.at >= ? AND r.outcome IS NOT NULL "
+                              "GROUP BY r.to_agent, r.outcome", [since]):
+            outcomes.setdefault(row[0], {})[row[1]] = row[2]
+        timings = self.query(
+            "SELECT dl.status, dl.finished_at, dl.acked_at, (SELECT max(t.at) FROM turn_ledger t "
+            "WHERE t.decision_id = r.decision_id AND t.agent_id = s.source_agent) AS turn_at "
+            "FROM deliveries dl JOIN routes r ON r.id = dl.route_id JOIN signals s ON s.id = r.signal_id "
+            "JOIN decisions d ON d.id = r.decision_id WHERE d.at >= ? AND r.urgency = 'now'", [since])
         return {
             "decisions": decisions[0] or 0,
             "tokens_in": decisions[1] or 0,
@@ -499,4 +590,10 @@ class SignalStore(Store):
             "labels": labels,
             "taps": taps,
             "missed": self.query("SELECT count(*) FROM missed_routes WHERE at >= ?", [since])[0][0],
+            "outcomes": outcomes,
+            "first_live_at": self.query("SELECT min(at) FROM decisions WHERE at >= ? AND mode = 'live'", [since])[0][0],
+            "acks": [r["acked_at"] - r["turn_at"] for r in timings
+                     if r["acked_at"] is not None and r["turn_at"] is not None],
+            "posts": [r["finished_at"] - r["turn_at"] for r in timings
+                      if r["status"] == POSTED and r["finished_at"] is not None and r["turn_at"] is not None],
         }

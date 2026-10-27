@@ -22,6 +22,7 @@ from core.channel.discord.ack import DiscordAck
 from core.channel.discord.radio import DiscordRadio, on_poll_vote, on_reaction
 from core.proactive.board import on_board
 from core.proactive.delivery import DueDeliveries, SignalsForMe
+from core.proactive.outcomes import Outcomes
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import TeamRadio
 from core.proactive.taps import TAP_CHAT, CallLog, LedgerEntry, SignalHook
@@ -39,11 +40,20 @@ CONCURRENT_RUNS = 2
 # bots are connecting meanwhile.
 CATCH_UP_S = 30.0
 
-# How often the would-deliver times of `today` and `next` routes are resolved.
+# How often the would-deliver times of `today` and `next` routes are resolved,
+# and the outcomes of proactive posts settled.
 SWEEP_S = 60.0
 
 Decide = Callable[[str, List[dict]], Awaitable[None]]
 Sweep = Callable[[], Awaitable[None]]
+
+
+def in_order(*sweeps: Sweep) -> Sweep:
+    """One sweep that runs each of `sweeps` in turn."""
+    async def sweep() -> None:
+        for each in sweeps:
+            await each()
+    return sweep
 
 
 def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
@@ -55,16 +65,19 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
     `decide` defaults to the Switchboard pipeline (pipeline.py), which tells
     team radio (radio.py) about each decision, and when a live decision approves
     a `now` delivery, calls `wake` (the schedule runner's) and puts the
-    recipient's emoji on your message (core/channel/discord/ack.py). With the
-    switch off, nothing is delivered: a route records when it would have been.
+    recipient's emoji on your message (core/channel/discord/ack.py). Its sweep
+    resolves the delivery times, then settles what came of each proactive post
+    (outcomes.py), which also hears ✅/❌ after team radio does. With the switch
+    off, nothing is delivered: a route records when it would have been.
     Returns the service, whose `start()` runs next to the bots, and whose
     `due_work` and `briefing` (delivery.py) main.py hands to the schedule runner."""
     if decide is None:
-        radio = TeamRadio(DiscordRadio())
+        radio, outcomes = TeamRadio(DiscordRadio()), Outcomes()
         on_reaction(radio.reacted)
+        on_reaction(outcomes.reacted)  # after team radio: a ✅/❌ on a radio line stays a label
         on_poll_vote(radio.voted)
         pipeline = Pipeline(radio=radio, wake=wake, ack=DiscordAck())
-        decide, sweep = pipeline, pipeline.resolve
+        decide, sweep = pipeline, in_order(pipeline.resolve, outcomes.settle)
     service = ProactiveService(decide=decide, sweep=sweep, due_work=DueDeliveries(), briefing=SignalsForMe())
     set_tool_hooks(list(tool_hooks()) + [CallLog()])
     set_turn_hooks(list(turn_hooks()) + [SignalHook(service.turn_ended)])

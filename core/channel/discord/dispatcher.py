@@ -17,10 +17,13 @@ async def dispatch_discord_output(
     channel: Optional[discord.abc.Messageable],
     response: AgentResponse,
     source: str = "discord"
-):
-    """Sends split message chunks, poll UI, and media files to Discord."""
+) -> List[discord.Message]:
+    """Sends split message chunks, poll UI, and media files to Discord. Returns the
+    messages it sent: a proactive delivery keeps their ids, so a ✅ or ❌ on one of
+    them is its outcome (core/proactive/outcomes.py). Other callers ignore them."""
+    sent: List[discord.Message] = []
     if channel is None or source not in POSTED_SOURCES:
-        return
+        return sent
 
     text_content = response.text
     poll_data = response.poll_data
@@ -68,7 +71,7 @@ async def dispatch_discord_output(
                 if files:
                     kwargs["files"] = files
                 try:
-                    await channel.send(chunk, **kwargs)
+                    sent.append(await channel.send(chunk, **kwargs))
                 except discord.HTTPException as e:
                     if view:
                         print(
@@ -76,12 +79,13 @@ async def dispatch_discord_output(
                             f"{e}). Retrying without view."
                         )
                         kwargs.pop("view", None)
-                        await channel.send(chunk, **kwargs)
+                        sent.append(await channel.send(chunk, **kwargs))
                     else:
                         raise
             else:
-                await channel.send(chunk)
+                sent.append(await channel.send(chunk))
 
     if missing_files:
         for path, media_type in missing_files:
-            await channel.send(f"{media_type} file not found: {path}")
+            sent.append(await channel.send(f"{media_type} file not found: {path}"))
+    return sent

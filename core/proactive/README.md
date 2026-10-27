@@ -45,6 +45,9 @@ flowchart TD
     PT -.->|"tapped with hops = 1: absorbed"| T
     B -->|"live next: handed over once"| SR["The recipient's next scheduled run: team findings in its prompt"]
     SR -->|"its post, or silent"| CH
+    CH -.->|"your reply, ✅/❌, or a day of neither"| O["Outcome (outcomes.py)"]
+    O -->|"unless you labeled the route"| A
+    O -->|"outcome line"| M
 ```
 
 ## Files
@@ -58,6 +61,7 @@ flowchart TD
 | [switchboard.py](switchboard.py) | Renders the prompt, runs `main` once, statelessly, and parses `<switchboard_response>`. |
 | [governor.py](governor.py) | The rules, the acceptance draw, and when a route would be delivered. Its docstring lists the **dormant levers**. |
 | [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. A `next` route rides along on the recipient's next scheduled run instead (`SignalsForMe`). |
+| [outcomes.py](outcomes.py) | What came of each proactive post: engaged, declined or ignored, from your reply, your ✅/❌, or a day of neither. Code decides it; it counts toward acceptance unless you labeled the route. |
 | [cards.py](cards.py) | Peer cards: what each teammate wants and offers. They come from `agent.json` `proactivity`, or are derived from `description`. |
 | [radio.py](radio.py) | Team radio's lines, your labels, the reason poll, and outcome lines. |
 | [board.py](board.py) | One worker thread for every Board call. |
@@ -171,7 +175,7 @@ With the switch on, each decision is **live**: a `now` or `today` route the Gove
 | Claim | Each tick, the runner's due work (`DueDeliveries`) first fails a row still running after 10 minutes (never run again) and an approved row due more than 3 hours ago (never posted late): for posts to you, at most once beats at least once. A row whose recipient this host doesn't hold right now is skipped, as `run_schedule` would; it stays approved, runs if the agent comes back, and expires otherwise. Every other due row is claimed with one conditional `UPDATE`, so it runs once. |
 | Run | A `DeliverySchedule`, through `run_schedule`: the same ownership check and limiter as a schedule. Stateless, with source `proactive`, on the scheduled surface, at thinking level `low` (posts are short; G4 wants post p95 ≤ 60 s). |
 | Post | Like a scheduled post: in the channel, in the channel inbox with its speech version ("Ramsay has a suggestion"), and in the session that answers your reply. A reply of `<silent/>` posts nothing and records nothing. |
-| Finish | `posted` (the route's `delivered_at` is set), `silent` or `failed`. |
+| Finish | `posted` (the route's `delivered_at` is set, and the ids of the messages it posted are kept), `silent` or `failed`. A post then gets its [outcome](#outcomes). |
 
 The turn's prompt ([delivery.md](../prompts/templates/proactive/delivery.md)) says what a teammate learned (the gist, the evidence, the payload, until or the window) and what the recipient could offer, with the Switchboard's note. It never names that teammate. Its rules: first person, in its own voice; never mention another agent, the Switchboard, or how it learned this; one short message with at most one question or a poll; `<silent/>` if it already knows this, or it isn't useful now.
 
@@ -194,6 +198,28 @@ A live `next` route isn't a proactive turn: it rides along on the recipient's ne
 > [!NOTE]
 > `resolve_times` moves a `today` route to `next` only once its window has
 > closed, so the window rule above leaves such a route out: it never rides along.
+
+### Outcomes
+
+Each proactive post gets one outcome, decided by code with no model ([outcomes.py](outcomes.py)). It's what "worth posting?" learns from when you give no label.
+
+| Outcome | When |
+|---|---|
+| engaged | ✅ on one of its messages; or your first turn with the recipient after the post, within 24 h, is anything but a short no: a reply, a poll vote (it reaches the recipient as your message), asking it to act. |
+| declined | ❌ on one of its messages; or that first turn is a short no: the whole reply is one of *no, nope, no thanks, not now, not interested, stop, skip, pass, don't, leave it*, or it's at most 4 words and starts with one ("not now, maybe later"), whatever the case and punctuation. "Skip the eggs, add the rest" and "no problem, add them" are engaged: a false decline would hold back a useful kind of nudge, and ❌ is there for a plain no. |
+| ignored | Neither within 24 h. |
+
+| | |
+|---|---|
+| Which posts | A proactive turn's, finished `posted`: a `now` or `today` route's. Not a `next` route's scheduled run, whose post says nothing about the item, nor a silent or failed turn. |
+| Your turn | The ledger's first turn with the recipient after the post that you started (caller `main`, not a schedule). |
+| The messages | The post keeps the ids of the messages it sent (`deliveries.message_ids`), so a ✅/❌ on any of them finds it. |
+| It sticks | The first outcome stays, except that ❌ within 24 h turns engaged into declined. Every bot runner offers the same reaction, and each change is one guarded `UPDATE`, so a repeat changes nothing. |
+| Counted once | A route counts once toward acceptance: your label if you gave one (team radio or `!signals`), else its outcome. A label given after the outcome takes over its count. |
+| The line | One line in main's memory log per outcome, for tonight's dream: engaged is a precedent (`[MEMORY]`), declined or ignored a correction (`[FEEDBACK]`). |
+| Where it runs | The service's sweep, each minute, after `resolve`; and a reaction listener after team radio's, so a ✅/❌ on a radio line stays a label. The listener lets the reaction go on: a ✅ on the post still finishes its channel's inbox row. A reaction first settles the post from the ledger, so the sweep's timing changes nothing. |
+
+`!signals <id>` shows how each route's delivery went and what came of it (`posted +31 s · engaged`); `!signals why <link>` finds the decision behind a post; and `!signals stats` has G4's evidence: engaged / ignored / declined per agent (G4 wants ≥ 50% engaged, and ≤ 1 decline per agent a week, counted from the first live decision), and a `now` route's reaction and post p95 after the turn it came from (≤ 10 s, ≤ 60 s).
 
 ### Live Context
 
@@ -224,7 +250,7 @@ With the switch on, an agent also sees what's true right now: a `LIVE_CONTEXT` s
 **Labeling a line:**
 - React ✅ or ❌ on it. A dropped route was never offered, so its line takes no label.
 - ❌ brings a poll under the line: *wrong agent · wrong timing · not worth it · wrong fact*.
-- A label counts toward acceptance at once, and writes one outcome line in main's memory log for tonight's dream.
+- A label counts toward acceptance at once, in place of the route's [outcome](#outcomes) if its post had one, and writes one outcome line in main's memory log for tonight's dream.
 
 **Hosts:** only the host that answers for `main` posts team radio and answers `!signals`. Each host keeps its own Board, and every host taps the agents it runs. So to see a dev host's decisions, claim `main` on it: otherwise they're recorded but never shown, and `!signals` shows the other host's Board.
 
@@ -233,13 +259,13 @@ With the switch on, an agent also sees what's true right now: a `LIVE_CONTEXT` s
 | Command | Shows or does |
 |---|---|
 | `!signals` | The last 10 decisions. |
-| `!signals <id>` | One decision's full trace. |
+| `!signals <id>` | One decision's full trace, with how each route's delivery went and what came of it. |
 | `!signals <id> good` | Labels its offered routes right. |
 | `!signals <id> bad <why>` | Labels them wrong, with a reason. |
 | `!signals missed <what>` | Records a route the Switchboard should have made. |
 | `!signals missed` | The missed routes you reported. |
-| `!signals stats` | The last 14 days, against G3's targets (≥ 30 labels, precision ≥ 0.8), and when deliveries would land. |
-| `!signals why <radio line link>` | The decision behind that line. |
+| `!signals stats` | The last 14 days, against G3's targets (≥ 30 labels, precision ≥ 0.8), when deliveries would land, and G4's: the posts' outcomes per agent, and how fast `now` routes came. |
+| `!signals why <message link>` | The decision behind a team radio line, or behind a proactive post. |
 
 ## Measuring for G3
 
@@ -265,7 +291,8 @@ G3 comes after ≥ 2 weeks of shadow running in prod and ≥ 30 labeled decision
 | What | Where |
 |---|---|
 | The proactive package, with the effects table | `tests/core/proactive/` (one file per module) |
-| The whole path, shadow and live (a stub agent posts, or stays silent; the `now` reaction; a `next` route on a scheduled run) | `tests/core/proactive/test_end_to_end.py` |
+| Outcomes: each rule, the short no, repeats, the ❌ override, labels, and what gets none | `tests/core/proactive/test_outcomes.py` |
+| The whole path, shadow and live (a stub agent posts, or stays silent; the `now` reaction; your ✅ on the post; a `next` route on a scheduled run) | `tests/core/proactive/test_end_to_end.py` |
 | The tool hooks | `tests/core/tooling/test_hooks.py`, and `test_transcript.py` for who announces |
 | The Board | `tests/core/storage/test_signals.py` |
 | The schedule runner's wake, due work and briefings | `tests/core/scheduler/test_schedule_runner.py` |

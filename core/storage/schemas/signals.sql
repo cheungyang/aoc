@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS signals (
 CREATE INDEX IF NOT EXISTS idx_signals_decision ON signals(decision_id);
 
 -- One row per route a signal named, with the Governor's verdict, when it would
--- be (or was) delivered, and your label.
+-- be (or was) delivered, what came of it, and your label. A route counts once
+-- toward acceptance: your label if you gave one, else its outcome.
 CREATE TABLE IF NOT EXISTS routes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     signal_id INTEGER NOT NULL,
@@ -82,13 +83,16 @@ CREATE TABLE IF NOT EXISTS routes (
     sampled REAL,                     -- the acceptance draw behind "worth posting?"
     deliver_at REAL,                  -- when it would be delivered (shadow) or is due (live)
     delivered_at REAL,                -- when its proactive turn posted (live; the deliveries table)
-    outcome TEXT,                     -- engaged, ignored, declined, missed
+    outcome TEXT,                     -- engaged, ignored or declined: what came of its proactive post
+                                      -- (live; core/proactive/outcomes.py). The first sticks, but ❌
+                                      -- within a day turns engaged into declined
     radio_message_id TEXT,            -- its team radio line
     poll_message_id TEXT,             -- the reason poll under that line
     label TEXT,                       -- good or bad: your ✅/❌
     label_reason TEXT,                -- wrong agent, wrong timing, not worth it, wrong fact
     label_note TEXT,
-    labeled_at REAL
+    labeled_at REAL,
+    outcome_at REAL                   -- when its outcome was decided (last: older tables get it added)
 );
 CREATE INDEX IF NOT EXISTS idx_routes_decision ON routes(decision_id);
 CREATE INDEX IF NOT EXISTS idx_routes_radio ON routes(radio_message_id);
@@ -115,7 +119,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
     claimed_at REAL,                  -- when a tick (or a scheduled run) took it
     finished_at REAL,
     error TEXT NOT NULL DEFAULT '',   -- why it failed
-    acked_at REAL                     -- when the recipient's emoji went on your message (a `now` route): G4's acknowledgment
+    acked_at REAL,                    -- when the recipient's emoji went on your message (a `now` route): G4's acknowledgment
+    message_ids TEXT NOT NULL DEFAULT '[]' -- JSON list: the Discord messages its proactive turn posted, where
+                                           -- your ✅/❌ is its outcome. Never a handed row's: that run's post
+                                           -- says nothing about the item
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_due ON deliveries(status, deliver_at);
 

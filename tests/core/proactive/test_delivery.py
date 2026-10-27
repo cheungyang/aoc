@@ -62,13 +62,14 @@ def _row(store, route_id):
 
 
 class Channel:
-    """A Discord channel: what was posted in it."""
+    """A Discord channel: what was posted in it, as messages 7001, 7002, ..."""
 
     def __init__(self):
         self.sent = []
 
     async def send(self, text, **kwargs):
         self.sent.append(text)
+        return SimpleNamespace(id=7000 + len(self.sent))
 
 
 class Holds:
@@ -132,9 +133,10 @@ async def test_a_silent_reply_posts_nothing():
     channel = Channel()
     silent, spoken = DeliveryOutput(channel), DeliveryOutput(channel)
     await silent.deliver(TURN, AgentResponse.from_string("<silent/>"))
-    assert channel.sent == [] and silent.outcome == "silent"
+    assert channel.sent == [] and silent.outcome == "silent" and silent.message_ids == []
     await spoken.deliver(TURN, AgentResponse.from_string("Want these in the kitchen inventory?"))
     assert channel.sent == ["Want these in the kitchen inventory?"] and spoken.outcome == "posted"
+    assert spoken.message_ids == ["7001"]  # a ✅ or ❌ on it is the post's outcome
 
 
 class TestTheTurn:
@@ -166,6 +168,8 @@ class TestTheTurn:
         assert store.route(posted)["delivered_at"] is not None and store.route(silent)["delivered_at"] is None
         assert store.delivery(failed)["error"] == "the turn failed"
         assert store.delivery(nowhere)["error"] == "nothing reached #meal-planning"
+        # The post keeps the ids of its messages, for its outcome.
+        assert [store.delivery(r)["message_ids"] for r in (posted, silent, failed, nowhere)] == [["7001"], [], [], []]
 
 
 class TestTheProvider:
