@@ -24,6 +24,7 @@ from core.runtime.commands.typed.leave import LeaveCommand
 from core.runtime.commands.typed.new import NewCommand
 from core.runtime.commands.typed.new_all import NewAllCommand
 from core.runtime.commands.typed.restart import RestartCommand
+from core.runtime.commands.typed.signals import SignalsCommand
 from core.runtime.commands.typed.voiceprint import VoiceprintCommand
 
 
@@ -74,7 +75,8 @@ class CommandRegistry:
 # `!name`, typed to the Discord bot (core/channel/discord/runner.py).
 TYPED = CommandRegistry([
     NewCommand(), NewAllCommand(), CompactCommand(), RestartCommand(), JobsCommand(), JobCommand(), KillCommand(),
-    JoinCommand(), LeaveCommand(), InboxCommand(), EnrollCommand(), VoiceprintCommand(), GateCommand(),
+    SignalsCommand(), JoinCommand(), LeaveCommand(), InboxCommand(), EnrollCommand(), VoiceprintCommand(),
+    GateCommand(),
 ])
 
 # Said in the voice room (core/voice/turn.py), tried in this order: a stop

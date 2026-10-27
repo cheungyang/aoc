@@ -4,6 +4,10 @@
   "emoji": "🛎️",
   "model": "FLASH",
   "memory_topics": ["home"],
+  "proactivity": {
+    "interests": ["when the house is empty or full", "new devices"],
+    "offers": ["away mode", "automations"]
+  },
   "description": "Smart Home Steward: manages, automates, audits, and observes Home Assistant devices and configurations safely.",
   "channels": [
     "home-automation",

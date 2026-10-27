@@ -20,11 +20,12 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
         runner = BotRunner("test_token", "main")
         
         # Verify event registration (on_ready, on_message, on_voice_state_update,
-        # on_raw_reaction_add)
-        self.assertEqual(mock_bot.event.call_count, 4)
+        # on_raw_reaction_add, on_raw_poll_vote_add)
+        self.assertEqual(mock_bot.event.call_count, 5)
         mock_bot.event.assert_any_call(runner.on_ready)
         mock_bot.event.assert_any_call(runner.on_message)
         mock_bot.event.assert_any_call(runner.on_voice_state_update)
+        mock_bot.event.assert_any_call(runner.on_raw_poll_vote_add)
         # Commands, `!help` among them, are core/runtime/commands/, run by
         # on_message: discord.py's own command handling and help stay unused.
         self.assertIsNone(mock_bot_class.call_args.kwargs["help_command"])
@@ -797,6 +798,45 @@ class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
         await runner.on_raw_reaction_add(MagicMock(emoji="❌", member=MagicMock(bot=False), channel_id=77,
                                                    message_id=31338))
         mark_read.assert_not_called()
+
+    async def test_a_mark_on_a_team_radio_line_labels_the_route_first(self, mock_bot_class, mock_loader_class,
+                                                                      mark_read, record_reply):
+        from core.channel.discord import radio
+        seen = []
+
+        async def team_radio(message_id, emoji):
+            seen.append((message_id, emoji))
+            return message_id == "424242"
+
+        radio.on_reaction(team_radio)
+        try:
+            # Team radio needs no voice room.
+            runner, message = self._runner(mock_bot_class, mock_loader_class, voice=False)
+            runner.bot.get_channel.return_value = message.channel
+            await runner.on_raw_reaction_add(MagicMock(emoji="✅", member=MagicMock(bot=False), message_id=424242))
+            self.assertEqual(seen, [("424242", "✅")])
+            mark_read.assert_not_called()
+        finally:
+            radio.clear_listeners()
+
+    async def test_a_poll_vote_reaches_team_radio_but_not_the_bots_own(self, mock_bot_class, mock_loader_class,
+                                                                       mark_read, record_reply):
+        from core.channel.discord import radio
+        votes = []
+
+        async def team_radio(message_id, answer_id):
+            votes.append((message_id, answer_id))
+            return True
+
+        radio.on_poll_vote(team_radio)
+        try:
+            runner, _ = self._runner(mock_bot_class, mock_loader_class)
+            runner.bot.user = MagicMock(id=1)
+            await runner.on_raw_poll_vote_add(MagicMock(user_id=2, message_id=555, answer_id=2))
+            await runner.on_raw_poll_vote_add(MagicMock(user_id=1, message_id=555, answer_id=3))
+            self.assertEqual(votes, [("555", 2)])
+        finally:
+            radio.clear_listeners()
 
 
 if __name__ == "__main__":

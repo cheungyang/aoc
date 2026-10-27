@@ -43,6 +43,7 @@ KNOWN_KEYS = frozenset({
     "channel_hosts",
     "discord_token_key",
     "memory_topics",
+    "proactivity",
     "tools",
     "skills",
     "schedules",
@@ -55,6 +56,11 @@ PRELOAD_MODES = ("full", "core")
 SKILL_KEYS = frozenset({"preload"})
 THINKING_SURFACES = tuple(THINKING_BY_SURFACE)
 VOICE_KEYS = frozenset({"name", "rate"})
+# The agent's peer card for the proactive team (core/proactive/cards.py): what
+# it wants to hear about and what it can offer. Without the block, the card is
+# derived from `description` and `memory_topics`.
+PROACTIVITY_LISTS = ("interests", "offers")
+PROACTIVITY_KEYS = frozenset(PROACTIVITY_LISTS)
 
 # The voice name's shape. Whether the voice exists is checked against
 # core/voice/foundation/settings.py by the config tests rather than here, because
@@ -131,6 +137,21 @@ def _validate_voice(voice: Any) -> List[str]:
     return errors
 
 
+def _validate_proactivity(proactivity: Any) -> List[str]:
+    if not isinstance(proactivity, dict):
+        return ['\'proactivity\' must be an object, e.g. {"interests": ["groceries bought"], '
+                '"offers": ["update kitchen inventory"]}']
+    errors = []
+    unknown = sorted(set(proactivity) - PROACTIVITY_KEYS)
+    if unknown:
+        errors.append(f"proactivity: unknown key(s) {', '.join(unknown)}")
+    for key in PROACTIVITY_LISTS:
+        value = proactivity.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+            errors.append(f"proactivity.{key} must be a list of short phrases, got {value!r}")
+    return errors
+
+
 def validate_agent_config(config: Any, known_skills: Iterable[str]) -> List[str]:
     """Every reason `config` can't be loaded, or an empty list."""
     if not isinstance(config, dict):
@@ -145,4 +166,6 @@ def validate_agent_config(config: Any, known_skills: Iterable[str]) -> List[str]
         errors.extend(_validate_thinking(config["thinking"]))
     if "voice" in config:
         errors.extend(_validate_voice(config["voice"]))
+    if "proactivity" in config:
+        errors.extend(_validate_proactivity(config["proactivity"]))
     return errors

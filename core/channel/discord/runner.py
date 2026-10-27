@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import datetime
 import time
 import discord
@@ -15,6 +16,8 @@ from core.runtime.foundation.sessions import SessionManager
 from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
+from core.channel.discord.radio import poll_vote_added as radio_poll_vote_added
+from core.channel.discord.radio import reaction_added as radio_reaction_added
 from core.channel.handoff import channel_named, pointer_line, request_line
 from core.channel.inbox import mark_read, record_reply
 from core.util.errors import format_error_message
@@ -118,6 +121,7 @@ class BotRunner:
         self.bot.event(self.on_message)
         self.bot.event(self.on_voice_state_update)
         self.bot.event(self.on_raw_reaction_add)
+        self.bot.event(self.on_raw_poll_vote_add)
 
     async def stop(self):
         """Cleanly shuts down the bot and prevents reconnect attempts."""
@@ -130,16 +134,21 @@ class BotRunner:
         await self.stop()
 
     async def on_raw_reaction_add(self, payload):
-        """✅ or ❌ on a `!gate review` post marks that utterance as yours or
-        not (core/voice/listening/gate_commands.py). ✅ on any other post
-        finishes its channel's inbox row (core/voice/briefing)."""
+        """✅ or ❌ on a team radio line labels that route (core/channel/discord/radio.py).
+        On a `!gate review` post it marks that utterance as yours or not
+        (core/voice/listening/gate_commands.py). ✅ on any other post finishes
+        its channel's inbox row (core/voice/briefing)."""
         emoji = str(getattr(payload, "emoji", ""))
         if emoji not in GATE_REACTIONS:
             return
         member = getattr(payload, "member", None)
         if member is None or getattr(member, "bot", False):
             return  # a DM, or a bot's own reaction
-        if not Ownership().is_mine(self.agent_id) or not self.voice_manager.hosts_voice():
+        if not Ownership().is_mine(self.agent_id):
+            return
+        if await radio_reaction_added(str(payload.message_id), emoji):
+            return
+        if not self.voice_manager.hosts_voice():
             return
         if self.voice_manager.mark_review(payload.message_id, emoji):
             return
@@ -150,6 +159,14 @@ class BotRunner:
             return
         mark_read(channel, Via.REACTION,
                   message_time=discord.utils.snowflake_time(payload.message_id).timestamp())
+
+    async def on_raw_poll_vote_add(self, payload):
+        """A vote in a poll: team radio's reason poll under a ❌ (core/channel/discord/radio.py)."""
+        if self.bot.user is not None and getattr(payload, "user_id", None) == self.bot.user.id:
+            return
+        if not Ownership().is_mine(self.agent_id):
+            return
+        await radio_poll_vote_added(str(payload.message_id), int(getattr(payload, "answer_id", 0) or 0))
 
     async def on_voice_state_update(self, member, before, after):
         """Follows you into the voice channel and greets you there
@@ -407,7 +424,9 @@ class BotRunner:
         # unless the message named another agent (a hand-off, below).
         reply_channel, reply_agent = message.channel, self.agent_id
         try:
-            async with message.channel.typing():
+            async with contextlib.AsyncExitStack() as typing:
+                # "Typing…" shows in the channel the reply is being written in.
+                await typing.enter_async_context(message.channel.typing())
                 from core.channel.discord.stream_buffer import DiscordStreamBuffer
                 stream_buffer = DiscordStreamBuffer(message.channel, edit_interval=1.5)
 
@@ -429,6 +448,9 @@ class BotRunner:
                             await self._post_request(target, message, event)
                             stream_buffer = DiscordStreamBuffer(target, edit_interval=1.5)
                             reply_channel, reply_agent = target, event.get("agent_id") or self.agent_id
+                            # discord.py re-sends "typing…" every 5 s until told to stop.
+                            await typing.aclose()
+                            await typing.enter_async_context(target.typing())
                     elif event_type == events.REACTION:
                         # Delegation acknowledgement. This arrives from the
                         # delegation path itself rather than from a tool

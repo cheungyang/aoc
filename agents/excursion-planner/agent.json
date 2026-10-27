@@ -8,6 +8,10 @@
     "emoji": "🏕️",
     "model": "FLASH",
     "memory_topics": ["food", "family", "travel"],
+    "proactivity": {
+        "interests": ["trips", "free weekends", "visitors", "local events"],
+        "offers": ["activity ideas", "bookings", "calendar holds"]
+    },
     "description": "An enthusiastic, adventurous weekend excursion planner.",
     "schedules": [
         {

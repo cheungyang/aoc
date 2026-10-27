@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from core.storage.sessions import SessionStore
 from scripts.compare_token_stats import _agent_for_table, _percentile, get_health_stats, get_stats, get_voice_stats
@@ -33,6 +34,22 @@ class TestVoiceStats(unittest.TestCase):
         self.assertEqual(stats["ttfa"], [4000])
         self.assertEqual(stats["stages"]["stt_done"], [1500])
         self.assertEqual(sorted(stats["model_calls"]), [0, 2])
+
+    def test_a_voice_window_can_end_before_now(self):
+        """G3's first_token check: the weeks before shadow mode, against the weeks in it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "memory.db")
+            store = SessionStore(db)
+            for at, ms in ((1000.0, 1800), (2000.0, 2600)):
+                with mock.patch("core.storage.sessions.time.time", return_value=at):
+                    store.append_turn_trace("main:discord:general",
+                                            {"ttfa_ms": ms, "deltas": {"first_token": ms}, "events": []})
+
+            before = get_voice_stats(db_path=db, since_ts=0, until_ts=1500)
+            during = get_voice_stats(db_path=db, since_ts=1500)
+
+        self.assertEqual(before["stages"]["first_token"], [1800])
+        self.assertEqual(during["stages"]["first_token"], [2600])
 
     def test_health_counts_round_trips_and_dead_ends(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -22,6 +22,12 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.config = Config()
         self.config.reset()
+        # The proactive team always runs next to the bots; its start() never
+        # returns, and install() hooks into the whole process. Stood in for.
+        proactive = patch('main.install_proactive')
+        self.install_proactive = proactive.start()
+        self.install_proactive.return_value.start = AsyncMock()
+        self.addCleanup(proactive.stop)
 
     def tearDown(self):
         self.config.reset()
@@ -59,6 +65,9 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
 
         # Should call run_bot only for agent1
         mock_runner_instance.run_bot.assert_awaited_once()
+        # The proactive team runs next to the bots, with no switch.
+        self.install_proactive.assert_called_once_with()
+        self.install_proactive.return_value.start.assert_awaited_once()
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

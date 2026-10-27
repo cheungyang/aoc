@@ -416,6 +416,60 @@ class TestLoggingHandler(unittest.TestCase):
         handler_main.manager.append_token_usage.assert_not_called()
 
 
+class TestToolHooks(unittest.TestCase):
+    """Each finished tool call of this agent's, announced to the tool hooks (core/tooling/hooks.py)."""
+
+    def setUp(self):
+        from core.tooling.hooks import ToolHook, set_tool_hooks, tool_hooks
+        self.session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="session1")
+        self.handler = LoggingHandler(session=self.session)
+        self.handler.manager = MagicMock()
+        self.heard = []
+
+        class Ear(ToolHook):
+            def called(ear, call):
+                self.heard.append(call)
+
+        saved = tool_hooks()
+        set_tool_hooks([Ear()])
+        self.addCleanup(set_tool_hooks, saved)
+
+    def test_a_call_is_announced_when_it_ends_with_its_arguments_and_status(self):
+        self.handler.on_tool_start({"name": "ledger_append"}, "{'vendor': '99 Ranch'}", run_id="r1",
+                                   inputs={"vendor": "99 Ranch", "total": 86.4})
+        self.assertEqual(self.heard, [], "not before it ends")
+        self.handler.on_tool_end(MagicMock(content="<ledger_append_response><status>ok</status>"), run_id="r1")
+        (call,) = self.heard
+        self.assertEqual((call.tool, call.args, call.status), ("ledger_append", {"vendor": "99 Ranch", "total": 86.4}, "ok"))
+        self.assertIs(call.session, self.session)
+
+    def test_without_inputs_the_input_string_is_parsed(self):
+        self.handler.on_tool_start({"name": "filesystem"}, "{'instructions': [{'action': 'write'}]}", run_id="r2")
+        self.handler.on_tool_end("<errors>None</errors>", run_id="r2")
+        self.assertEqual(self.heard[0].args, {"instructions": [{"action": "write"}]})
+
+    def test_a_tool_that_raised_is_announced_as_failed(self):
+        self.handler.on_tool_start({"name": "calendar_add"}, "{}", run_id="r3", inputs={})
+        self.handler.on_tool_error(RuntimeError("gog down"), run_id="r3")
+        self.assertEqual([(c.tool, c.status) for c in self.heard], [("calendar_add", "failed")])
+
+    def test_another_agents_calls_are_not_announced_here(self):
+        mine = {"metadata": {"agent_id": "meal-planner"}}
+        self.handler.on_tool_start({"name": "kitchen_inventory"}, "{}", run_id="r4", **mine)
+        self.handler.on_tool_end("<status>ok</status>", run_id="r4", **mine)
+        self.assertEqual(self.heard, [])
+
+    def test_the_status_comes_from_the_envelope(self):
+        from core.runtime.observability.transcript import tool_status
+        self.assertEqual(tool_status("<x_response><status>failed</status><errors>boom</errors>"), "failed")
+        self.assertEqual(tool_status("<x_response><status>partial</status>"), "partial")
+        self.assertEqual(tool_status("<payload>done</payload><errors>None</errors>"), "ok")
+        self.assertEqual(tool_status("<payload></payload><errors>Error: no such file</errors>"), "failed")
+        self.assertEqual(tool_status("plain text"), "ok")
+        # Only the envelope's ends are read: a huge output costs nothing extra.
+        self.assertEqual(tool_status("<status>ok</status>" + "x" * 10_000_000 + "<errors>None</errors>"), "ok")
+
+
 class TestHandlerModelName(unittest.TestCase):
     """The handler stores the name `extract_model_name` finds on the token row."""
 

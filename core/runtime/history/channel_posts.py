@@ -11,9 +11,8 @@ Which session that is depends on routing, not on who made the post:
     deterministically (`core.runtime.foundation.routing.decide`) and the specialist answers
     from its delegation session, `<specialist>:tool:<channel>[:<thread>]`.
     The host's own discord session is never read by a model on that path.
-  - Otherwise the host answers itself -- a fixed line, or its model under
-    `ROUTING_LLM_FALLBACK` -- from its own `<host>:discord:<channel>[:<thread>]`
-    session.
+  - Otherwise the host answers itself, with a fixed line, from its own
+    `<host>:discord:<channel>[:<thread>]` session.
 
 `record_channel_post` asks the router the same question the next untagged
 message will ask, then appends the post to that session as an attributed

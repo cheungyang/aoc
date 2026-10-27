@@ -9,8 +9,8 @@ command.
     registry.py   CommandRegistry; TYPED, SPOKEN and CONTROL, one per way in
     typed/        `!name`, typed to the Discord bot. In a channel the bot
                   answers: !new, !newall, !compact, !restart, !jobs, !job,
-                  !kill, !help. For the voice room: !join, !leave, !inbox,
-                  !enroll, !voiceprint, !gate
+                  !kill, !signals, !help. For the voice room: !join, !leave,
+                  !inbox, !enroll, !voiceprint, !gate
     spoken/       said in the voice room: "stop", "wait", "next agent",
                   "where am I", "switch me to Daisy"
     control/      typed in the ownership control thread: !claim <agent>,

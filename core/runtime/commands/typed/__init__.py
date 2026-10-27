@@ -8,6 +8,10 @@ answers messages there:
     new_all.py     !newall         clears every session
     compact.py     !compact        compacts this channel's session history now
     restart.py     !restart        restarts the process
+    jobs.py        !jobs           background jobs that are queued, running or failed
+    job.py         !job <id>       one job, and how it went
+    kill.py        !kill <id>      stops a job
+    signals.py     !signals        what the proactive team decided, and your labels
     help.py        !help           every command, typed or spoken
 
 For the voice room (VoiceRoomCommand), through VoiceControls (../ports.py):

@@ -7,7 +7,7 @@ history and a line you might say there to another agent -- "Ted, create a
 syllabus on THIS topic" in #pkm-wiki. A case passes when
 
   1. the router hands the line to the expected agent, in the expected channel
-     (routing.decide with HANDOFF_ENABLED; no model), and
+     (routing.decide; no model), and
   2. that agent, given the line and the capsule, replies about the right
      thing: its reply matches one of `reply_matches` (regexes, any case).
 
@@ -56,6 +56,8 @@ sys.path.insert(0, REPO)
 CASES_PATH = os.path.join(REPO, "sessions", "handoff_replay_cases.json")
 # The target G2 sets: this many cases of ten.
 TARGET = 9
+# How long one agent turn may take before its case fails (a turn once hung for hours).
+CASE_TIMEOUT_S = 240.0
 HOST = "main"
 # What the read-only guard (scripts/voice_dryrun.py) leaves alone because these
 # tools declare no read set, but which acts outside the throwaway session DB:
@@ -64,6 +66,12 @@ HOST = "main"
 # rebuilding the task and project indexes.
 WITHHELD_TOOLS = frozenset({"graph_call", "nlm", "git"})
 REFUSED_ACTIONS = frozenset({("task_query", "sync"), ("project_query", "sync")})
+# A provider quota error ("[429] Resource has been exhausted") says nothing
+# about the hand-off, so the turn runs again from scratch after a pause, up to
+# QUOTA_RETRIES times. The report counts the retries.
+QUOTA_ERROR = re.compile(r"\b429\b|resource has been exhausted", re.IGNORECASE)
+QUOTA_RETRIES = 2
+QUOTA_PAUSE_S = 60.0
 
 
 @dataclass
@@ -80,6 +88,7 @@ class CaseResult:
     reply_matches: Optional[bool] = None
     blocked_writes: List[tuple] = field(default_factory=list)
     failures: List[str] = field(default_factory=list)
+    retries: int = 0
 
     @property
     def passed(self) -> bool:
@@ -159,7 +168,7 @@ def prepare(case: dict, loader) -> CaseResult:
 
     expect = case["expect"]
     result = CaseResult(case_id=case["id"], line=case["line"])
-    decision = decide(case["line"], HOST, case["from"], loader.get_agent_config(HOST) or {}, loader, handoffs=True)
+    decision = decide(case["line"], HOST, case["from"], loader.get_agent_config(HOST) or {}, loader)
     result.routed_to, result.routed_channel, result.route_reason = decision.agent_id, decision.channel, decision.reason
     if not decision.is_handoff or (decision.agent_id, decision.channel) != (expect["agent"], expect["channel"]):
         result.failures.append(f"routed {decision.target} -> {decision.agent_id} #{decision.channel}, "
@@ -186,8 +195,13 @@ def prepare(case: dict, loader) -> CaseResult:
     return result
 
 
-async def answer(case: dict, result: CaseResult, db_path: str) -> None:
-    """The named agent's reply to the line and its capsule, as a hand-off runs it."""
+async def answer(case: dict, result: CaseResult, db_path: str, timeout: float = None,
+                 pause: float = QUOTA_PAUSE_S) -> None:
+    """The named agent's reply to the line and its capsule, as a hand-off runs it.
+    A turn still running after `timeout` seconds fails the case; what it had
+    streamed by then is judged all the same. A turn the provider's quota
+    stopped runs again from scratch after `pause` seconds (QUOTA_RETRIES);
+    only the last run is judged."""
     from scripts.voice_dryrun import BLOCKED_WRITES, reset_history
     from core.loaders.agents_loader import AgentsLoader
     from core.runtime.delegation import with_caller
@@ -195,24 +209,43 @@ async def answer(case: dict, result: CaseResult, db_path: str) -> None:
     from core.runtime.foundation.sessions import SessionManager
     from core.runtime.history.handoff import with_capsule
 
-    reset_history(db_path)
-    BLOCKED_WRITES.clear()
     agent_id, channel = case["expect"]["agent"], case["expect"]["channel"]
-    session = SessionManager.get_session(agent_id=agent_id, source="tool", channel=channel, record_memory=False)
     prompt = with_caller(with_capsule(case["line"], result.capsule), HOST)
-    tokens, final = [], ""
-    async for event in AgentsLoader().get_agent(agent_id).execute_stream(prompt, session=session):
-        if event.get("type") == events.TOKEN:
-            tokens.append(event.get("content", ""))
-        elif event.get("type") == events.FINAL_RESPONSE:
-            final = event.get("text", "") or ""
-        elif event.get("type") == events.ERROR:
-            result.failures.append(f"agent error: {event.get('content')}")
-    result.reply = final or "".join(tokens)
+    timeout = timeout or CASE_TIMEOUT_S
+
+    for attempt in range(QUOTA_RETRIES + 1):
+        reset_history(db_path)
+        BLOCKED_WRITES.clear()
+        session = SessionManager.get_session(agent_id=agent_id, source="tool", channel=channel, record_memory=False)
+        tokens, final, errors = [], [], []
+
+        async def run():
+            async for event in AgentsLoader().get_agent(agent_id).execute_stream(prompt, session=session):
+                if event.get("type") == events.TOKEN:
+                    tokens.append(event.get("content", ""))
+                elif event.get("type") == events.FINAL_RESPONSE:
+                    final.append(event.get("text", "") or "")
+                elif event.get("type") == events.ERROR:
+                    errors.append(f"agent error: {event.get('content')}")
+
+        try:
+            await asyncio.wait_for(run(), timeout)
+        except asyncio.TimeoutError:
+            errors.append(f"no reply within {timeout:.0f}s")
+        if attempt == QUOTA_RETRIES or not any(QUOTA_ERROR.search(e) for e in errors):
+            break
+        result.retries += 1
+        print(f"[handoff-replay] {case['id']}: provider quota error; again in {pause:.0f}s", file=sys.stderr)
+        await asyncio.sleep(pause)
+
+    result.failures += errors
+    result.reply = (final[-1] if final else "") or "".join(tokens)
     result.reply_matches = matches(case["expect"]["reply_matches"], result.reply)
     if not result.reply_matches:
         result.failures.append(f"reply doesn't name {case['expect']['referent']!r}")
     result.blocked_writes = list(BLOCKED_WRITES)
+    verdict = "pass" if result.passed else f"FAIL ({'; '.join(result.failures)})"
+    print(f"[handoff-replay] {case['id']}: {verdict}", file=sys.stderr)
 
 
 def render(cases: List[dict], results: List[CaseResult], dry: bool, show_capsule: bool) -> str:
@@ -232,6 +265,8 @@ def render(cases: List[dict], results: List[CaseResult], dry: bool, show_capsule
             out.append(f"- reply: {' '.join(r.reply.split())[:400]}")
         if r.blocked_writes:
             out.append(f"- writes refused: {r.blocked_writes}")
+        if r.retries:
+            out.append(f"- run again after a provider quota error: {r.retries}×")
         for failure in r.failures:
             out.append(f"- ❌ {failure}")
         if show_capsule:

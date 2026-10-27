@@ -9,19 +9,19 @@ which exactly one specialist is allowed to answer — is delegated without any
 model call. A message in a channel no single agent answers (`#general`) gets a
 fixed line, also without a model call. A message that calls another agent by
 name ("Ted, create a syllabus on THIS topic") is handed to that agent in its
-own channel, with a capsule of the conversation it came from (behind
-`HANDOFF_ENABLED`). Every other turn — the executing agent's own — reaches the
+own channel, with a capsule of the conversation it came from. Every other
+turn — the executing agent's own — reaches the
 concierge (the ReAct agent) as before. It runs on every message an agent
 handles: Discord messages, voice turns, scheduled jobs, `agent_call`
 delegations, and `graph_call` invocations all execute through the compiled
-graph returned by [create_graph](graph.py#L84-L266).
+graph returned by [create_graph](graph.py#L84-L263).
 
 > [!IMPORTANT]
 > Because this graph is shared by all agents, the router must stay **inert**
 > for specialists. Any change here has to keep an agent that does not host
 > the channel, or lists it in its own `channels`, or is running a turn
 > addressed to it (a delegation, job or schedule), on the concierge path — see
-> [routing_enabled](../../core/runtime/foundation/routing.py#L77-L100).
+> [routing_enabled](../../core/runtime/foundation/routing.py#L75-L98).
 
 ## Workflow
 
@@ -41,7 +41,7 @@ flowchart TD
 The conditional edge is
 `lambda state: state.get("route") or CONCIERGE`, mapped to
 `{DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE}`
-([graph.py:L256-L260](graph.py#L256-L260)),
+([graph.py:L253-L257](graph.py#L253-L257)),
 so a missing or empty `route` falls back to `concierge`.
 
 The `concierge` node wraps an inner `create_react_agent(llm, tools, prompt=prompt)`
@@ -51,7 +51,7 @@ nodes of this graph.
 ## State
 
 The state schema is `RouterState`, a subclass of `MessagesState`
-([graph.py:L242-L246](graph.py#L242-L246)).
+([graph.py:L239-L243](graph.py#L239-L243)).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ The state schema is `RouterState`, a subclass of `MessagesState`
 
 ### `route`
 
-[_decide](graph.py#L91-L124) — resolves the
+[_decide](graph.py#L91-L121) — resolves the
 route and stashes it for the conditional edge. Synchronous and model-free.
 
 - **Inputs from state:** `messages` (only the last message's `content` is
@@ -75,9 +75,7 @@ route and stashes it for the conditional edge. Synchronous and model-free.
   via `try_context()` (for `agent_id`, `channel_name` and `source`), the agent
   config captured at build time, a fresh
   [`AgentsLoader`](../../core/loaders/agents_loader.py#L99-L130)
-  as the routing-table source, and two flags from
-  [`Config()`](../../core/config/settings.py#L150-L156):
-  `routing_llm_fallback` (the rollback switch) and `handoff_enabled`. When
+  as the routing-table source. There are no switches. When
   there is no active context it falls back to `owner_agent_id` (from
   `agent_id`/`config["agent_id"]`/`config["id"]`), an empty channel name and
   an empty source — which makes `routing_enabled` false, i.e. concierge.
@@ -90,7 +88,7 @@ route and stashes it for the conditional edge. Synchronous and model-free.
 
 ### `direct_call`
 
-[_direct_call](graph.py#L126-L159) — hands
+[_direct_call](graph.py#L123-L156) — hands
 the turn to the one agent allowed to answer in this channel. Async.
 
 - **Inputs from state:** `messages[-1].content` as the user prompt,
@@ -105,7 +103,7 @@ the turn to the one agent allowed to answer in this channel. Async.
   - On failure it does **not** raise: it logs to stderr and returns
     `AIMessage("Could not reach \`<target>\`: <error>")`, because a
     misconfigured channel should say so in the channel rather than crash the
-    graph ([graph.py:L142-L146](graph.py#L142-L146)).
+    graph ([graph.py:L139-L143](graph.py#L139-L143)).
   - On success the reply text is prefixed with
     [agent_header](../../core/runtime/delegation.py#L108-L112)
     (`emoji Name: `). Attribution matters: this text becomes part of the
@@ -124,21 +122,21 @@ the turn to the one agent allowed to answer in this channel. Async.
 
 ### `fixed`
 
-[_fixed](graph.py#L161-L180) — answers a
+[_fixed](graph.py#L158-L177) — answers a
 message in a channel no single agent answers with a fixed line. Async; no
 model runs.
 
 - **Inputs from state:** `messages[-1].content`, for the session log only.
 - **Other inputs:** the ambient context's surface
   ([`get_surface`](../../core/runtime/foundation/context.py#L243-L249)).
-- **Behavior:** [fixed_reply](graph.py#L68-L76) picks the line:
-  - typed: `UNADDRESSED_TEXT` — post in the agent's own channel, or type
-    `!help` for commands. It doesn't suggest addressing an agent by name:
-    with `HANDOFF_ENABLED` off, that would only bring the user back to this
-    line;
-  - spoken (the voice lobby): `<speech>Who's it for? Say 'switch to Daisy'.</speech>`
-    — only a `<speech>` block, so the voice speaks it and the channel shows it
-    as the whole reply.
+- **Behavior:** [fixed_reply](graph.py#L68-L76) picks the line by surface.
+  Both offer starting with an agent's name, which hands the message off:
+  - typed: `UNADDRESSED_TEXT` — start with an agent's name ("Daisy, …"),
+    post in their channel, or type `!help`;
+  - spoken (the voice lobby): `UNADDRESSED_SPEECH`, which uses a whole
+    example ("like 'Daisy, what's on today?'"), because a spoken "…" is only
+    a pause. It's only a `<speech>` block, so the voice speaks it and the
+    channel shows it as the whole reply.
 
   The line is dispatched as a
   [`NODE_STREAM_TOKEN`](../../core/runtime/foundation/events.py) custom event
@@ -150,7 +148,7 @@ model runs.
 
 ### `handoff`
 
-[_handoff](graph.py#L182-L233) — hands a
+[_handoff](graph.py#L179-L230) — hands a
 message that calls another agent by name to that agent, in the agent's home
 channel. Async; no model runs on the host.
 
@@ -186,7 +184,7 @@ channel. Async; no model runs on the host.
 
 ### `concierge`
 
-[_concierge](graph.py#L235-L240) — the
+[_concierge](graph.py#L232-L237) — the
 ReAct behaviour, for turns that are the executing agent's own. Async.
 
 - **Inputs from state:** `messages` (the full list), plus the LangGraph
@@ -203,7 +201,7 @@ ReAct behaviour, for turns that are the executing agent's own. Async.
 
 All routing logic lives in [core/runtime/foundation/routing.py](../../core/runtime/foundation/routing.py),
 where voice and channel posts use it too, and is deliberately pure: `decide()` is a function of
-`(prompt, agent_id, channel_name, agent_config, loader, source, llm_fallback, handoffs)` and
+`(prompt, agent_id, channel_name, agent_config, loader, source)` and
 performs no work and no network I/O, so the routing table is something a test can pin.
 
 Routing is **deterministic only**. Guessing the agent for a message in
@@ -215,8 +213,8 @@ typed commands now: `!jobs`, `!job <id>`, `!kill <id>`
 The Concierge holds no tools; `#content-creation` belongs to 🎬 Coco
 (`content-creator`), who starts and resumes `content_creation` runs.
 
-[decide](../../core/runtime/foundation/routing.py#L103-L136) returns a
-frozen [RouteDecision](../../core/runtime/foundation/routing.py#L53-L74)
+[decide](../../core/runtime/foundation/routing.py#L101-L128) returns a
+frozen [RouteDecision](../../core/runtime/foundation/routing.py#L51-L72)
 (`target`, `agent_id`, `prompt`, `reason`, `channel`; `is_direct` and
 `is_handoff` are convenience properties). `reason` exists for logs and tests:
 when routing is wrong, the useful question is *which rule fired*.
@@ -226,14 +224,13 @@ when routing is wrong, the useful question is *which rule fired*.
 | Condition | Route | `agent_id` | `reason` |
 | --- | --- | --- | --- |
 | `routing_enabled(...)` is false | `concierge` | `None` | `routing not enabled for this agent/channel` |
-| `HANDOFF_ENABLED` on, and the message calls by name an agent other than the channel's, which has a home channel | `handoff` | that agent (`channel`: its home) | `<form> address to '<name>' in #<channel>; continues in #<home>` |
+| The message calls by name an agent other than the channel's, which has a home channel | `handoff` | that agent (`channel`: its home) | `<form> address to '<name>' in #<channel>; continues in #<home>` |
 | Exactly 1 eligible agent in the channel | `direct_call` | that agent | `sole eligible agent in #<channel>` |
-| 0 or ≥2 eligible agents, `ROUTING_LLM_FALLBACK` on | `concierge` | `None` | `<n> eligible agents in #<channel>; ROUTING_LLM_FALLBACK is on` |
 | 0 or ≥2 eligible agents | `fixed` | `None` | `<n> eligible agents in #<channel>` |
 
 ### `routing_enabled`
 
-[routing_enabled](../../core/runtime/foundation/routing.py#L77-L100)
+[routing_enabled](../../core/runtime/foundation/routing.py#L75-L98)
 requires all of:
 
 1. the turn's `source` is not in `ADDRESSED_SOURCES` (`tool`, `job`,
@@ -275,11 +272,11 @@ agent owns the channel, and the message gets the fixed line.
 
 ### Hand-offs
 
-With `HANDOFF_ENABLED` on, the hand-off rule runs before the channel rules
-([_handoff](../../core/runtime/foundation/routing.py#L139-L158)):
+The hand-off rule runs before the channel rules
+([_handoff](../../core/runtime/foundation/routing.py#L131-L150)):
 
 1. **Who can be named:**
-   [addressable_agents](../../core/runtime/foundation/routing.py#L161-L176) —
+   [addressable_agents](../../core/runtime/foundation/routing.py#L155-L170) —
    every agent with channels of its own, by its `name` or its id; not a
    `["*"]` agent (the Concierge, the graph workers), not a stateless one, and
    not the agent that answers this channel (naming it is a message for it).
@@ -289,25 +286,13 @@ With `HANDOFF_ENABLED` on, the hand-off rule runs before the channel rules
    reporting-verb stoplist ("William said …" is about William). Words only;
    no model.
 3. **Where it continues:**
-   [home_channel](../../core/runtime/foundation/routing.py#L179-L191) — the
+   [home_channel](../../core/runtime/foundation/routing.py#L173-L184) — the
    first of the agent's `channels` in which it answers untagged messages, the
    same channel "switch to Ted" takes the voice to. An agent with no such
    channel (Terminator lists only `#general`) is not handed to.
 
 `answering_agent` and the channel inbox ask about a channel, not a message, and
 never hand off.
-
-### The rollback switch
-
-`ROUTING_LLM_FALLBACK=1` (a `Setting` in
-[core/config/settings.py](../../core/config/settings.py#L150), off by default)
-sends a message in a channel without one agent to the host's model instead of
-the fixed line. It changes nothing else: a channel's one agent is still reached
-without a model. The Concierge now holds no tools, so with only the flag on it
-can talk but not delegate; the full rollback also restores its `agent.json`,
-`AGENTS.md` and `SOUL.md`. `HANDOFF_ENABLED=0` (the default,
-[settings.py:L156](../../core/config/settings.py#L156)) turns hand-offs off:
-a message naming another agent goes to whoever answers the channel.
 
 ## Entry & Exit
 
@@ -326,7 +311,7 @@ Returns `{"messages": [{"role": "user", "content": formatted_query}]}`. When
 `caller` is given and the query does not already contain `<caller>`, the query
 is prefixed with `<caller>{caller}</caller>\n`; the guard makes it idempotent
 so a re-entering prompt is not double-tagged
-([graph.py:L269-L277](graph.py#L269-L277)).
+([graph.py:L266-L274](graph.py#L266-L274)).
 
 ```python
 def format_output(state: Dict[str, Any]) -> str
@@ -334,7 +319,7 @@ def format_output(state: Dict[str, Any]) -> str
 
 Returns `state["messages"][-1].content` when `state` is a dict with a non-empty
 `messages`; otherwise falls back to `str(state)`
-([graph.py:L280-L284](graph.py#L280-L284)).
+([graph.py:L277-L281](graph.py#L277-L281)).
 
 ### Checkpointer ownership
 
@@ -369,7 +354,7 @@ never triggers.
 
 | File | Description |
 | --- | --- |
-| [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, the fixed line typed and spoken (streamed, logged, no model), the `ROUTING_LLM_FALLBACK` path, former prefixes delegated as plain words, a delegated turn reaching the concierge, turn recording, failed delegation, and that specialists never route. Hand-offs: off by default, the `ROUTE_HANDOFF` announcement and pointer, the capsule appended, no host model, spoken and typed alike; and, on the real store, that the source session is untouched. |
+| [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, the fixed line typed and spoken (streamed, logged, no model), former prefixes delegated as plain words, a delegated turn reaching the concierge, turn recording, failed delegation, and that specialists never route. Hand-offs: the `ROUTE_HANDOFF` announcement and pointer, the capsule appended, no host model, spoken and typed alike; and, on the real store, that the source session is untouched. |
 | [test_routing.py](../../tests/core/runtime/foundation/test_routing.py) | Unit-tests `decide()`, `routing_enabled()` and `answering_agent()`, and pins the live routing table against the real `agents/` configs: every hosted channel but `#general` has exactly one agent, `#general` gets the fixed line, and the Concierge holds no tools. Hand-offs on the live configs, and every agent's home channel matching the voice focus's. |
 | [test_addressing.py](../../tests/core/runtime/foundation/test_addressing.py) | The addressed-agent rule: the vocative forms, real messages from session history, and the stoplist negatives ("William said …", possessives, acronyms). |
 | [test_handoff.py](../../tests/core/runtime/history/test_handoff.py) | The capsule: exchanges, posts, cleaned replies, touched files, the summary, the caps, and that building one writes nothing. |

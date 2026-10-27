@@ -21,6 +21,8 @@ elsewhere (MCP, say). Shared tools in tools/ use it for their envelope,
 - paths.py: `pkm_path`, `display_path`.
 - workflow.py: WORKFLOW.md, the contract each agent's tools keep: its format,
   the example runner and the contract checks the test suite runs. Not for tools.
+- hooks.py: `ToolHook`, told about every finished tool call of any tool, for
+  code that watches the tools (the proactive team). Not for tools either.
 """
 from core.tooling.agent_tool import (
     AgentTool,

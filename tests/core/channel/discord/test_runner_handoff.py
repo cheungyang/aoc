@@ -115,6 +115,22 @@ class TestTypedHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertIs(only.channel, self.wiki)
         self.assertEqual(only.tokens[-1], "Starting a syllabus on prompt caching.")
         self.assertIs(record_reply.call_args.args[0], self.wiki)
+        self.research.typing.assert_not_called()
+
+    async def test_typing_moves_with_the_reply(self):
+        """discord.py re-sends "typing…" every few seconds until told to stop."""
+        order = []
+        wiki_typing, research_typing = self.wiki.typing.return_value, self.research.typing.return_value
+        wiki_typing.__aexit__.side_effect = lambda *exc: order.append("#pkm-wiki stops")
+        research_typing.__aenter__.side_effect = lambda *cm: order.append("#topic-research starts")
+        research_typing.__aexit__.side_effect = lambda *exc: order.append("#topic-research stops")
+        self.research.send.side_effect = lambda text: order.append("request posted")
+
+        events, _ = self._events()
+        await self._run(events, [self.wiki, self.research])
+
+        self.assertEqual(order, ["request posted", "#pkm-wiki stops", "#topic-research starts",
+                                 "#topic-research stops"])
 
 
 class TestHandoffLines(unittest.TestCase):

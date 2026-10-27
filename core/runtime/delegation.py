@@ -1,15 +1,22 @@
 """The single path by which one agent's turn is handed to another.
 
-There are two callers and there must never be three: the `agent_call` tool, used
-when the concierge LLM decides to delegate, and the `direct_call` node in
-`graphs/main`, used when the router already knows the answer. They differ only in
-*who chose the target*. Everything downstream -- the streamed header, the custom
-events Discord and voice listen for, the channel permission check, the `<caller>`
-prefix -- has to be identical, because the user cannot tell which path ran and
-should not be able to.
+Every caller comes through `stream_delegate`:
 
-Keeping both in one function is the point. The duplicate this replaces was the
-reason a reaction emoji could appear on one path and not the other.
+  - the `agent_call` tool, when an agent's model decides to ask another agent;
+  - the `direct_call` node in `graphs/main`, when the channel says who answers;
+  - its `handoff` node, when the user names another agent. The reply then lands
+    in that agent's own channel, with a capsule of the conversation the request
+    came from.
+
+The callers differ only in *who chose the target* and *which channel the reply
+lands in*. Everything downstream must be identical, because the user cannot tell
+which path ran and should not be able to. That covers the streamed header, the
+custom events Discord and voice listen for, the channel permission check and the
+`<caller>` prefix. Adding a caller is fine. Adding a second copy of this path is
+not.
+
+Keeping one function is the point. The duplicate this replaces was the reason a
+reaction emoji could appear on one path and not the other.
 
 Python code that needs one small model task (a speech version, which agent a
 misheard name means) runs a `WorkerPrompt` (core/prompts/base.py), which hands
@@ -123,7 +130,7 @@ async def stream_delegate(
 ) -> DelegationResult:
     """Runs `agent_id` on `prompt` and streams its reply into the caller's stream.
 
-    Returns a `DelegationResult` rather than raising: both callers need to report
+    Returns a `DelegationResult` rather than raising: every caller needs to report
     failure as text in the channel, not as a traceback.
 
     `record_memory` and `model` are for Python callers only -- the `agent_call`
@@ -180,8 +187,8 @@ async def stream_delegate(
         output=output,
     )
 
-    # The reaction is dispatched from here, not from the callers, so the concierge
-    # path and the router path acknowledge a delegation identically.
+    # The reaction is dispatched from here, not from the callers, so every path
+    # acknowledges a delegation identically.
     await safe_dispatch_custom_event(
         events.ROUTE_REACTION,
         {"agent_id": agent_id, "emoji": config.get("emoji", "🤖")},

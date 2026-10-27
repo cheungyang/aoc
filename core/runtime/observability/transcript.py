@@ -1,6 +1,7 @@
 import datetime
 import os
 import json
+import re
 import time
 import ast
 from typing import Any, Optional, Union
@@ -8,6 +9,47 @@ from langchain_core.callbacks import BaseCallbackHandler
 from core.runtime.foundation.context import ExecutionContext
 from core.storage.sessions import SessionStore
 from core.runtime.observability.log_format import extract_model_name, format_tool_extra_str
+from core.tooling.hooks import ToolCall, tool_called
+
+_STATUS = re.compile(r"<status>\s*(ok|partial|failed)\s*</status>", re.IGNORECASE)
+_ERRORS = re.compile(r"<errors>(.*?)</errors>", re.DOTALL)
+# A tool's envelope opens with its status and closes with its errors
+# (core/tooling/report.py); only those ends are read, since an output can be huge.
+_ENVELOPE_END = 4000
+
+
+def tool_status(content: str) -> str:
+    """A tool call's outcome from its reply: "ok", "partial" or "failed".
+
+    An @agent_tool reply says so in <status>; a shared tool's reply has only
+    <errors>, which is "None" when it worked.
+    """
+    text = content or ""
+    status = _STATUS.search(text[:_ENVELOPE_END])
+    if status:
+        return status.group(1).lower()
+    errors = _ERRORS.search(text[-_ENVELOPE_END:])
+    if errors and errors.group(1).strip() not in ("", "None"):
+        return "failed"
+    return "ok"
+
+
+def _tool_args(inputs: Any, input_str: Any) -> dict:
+    """A tool call's arguments: LangChain's `inputs` when it passes them, else its input string, parsed."""
+    if isinstance(inputs, dict):
+        return inputs
+    if isinstance(input_str, dict):
+        return input_str
+    if isinstance(input_str, str):
+        for parse in (json.loads, ast.literal_eval):
+            try:
+                value = parse(input_str)
+            except Exception:
+                continue
+            if isinstance(value, dict):
+                return value
+        return {"input": input_str}
+    return {}
 
 
 class LoggingHandler(BaseCallbackHandler):
@@ -26,6 +68,9 @@ class LoggingHandler(BaseCallbackHandler):
         self.llm_start_time = None
         self.last_execution_time = 0.0
         self.tool_start_times = {}
+        # run_id -> (tool, args) of the calls under way, announced to the tool
+        # hooks (core/tooling/hooks.py) when they finish.
+        self._calls = {}
 
     def _is_for_this_agent(self, kwargs: dict) -> bool:
         """
@@ -176,23 +221,37 @@ class LoggingHandler(BaseCallbackHandler):
         print(f"{agent_prefix}Tool use: {tool_name}{extra_str}")
         if self.session_id:
             self.manager.append_message(self.session_id, 'system', f"Tool {tool_name}{extra_str}:{input_str}")
+        self._calls[run_id] = (tool_name, _tool_args(kwargs.get("inputs"), input_str))
 
     def on_tool_end(self, output, **kwargs):
         if not self._is_for_this_agent(kwargs):
             return
+        run_id = str(kwargs.get("run_id") or "default")
+        content = output.content if hasattr(output, 'content') else str(output)
+        if isinstance(content, (list, dict)):
+            try:
+                content = json.dumps(content)
+            except Exception:
+                content = str(content)
+        elif not isinstance(content, str):
+            content = str(content)
+        self._announce(run_id, tool_status(content))
         if self.session_id:
-            run_id = str(kwargs.get("run_id") or "default")
             start_t = getattr(self, "tool_start_times", {}).pop(run_id, None)
             latency_str = ""
             if start_t is not None:
                 latency_str = f" [{round(time.time() - start_t, 3)}s]"
-
-            content = output.content if hasattr(output, 'content') else str(output)
-            if isinstance(content, (list, dict)):
-                try:
-                    content = json.dumps(content)
-                except Exception:
-                    content = str(content)
-            elif not isinstance(content, str):
-                content = str(content)
             self.manager.append_message(self.session_id, 'system', f"Tool Output{latency_str}: {content}")
+
+    def on_tool_error(self, error, **kwargs):
+        """A tool that raised: announced as failed. Its error reaches the model as the call's reply."""
+        if not self._is_for_this_agent(kwargs):
+            return
+        self._announce(str(kwargs.get("run_id") or "default"), "failed")
+
+    def _announce(self, run_id: str, status: str) -> None:
+        """Tells the tool hooks (core/tooling/hooks.py) that a call of this agent's finished."""
+        started = self._calls.pop(run_id, None)
+        if started is not None:
+            tool, args = started
+            tool_called(ToolCall(tool=tool, args=args, status=status, session=self.session))

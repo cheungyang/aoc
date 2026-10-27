@@ -118,17 +118,6 @@ class TestDecide(unittest.TestCase):
         loader = _loader(hosts=("aoc-debug",), eligible=[])
         self.assertEqual(decide("hello", "main", "aoc-debug", HOST, loader).target, FIXED)
 
-    def test_the_llm_fallback_brings_the_model_back_where_no_single_agent_answers(self):
-        """The rollback switch changes shared channels only: a channel's one
-        agent is still reached without a model."""
-        shared = _loader(hosts=("general",), eligible=["day-planner", "meal-planner"])
-        decision = decide("plan my week", "main", "general", HOST, shared, llm_fallback=True)
-        self.assertEqual(decision.target, CONCIERGE)
-        self.assertIn("ROUTING_LLM_FALLBACK", decision.reason)
-
-        sole = _loader(hosts=("receipts",), eligible=["receipt-processor"])
-        self.assertEqual(decide("scan", "main", "receipts", HOST, sole, llm_fallback=True).target, DIRECT_CALL)
-
     def test_what_used_to_be_a_concierge_prefix_is_just_a_message(self):
         """`[main]`, `jobs` and `kill` once claimed a message for the concierge.
         They retired with its tools -- job verbs are typed commands now -- so
@@ -266,8 +255,8 @@ class TestLiveRoutingTable(unittest.TestCase):
         self.assertEqual(self._sole_eligible("receipts"), "receipt-processor")
 
     def test_the_concierge_holds_no_tools(self):
-        """Its model runs only under ROUTING_LLM_FALLBACK, in #general. When it
-        does, it must not be able to start a multi-hour graph or delegate."""
+        """Its model never answers a channel message. Should it run anyway (a
+        delegation to it), it must not be able to start a multi-hour graph or delegate."""
         self.assertEqual(self.configs["main"].get("tools"), {})
 
     def test_the_concierge_lists_no_channel_of_its_own(self):
@@ -328,13 +317,8 @@ class TestHandoffs(unittest.TestCase):
         cls.configs = _load_agent_configs()
         cls.loader = _ConfigLoader(cls.configs)
 
-    def _decide(self, prompt, channel, handoffs=True, **kwargs):
-        return decide(prompt, "main", channel, self.configs["main"], self.loader, handoffs=handoffs, **kwargs)
-
-    def test_off_by_default(self):
-        """`HANDOFF_ENABLED` ships off: the channel's agent gets the message, as before."""
-        decision = decide("Ted, create a syllabus on THIS topic", "main", "pkm-wiki", self.configs["main"], self.loader)
-        self.assertEqual((decision.target, decision.agent_id), (DIRECT_CALL, "wiki-gardener"))
+    def _decide(self, prompt, channel, **kwargs):
+        return decide(prompt, "main", channel, self.configs["main"], self.loader, **kwargs)
 
     def test_naming_another_agent_hands_the_message_to_its_home_channel(self):
         decision = self._decide("Ted create a syllabus on THIS topic", "pkm-wiki")

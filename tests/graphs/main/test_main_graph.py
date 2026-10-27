@@ -11,7 +11,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from core.channel.response_parser import AgentResponse
-from core.config.settings import Config
 from core.runtime.delegation import DelegationResult
 from core.runtime.foundation import events
 from core.runtime.foundation.context import current_execution_context
@@ -80,8 +79,9 @@ class TestMainGraph(unittest.TestCase):
 class TestFixedReply(unittest.TestCase):
     """What a message gets where no single agent answers, as each surface needs it."""
 
-    def test_typed_it_points_at_the_agents_channels_and_the_commands(self):
+    def test_typed_it_offers_a_name_the_agents_channels_and_the_commands(self):
         self.assertEqual(fixed_reply("text"), UNADDRESSED_TEXT)
+        self.assertIn('"Daisy, …"', UNADDRESSED_TEXT)  # starting with a name hands the message off
         self.assertIn("!help", UNADDRESSED_TEXT)
 
     def test_spoken_it_is_all_speech(self):
@@ -92,10 +92,10 @@ class TestFixedReply(unittest.TestCase):
         self.assertEqual(response.speech, UNADDRESSED_SPEECH)
         self.assertEqual(response.text, "")
 
-    def test_it_never_offers_addressing_an_agent_by_name_in_text(self):
-        """Hand-offs ("Daisy, ...") ship off (`HANDOFF_ENABLED`); while they
-        are, offering them would send the user straight back to this line."""
-        self.assertNotIn("Daisy", UNADDRESSED_TEXT)
+    def test_spoken_it_gives_a_whole_example(self):
+        """Spoken, "…" is only a pause, so the example is a whole sentence."""
+        self.assertIn("'Daisy, what's on today?'", UNADDRESSED_SPEECH)
+        self.assertNotIn("…", UNADDRESSED_SPEECH)
 
 
 class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
@@ -187,17 +187,6 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         spoken = f"<speech>{UNADDRESSED_SPEECH}</speech>"
         self.assertEqual(state["messages"][-1].content, spoken)
         self.assertEqual(dispatch.await_args.args[1]["content"], spoken)
-
-    async def test_the_llm_fallback_brings_the_concierge_back(self):
-        with Config().overriding(routing_llm_fallback=True):
-            state, delegate, _, dispatch, concierge = await self._run(
-                "plan my weekend", self._shared(), channel="general"
-            )
-
-        delegate.assert_not_awaited()
-        dispatch.assert_not_awaited()
-        self.assertEqual(concierge.calls, 1)
-        self.assertEqual(state["messages"][-1].content, "concierge reply")
 
     async def test_a_former_concierge_prefix_is_delegated_like_any_message(self):
         """`[main]` was routing syntax; now it is just the user's words."""
@@ -302,7 +291,7 @@ class _TeamLoader:
 class TestHandoffNode(unittest.IsolatedAsyncioTestCase):
     """A message that names another agent goes to that agent's own channel."""
 
-    async def _run(self, prompt, channel="pkm-wiki", handoffs=True, surface=None, capsule="<handoff_context/>",
+    async def _run(self, prompt, channel="pkm-wiki", surface=None, capsule="<handoff_context/>",
                    delegate_result=None, record=True):
         delegate = AsyncMock(return_value=delegate_result or DelegationResult(
             agent_id="topic-researcher", text="Starting a syllabus on prompt caching."))
@@ -322,18 +311,12 @@ class TestHandoffNode(unittest.IsolatedAsyncioTestCase):
             dispatch = started[2]
             recorder = started[-1] if record else None
             graph = create_graph(llm=MagicMock(), tools=[], agent_id="main", config=TEAM["main"])
-            with Config().overriding(handoff_enabled=handoffs):
-                with _session(channel=channel, surface=surface):
-                    state = await graph.ainvoke({"messages": [HumanMessage(content=prompt)]})
+            with _session(channel=channel, surface=surface):
+                state = await graph.ainvoke({"messages": [HumanMessage(content=prompt)]})
         finally:
             for p in reversed(patches):
                 p.stop()
         return state, delegate, dispatch, recorder, concierge
-
-    async def test_off_the_channels_own_agent_gets_the_message(self):
-        _, delegate, _, _, _ = await self._run("Ted, create a syllabus on THIS topic", handoffs=False)
-        self.assertEqual(delegate.await_args.kwargs["agent_id"], "wiki-gardener")
-        self.assertEqual(delegate.await_args.kwargs["channel"], "pkm-wiki")
 
     async def test_the_named_agent_answers_in_its_own_channel_with_the_capsule(self):
         state, delegate, _, _, concierge = await self._run("Ted create a syllabus on THIS topic")

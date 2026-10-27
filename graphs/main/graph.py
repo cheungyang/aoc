@@ -7,9 +7,8 @@ deterministic `route` step. A channel's one agent gets the turn with no model
 call on the host (`direct_call`); a message in a channel no single agent answers
 gets a fixed line, with no model call at all (`fixed`); a message that calls
 another agent by name goes to that agent in its own channel, with a capsule of
-the conversation it came from (`handoff`, behind `HANDOFF_ENABLED`); and the
-ReAct agent runs only for turns that are the executing agent's own
-(`concierge`).
+the conversation it came from (`handoff`); and the ReAct agent runs only for
+turns that are the executing agent's own (`concierge`).
 
 Two things to know before editing:
 
@@ -30,7 +29,6 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
-from core.config.settings import Config
 from core.runtime.delegation import agent_header, prompt_to_text, safe_dispatch_custom_event, stream_delegate
 from core.runtime.foundation import events
 from core.runtime.foundation.addressing import message_text
@@ -38,10 +36,12 @@ from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDO
 from core.runtime.history.handoff import capsule_for, with_capsule
 
 # What the `fixed` node answers: a message in a channel no single agent answers
-# (#general). Typed, it points at what #general is used for -- the agents' own
-# channels and the commands. Spoken, at how the voice room reaches an agent.
-UNADDRESSED_TEXT = "No agent picks up here. Post in the agent's own channel, or type `!help` for commands."
-UNADDRESSED_SPEECH = "Who's it for? Say 'switch to Daisy'."
+# (#general). It offers starting with an agent's name (a hand-off). Typed, it
+# also points at the agents' own channels and the commands. Spoken, it gives a
+# whole example: TTS reads "…" as a pause.
+UNADDRESSED_TEXT = ("No agent picks up here. Start with an agent's name (\"Daisy, …\"), "
+                    "post in their channel, or type `!help`.")
+UNADDRESSED_SPEECH = "Who's it for? Start with their name, like 'Daisy, what's on today?'"
 
 
 def _record_turn(session, user_prompt, reply_text: str):
@@ -97,7 +97,6 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         messages = state.get("messages") or []
         latest = messages[-1].content if messages else ""
 
-        settings = Config()
         decision = decide(
             prompt=latest,
             agent_id=(ctx.agent_id if ctx else owner_agent_id),
@@ -105,8 +104,6 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             agent_config=agent_config,
             loader=AgentsLoader(),
             source=(ctx.source if ctx else ""),
-            llm_fallback=settings.routing_llm_fallback,
-            handoffs=settings.handoff_enabled,
         )
 
         if decision.is_direct:

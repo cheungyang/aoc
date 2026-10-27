@@ -75,6 +75,23 @@ class TestVoice(unittest.TestCase):
                       errors(voice={"name": "en-US-Chirp3-HD-Puck", "pitch": 2}))
 
 
+class TestProactivity(unittest.TestCase):
+    """The peer card (core/proactive/cards.py)."""
+
+    def test_interests_and_offers(self):
+        self.assertEqual(errors(proactivity={"interests": ["groceries bought"], "offers": ["update the inventory"]}), [])
+        self.assertEqual(errors(proactivity={}), [])
+
+    def test_lists_of_phrases_only(self):
+        for bad in ({"offers": "inventory"}, {"interests": [""]}, {"offers": [3]}):
+            with self.subTest(block=bad):
+                self.assertTrue(any(e.startswith("proactivity.") for e in errors(proactivity=bad)))
+
+    def test_unknown_key_and_shape(self):
+        self.assertIn("proactivity: unknown key(s) level", errors(proactivity={"level": "high"}))
+        self.assertTrue(errors(proactivity=["inventory"])[0].startswith("'proactivity' must be an object"))
+
+
 class TestTopLevel(unittest.TestCase):
 
     def test_unknown_keys_are_rejected(self):

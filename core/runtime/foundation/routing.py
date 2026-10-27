@@ -9,14 +9,12 @@ Routing is deterministic only. A message in a channel with one agent goes to
 that agent; a message in a channel several agents share (#general) gets a fixed
 line from the host, also without a model call. Having a model guess the agent
 there was retired: nearly every message is typed in its agent's own channel,
-and #general is used for commands. `ROUTING_LLM_FALLBACK`
-(core/config/settings.py) brings the guess back, as a rollback switch.
+and #general is used for commands.
 
 A message that calls another agent by name -- "Ted, create a syllabus on THIS
 topic" in #pkm-wiki, "Daisy, ..." in #general -- is a hand-off: it goes to
-that agent in its home channel, and the conversation continues there
-(`HANDOFF_ENABLED`). Who a message calls is addressing.py's rule, read from
-the words alone.
+that agent in its home channel, and the conversation continues there. Who a
+message calls is addressing.py's rule, read from the words alone.
 
 Nothing here performs work or touches the network. `decide()` is a pure function
 of (prompt, context, config) so the routing table is something a test can pin.
@@ -101,26 +99,23 @@ def routing_enabled(agent_id: str, channel_name: str, agent_config: dict, loader
 
 
 def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict, loader: Any, *,
-           source: str = CHANNEL_MESSAGE, llm_fallback: bool = False, handoffs: bool = False) -> RouteDecision:
+           source: str = CHANNEL_MESSAGE) -> RouteDecision:
     """Resolves a turn to a route. Pure; performs no delegation.
 
     Only the hand-off rule reads `prompt`; it travels with the decision, so what
     is routed and where it goes stay one value. `source` is the turn's
     `ExecutionContext.source`; the default asks about a message posted in the
-    channel, as the voice focus and the channel inbox do. `llm_fallback` is
-    `ROUTING_LLM_FALLBACK`: with it on, a channel without one agent reaches the
-    host's model instead of the fixed line. `handoffs` is `HANDOFF_ENABLED`:
-    with it on, a message calling another agent by name goes to that agent's
-    home channel, ahead of the rules below.
+    channel, as the voice focus and the channel inbox do. A message calling
+    another agent by name goes to that agent's home channel, ahead of the other
+    rules.
     """
     if not routing_enabled(agent_id, channel_name, agent_config, loader, source=source):
         return RouteDecision(CONCIERGE, prompt=prompt, reason="routing not enabled for this agent/channel")
 
     eligible: List[str] = loader.eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)
-    if handoffs:
-        handoff = _handoff(prompt, agent_id, channel_name, eligible, loader)
-        if handoff is not None:
-            return handoff
+    handoff = _handoff(prompt, agent_id, channel_name, eligible, loader)
+    if handoff is not None:
+        return handoff
 
     if len(eligible) == 1:
         return RouteDecision(
@@ -130,16 +125,15 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
             reason=f"sole eligible agent in #{channel_name}",
         )
 
-    reason = f"{len(eligible)} eligible agents in #{channel_name}"
-    if llm_fallback:
-        return RouteDecision(CONCIERGE, prompt=prompt, reason=f"{reason}; ROUTING_LLM_FALLBACK is on")
-    return RouteDecision(FIXED, prompt=prompt, reason=reason)
+    return RouteDecision(FIXED, prompt=prompt, reason=f"{len(eligible)} eligible agents in #{channel_name}")
 
 
 def _handoff(prompt: Prompt, host_id: str, channel_name: str, eligible: List[str],
              loader: Any) -> Optional[RouteDecision]:
     """A hand-off, if `prompt` calls by name an agent other than the one that
     answers here, and that agent has a home channel to continue in."""
+    if not prompt:
+        return None  # a question about the channel, not a message (answering_agent)
     answers_here = eligible[0] if len(eligible) == 1 else None
     address = addressed_agent(prompt, addressable_agents(loader, exclude=(host_id, answers_here)))
     if address is None:
@@ -209,8 +203,8 @@ def answering_agent(host_id: str, channel: str, loader: Any) -> str:
     """Who answers an untagged message in `channel` hosted by `host_id`.
 
     The policy typed messages follow (`decide`), so voice and the channel inbox
-    can't drift from them: the sole eligible agent, else the host itself (with
-    its fixed line, or its model under `ROUTING_LLM_FALLBACK`).
+    can't drift from them: the sole eligible agent, else the host itself, with
+    its fixed line.
     """
     decision = decide(
         prompt="",

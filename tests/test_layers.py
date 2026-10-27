@@ -34,7 +34,8 @@ from typing import Dict, Iterator, Optional, Set, Tuple
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PROJECT = ("core", "graphs", "tools", "scripts", "agents", "main")
 
-ADAPTERS = ("core.channel.discord", "core.voice", "core.scheduler", "graphs", "tools", "scripts", "agents", "main")
+ADAPTERS = ("core.channel.discord", "core.voice", "core.scheduler", "core.proactive", "graphs", "tools", "scripts",
+            "agents", "main")
 BELOW_RUNTIME = ("core.prompts", "core.loaders", "core.storage", "core.knowledge", "core.util",
                  "core.tooling", "core.permissions", "core.channel", "core.config", "core.git")
 FOUNDATION = ("core.runtime.foundation",)

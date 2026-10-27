@@ -9,6 +9,7 @@ from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.scheduler.schedule_runner import ScheduleRunner
 from core.channel.discord.ownership import DEV, PROD, Ownership
+from core.proactive.service import install as install_proactive
 from core.runtime import bootstrap
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
@@ -77,6 +78,9 @@ async def run_bots(dev: bool = False, agents: list = None):
             
     schedule_runner = ScheduleRunner()
     tasks.append(schedule_runner.start())
+
+    # The proactive team (core/proactive/README.md): taps every agent turn from here on.
+    tasks.append(install_proactive().start())
             
     if tasks:
         try:

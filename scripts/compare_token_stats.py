@@ -149,8 +149,9 @@ def _agent_for_table(table, agent_ids):
     return raw.split("_")[0]
 
 
-def get_voice_stats(db_path=None, since_ts=0):
-    """Token use of voice turns and the latency of each pipeline stage, since `since_ts`.
+def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
+    """Token use of voice turns and the latency of each pipeline stage, since `since_ts`
+    (and before `until_ts`, if given: a before/after comparison, as G3's first_token check).
 
     Token rows are tagged `surface='voice'` (including the agents a voice turn
     delegates to); latency comes from the `turn_trace` rows VoiceManager writes
@@ -169,6 +170,10 @@ def get_voice_stats(db_path=None, since_ts=0):
         return None
     agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
     agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
+    window, params = "created_at >= ?", [since_ts]
+    if until_ts:
+        window += " AND created_at < ?"
+        params.append(until_ts)
     with store.read_only() as conn:
         for t in store.tables(include_archived=True, conn=conn):
             if "surface" not in store.columns(t, conn=conn):
@@ -176,7 +181,7 @@ def get_voice_stats(db_path=None, since_ts=0):
             agent = _agent_for_table(t, agent_ids)
             for in_tok, out_tok in conn.execute(
                 f"""SELECT input_tokens, output_tokens FROM "{t}"
-                    WHERE entry_type = 'token' AND surface = 'voice' AND created_at >= ?""", (since_ts,)
+                    WHERE entry_type = 'token' AND surface = 'voice' AND {window}""", params
             ):
                 stats["calls"] += 1
                 stats["in_tokens"] += in_tok or 0
@@ -186,7 +191,7 @@ def get_voice_stats(db_path=None, since_ts=0):
                 row[1] += in_tok or 0
                 row[2] += out_tok or 0
             for (message,) in conn.execute(
-                f"""SELECT message FROM "{t}" WHERE entry_type = 'turn_trace' AND created_at >= ?""", (since_ts,)
+                f"""SELECT message FROM "{t}" WHERE entry_type = 'turn_trace' AND {window}""", params
             ):
                 try:
                     trace = json.loads(message)
@@ -202,8 +207,8 @@ def get_voice_stats(db_path=None, since_ts=0):
     return stats
 
 
-def print_voice_stats(since_ts=0, db_path=None):
-    stats = get_voice_stats(db_path=db_path, since_ts=since_ts)
+def print_voice_stats(since_ts=0, db_path=None, until_ts=None):
+    stats = get_voice_stats(db_path=db_path, since_ts=since_ts, until_ts=until_ts)
     if stats is None:
         return
 
@@ -211,8 +216,9 @@ def print_voice_stats(since_ts=0, db_path=None):
         return "-" if ms is None else f"{ms / 1000:.2f}s"
 
     since = datetime.datetime.fromtimestamp(since_ts).strftime('%Y-%m-%d %H:%M') if since_ts else "the beginning"
+    until = f" until {datetime.datetime.fromtimestamp(until_ts).strftime('%Y-%m-%d %H:%M')}" if until_ts else ""
     print("=" * 85)
-    print(f"VOICE BASELINE since {since}")
+    print(f"VOICE BASELINE since {since}{until}")
     print("=" * 85)
     avg_in = stats["in_tokens"] / stats["calls"] if stats["calls"] else 0
     print(f"{'Voice LLM calls':<30} | {stats['calls']:>12,d}")
@@ -223,13 +229,14 @@ def print_voice_stats(since_ts=0, db_path=None):
         print(f"{'Model calls / turn p50, p90':<30} | {_percentile(stats['model_calls'], 50):>12} , {_percentile(stats['model_calls'], 90)}")
     print(f"{'Time to first audio p50, p90':<30} | {sec(_percentile(stats['ttfa'], 50)):>12} , {sec(_percentile(stats['ttfa'], 90))}")
     if stats["stages"]:
-        print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'n':>5}")
-        print("-" * 60)
+        print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'p95':>8} | {'n':>5}")
+        print("-" * 71)
         from core.runtime.observability.turn_trace import STAGES
         for stage in STAGES:
             values = stats["stages"].get(stage)
             if values:
-                print(f"{stage:<30} | {sec(_percentile(values, 50)):>8} | {sec(_percentile(values, 90)):>8} | {len(values):>5}")
+                print(f"{stage:<30} | {sec(_percentile(values, 50)):>8} | {sec(_percentile(values, 90)):>8} | "
+                      f"{sec(_percentile(values, 95)):>8} | {len(values):>5}")
     if stats["agents"]:
         print(f"\n{'Agent (voice)':<25} | {'Calls':>8} | {'In tokens':>12} | {'Out tokens':>12}")
         print("-" * 65)
@@ -316,13 +323,14 @@ if __name__ == "__main__":
     parser.add_argument("--archive-all", action="store_true", help="Archive all active sessions now so all future runs start in fresh tables.")
     parser.add_argument("--voice", action="store_true", help="Report the voice baseline: voice token use and per-stage latency from turn traces.")
     parser.add_argument("--since", type=int, default=0, help="With --voice: only rows after this Unix timestamp.")
+    parser.add_argument("--until", type=int, default=0, help="With --voice: only rows before this Unix timestamp.")
     parser.add_argument("--health", action="store_true",
                         help="Report model calls per user turn by agent, denied tool permissions and failed load_skill calls.")
     parser.add_argument("--days", type=float, default=7, help="With --health: look back this many days (default 7).")
     args = parser.parse_args()
 
     if args.voice:
-        print_voice_stats(since_ts=args.since)
+        print_voice_stats(since_ts=args.since, until_ts=args.until or None)
         sys.exit(0)
 
     if args.health:

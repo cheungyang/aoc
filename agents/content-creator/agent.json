@@ -7,6 +7,10 @@
   "emoji": "🎬",
   "description": "Content producer: starts content_creation runs for your projects and carries your replies through their two approval gates.",
   "model": "FLASH",
+  "proactivity": {
+    "interests": ["recordings and voice notes", "ideas the user would like to share"],
+    "offers": ["turn them into videos and posts"]
+  },
   "tools": {
     "graph_call": {},
     "graph_status": {}

@@ -28,7 +28,8 @@ it, never above (checked by tests/test_layers.py):
 
 Rules:
   1. The runtime never imports an adapter (core.channel.discord, core.voice,
-     core.scheduler, graphs, tools, scripts). Adapters import the runtime.
+     core.scheduler, core.proactive, graphs, tools, scripts). Adapters import
+     the runtime.
   2. Inside the runtime, imports point down the layers above.
   3. The packages the runtime builds on (core.prompts, loaders, storage,
      knowledge, tooling, permissions, channel, util, config), and core.git,
