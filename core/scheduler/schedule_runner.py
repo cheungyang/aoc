@@ -8,7 +8,20 @@ For every due schedule the runner:
 2. takes a slot from the concurrency limiter, so simultaneous schedules queue
    instead of bursting the model's per-minute quota;
 3. dispatches by kind — a prompt becomes an agent turn, a script a subprocess;
-4. records `last_success_at` only if the run succeeded.
+4. records `last_success_at` only if the run succeeded. A run that failed
+   calls the spec's `on_failure`.
+
+One loop, two alarm clocks. The loop sleeps TICK_SECONDS between ticks, and
+`wake()` ends a sleep early, for work that shouldn't wait up to 30 s (a
+proactive delivery approved for `now`). A wake starts nothing itself: it only
+brings the next tick forward, so there is still one loop and one tick at a
+time. Each tick fires the due cron entries, then the due work: every provider
+registered with `add_due_work` returns the specs due now, and each runs as a
+task through `run_schedule`, with the same ownership check and limiter as a
+schedule. A provider claims its own items, so none runs twice
+(core/proactive/delivery.py claims each delivery with one conditional UPDATE).
+Such a spec may bring its own source and output (`source`, `output_for`), and
+say when its reply posted nothing (`is_silent`): then nothing is recorded.
 
 Every post it makes also puts its channel in the channel inbox (core/voice/briefing),
 unless the schedule's priority is IGNORE, so a voice briefing can tell you
@@ -21,12 +34,14 @@ has none). Schedules are re-read whenever an `agent.json` schedules array
 changes, so an edit takes effect without a restart.
 """
 import asyncio
+import contextlib
 import datetime
+import inspect
 import json
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Union
 
 from croniter import croniter
 
@@ -65,6 +80,10 @@ FAILED_JOB_STATUSES = {"error", "killing", "killed", "timeout"}
 # resolved yet is retried on later ticks before being given up (and logged).
 ALERT_ATTEMPTS = 10
 
+# A due-work provider (`add_due_work`): given the epoch time, the specs due now,
+# claimed, or an awaitable of them.
+DueWork = Callable[[float], Union[Iterable[ScheduleSpec], Awaitable[Iterable[ScheduleSpec]]]]
+
 
 def reset_conversation(session) -> int:
     """Empties a scheduled session's conversation history before a STATELESS run.
@@ -100,6 +119,8 @@ class ScheduleRunner:
         self._alerted = set()
         self._fingerprint: Optional[str] = None
         self._tasks = set()
+        self._due_work: List[DueWork] = []
+        self._wake: Optional[asyncio.Event] = None  # made by start(), on the running loop
         self._load_schedules()
 
     # ------------------------------------------------------------------ load
@@ -173,10 +194,27 @@ class ScheduleRunner:
     # ------------------------------------------------------------------ loop
 
     async def start(self):
+        """Ticks every TICK_SECONDS, or sooner when woken (module docstring)."""
         print("ScheduleRunner started.")
+        self._wake = asyncio.Event()
         while True:
-            await asyncio.sleep(TICK_SECONDS)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), timeout=TICK_SECONDS)
+            self._wake.clear()
             await self.tick()
+
+    def wake(self) -> None:
+        """Brings the next tick forward; call it on the event loop. It starts nothing
+        itself, and any number of wakes during a tick make one more tick, not one each.
+        A no-op before start()."""
+        if self._wake is not None:
+            self._wake.set()
+
+    def add_due_work(self, provider: DueWork) -> None:
+        """Registers `provider(now)`: each tick, after the cron entries, it's given the
+        epoch time and returns the specs due now. It claims them itself: the runner
+        runs each spec it returns, once, through run_schedule."""
+        self._due_work.append(provider)
 
     async def tick(self, now: Optional[datetime.datetime] = None):
         self._maybe_reload()
@@ -190,16 +228,33 @@ class ScheduleRunner:
             if now >= item.next_run:
                 if triggered:
                     await asyncio.sleep(2)
-                task = asyncio.create_task(self.run_schedule(item.spec))
-                self._tasks.add(task)
-                if hasattr(task, "add_done_callback"):
-                    task.add_done_callback(self._tasks.discard)
+                self._spawn(self.run_schedule(item.spec))
                 triggered = True
                 # Update next run time
                 try:
                     item.next_run = self._next_run(item.spec.cron, now)
                 except Exception as e:
                     print(f"Error updating next run for {item.spec.agent_id}: {e}")
+        await self._run_due_work(now.timestamp())
+
+    async def _run_due_work(self, now: float) -> None:
+        """The specs each provider says are due now, each run as a task through run_schedule."""
+        for provider in list(self._due_work):
+            try:
+                specs = provider(now)
+                if inspect.isawaitable(specs):
+                    specs = await specs
+            except Exception as e:
+                print(f"ScheduleRunner: due work failed: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+            for spec in specs or ():
+                self._spawn(self.run_schedule(spec))
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        if hasattr(task, "add_done_callback"):
+            task.add_done_callback(self._tasks.discard)
 
     # ------------------------------------------------------------- execution
 
@@ -281,6 +336,10 @@ class ScheduleRunner:
                 print(f"ScheduleRunner: on_success failed for {spec.schedule_id}: {e}")
             self._record(self.state.record_success, spec.schedule_id, started)
         else:
+            try:
+                spec.on_failure(ctx)
+            except Exception as e:
+                print(f"ScheduleRunner: on_failure failed for {spec.schedule_id}: {e}")
             self._record(self.state.record_failure, spec.schedule_id, started)
         return ok
 
@@ -340,14 +399,19 @@ class ScheduleRunner:
 
     async def _run_prompt(self, spec: PromptSchedule, ctx: ScheduleContext, decision: Optional[WorkDecision] = None) -> bool:
         channel = self._resolve_channel(spec.agent_id, spec.channel, spec.thread)
+        output = None
+        if channel is not None:
+            # A spec may write its own way: a proactive delivery posts nothing for a silent reply.
+            output_for = getattr(spec, "output_for", None)
+            output = output_for(channel) if callable(output_for) else DiscordOutput(channel)
 
         # Execute regardless of channel existence
         session = SessionManager.get_session(
             agent_id=spec.agent_id,
-            source="scheduled",
+            source=getattr(spec, "source", "scheduled"),
             channel=channel or spec.channel,
             thinking_level=spec.thinking_level,
-            output=DiscordOutput(channel) if channel is not None else None,
+            output=output,
         )
         if spec.session_policy is SessionPolicy.STATELESS:
             try:
@@ -368,8 +432,8 @@ class ScheduleRunner:
         ok = self._job_succeeded(getattr(session, "job_id", None))
         # Only a successful run's reply was posted as the schedule's output (a
         # failure posts an error message instead), and only if there was a
-        # channel to post it to.
-        if ok and channel is not None and isinstance(reply, str):
+        # channel to post it to. A reply that says nothing posted nothing.
+        if ok and channel is not None and isinstance(reply, str) and not self._silent(spec, reply):
             record_channel_post(channel, reply, origin=spec.schedule_id, loader=self.loader)
             response = session.turn_hints.get(events.RESPONSE_HINT)
             record_push(
@@ -379,6 +443,12 @@ class ScheduleRunner:
                 loader=self.loader,
             )
         return ok
+
+    @staticmethod
+    def _silent(spec: ScheduleSpec, reply: str) -> bool:
+        """A blank reply, or one the spec calls silent (`is_silent`)."""
+        is_silent = getattr(spec, "is_silent", None)
+        return not reply.strip() or (callable(is_silent) and bool(is_silent(reply)))
 
     async def _run_script(self, spec: ScriptSchedule, ctx: ScheduleContext, steps) -> bool:
         results = []

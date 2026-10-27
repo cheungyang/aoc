@@ -8,8 +8,15 @@ the schema is core/storage/schemas/signals.sql. JSON columns are encoded and
 decoded here, so callers pass and get plain lists and dicts.
 
 Acceptance counts are per kind of nudge (`kind_key`, recipient/kind/tag).
-Until deliveries exist (stage S4), your team radio labels are the outcome:
-✅ counts as engaged, ❌ as declined, and changing a label moves its count.
+Until delivery outcomes are captured (stage S4), your team radio labels are
+the outcome: ✅ counts as engaged, ❌ as declined, and changing a label moves
+its count.
+
+Live (`PROACTIVE_DELIVERY` on), a route approved for delivery gets a
+`deliveries` row: a schedule runner tick claims it once, and its proactive
+turn finishes it posted, silent or failed (core/proactive/delivery.py). Live
+Context (core/prompts/live_context.py) shows agents the live situations
+(`live_situations`).
 """
 import json
 import time
@@ -25,6 +32,16 @@ _JSON = {
 }
 # A label, as the acceptance counts see it.
 _COUNTED_AS = {"good": "engaged", "bad": "declined"}
+# A delivery's statuses: approved → running → posted, silent or failed.
+APPROVED, RUNNING, POSTED, SILENT, FAILED = "approved", "running", "posted", "silent", "failed"
+FINISHED = (POSTED, SILENT, FAILED)
+# Why a delivery left running was failed (fail_stuck).
+STUCK = "stuck; not retried"
+# Why an approved delivery was failed unrun: it was due too long ago (expire_deliveries).
+EXPIRED = "expired; not posted late"
+# Tags whose facts reach only the agents that read them (D10, decided at G3): the
+# Governor's routes (core/proactive/governor.py) and Live Context's lines (live_situations).
+SENSITIVE_TAGS = frozenset({"health", "finance"})
 
 
 def _encode(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -153,8 +170,10 @@ class SignalStore(Store):
         return [dict(r) for r in rows]
 
     def route(self, route_id: int) -> Optional[Dict[str, Any]]:
-        rows = self.query("SELECT r.*, s.kind, s.gist, s.tags, s.source_agent, s.source_channel "
-                          "FROM routes r JOIN signals s ON s.id = r.signal_id WHERE r.id = ?", [route_id])
+        """One route, with its signal's kind, gist, tags and source, and its decision's mode."""
+        rows = self.query("SELECT r.*, s.kind, s.gist, s.tags, s.source_agent, s.source_channel, d.mode "
+                          "FROM routes r JOIN signals s ON s.id = r.signal_id "
+                          "LEFT JOIN decisions d ON d.id = r.decision_id WHERE r.id = ?", [route_id])
         return dict(rows[0]) if rows else None
 
     def active_signals(self, *, since: float, today: str, limit: int = 30) -> List[Dict[str, Any]]:
@@ -169,6 +188,37 @@ class SignalStore(Store):
             signal["routes"] = [dict(r) for r in self.query(
                 "SELECT to_agent, urgency, verdict FROM routes WHERE signal_id = ? ORDER BY id", [row["id"]])]
             out.append(signal)
+        return out
+
+    def live_situations(self, topics: Iterable[str], *, today: str, since: float,
+                        limit: int = 8) -> List[Dict[str, Any]]:
+        """What Live Context shows an agent that reads `topics`, newest first, at most `limit`:
+        the situations emitted since `since`, with their evidence found and still true on
+        `today` (`until` today or later), whose tags meet `topics`.
+
+        As for the Governor's routes (D10), a health or finance fact shows only to an agent
+        that reads that tag, and a sensitive one only to an agent that reads either. A fact
+        emitted twice (the same dedupe key) shows once, as its newest wording.
+        """
+        wanted = set(topics)
+        if not wanted:
+            return []
+        rows = self.query("SELECT * FROM signals WHERE kind = 'situation' AND evidence_found = 1 AND at >= ? "
+                          "AND until IS NOT NULL AND until >= ? ORDER BY at DESC, id DESC", [since, today])
+        out, seen = [], set()
+        for row in rows:
+            tags = {t.strip() for t in (row["tags"] or "").split(",") if t.strip()}
+            guarded = tags & SENSITIVE_TAGS
+            if not tags & wanted or not guarded <= wanted:
+                continue
+            if not guarded and row["sensitivity"] == "sensitive" and not SENSITIVE_TAGS & wanted:
+                continue
+            if row["dedupe_key"] and row["dedupe_key"] in seen:
+                continue
+            seen.add(row["dedupe_key"])
+            out.append(_decode("signals", row))
+            if len(out) >= limit:
+                break
         return out
 
     def recent_route(self, *, to_agent: str, dedupe_key: str, since: float) -> Optional[Dict[str, Any]]:
@@ -220,6 +270,73 @@ class SignalStore(Store):
     def route_by_poll_message(self, message_id: Any) -> Optional[Dict[str, Any]]:
         row = self.select_one("routes", {"poll_message_id": str(message_id)})
         return self.route(row["id"]) if row else None
+
+    # -- deliveries (live mode) ------------------------------------------------
+
+    def approve_delivery(self, route_id: int, *, to_agent: str, channel: str, deliver_at: float,
+                         at: Optional[float] = None) -> bool:
+        """Approves `route_id` for a proactive turn in `channel`, due at `deliver_at`.
+        A route is approved once: a second approval changes nothing. True if this one approved it."""
+        row = {"route_id": route_id, "to_agent": to_agent, "channel": channel or "", "deliver_at": deliver_at,
+               "status": APPROVED, "approved_at": time.time() if at is None else at}
+        return self.insert("deliveries", row, or_="IGNORE") is not None
+
+    def due_deliveries(self, now: float) -> List[Dict[str, Any]]:
+        """The approved deliveries due by `now`, soonest first, each with what its turn needs:
+        its route's offer, note, urgency and window, and its signal's kind, gist, evidence,
+        payload, tags, until and source."""
+        rows = self.query(
+            "SELECT d.*, r.offer, r.note, r.urgency, r.window_start, r.window_end, s.kind, s.gist, s.evidence, "
+            "s.payload, s.tags, s.until, s.source_agent, s.source_channel "
+            "FROM deliveries d JOIN routes r ON r.id = d.route_id JOIN signals s ON s.id = r.signal_id "
+            "WHERE d.status = 'approved' AND d.deliver_at <= ? ORDER BY d.deliver_at ASC, d.route_id ASC", [now])
+        return [_decode("signals", r) for r in rows]
+
+    def claim_delivery(self, route_id: int, now: float) -> bool:
+        """Takes a due delivery for one run; True only for the claim that changed the row.
+
+        One conditional UPDATE: of two ticks claiming at once, only one moves it
+        from approved to running.
+        """
+        return self.execute("UPDATE deliveries SET status = 'running', claimed_at = ? "
+                            "WHERE route_id = ? AND status = 'approved' AND deliver_at <= ?",
+                            [now, route_id, now]) == 1
+
+    def finish_delivery(self, route_id: int, status: str, *, error: str = "", at: Optional[float] = None) -> None:
+        """Records how a delivery ended: posted, silent or failed. A post also sets its route's
+        `delivered_at`. A run that outlived fail_stuck still records how it really ended."""
+        if status not in FINISHED:
+            raise ValueError(f"a delivery finishes posted, silent or failed, not {status!r}")
+        at = time.time() if at is None else at
+        with self.connect() as conn:
+            self.update("deliveries", {"status": status, "finished_at": at, "error": error or ""},
+                        {"route_id": route_id}, conn=conn)
+            if status == POSTED:
+                self.update("routes", {"delivered_at": at}, {"id": route_id}, conn=conn)
+
+    def fail_stuck(self, now: float, older_than_s: float) -> List[int]:
+        """Fails the deliveries running since before `now - older_than_s`, and returns their
+        route ids. A stuck run may have posted already, so it is never run again."""
+        failed = []
+        with self.connect() as conn:
+            stuck = [r[0] for r in conn.execute(
+                "SELECT route_id FROM deliveries WHERE status = 'running' AND claimed_at < ? ORDER BY route_id",
+                [now - older_than_s])]
+            for route_id in stuck:
+                if conn.execute("UPDATE deliveries SET status = 'failed', finished_at = ?, error = ? "
+                                "WHERE route_id = ? AND status = 'running'", [now, STUCK, route_id]).rowcount:
+                    failed.append(route_id)
+        return failed
+
+    def expire_deliveries(self, now: float, older_than_s: float) -> int:
+        """Fails the approved deliveries due before `now - older_than_s`, unrun, and returns how
+        many: a post that late would be stale. One guarded UPDATE, so it can't race a claim."""
+        return self.execute("UPDATE deliveries SET status = 'failed', finished_at = ?, error = ? "
+                            "WHERE status = 'approved' AND deliver_at < ?", [now, EXPIRED, now - older_than_s])
+
+    def delivery(self, route_id: int) -> Optional[Dict[str, Any]]:
+        row = self.select_one("deliveries", {"route_id": route_id})
+        return dict(row) if row else None
 
     # -- labels and acceptance -------------------------------------------------
 

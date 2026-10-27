@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import datetime
 import os
 import sqlite3
@@ -206,13 +207,163 @@ class TestTick(RunnerCase):
         await asyncio.sleep(0)
         runner.run_schedule.assert_not_called()
 
-    async def test_start_loops_on_tick(self):
+    async def test_start_ticks_after_each_sleep(self):
         runner = self.make_runner()
-        runner.tick = AsyncMock()
-        with patch.object(runner_mod.asyncio, "sleep", AsyncMock(side_effect=[None, asyncio.CancelledError()])):
+        runner.tick = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+        with patch.object(runner_mod, "TICK_SECONDS", 0.01):
             with self.assertRaises(asyncio.CancelledError):
                 await runner.start()
-        runner.tick.assert_awaited_once()
+        self.assertEqual(runner.tick.await_count, 2)
+
+    async def test_a_wake_ends_the_sleep_early(self):
+        runner = self.make_runner()
+        ticked = asyncio.Event()
+
+        async def tick():
+            ticked.set()
+
+        runner.tick = tick
+        with patch.object(runner_mod, "TICK_SECONDS", 5):
+            loop = asyncio.create_task(runner.start())
+            try:
+                await asyncio.sleep(0.05)
+                self.assertFalse(ticked.is_set(), "still asleep")
+                runner.wake()
+                await asyncio.wait_for(ticked.wait(), 1.0)  # long before the 5 s sleep ends
+            finally:
+                loop.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await loop
+
+    async def test_wakes_during_a_tick_make_one_more_tick(self):
+        runner = self.make_runner()
+        ticks = []
+
+        async def tick():
+            ticks.append(len(ticks))
+            if len(ticks) == 1:
+                for _ in range(5):
+                    runner.wake()
+
+        runner.tick = tick
+        with patch.object(runner_mod, "TICK_SECONDS", 5):
+            loop = asyncio.create_task(runner.start())
+            try:
+                await asyncio.sleep(0.05)
+                runner.wake()
+                await asyncio.sleep(0.1)
+            finally:
+                loop.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await loop
+        self.assertEqual(ticks, [0, 1], "an Event is a flag, not a counter")
+
+    def test_a_wake_before_start_does_nothing(self):
+        self.make_runner().wake()
+
+
+class SourcedSpec(PromptSchedule):
+    """A spec that brings its own source and output, and says when a reply is
+    silent, as a proactive delivery does (core/proactive/delivery.py)."""
+
+    source = "proactive"
+
+    def __init__(self, **kw):
+        kw.setdefault("schedule_id", "proactive:agent1")
+        kw.setdefault("agent_id", "agent1")
+        kw.setdefault("cron", "")
+        kw.setdefault("channel", "test-channel")
+        super().__init__(prompt="tell them", **kw)
+        self.outputs, self.failures = [], 0
+
+    def output_for(self, channel):
+        output = MagicMock(channel=channel)
+        self.outputs.append(output)
+        return output
+
+    def is_silent(self, reply):
+        return "<silent/>" in reply
+
+    def on_failure(self, ctx):
+        self.failures += 1
+
+
+class TestDueWork(RunnerCase):
+    async def test_due_specs_run_through_run_schedule_after_the_cron_entries(self):
+        runner = self.make_runner()
+        ran = []
+
+        async def run_schedule(spec):
+            ran.append(spec.schedule_id)
+            return True
+
+        runner.run_schedule = run_schedule
+        now = get_local_now()
+        runner.schedules[0].next_run = now - datetime.timedelta(minutes=1)
+        cron = runner.schedules[0].spec.schedule_id
+        given = []
+
+        def sync_provider(at):
+            given.append(at)
+            return [SourcedSpec(schedule_id="proactive:a")]
+
+        async def async_provider(at):
+            return [SourcedSpec(schedule_id="proactive:b")]
+
+        runner.add_due_work(sync_provider)
+        runner.add_due_work(async_provider)
+        await runner.tick(now=now)
+        await asyncio.sleep(0)
+        self.assertEqual(ran, [cron, "proactive:a", "proactive:b"])
+        self.assertEqual(given, [now.timestamp()])
+
+    async def test_due_specs_get_the_ownership_check(self):
+        from core.channel.discord.ownership import Event, Ownership
+        runner = self.make_runner()
+        Ownership()._reduce(Ownership().holds, Event("claim", "agent1", "laptop"), None)
+        runner.add_due_work(lambda at: [SourcedSpec()])
+        await runner.tick(now=get_local_now())
+        await asyncio.gather(*list(runner._tasks))
+        self.agent.execute.assert_not_called()
+
+    async def test_a_failing_provider_doesnt_stop_the_others(self):
+        runner = self.make_runner()
+        runner.run_schedule = AsyncMock(return_value=True)
+        spec = SourcedSpec()
+
+        def broken(at):
+            raise RuntimeError("board locked")
+
+        runner.add_due_work(broken)
+        runner.add_due_work(lambda at: [spec])
+        await runner.tick(now=get_local_now())
+        await asyncio.sleep(0)
+        runner.run_schedule.assert_awaited_once_with(spec)
+
+    async def test_a_spec_brings_its_source_and_output(self):
+        runner = self.make_runner()
+        spec = SourcedSpec()
+        self.assertTrue(await runner.run_schedule(spec))
+        kwargs = self.get_session.call_args.kwargs
+        self.assertEqual(kwargs["source"], "proactive")
+        self.assertIs(kwargs["output"], spec.outputs[0])
+        self.assertIs(spec.outputs[0].channel, self.channel)
+        self.record_post.assert_called_once_with(self.channel, "ok", origin="proactive:agent1", loader=self.loader)
+
+    async def test_a_silent_or_blank_reply_records_nothing(self):
+        runner = self.make_runner()
+        for reply, spec in (("<silent/>", SourcedSpec()), ("  \n", self.prompt_spec())):
+            self.agent.execute = AsyncMock(return_value=reply)
+            self.assertTrue(await runner.run_schedule(spec))
+        self.record_post.assert_not_called()
+        self.record_push.assert_not_called()
+
+    async def test_a_failed_run_calls_on_failure(self):
+        runner = self.make_runner()
+        self.agent.execute.side_effect = RuntimeError("boom")
+        spec = SourcedSpec()
+        self.assertFalse(await runner.run_schedule(spec))
+        self.assertEqual(spec.failures, 1)
 
 
 class TestPromptDispatch(RunnerCase):

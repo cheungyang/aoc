@@ -125,7 +125,8 @@ async def test_turns_left_unread_by_a_restart_are_picked_up(store, fast):
 
 
 class TestInstall:
-    """main.py's install: every agent turn and tool call is tapped. There is no switch."""
+    """main.py's install: every agent turn and tool call is tapped. Delivery waits on
+    the one switch, PROACTIVE_DELIVERY."""
 
     @pytest.fixture(autouse=True)
     def hooks(self):
@@ -148,8 +149,18 @@ class TestInstall:
         assert isinstance(service, ProactiveService)
         assert turn_hooks()[:-1] == hooks[0] and isinstance(turn_hooks()[-1], SignalHook)
         assert list(tool_hooks()[:-1]) == hooks[1] and isinstance(tool_hooks()[-1], CallLog)
-        # Nothing is delivered yet (stage S4): each decision is recorded in shadow.
+        # With the switch off (the default), each decision is recorded in shadow.
         assert isinstance(service.decide, Pipeline) and service.decide.current_mode() == "shadow"
         assert service.decide.radio is not None
         # Team radio hears ✅/❌ and poll votes from the Discord runner.
         assert len(discord_radio._reaction_listeners) == 1 and len(discord_radio._vote_listeners) == 1
+
+    def test_the_schedule_runner_runs_the_deliveries_and_is_woken_for_them(self, hooks):
+        from core.proactive.delivery import DueDeliveries
+
+        def wake():
+            pass
+
+        service = service_module.install(wake=wake)
+        assert isinstance(service.due_work, DueDeliveries)
+        assert service.decide.wake is wake

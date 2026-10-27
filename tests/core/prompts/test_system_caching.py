@@ -177,6 +177,17 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertEqual(spoken[:-1], typed)
         self.assertEqual(spoken[-1], "<voice_mode>V</voice_mode>")
 
+    def test_live_context_comes_after_memory_and_before_the_channel(self):
+        """It changes a few times a day: after the nightly memory, before the per-channel block."""
+        plain = self._system_blocks()
+        with patch("core.runtime.graph_builder.get_live_context_prompt",
+                   return_value="<LIVE_CONTEXT>L</LIVE_CONTEXT>") as live_context:
+            live = self._system_blocks()
+        live_context.assert_called_with("test-agent")
+        self.assertEqual(live[:7], plain[:7])  # up to and including memory
+        self.assertEqual(live[7], "<LIVE_CONTEXT>L</LIVE_CONTEXT>")
+        self.assertEqual(live[8:], plain[7:])  # the channel block
+
 
 if __name__ == "__main__":
     unittest.main()

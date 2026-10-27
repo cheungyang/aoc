@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS routes (
     kind_key TEXT NOT NULL DEFAULT '',-- recipient/kind/tag: what acceptance is counted per
     sampled REAL,                     -- the acceptance draw behind "worth posting?"
     deliver_at REAL,                  -- when it would be delivered (shadow) or is due (live)
-    delivered_at REAL,
+    delivered_at REAL,                -- when its proactive turn posted (live; the deliveries table)
     outcome TEXT,                     -- engaged, ignored, declined, missed
     radio_message_id TEXT,            -- its team radio line
     poll_message_id TEXT,             -- the reason poll under that line
@@ -93,6 +93,25 @@ CREATE INDEX IF NOT EXISTS idx_routes_decision ON routes(decision_id);
 CREATE INDEX IF NOT EXISTS idx_routes_radio ON routes(radio_message_id);
 CREATE INDEX IF NOT EXISTS idx_routes_poll ON routes(poll_message_id);
 CREATE INDEX IF NOT EXISTS idx_routes_to ON routes(to_agent, verdict);
+
+-- One row per route approved for delivery: live mode only (PROACTIVE_DELIVERY).
+-- The delivery is a proactive turn of the recipient in its home channel
+-- (core/proactive/delivery.py). A row goes approved → running → posted, silent
+-- or failed, and never back. Each schedule runner tick claims a due row with one
+-- conditional UPDATE, so it runs once. A row left running is failed, not
+-- retried: it may have posted, and for posts to you at most once beats at least once.
+CREATE TABLE IF NOT EXISTS deliveries (
+    route_id INTEGER PRIMARY KEY,     -- routes.id: a route is delivered once
+    to_agent TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT '', -- the recipient's home channel: where its turn runs and posts
+    deliver_at REAL NOT NULL,         -- when it's due, epoch seconds
+    status TEXT NOT NULL,             -- approved, running, posted, silent or failed
+    approved_at REAL,
+    claimed_at REAL,                  -- when a tick took it
+    finished_at REAL,
+    error TEXT NOT NULL DEFAULT ''    -- why it failed
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_due ON deliveries(status, deliver_at);
 
 -- How each kind of nudge has gone: what "worth posting?" samples from.
 CREATE TABLE IF NOT EXISTS acceptance (

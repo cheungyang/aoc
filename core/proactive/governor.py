@@ -70,12 +70,12 @@ from typing import Any, Callable, Dict, List, Optional
 from core.channel.discord.ownership import Ownership
 from core.proactive.cards import PeerCard
 from core.proactive.switchboard import ProposedRoute, ProposedSignal, local
-from core.storage.signals import SignalStore
+from core.storage.signals import SENSITIVE_TAGS, SignalStore
 
 DELIVER, ABSORB, DROP = "deliver", "absorb", "drop"
 
-# Tags whose facts reach only the teammates that read them (D10, decided at G3).
-SENSITIVE_TAGS = frozenset({"health", "finance"})
+# SENSITIVE_TAGS (health, finance) reach only the teammates that read them (D10,
+# decided at G3). The Board defines them: Live Context follows the same rule.
 DEDUPE_S = 72 * 3600
 ACTIVE_S = 10 * 60
 QUIET_STRETCH_S = 30 * 60

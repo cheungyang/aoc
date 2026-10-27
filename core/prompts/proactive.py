@@ -21,3 +21,25 @@ class SwitchboardPrompt(Prompt):
     tags: str
     board: str
     exchange: str
+
+
+@dataclass
+class DeliveryPrompt(Prompt):
+    """A proactive turn's prompt: what a teammate learned, and what the recipient could offer.
+
+    core/proactive/delivery.py renders the parts from one due delivery, its
+    route and its signal. Nothing in it names where the fact came from: the
+    recipient speaks in its own voice and never mentions another agent. Empty
+    parts are left out. A reply of <silent/> posts nothing (delivery.is_silent).
+    """
+
+    template = "proactive/delivery"
+
+    now: str
+    gist: str
+    evidence: str
+    details: str   # the signal's payload, as JSON
+    until: str
+    window: str
+    offer: str
+    note: str      # the Switchboard's one sentence on what the recipient could do with it

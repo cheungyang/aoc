@@ -6,6 +6,12 @@ from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
 from core.channel.chunks import safe_chunks
 
+# Sources whose reply is posted: a message in the channel, a schedule, and a
+# proactive delivery (core/proactive/delivery.py).
+POSTED_SOURCES = ("discord", "scheduled", "proactive")
+# Sources whose reply may carry a poll.
+POLL_SOURCES = ("discord", "proactive")
+
 
 async def dispatch_discord_output(
     channel: Optional[discord.abc.Messageable],
@@ -13,7 +19,7 @@ async def dispatch_discord_output(
     source: str = "discord"
 ):
     """Sends split message chunks, poll UI, and media files to Discord."""
-    if channel is None or source not in ["discord", "scheduled"]:
+    if channel is None or source not in POSTED_SOURCES:
         return
 
     text_content = response.text
@@ -24,7 +30,7 @@ async def dispatch_discord_output(
     chunks = safe_chunks(text_content)
 
     view = None
-    if poll_data and source == "discord" and poll_data.get("options"):
+    if poll_data and source in POLL_SOURCES and poll_data.get("options"):
         if poll_data.get("allow_multiple"):
             view = PollSelectView(poll_data, channel)
         else:

@@ -155,6 +155,12 @@ class TestExecutionContextSurface(unittest.TestCase):
         ctx = SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="voice")
         self.assertEqual(ctx.get_surface(), "voice")
 
+    def test_a_proactive_delivery_runs_on_the_scheduled_surface(self):
+        """Like a schedule's, its post can be heard later in a voice briefing."""
+        ctx = SessionManager.get_session(agent_id="meal-planner", source="proactive", channel="meal-planning")
+        self.assertIsNone(ctx.surface)
+        self.assertEqual(ctx.get_surface(), "scheduled")
+
     def test_surface_does_not_change_session_identity(self):
         text = SessionManager.get_session(agent_id="a", source="discord", channel="general")
         voice = text.with_surface("voice")

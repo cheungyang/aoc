@@ -26,6 +26,22 @@ class TestDispatchDiscordOutput(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(c.startswith("```python\n") for c in sent[1:]))
         self.assertTrue(sent[-1].endswith("Done."))
 
+    async def test_a_proactive_reply_is_posted_and_may_carry_a_poll(self):
+        poll = {"question": "Add them?", "allow_multiple": False,
+                "options": [{"text": "Add all", "emoji": "", "response": "Add them all"}]}
+        for source, polled in (("proactive", True), ("scheduled", False)):
+            channel = AsyncMock()
+            with patch("core.channel.discord.dispatcher.PollButtonView") as view:
+                await dispatch_discord_output(channel, AgentResponse(text="Want these in the inventory?",
+                                                                     poll_data=poll), source=source)
+            kwargs = {"view": view.return_value} if polled else {}
+            channel.send.assert_awaited_once_with("Want these in the inventory?", **kwargs)
+
+    async def test_a_job_posts_nothing(self):
+        channel = AsyncMock()
+        await dispatch_discord_output(channel, AgentResponse(text="done"), source="job")
+        channel.send.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -111,6 +111,14 @@ class TestTheEntry:
     def test_a_scheduled_run_wakes_the_switchboard_at_once(self):
         assert entry_for(_turn(source="scheduled", prompt="Post the morning plan.")).tap == TAP_SCHEDULED
 
+    def test_a_proactive_turn_counts_with_hops_1_so_it_starts_nothing(self):
+        turn = _turn([RECEIPT], source="proactive", prompt="A teammate learned something about the user...")
+        assert counts(turn)
+        entry = entry_for(turn)
+        # Read at once like a scheduled run, even with a trigger effect.
+        assert (entry.hops, entry.tap, entry.source, entry.surface) == (1, TAP_SCHEDULED, "proactive", "scheduled")
+        assert entry_for(_turn([RECEIPT])).hops == 0
+
     def test_filesystem_writes_become_touched_paths_not_effects(self):
         with Config().overriding(pkm_dir="/vault"):
             entry = entry_for(_turn([

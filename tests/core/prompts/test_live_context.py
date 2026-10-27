@@ -1,0 +1,119 @@
+"""Live Context (core/prompts/live_context.py): what's true right now, from teammates' signals."""
+import re
+from datetime import datetime
+
+import pytest
+
+from core.config.settings import Config
+from core.prompts import live_context
+from core.prompts.live_context import CACHE_S, MAX_AGE_S, get_live_context_prompt
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
+from core.storage.signals import SignalStore
+from core.util.local_time import get_local_timezone
+
+NOW = datetime(2026, 10, 24, 9, 31, tzinfo=get_local_timezone()).timestamp()
+ERIC = {"channels": ["weekend-planning"], "memory_topics": ["family", "travel"]}
+
+
+@pytest.fixture(autouse=True)
+def isolated(monkeypatch):
+    """A fresh cache, and the topics the config names: no TAGS.md from the vault."""
+    monkeypatch.setattr(live_context, "_cache", {})
+    monkeypatch.setattr(live_context, "memory_topics",
+                        lambda config, agent_id="": sorted(config.get("memory_topics") or []))
+
+
+@pytest.fixture
+def live():
+    with Config().overriding(proactive_delivery=True):
+        yield
+
+
+@pytest.fixture
+def store():
+    return SignalStore()  # memory.db, which tests/conftest.py points into the test's tmp dir
+
+
+def _situation(store, gist, *, at=NOW - 3600, until="2026-10-27", tags="travel,family", **extra):
+    decision_id = store.start_decision(tap="chat", session_id="s", first_turn_at=at, mode="live", at=at)
+    store.add_signal({"decision_id": decision_id, "at": at, "kind": "situation", "gist": gist,
+                      "evidence": "We're in Tahoe", "evidence_found": 1, "tags": tags, "until": until,
+                      "source_agent": "day-planner", "source_channel": "day-planning",
+                      "dedupe_key": f"situation:{gist}", **extra})
+
+
+def _lines(block):
+    return re.findall(r"- (.+?) \(until ", block)
+
+
+def test_it_shows_the_live_situations_an_agent_reads(store, live):
+    _situation(store, "The user and family are in Lake Tahoe Oct 23-27")
+    _situation(store, "The garage door sensor is out", tags="home")
+    block = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    assert block.startswith("<LIVE_CONTEXT>\n<description>") and block.endswith("</content>\n</LIVE_CONTEXT>")
+    assert "<content>- The user and family are in Lake Tahoe Oct 23-27 (until 2026-10-27)</content>" in block
+    assert "day-planner" not in block and "day-planning" not in block  # no source named
+
+
+def test_newest_first_and_at_most_8(store, live):
+    for i in range(10):
+        _situation(store, f"Fact {i}", at=NOW - 3600 + i)
+    assert _lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW)) == [f"Fact {i}" for i in range(9, 1, -1)]
+
+
+def test_it_shows_only_what_is_live(store, live):
+    _situation(store, "True through today", until="2026-10-24")
+    _situation(store, "Over yesterday", until="2026-10-23")
+    _situation(store, "Learned 15 days ago", at=NOW - MAX_AGE_S - 86400, until="2026-12-31")
+    _situation(store, "Evidence not found", evidence_found=0)
+    _situation(store, "An event", kind="event")
+    assert _lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW)) == ["True through today"]
+
+
+def test_with_the_switch_off_it_is_empty(store):
+    _situation(store, "In Tahoe")
+    assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""
+
+
+@pytest.mark.parametrize("config", [
+    {**ERIC, "stateless": True},
+    {"channels": ["weekend-planning"]},
+    {**ERIC, "memory_topics": []},
+], ids=["stateless agent", "no topics", "empty topics"])
+def test_a_stateless_agent_or_one_without_topics_gets_none(store, live, config):
+    _situation(store, "In Tahoe")
+    assert get_live_context_prompt("excursion-planner", config, now=NOW) == ""
+
+
+@pytest.mark.parametrize("run, shown", [
+    (dict(source="discord", channel="weekend-planning"), True),
+    (dict(source="job"), False),
+    (dict(source="tool", channel="weekend-planning", stateless=True), False),
+    (dict(source="tool", channel="weekend-planning", record_memory=False), False),
+], ids=["its own turn", "a job", "a stateless run", "a run that records no memory (a dream)"])
+def test_only_a_run_that_keeps_memory_gets_it(store, live, run, shown):
+    _situation(store, "In Tahoe")
+    token = current_execution_context.set(SessionManager.get_session(agent_id="excursion-planner", **run))
+    try:
+        assert bool(get_live_context_prompt("excursion-planner", ERIC, now=NOW)) is shown
+    finally:
+        current_execution_context.reset(token)
+
+
+def test_the_block_is_kept_for_its_window(store, live):
+    _situation(store, "In Tahoe")
+    first = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    _situation(store, "Guests on Saturday", at=NOW - 60)
+    assert get_live_context_prompt("excursion-planner", ERIC, now=NOW + CACHE_S - 1) == first
+    assert _lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW + CACHE_S + 1)) == [
+        "Guests on Saturday", "In Tahoe"]
+
+
+def test_an_unreadable_board_leaves_it_out(live, monkeypatch, capsys):
+    def locked(self, *args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(SignalStore, "live_situations", locked)
+    assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""
+    assert "No Live Context for excursion-planner: RuntimeError: database is locked" in capsys.readouterr().out

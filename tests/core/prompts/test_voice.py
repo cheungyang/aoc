@@ -83,6 +83,12 @@ class TestVoiceModePrompt(unittest.TestCase):
             self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general", surface="voice"),
                              VOICE_MODE)
 
+    def test_a_proactive_delivery_gets_the_scheduled_block_inside_its_scope(self):
+        proactive = dict(agent_id="meal-planner", source="proactive", channel="meal-planning")
+        self.assertEqual(self._prompt_in(**proactive), "")
+        with scheduled_speech_scope("meal-planner"):
+            self.assertEqual(self._prompt_in(**proactive), SCHEDULED_VOICE_MODE)
+
     def test_the_scheduled_block_marks_questions_and_has_no_pre_tool_line(self):
         self.assertIn(SPEECH_RULES, SCHEDULED_VOICE_MODE)
         self.assertIn(SPEECH_RULES, VOICE_MODE, "one set of rules for both")

@@ -3,7 +3,7 @@
 `core/runtime/graph_builder.py` stacks these blocks, most static first, for
 prompt caching. Their instruction text is in templates/system/; the agent's
 own text comes from agents/<id>/, and its memory from the PKM. The voice block
-is in core/prompts/voice.py.
+is in core/prompts/voice.py, and Live Context's in core/prompts/live_context.py.
 """
 import os
 from dataclasses import dataclass

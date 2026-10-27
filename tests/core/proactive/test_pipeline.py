@@ -66,9 +66,14 @@ def store(tmp_path):
     return SignalStore(str(tmp_path / "memory.db"))
 
 
-def _pipeline(store, run=None, radio=None):
+# Each recipient's home channel, where its deliveries run and post.
+HOMES = {"meal-planner": "meal-planning", "excursion-planner": "weekend-planning"}
+
+
+def _pipeline(store, run=None, radio=None, **options):
+    options.setdefault("clock", lambda: NOW)
     return Pipeline(store, run=run or FakeRun(), team=lambda: TEAM, radio=radio, owns=lambda agent_id: True,
-                    rng=Draw(0), clock=lambda: NOW, tags="- food: Diet.")
+                    rng=Draw(0), tags="- food: Diet.", **options)
 
 
 @pytest.mark.asyncio
@@ -97,6 +102,64 @@ async def test_the_switch_decides_the_mode(store):
         live = await _pipeline(store)("s1", _turn(store))
     shadow = await _pipeline(store)("s2", _turn(store, session_id="s2"))
     assert (store.decision(live)["mode"], store.decision(shadow)["mode"]) == ("live", "shadow")
+
+
+@pytest.mark.asyncio
+async def test_live_a_now_route_is_approved_for_its_home_channel_and_wakes_the_runner(store):
+    woken = []
+    decision_id = await _pipeline(store, mode="live", home=HOMES.get, wake=lambda: woken.append(True))(
+        "s1", _turn(store))
+    ramsay, stranger = store.decision(decision_id)["routes"]
+    delivery = store.delivery(ramsay["id"])
+    assert (delivery["status"], delivery["to_agent"], delivery["channel"]) == ("approved", "meal-planner",
+                                                                              "meal-planning")
+    assert delivery["deliver_at"] == NOW
+    assert store.delivery(stranger["id"]) is None  # dropped: nothing to deliver
+    assert woken == [True]
+
+
+@pytest.mark.asyncio
+async def test_shadow_approves_nothing(store):
+    woken = []
+    decision_id = await _pipeline(store, mode="shadow", home=HOMES.get, wake=lambda: woken.append(True))(
+        "s1", _turn(store))
+    assert store.decision(decision_id)["mode"] == "shadow"
+    assert [store.delivery(r["id"]) for r in store.decision(decision_id)["routes"]] == [None, None]
+    assert woken == []
+
+
+@pytest.mark.asyncio
+async def test_live_a_recipient_with_no_home_channel_gets_no_delivery(store, capsys):
+    woken = []
+    pipeline = _pipeline(store, mode="live", home=lambda agent_id: None, wake=lambda: woken.append(True))
+    decision_id = await pipeline("s1", _turn(store))
+    assert store.delivery(store.decision(decision_id)["routes"][0]["id"]) is None
+    assert woken == []
+    assert "meal-planner has no home channel" in capsys.readouterr().out
+
+
+def _waiting_route(store, mode, urgency="today", to="excursion-planner"):
+    decision_id = store.start_decision(tap="chat", session_id="s", first_turn_at=NOW, mode=mode, at=NOW)
+    signal_id = store.add_signal({"decision_id": decision_id, "at": NOW, "kind": "situation", "gist": "In Tahoe"})
+    return store.add_route({"signal_id": signal_id, "decision_id": decision_id, "to_agent": to, "asked": urgency,
+                            "urgency": urgency, "verdict": "deliver"})
+
+
+@pytest.mark.asyncio
+async def test_resolve_approves_a_today_route_only_when_its_decision_is_live(store):
+    live, shadow, nxt = _waiting_route(store, "live"), _waiting_route(store, "shadow"), _waiting_route(
+        store, "live", urgency="next")
+    # The recipient's scheduled run: the `next` route's touchpoint.
+    store.record_turn({"at": NOW + 60, "agent_id": "excursion-planner", "caller": "", "tap": "scheduled"})
+    await _pipeline(store, home=HOMES.get, clock=lambda: NOW + 3600).resolve()
+
+    # No turn of yours since: each `today` route's quiet stretch began when it was decided.
+    assert (store.route(live)["deliver_at"], store.route(shadow)["deliver_at"]) == (NOW, NOW)
+    delivery = store.delivery(live)
+    assert (delivery["status"], delivery["channel"], delivery["deliver_at"]) == ("approved", "weekend-planning", NOW)
+    assert store.delivery(shadow) is None
+    # A `next` route is timed, but reaches the recipient's next run instead (part 3).
+    assert store.route(nxt)["deliver_at"] == NOW + 60 and store.delivery(nxt) is None
 
 
 @pytest.mark.asyncio

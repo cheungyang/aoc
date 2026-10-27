@@ -14,7 +14,7 @@ taps the turns of the agents it runs. It has **one switch**, `PROACTIVE_DELIVERY
 | `PROACTIVE_DELIVERY` | What happens |
 |---|---|
 | off (default) | **Shadow.** Turns are tapped, decided and shown on team radio, but **nothing reaches an agent or its channel**. A route only records when it *would* have been delivered. |
-| on | Stage S4, being built: approved routes are delivered. It's turned on at G3. |
+| on | **Live** (stage S4). A `now` or `today` route the Governor lets through becomes a **proactive turn**: the recipient posts in its own channel, or stays silent ([Delivery](#delivery-s4)). A `next` route still only records its time. Each agent also sees the live situations its topics cover ([Live Context](#live-context)). It's turned on at G3. |
 
 > [!IMPORTANT]
 > Nothing here runs before a reply is out. The taps work in `ended`, after the
@@ -38,6 +38,10 @@ flowchart TD
     M -->|"nightly dream"| F["main's MEMORY / FEEDBACK"]
     F -.->|"read on every run"| SB
     A -.->|"Thompson draw"| G
+    B -->|"live: now at once, today once timed"| D[("deliveries")]
+    D -->|"schedule runner tick (a now route wakes it)"| PT["Proactive turn (delivery.py)"]
+    PT -->|"a post, or silent"| CH["The recipient's channel"]
+    PT -.->|"tapped with hops = 1: absorbed"| T
 ```
 
 ## Files
@@ -50,13 +54,16 @@ flowchart TD
 | [pipeline.py](pipeline.py) | One decision: claim the turns, run the Switchboard, judge each route, record it, then tell team radio. A step that fails becomes the decision's error. |
 | [switchboard.py](switchboard.py) | Renders the prompt, runs `main` once, statelessly, and parses `<switchboard_response>`. |
 | [governor.py](governor.py) | The rules, the acceptance draw, and when a route would be delivered. Its docstring lists the **dormant levers**. |
+| [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. |
 | [cards.py](cards.py) | Peer cards: what each teammate wants and offers. They come from `agent.json` `proactivity`, or are derived from `description`. |
 | [radio.py](radio.py) | Team radio's lines, your labels, the reason poll, and outcome lines. |
 | [board.py](board.py) | One worker thread for every Board call. |
 
 Elsewhere:
 - **Board:** [core/storage/signals.py](../storage/signals.py), with its schema in [signals.sql](../storage/schemas/signals.sql).
-- **Prompt:** [core/prompts/templates/proactive/switchboard.md](../prompts/templates/proactive/switchboard.md).
+- **Prompts:** [core/prompts/templates/proactive/switchboard.md](../prompts/templates/proactive/switchboard.md), and the proactive turn's [delivery.md](../prompts/templates/proactive/delivery.md).
+- **The runner that delivers:** [core/scheduler/schedule_runner.py](../scheduler/schedule_runner.py): its wake, and its due work.
+- **Live Context:** [core/prompts/live_context.py](../prompts/live_context.py), with its query `SignalStore.live_situations` and its place in [graph_builder.py](../runtime/graph_builder.py).
 - **Discord side of team radio:** [core/channel/discord/radio.py](../channel/discord/radio.py).
 - **`!signals`:** [core/runtime/commands/typed/signals.py](../runtime/commands/typed/signals.py).
 - **Outcome lines:** [core/knowledge/memory/outcomes.py](../knowledge/memory/outcomes.py).
@@ -147,6 +154,43 @@ The acceptance draw is Thompson sampling over `Beta(2 + engaged, 1 + ignored + d
 
 **Dormant levers** (quiet hours, delivery window, per-signal, per-agent, global and long-shot caps, open follow-ups) are written down in the Governor's docstring, each with the condition that switches it on. They're decided at the gates, from shadow data.
 
+## Delivery (S4)
+
+With the switch on, each decision is **live**: a `deliver` verdict becomes a **proactive turn**, a one-shot run of the recipient in its own home channel ([delivery.py](delivery.py)).
+
+| Step | What happens |
+|---|---|
+| Approve | The pipeline approves a `now` route at once, and a `today` route when `resolve_times` knows its time: one `deliveries` row on the Board, for the recipient's home channel. A recipient with no home channel gets nothing. A `next` route isn't delivered this way: it will reach the recipient's next run (part 3). |
+| Wake | A `now` approval wakes the schedule runner, so its 30 s sleep ends early. It's still one loop, one tick at a time. |
+| Claim | Each tick, the runner's due work (`DueDeliveries`) first fails a row still running after 10 minutes (never run again) and an approved row due more than 3 hours ago (never posted late): for posts to you, at most once beats at least once. A row whose recipient this host doesn't hold right now is skipped, as `run_schedule` would; it stays approved, runs if the agent comes back, and expires otherwise. Every other due row is claimed with one conditional `UPDATE`, so it runs once. |
+| Run | A `DeliverySchedule`, through `run_schedule`: the same ownership check and limiter as a schedule. Stateless, with source `proactive`, on the scheduled surface, at thinking level `low` (posts are short; G4 wants post p95 ≤ 60 s). |
+| Post | Like a scheduled post: in the channel, in the channel inbox with its speech version ("Ramsay has a suggestion"), and in the session that answers your reply. A reply of `<silent/>` posts nothing and records nothing. |
+| Finish | `posted` (the route's `delivered_at` is set), `silent` or `failed`. |
+
+The turn's prompt ([delivery.md](../prompts/templates/proactive/delivery.md)) says what a teammate learned (the gist, the evidence, the payload, until or the window) and what the recipient could offer, with the Switchboard's note. It never names that teammate. Its rules: first person, in its own voice; never mention another agent, the Switchboard, or how it learned this; one short message with at most one question or a poll; `<silent/>` if it already knows this, or it isn't useful now.
+
+**No chains:** the taps give a proactive turn `hops = 1` and the scheduled tap, so the Governor absorbs any signal it starts.
+
+**Rollback:** turn the switch off. The due work reads it on every tick, so nothing more is delivered. Approved rows wait; if it's turned back on, any due more than 3 hours ago expire unposted.
+
+### Live Context
+
+With the switch on, an agent also sees what's true right now: a `LIVE_CONTEXT` system block ([core/prompts/live_context.py](../prompts/live_context.py)) of the live situations on the Board that its `memory_topics` cover. It's working memory, next to the dream's long-term memory: nothing curates it, and its lines expire on their own.
+
+```text
+- The user and family are in Lake Tahoe Oct 23–27 (until 2026-10-27)
+```
+
+| | |
+|---|---|
+| Lines | `situation` signals with their evidence found, `until` today or later, learned in the last 14 days, whose tags meet the agent's topics. Newest first, at most 8, one line each, with no source named. A fact said twice shows once. As for routes (D10), a health or finance fact shows only to an agent that reads that tag. |
+| Who | An agent with memory topics. Never a stateless agent, nor a stateless or non-recording run (a job, a dream, a replay). |
+| Where | Right after the agent's memory, before the channel block ([graph_builder.py](../runtime/graph_builder.py)): it changes a few times a day. |
+| Cost | Asked for on every model call, so each agent's block is kept for 60 s. With the switch off, it's never read. |
+
+> [!NOTE]
+> The dream reading the day's signals, to promote the lasting situations into topics (review record §6.4), isn't part of this. A dream doesn't see Live Context either: it records no memory, so it gets no block.
+
 ## Team radio and `!signals`
 
 ```text
@@ -199,8 +243,11 @@ G3 comes after ≥ 2 weeks of shadow running in prod and ≥ 30 labeled decision
 | What | Where |
 |---|---|
 | The proactive package, with the effects table | `tests/core/proactive/` (one file per module) |
+| The whole path, shadow and live (a stub agent posts, or stays silent) | `tests/core/proactive/test_end_to_end.py` |
 | The tool hooks | `tests/core/tooling/test_hooks.py`, and `test_transcript.py` for who announces |
 | The Board | `tests/core/storage/test_signals.py` |
-| The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_runner.py` |
+| The schedule runner's wake and due work | `tests/core/scheduler/test_schedule_runner.py` |
+| Live Context, and its place in the system prompt | `tests/core/prompts/test_live_context.py`, `test_system_caching.py` |
+| The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_runner.py`, `test_dispatcher.py` |
 | `!signals` | `tests/core/runtime/commands/typed/test_signals.py` |
 | The D20 replay | `tests/scripts/test_proactive_replay.py` |

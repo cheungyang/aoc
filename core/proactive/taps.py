@@ -24,6 +24,10 @@ hints, and `entry_for` reads them when the turn ends.
 The tap decides when the Switchboard runs: at once for a trigger or the end of
 a scheduled run, and after 90 s of quiet for a conversation (service.py).
 
+A proactive delivery's turn (source "proactive", delivery.py) counts too. It
+is read at once, with the scheduled tap, and its entry has hops = 1: the
+Governor absorbs any signal it starts, so a delivery never starts another.
+
 Which turns count: an agent's own work. These are skipped:
   - the host's routing turn, and any agent reachable everywhere
     (`channels: ["*"]`: the Concierge, the graph workers);
@@ -67,6 +71,8 @@ MAX_TOUCHED = 8
 # background job (run_tool, graph_call without a caller, the coding tick), a
 # graph's own steps, and the voice replay.
 SKIPPED_SOURCES = frozenset({"job", "graph", "voice_replay"})
+# The source of a proactive delivery's turn (delivery.py). It counts: hops = 1.
+PROACTIVE_SOURCE = "proactive"
 # Tools too common to tell which skill a turn used.
 GENERIC_TOOLS = frozenset({"filesystem", "load_skill", "web_search", "web_fetch", "bash", "agent_call"})
 # Statuses of a call that changed something (transcript.tool_status).
@@ -122,7 +128,10 @@ def entry_for(turn: Turn, now: Optional[float] = None) -> Optional[LedgerEntry]:
     calls = list(ctx.turn_hints.get(CALLS_HINT) or [])
     effects, touched = effects_of(calls)
     surface = ctx.get_surface()
-    if any(effect["role"] == TRIGGER for effect in effects):
+    proactive = ctx.source == PROACTIVE_SOURCE
+    if proactive:
+        tap = TAP_SCHEDULED  # read at once, like a scheduled run, whatever it called
+    elif any(effect["role"] == TRIGGER for effect in effects):
         tap = TAP_EFFECT
     elif ctx.source == "scheduled" or surface == "scheduled":
         tap = TAP_SCHEDULED
@@ -148,6 +157,7 @@ def entry_for(turn: Turn, now: Optional[float] = None) -> Optional[LedgerEntry]:
         memory=memory_lines(getattr(turn.response, "system_memory_log", "") or ""),
         effects=effects,
         context=context,
+        hops=1 if proactive else 0,
     )
 
 

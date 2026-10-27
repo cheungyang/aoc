@@ -17,6 +17,7 @@ from core.prompts.system import (
     get_knowledge_prompt,
     get_tool_rules_prompt,
 )
+from core.prompts.live_context import get_live_context_prompt
 from core.prompts.voice import get_voice_mode_prompt
 from core.runtime.history.budget import cap_tool_output
 from langgraph.types import interrupt
@@ -36,6 +37,8 @@ class GraphBuilder:
             # (static) and the PKM memory files (mutable at runtime).
             agent_static_prompt = get_agent_static_prompt(agent_id)
             agent_memory_prompt = get_agent_memory_prompt(agent_id)
+            # What's true right now, from teammates' signals (empty with the switch off).
+            live_context_prompt = get_live_context_prompt(agent_id)
             # How to treat what tools return (partial/failed, tool gaps); static.
             tool_rules_prompt = get_tool_rules_prompt(agent_id)
 
@@ -66,11 +69,14 @@ class GraphBuilder:
             #   skills, subgraphs                                -> change on deploy
             #   knowledge                                        -> changes once a day
             #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
+            #   live context (teammates' live situations)        -> changes a few times a day
             #   channel                                          -> differs per channel/thread
             #   voice mode                                       -> voice turns only
             # Memory precedes channel: memory is identical across all of an agent's
             # channels and changes rarely, so channel-varying calls (e.g. agent_call
             # into another channel) still share the prefix up to and including memory.
+            # Live context sits between them: it's the same in every channel too, but
+            # changes more often than the nightly memory, so it comes after it.
             # Voice mode comes last, so a voice turn shares every block before it with
             # a typed turn in the same channel.
             # Each block goes in as a message, not a template, so its braces are text.
@@ -82,6 +88,7 @@ class GraphBuilder:
                 subgraphs_prompt,
                 knowledge_prompt,
                 agent_memory_prompt,
+                live_context_prompt,
                 channel_prompt,
                 voice_mode_prompt,
             ]

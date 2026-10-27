@@ -106,6 +106,56 @@ def test_the_board_shows_signals_still_true(store):
     assert gists == ["In Tahoe"]
 
 
+# -- Live Context ------------------------------------------------------------------
+
+def _situation(store, gist, *, at=1000.0, until="2026-10-27", tags="travel", **overrides):
+    values = dict(kind="situation", gist=gist, at=at, until=until, tags=tags, dedupe_key=f"situation:{gist}")
+    values.update(overrides)
+    return _signal(store, _decision(store), **values)
+
+
+def _live(store, topics, since=100.0, **options):
+    return [s["gist"] for s in store.live_situations(topics, today="2026-10-24", since=since, **options)]
+
+
+def test_live_situations_are_the_ones_an_agents_topics_cover_newest_first(store):
+    _situation(store, "In Tahoe", at=1000.0, tags="travel,family")
+    _situation(store, "Guests on Saturday", at=2000.0, tags="family")
+    _situation(store, "Kitchen remodel", at=3000.0, tags="home")
+    assert _live(store, ["family", "food"]) == ["Guests on Saturday", "In Tahoe"]
+    assert _live(store, []) == []
+
+
+def test_live_situations_skip_what_isnt_live(store):
+    _situation(store, "True through today", until="2026-10-24")
+    _situation(store, "Over yesterday", until="2026-10-23")
+    _situation(store, "No until", until=None)
+    _situation(store, "Evidence not found", evidence_found=0)
+    _situation(store, "Learned too long ago", at=50.0)
+    _situation(store, "An artifact", kind="artifact")
+    assert _live(store, ["travel"]) == ["True through today"]
+
+
+def test_live_situations_stop_at_the_limit(store):
+    for i in range(10):
+        _situation(store, f"Fact {i}", at=1000.0 + i)
+    assert _live(store, ["travel"], limit=8) == [f"Fact {i}" for i in range(9, 1, -1)]
+
+
+def test_a_health_finance_or_sensitive_fact_shows_only_to_its_readers(store):
+    _situation(store, "Flu until Friday", tags="health,family", at=1000.0)
+    _situation(store, "A tight month", tags="family", sensitivity="sensitive", at=2000.0)
+    _situation(store, "Guests on Saturday", tags="family", at=3000.0)
+    assert _live(store, ["family"]) == ["Guests on Saturday"]
+    assert _live(store, ["family", "health"]) == ["Guests on Saturday", "A tight month", "Flu until Friday"]
+
+
+def test_a_fact_emitted_twice_shows_once_in_its_newest_wording(store):
+    _situation(store, "In Tahoe with the family", at=1000.0, dedupe_key="situation:tahoe")
+    _situation(store, "The family is up in Tahoe", at=2000.0, dedupe_key="situation:tahoe")
+    assert _live(store, ["travel"]) == ["The family is up in Tahoe"]
+
+
 def test_a_label_counts_toward_acceptance_and_a_relabel_moves_it(store):
     decision_id = _decision(store)
     route_id = _route(store, _signal(store, decision_id), decision_id)
@@ -177,3 +227,94 @@ def test_would_deliver_lists_the_deliveries_whose_time_is_known(store):
         {"urgency": "now", "decided_at": 110.0, "deliver_at": 110.0},
         {"urgency": "today", "decided_at": 110.0, "deliver_at": 4000.0},
     ]
+
+
+def test_a_route_knows_its_decisions_mode(store):
+    decision_id = _decision(store, mode="live")
+    assert store.route(_route(store, _signal(store, decision_id), decision_id))["mode"] == "live"
+
+
+# -- deliveries (live mode) ------------------------------------------------------
+
+def _approved(store, deliver_at=200.0, **route):
+    decision_id = _decision(store, mode="live")
+    route_id = _route(store, _signal(store, decision_id), decision_id, **route)
+    store.approve_delivery(route_id, to_agent="meal-planner", channel="meal-planning", deliver_at=deliver_at, at=110.0)
+    return route_id
+
+
+def test_a_delivery_is_approved_once(store):
+    decision_id = _decision(store, mode="live")
+    route_id = _route(store, _signal(store, decision_id), decision_id)
+    assert store.approve_delivery(route_id, to_agent="meal-planner", channel="meal-planning", deliver_at=200.0,
+                                  at=110.0)
+    # A second approval changes nothing: not the channel, not the time.
+    assert not store.approve_delivery(route_id, to_agent="meal-planner", channel="general", deliver_at=999.0)
+    delivery = store.delivery(route_id)
+    assert (delivery["status"], delivery["channel"], delivery["deliver_at"]) == ("approved", "meal-planning", 200.0)
+    assert delivery["approved_at"] == 110.0
+
+
+def test_a_due_delivery_comes_with_what_its_turn_needs(store):
+    route_id = _approved(store, note="Add them.", window_start="2026-10-24", window_end="2026-10-25")
+    (due,) = store.due_deliveries(now=200.0)
+    assert (due["route_id"], due["to_agent"], due["channel"]) == (route_id, "meal-planner", "meal-planning")
+    assert (due["offer"], due["note"], due["urgency"]) == ("update kitchen inventory", "Add them.", "now")
+    assert (due["window_start"], due["window_end"], due["until"]) == ("2026-10-24", "2026-10-25", None)
+    assert (due["kind"], due["gist"], due["evidence"], due["tags"]) == ("artifact", "Groceries from Costco", "Costco",
+                                                                      "food")
+    assert due["payload"] == {"vendor": "Costco"}
+    assert (due["source_agent"], due["source_channel"]) == ("receipt-processor", "receipts")
+
+
+def test_due_skips_deliveries_not_due_yet_and_taken_ones(store):
+    due, later, taken = _approved(store, deliver_at=200.0), _approved(store, deliver_at=500.0), _approved(store)
+    assert store.claim_delivery(taken, now=200.0)
+    assert [d["route_id"] for d in store.due_deliveries(now=300.0)] == [due]
+    assert [d["route_id"] for d in store.due_deliveries(now=500.0)] == [due, later]
+
+
+def test_a_delivery_is_claimed_once(store):
+    route_id = _approved(store, deliver_at=200.0)
+    assert not store.claim_delivery(route_id, now=199.0)  # not due yet
+    assert store.claim_delivery(route_id, now=200.0)
+    assert not store.claim_delivery(route_id, now=201.0)  # another tick gets nothing
+    delivery = store.delivery(route_id)
+    assert (delivery["status"], delivery["claimed_at"]) == ("running", 200.0)
+
+
+def test_a_stuck_delivery_is_failed_not_retried(store):
+    stuck, recent, waiting = _approved(store), _approved(store), _approved(store, deliver_at=900.0)
+    store.claim_delivery(stuck, now=200.0)
+    store.claim_delivery(recent, now=700.0)
+    assert store.fail_stuck(now=900.0, older_than_s=600.0) == [stuck]
+    assert store.fail_stuck(now=900.0, older_than_s=600.0) == []
+    failed = store.delivery(stuck)
+    assert (failed["status"], failed["error"], failed["finished_at"]) == ("failed", "stuck; not retried", 900.0)
+    assert (store.delivery(recent)["status"], store.delivery(waiting)["status"]) == ("running", "approved")
+    assert not store.claim_delivery(stuck, now=1000.0)
+
+
+def test_an_approved_delivery_due_too_long_ago_expires_unrun(store):
+    old, fresh, running = _approved(store, deliver_at=100.0), _approved(store, deliver_at=500.0), _approved(store)
+    store.claim_delivery(running, now=200.0)
+    assert store.expire_deliveries(now=1000.0, older_than_s=600.0) == 1  # due before 400
+    expired = store.delivery(old)
+    assert (expired["status"], expired["error"], expired["finished_at"]) == ("failed", "expired; not posted late",
+                                                                            1000.0)
+    # A fresh row waits; a run in flight is fail_stuck's to judge.
+    assert (store.delivery(fresh)["status"], store.delivery(running)["status"]) == ("approved", "running")
+    assert store.expire_deliveries(now=1000.0, older_than_s=600.0) == 0
+    assert not store.claim_delivery(old, now=1000.0)
+
+
+def test_a_posted_delivery_marks_its_route_delivered(store):
+    posted, silent, failed = _approved(store), _approved(store), _approved(store)
+    store.finish_delivery(posted, "posted", at=250.0)
+    store.finish_delivery(silent, "silent", at=260.0)
+    store.finish_delivery(failed, "failed", error="the turn failed", at=270.0)
+    assert (store.delivery(posted)["status"], store.route(posted)["delivered_at"]) == ("posted", 250.0)
+    assert (store.delivery(silent)["status"], store.route(silent)["delivered_at"]) == ("silent", None)
+    assert (store.delivery(failed)["error"], store.route(failed)["delivered_at"]) == ("the turn failed", None)
+    with pytest.raises(ValueError):
+        store.finish_delivery(posted, "running")

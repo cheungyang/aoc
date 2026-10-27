@@ -199,6 +199,9 @@ class ScheduleSpec(ABC):
     def on_success(self, ctx: ScheduleContext) -> None:
         """Called after a successful run; the runner then records last_success_at."""
 
+    def on_failure(self, ctx: ScheduleContext) -> None:
+        """Called after a run that failed; last_success_at stays where it was."""
+
     def on_skip(self, ctx: ScheduleContext, reason: str) -> None:
         """Called when has_work() said no."""
 
