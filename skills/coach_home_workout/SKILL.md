@@ -8,7 +8,7 @@ description: Plans, serves and logs ~30-minute home workouts with workout_setup 
 1. In one step, call `workout_setup()` and `set_thinking("medium")`.
 2. Pick 1 `main` + 2 `accessory` + 1 `finisher`, 3 sets each (~30 min), from 1–2 stations. Keep the same `main` lifts for 4–6 weeks (`recent_mains`); rotate the rest (`days` since last done). Prefer `beginner`/`intermediate` unless progression shows the easier version is mastered. `short_sleep`: drop one exercise or one set per exercise.
 3. Prescribe each pick's `rx`, or its break discount (Choosing loads). `(new)`: start light and climb with 🔼 set by set; the last completed set is the baseline.
-4. Send the plan in one line with library names (`Barbell Back Squat 3×5-8 @ 185 · Barbell Hip Thrust 3×8-12 @ 135 · Ab Wheel Rollout 3×8-12`) and a `<poll>` with one `[💪 Let's Go]` button.
+4. Send the plan in one line with library names (`Barbell Back Squat 3×5-8 @ 185 · Barbell Hip Thrust 3×8-12 @ 135 · Ab Wheel Rollout 3×8-12`) and a `<poll>` with one `[Let's Go]` button.
 
 ## 2. Execution Phase
 On 💪 Let's Go, call `workout_setup(ids=[...])` once with the picks: it returns the session `start` and each pick's `cue`, `media`, `loads` and any `gap`.
