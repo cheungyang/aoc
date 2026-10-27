@@ -91,6 +91,15 @@ async def test_a_receipt_becomes_a_route_to_ramsay(store):
 
 
 @pytest.mark.asyncio
+async def test_the_switch_decides_the_mode(store):
+    from core.config.settings import Config
+    with Config().overriding(proactive_delivery=True):
+        live = await _pipeline(store)("s1", _turn(store))
+    shadow = await _pipeline(store)("s2", _turn(store, session_id="s2"))
+    assert (store.decision(live)["mode"], store.decision(shadow)["mode"]) == ("live", "shadow")
+
+
+@pytest.mark.asyncio
 async def test_turns_another_decision_took_are_not_read_twice(store):
     turns = _turn(store)
     store.claim_turns([t["id"] for t in turns], decision_id=999)

@@ -18,6 +18,7 @@ import random
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
+from core.config.settings import Config
 from core.proactive.board import on_board
 from core.proactive.cards import PeerCard, cards, offer_words
 from core.proactive.effects import TRIGGER
@@ -26,6 +27,10 @@ from core.proactive.switchboard import ModelRun, ProposedSignal, build_prompt, l
 from core.proactive.taps import TAP_CHAT, TAP_EFFECT, TAP_SCHEDULED
 from core.storage.signals import SignalStore
 
+# A decision's mode: SHADOW records when a route would be delivered; LIVE
+# delivers it (stage S4). The switch, `PROACTIVE_DELIVERY`, picks one.
+SHADOW = "shadow"
+LIVE = "live"
 # How far back the Switchboard sees the Board, so it doesn't route a fact twice.
 BOARD_S = 72 * 3600
 # Payload fields that identify a fact across wordings (a receipt, a booking, a trip).
@@ -61,7 +66,7 @@ def payload_from(turns: List[Dict[str, Any]], signal: ProposedSignal) -> Dict[st
 class Pipeline:
     """The service's `decide`: one decision per call (module docstring)."""
 
-    def __init__(self, store: Optional[SignalStore] = None, *, mode: str = "shadow",
+    def __init__(self, store: Optional[SignalStore] = None, *, mode: Optional[str] = None,
                  run: Callable[[str], Awaitable[ModelRun]] = run_model,
                  team: Callable[[], Dict[str, PeerCard]] = cards, radio: Optional[Radio] = None,
                  owns: Optional[Callable[[str], bool]] = None, rng: Optional[random.Random] = None,
@@ -76,6 +81,10 @@ class Pipeline:
         self.clock = clock
         self.tags = tags
 
+    def current_mode(self) -> str:
+        """LIVE when the switch (`PROACTIVE_DELIVERY`) is on, else SHADOW; or the mode given."""
+        return self.mode or (LIVE if Config().proactive_delivery else SHADOW)
+
     async def __call__(self, session_id: str, turns: List[Dict[str, Any]]) -> Optional[int]:
         """Decides on `turns`, one session's unread ledger rows; returns the decision's id.
 
@@ -88,7 +97,7 @@ class Pipeline:
         tap = min((t.get("tap") or TAP_CHAT for t in turns),
                   key=lambda name: _TAP_ORDER.index(name) if name in _TAP_ORDER else len(_TAP_ORDER))
         decision_id = await on_board(self.store.start_decision, tap=tap, session_id=session_id,
-                                     first_turn_at=min(t["at"] for t in turns), mode=self.mode, at=now)
+                                     first_turn_at=min(t["at"] for t in turns), mode=self.current_mode(), at=now)
         claimed = set(await on_board(self.store.claim_turns, [t["id"] for t in turns], decision_id))
         turns = [t for t in turns if t["id"] in claimed]
         if not turns:

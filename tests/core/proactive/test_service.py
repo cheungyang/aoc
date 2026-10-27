@@ -149,7 +149,7 @@ class TestInstall:
         assert turn_hooks()[:-1] == hooks[0] and isinstance(turn_hooks()[-1], SignalHook)
         assert list(tool_hooks()[:-1]) == hooks[1] and isinstance(tool_hooks()[-1], CallLog)
         # Nothing is delivered yet (stage S4): each decision is recorded in shadow.
-        assert isinstance(service.decide, Pipeline) and service.decide.mode == "shadow"
+        assert isinstance(service.decide, Pipeline) and service.decide.current_mode() == "shadow"
         assert service.decide.radio is not None
         # Team radio hears ✅/❌ and poll votes from the Discord runner.
         assert len(discord_radio._reaction_listeners) == 1 and len(discord_radio._vote_listeners) == 1

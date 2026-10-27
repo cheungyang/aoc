@@ -140,6 +140,15 @@ class Config:
     control_thread_id = Setting("CONTROL_THREAD_ID", "", strip=True)
 
     # -------------------------------------------------------------------------
+    # Proactive team (core/proactive/README.md)
+    # -------------------------------------------------------------------------
+    # The team's one switch. Off: shadow. Every agent turn is still tapped and
+    # decided, and team radio shows each decision, but nothing reaches an agent;
+    # a route only records when it would have been delivered. On (stage S4,
+    # turned on at G3): approved routes are delivered. `PROACTIVE_DELIVERY`.
+    proactive_delivery = Setting("PROACTIVE_DELIVERY", False, bool)
+
+    # -------------------------------------------------------------------------
     # LangSmith / Observability settings
     # -------------------------------------------------------------------------
     langsmith_tracing = Setting("LANGSMITH_TRACING", False, bool, fallback_env="LANGCHAIN_TRACING_V2")

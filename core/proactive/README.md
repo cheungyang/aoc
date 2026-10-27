@@ -7,11 +7,14 @@ could use it. The **Governor** (code) decides what each of those routes may
 become. Every decision shows up on **team radio**, a thread under `#general`,
 where your ✅/❌ teach the system what's worth it.
 
-It's part of the system, with no switch: main.py installs it in the bot
-process (`service.install`), so every host taps the turns of the agents it
-runs. Until delivery is built (stage S4), it runs in **shadow**: turns are
-tapped, decided and shown on team radio, but **nothing reaches an agent or its
-channel**. A route only records when it *would* have been delivered.
+main.py installs it in the bot process (`service.install`), so every host
+taps the turns of the agents it runs. It has **one switch**, `PROACTIVE_DELIVERY`
+(`core/config/settings.py`):
+
+| `PROACTIVE_DELIVERY` | What happens |
+|---|---|
+| off (default) | **Shadow.** Turns are tapped, decided and shown on team radio, but **nothing reaches an agent or its channel**. A route only records when it *would* have been delivered. |
+| on | Stage S4, being built: approved routes are delivered. It's turned on at G3. |
 
 > [!IMPORTANT]
 > Nothing here runs before a reply is out. The taps work in `ended`, after the
