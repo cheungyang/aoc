@@ -348,6 +348,47 @@ class TestBotRunner(unittest.IsolatedAsyncioTestCase):
 
     @patch('core.channel.discord.runner.AgentsLoader')
     @patch('core.channel.discord.runner.commands.Bot')
+    async def test_on_message_remembers_your_message_for_the_now_reaction(self, mock_bot_class, mock_agents_loader_class):
+        """The turn's output names the message it answers: a live `now` route puts its
+        recipient's emoji there (core/proactive/pipeline.py)."""
+        mock_bot = MagicMock()
+        mock_bot.user = MagicMock()
+        mock_bot.user.bot = True
+        mock_bot_class.return_value = mock_bot
+        runner = BotRunner("test_token", "main")
+
+        mock_message = MagicMock()
+        mock_message.id = 222
+        mock_message.author = MagicMock()
+        mock_message.author.bot = False
+        mock_message.content = "here's my receipt"
+        mock_message.mentions = []
+        mock_message.channel.id = 111
+        mock_message.channel.name = "receipts"
+        mock_message.channel.send = AsyncMock()
+        mock_typing = MagicMock()
+        mock_typing.__aenter__ = AsyncMock()
+        mock_typing.__aexit__ = AsyncMock()
+        mock_message.channel.typing.return_value = mock_typing
+
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
+        mock_loader = MagicMock()
+        mock_agents_loader_class.return_value = mock_loader
+        mock_agent = MagicMock()
+        mock_agent.config = {"channel_hosts": ["receipts"]}
+        mock_agent.execute_stream = MagicMock(side_effect=fake_empty_stream)
+        mock_loader.get_agent = MagicMock(return_value=mock_agent)
+
+        await runner.on_message(mock_message)
+
+        session = mock_agent.execute_stream.call_args.kwargs["session"]
+        self.assertEqual(session.output.source_message, "111/222")
+
+    @patch('core.channel.discord.runner.AgentsLoader')
+    @patch('core.channel.discord.runner.commands.Bot')
     async def test_on_message_ignores_self_non_vote(self, mock_bot_class, mock_agents_loader_class):
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()

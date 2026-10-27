@@ -12,6 +12,13 @@ runner, the scheduler, the host of the voice room) passes a TurnOutput to
                           the surface can't find it.
   channel                 what it writes to, as sessions key on it
 
+Optional, read with getattr:
+
+  source_message          the message of yours that started the turn, as the
+                          surface names it ("<channel id>/<message id>" on
+                          Discord), or None. The proactive taps keep it, for a
+                          live `now` route's reaction (core/proactive/pipeline.py).
+
 Derived contexts keep their output, and delegation hands the caller's on (or
 `to()` another channel), so a turn always writes where its surface is.
 """

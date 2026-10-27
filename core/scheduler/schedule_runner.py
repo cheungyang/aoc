@@ -23,6 +23,11 @@ schedule. A provider claims its own items, so none runs twice
 Such a spec may bring its own source and output (`source`, `output_for`), and
 say when its reply posted nothing (`is_silent`): then nothing is recorded.
 
+A scheduled run that posts somewhere can also be briefed: each provider
+registered with `add_briefing` may add a block after its prompt (the team's
+findings for that agent, core/proactive/delivery.py), and then hears how the
+run went: posted, silent or failed.
+
 Every post it makes also puts its channel in the channel inbox (core/voice/briefing),
 unless the schedule's priority is IGNORE, so a voice briefing can tell you
 about it. A prompt run that isn't IGNORE also writes the speech version of
@@ -56,6 +61,10 @@ from core.scheduler.limiter import ScheduleLimiter
 from core.scheduler.registry import Rejection, load_all
 from core.scheduler.script_runner import run_step
 from core.scheduler.spec import (
+    RUN_FAILED,
+    RUN_POSTED,
+    RUN_SILENT,
+    Briefing,
     Problems,
     PromptSchedule,
     ScheduleContext,
@@ -83,6 +92,9 @@ ALERT_ATTEMPTS = 10
 # A due-work provider (`add_due_work`): given the epoch time, the specs due now,
 # claimed, or an awaitable of them.
 DueWork = Callable[[float], Union[Iterable[ScheduleSpec], Awaitable[Iterable[ScheduleSpec]]]]
+# A briefing provider (`add_briefing`): given a scheduled run's spec and context,
+# a Briefing for it or None, or an awaitable of either.
+BriefingProvider = Callable[[ScheduleSpec, ScheduleContext], Union[Optional[Briefing], Awaitable[Optional[Briefing]]]]
 
 
 def reset_conversation(session) -> int:
@@ -120,6 +132,7 @@ class ScheduleRunner:
         self._fingerprint: Optional[str] = None
         self._tasks = set()
         self._due_work: List[DueWork] = []
+        self._briefing_providers: List[BriefingProvider] = []
         self._wake: Optional[asyncio.Event] = None  # made by start(), on the running loop
         self._load_schedules()
 
@@ -215,6 +228,14 @@ class ScheduleRunner:
         epoch time and returns the specs due now. It claims them itself: the runner
         runs each spec it returns, once, through run_schedule."""
         self._due_work.append(provider)
+
+    def add_briefing(self, provider: BriefingProvider) -> None:
+        """Registers `provider(spec, ctx)`: before each run of a spec whose source is
+        "scheduled" and whose channel was found, it may return a Briefing. Its block
+        goes after the run's prompt, and its finish then hears how the run went:
+        posted when the reply was recorded as a post, silent when the run succeeded
+        but its reply was blank or silent, failed otherwise."""
+        self._briefing_providers.append(provider)
 
     async def tick(self, now: Optional[datetime.datetime] = None):
         self._maybe_reload()
@@ -406,9 +427,10 @@ class ScheduleRunner:
             output = output_for(channel) if callable(output_for) else DiscordOutput(channel)
 
         # Execute regardless of channel existence
+        source = getattr(spec, "source", "scheduled")
         session = SessionManager.get_session(
             agent_id=spec.agent_id,
-            source=getattr(spec, "source", "scheduled"),
+            source=source,
             channel=channel or spec.channel,
             thinking_level=spec.thinking_level,
             output=output,
@@ -423,26 +445,65 @@ class ScheduleRunner:
 
         agent = self.loader.get_agent(spec.agent_id)
         prompt = spec.build_prompt(ctx, decision)
-        if spec.priority is Priority.IGNORE:
-            reply = await agent.execute(prompt, session=session, role="user")
-        else:
-            # The post may be heard later, so the run also writes its speech version.
-            with scheduled_speech_scope(spec.agent_id):
+        # Only a scheduled run with somewhere to post is briefed (`add_briefing`).
+        briefings = await self._briefings_for(spec, ctx) if source == "scheduled" and channel is not None else []
+        prompt = "\n\n".join([prompt] + [briefing.block for briefing in briefings if briefing.block])
+        outcome = RUN_FAILED  # unless the run gets further, or raises
+        try:
+            if spec.priority is Priority.IGNORE:
                 reply = await agent.execute(prompt, session=session, role="user")
-        ok = self._job_succeeded(getattr(session, "job_id", None))
-        # Only a successful run's reply was posted as the schedule's output (a
-        # failure posts an error message instead), and only if there was a
-        # channel to post it to. A reply that says nothing posted nothing.
-        if ok and channel is not None and isinstance(reply, str) and not self._silent(spec, reply):
-            record_channel_post(channel, reply, origin=spec.schedule_id, loader=self.loader)
-            response = session.turn_hints.get(events.RESPONSE_HINT)
-            record_push(
-                channel, reply, schedule_id=spec.schedule_id, agent_id=spec.agent_id,
-                priority=spec.priority, label=spec.label,
-                speech=getattr(response, "speech", None), question=getattr(response, "question", None),
-                loader=self.loader,
-            )
-        return ok
+            else:
+                # The post may be heard later, so the run also writes its speech version.
+                with scheduled_speech_scope(spec.agent_id):
+                    reply = await agent.execute(prompt, session=session, role="user")
+            ok = self._job_succeeded(getattr(session, "job_id", None))
+            # Only a successful run's reply was posted as the schedule's output (a
+            # failure posts an error message instead), and only if there was a
+            # channel to post it to. A reply that says nothing posted nothing.
+            if ok and channel is not None and isinstance(reply, str) and not self._silent(spec, reply):
+                record_channel_post(channel, reply, origin=spec.schedule_id, loader=self.loader)
+                response = session.turn_hints.get(events.RESPONSE_HINT)
+                record_push(
+                    channel, reply, schedule_id=spec.schedule_id, agent_id=spec.agent_id,
+                    priority=spec.priority, label=spec.label,
+                    speech=getattr(response, "speech", None), question=getattr(response, "question", None),
+                    loader=self.loader,
+                )
+                outcome = RUN_POSTED
+            elif ok:
+                outcome = RUN_SILENT
+            return ok
+        finally:
+            await self._finish_briefings(briefings, outcome)
+
+    async def _briefings_for(self, spec: PromptSchedule, ctx: ScheduleContext) -> List[Briefing]:
+        """What each briefing provider adds to this run. One that fails is logged, and the
+        run goes on without it."""
+        briefings = []
+        for provider in list(self._briefing_providers):
+            try:
+                briefing = provider(spec, ctx)
+                if inspect.isawaitable(briefing):
+                    briefing = await briefing
+            except Exception as e:
+                print(f"ScheduleRunner: a briefing for {spec.describe()} failed: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+                continue
+            if briefing is not None:
+                briefings.append(briefing)
+        return briefings
+
+    @staticmethod
+    async def _finish_briefings(briefings: List[Briefing], outcome: str) -> None:
+        """Tells each briefing how its run went. One whose finish fails is logged."""
+        for briefing in briefings:
+            try:
+                finished = briefing.finish(outcome)
+                if inspect.isawaitable(finished):
+                    await finished
+            except Exception as e:
+                print(f"ScheduleRunner: a briefing could not finish ({outcome}): {type(e).__name__}: {e}",
+                      file=sys.stderr)
 
     @staticmethod
     def _silent(spec: ScheduleSpec, reply: str) -> bool:

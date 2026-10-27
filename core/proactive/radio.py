@@ -54,7 +54,8 @@ def line(decision: Dict[str, Any], route: Dict[str, Any], team: Dict[str, PeerCa
         detail = {
             "now": "delivering now" if live else "would deliver at once",
             "today": "held for your first quiet stretch",
-            "next": f"waits for {name}'s next run or your next conversation with them",
+            "next": (f"rides along on {name}'s next scheduled run" if live
+                     else f"waits for {name}'s next run or your next conversation with them"),
         }.get(route.get("urgency"), "")
         if route.get("reason"):
             detail = f"{detail} ({route['reason']})" if detail else route["reason"]

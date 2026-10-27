@@ -1,4 +1,6 @@
 """The proactive Board (core/storage/signals.py)."""
+import sqlite3
+
 import pytest
 
 from core.storage.signals import SignalStore
@@ -318,3 +320,82 @@ def test_a_posted_delivery_marks_its_route_delivered(store):
     assert (store.delivery(failed)["error"], store.route(failed)["delivered_at"]) == ("the turn failed", None)
     with pytest.raises(ValueError):
         store.finish_delivery(posted, "running")
+
+
+def test_the_now_reaction_is_recorded_once(store):
+    route_id = _approved(store)
+    assert store.delivery(route_id)["acked_at"] is None
+    store.ack_delivery(route_id, at=111.0)
+    store.ack_delivery(route_id, at=150.0)  # the first one counts
+    assert store.delivery(route_id)["acked_at"] == 111.0
+
+
+def test_an_old_deliveries_table_gets_acked_at(tmp_path):
+    """A dev database may hold the deliveries table as S4's first part made it."""
+    path = str(tmp_path / "memory.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE deliveries (route_id INTEGER PRIMARY KEY, to_agent TEXT NOT NULL, "
+                 "channel TEXT NOT NULL DEFAULT '', deliver_at REAL NOT NULL, status TEXT NOT NULL, "
+                 "approved_at REAL, claimed_at REAL, finished_at REAL, error TEXT NOT NULL DEFAULT '')")
+    conn.execute("INSERT INTO deliveries (route_id, to_agent, deliver_at, status) VALUES (7, 'meal-planner', 1, 'posted')")
+    conn.commit()
+    conn.close()
+
+    store = SignalStore(path)
+    assert store.delivery(7)["acked_at"] is None  # the row is kept, and the column added
+    store.ack_delivery(7, at=2.0)
+    assert SignalStore(path).delivery(7)["acked_at"] == 2.0  # the next connection finds it there
+
+
+# -- the next touchpoint (live `next` routes) ---------------------------------------
+
+TODAY = "2026-10-24"
+
+
+def _next_route(store, mode="live", at=110.0, until=None, window_end=None, **route):
+    decision_id = _decision(store, mode=mode)
+    signal_id = _signal(store, decision_id, at=at, until=until)
+    values = {"asked": "next", "urgency": "next", "window_end": window_end, **route}
+    return _route(store, signal_id, decision_id, **values)
+
+
+def test_pending_next_is_the_live_next_routes_no_run_has_taken(store):
+    newer, older = _next_route(store, at=120.0), _next_route(store, until=TODAY, window_end=TODAY)
+    _next_route(store, mode="shadow")                  # never delivered
+    _next_route(store, verdict="absorb")               # nothing to deliver
+    _next_route(store, urgency="today")                # a proactive turn's, not a run's
+    _next_route(store, to_agent="day-planner")         # another agent's
+    _next_route(store, at=50.0)                        # emitted before `since`
+    _next_route(store, until="2026-10-23")             # no longer true
+    _next_route(store, window_end="2026-10-23")        # its window has closed
+    taken = _next_route(store)
+    store.hand_over([taken], to_agent="meal-planner", channel="meal-planning", now=200.0)
+
+    pending = store.pending_next("meal-planner", since=100.0, today=TODAY, limit=5)
+    assert [r["route_id"] for r in pending] == [older, newer]  # oldest first
+    assert (pending[0]["gist"], pending[0]["payload"], pending[0]["offer"]) == (
+        "Groceries from Costco", {"vendor": "Costco"}, "update kitchen inventory")
+    assert [r["route_id"] for r in store.pending_next("meal-planner", since=100.0, today=TODAY, limit=1)] == [older]
+
+
+def test_a_route_is_handed_over_once(store):
+    first, second = _next_route(store), _next_route(store)
+    assert store.hand_over([first], to_agent="meal-planner", channel="meal-planning", now=200.0) == [first]
+    # A second run asking for both gets only the one left.
+    assert store.hand_over([first, second], to_agent="meal-planner", channel="meal-planning", now=210.0) == [second]
+    handed = store.delivery(first)
+    assert (handed["status"], handed["channel"], handed["deliver_at"], handed["claimed_at"]) == (
+        "handed", "meal-planning", 200.0, 200.0)
+    assert store.pending_next("meal-planner", since=100.0, today=TODAY, limit=5) == []
+
+
+def test_a_handed_row_is_left_to_its_run(store):
+    route_id = _next_route(store)
+    store.hand_over([route_id], to_agent="meal-planner", channel="meal-planning", now=200.0)
+    # However long the run takes: never stuck, never expired, never claimed for a proactive turn.
+    assert store.fail_stuck(now=99_999.0, older_than_s=600.0) == []
+    assert store.expire_deliveries(now=99_999.0, older_than_s=600.0) == 0
+    assert store.due_deliveries(now=99_999.0) == [] and not store.claim_delivery(route_id, now=99_999.0)
+    assert store.delivery(route_id)["status"] == "handed"
+    store.finish_delivery(route_id, "posted", at=300.0)  # its run posted
+    assert (store.delivery(route_id)["status"], store.route(route_id)["delivered_at"]) == ("posted", 300.0)

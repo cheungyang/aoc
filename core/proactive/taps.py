@@ -15,7 +15,9 @@ What a turn contributes:
             with their arguments. A trigger wakes the Switchboard at once (a
             receipt saved, food logged); context does not (a review written)
   context   paths that the turn's filesystem calls changed, and the skills
-            its tool calls point to. Never a trigger on their own.
+            its tool calls point to. Never a trigger on their own. And your
+            message that started the turn, when the surface names one
+            (`source_message`): a live `now` route's reaction goes on it.
 
 The taps hear about each tool call through the tool hooks
 (core/tooling/hooks.py): `CallLog` notes every finished call in its turn's
@@ -98,7 +100,7 @@ class LedgerEntry:
     reply_text: str = ""
     memory: List[str] = field(default_factory=list)
     effects: List[Dict[str, Any]] = field(default_factory=list)
-    context: Dict[str, List[str]] = field(default_factory=dict)
+    context: Dict[str, Any] = field(default_factory=dict)
     hops: int = 0
 
     def row(self) -> Dict[str, Any]:
@@ -143,6 +145,9 @@ def entry_for(turn: Turn, now: Optional[float] = None) -> Optional[LedgerEntry]:
     skills = skill_labels(turn.agent_config or {}, calls)
     if skills:
         context["skills"] = skills
+    message = getattr(ctx.output, "source_message", None)
+    if isinstance(message, str) and message:
+        context["message"] = message
     return LedgerEntry(
         at=time.time() if now is None else now,
         agent_id=turn.agent_id,

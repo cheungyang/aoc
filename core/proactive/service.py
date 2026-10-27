@@ -18,9 +18,10 @@ import asyncio
 import time
 from typing import Awaitable, Callable, Dict, List, Optional, Set
 
+from core.channel.discord.ack import DiscordAck
 from core.channel.discord.radio import DiscordRadio, on_poll_vote, on_reaction
 from core.proactive.board import on_board
-from core.proactive.delivery import DueDeliveries
+from core.proactive.delivery import DueDeliveries, SignalsForMe
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import TeamRadio
 from core.proactive.taps import TAP_CHAT, CallLog, LedgerEntry, SignalHook
@@ -52,18 +53,19 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
     to the service (taps.SignalHook). main.py calls it after bootstrap.wire(),
     so only the bot process taps: scripts and tests that wire the runtime don't.
     `decide` defaults to the Switchboard pipeline (pipeline.py), which tells
-    team radio (radio.py) about each decision, and calls `wake` (the schedule
-    runner's) when a live decision approves a `now` delivery. With the switch
-    off, nothing is delivered: a route records when it would have been.
+    team radio (radio.py) about each decision, and when a live decision approves
+    a `now` delivery, calls `wake` (the schedule runner's) and puts the
+    recipient's emoji on your message (core/channel/discord/ack.py). With the
+    switch off, nothing is delivered: a route records when it would have been.
     Returns the service, whose `start()` runs next to the bots, and whose
-    `due_work` (delivery.py) main.py hands to the schedule runner."""
+    `due_work` and `briefing` (delivery.py) main.py hands to the schedule runner."""
     if decide is None:
         radio = TeamRadio(DiscordRadio())
         on_reaction(radio.reacted)
         on_poll_vote(radio.voted)
-        pipeline = Pipeline(radio=radio, wake=wake)
+        pipeline = Pipeline(radio=radio, wake=wake, ack=DiscordAck())
         decide, sweep = pipeline, pipeline.resolve
-    service = ProactiveService(decide=decide, sweep=sweep, due_work=DueDeliveries())
+    service = ProactiveService(decide=decide, sweep=sweep, due_work=DueDeliveries(), briefing=SignalsForMe())
     set_tool_hooks(list(tool_hooks()) + [CallLog()])
     set_turn_hooks(list(turn_hooks()) + [SignalHook(service.turn_ended)])
     print("[proactive] Tapping agent turns.")
@@ -72,14 +74,16 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
 
 class ProactiveService:
     """Records tapped turns and runs `decide` on them when their tap says so.
-    `due_work` is the schedule runner's provider of due deliveries (delivery.py)."""
+    `due_work` is the schedule runner's provider of due deliveries, and `briefing`
+    its provider of findings for a scheduled run (delivery.py)."""
 
     def __init__(self, decide: Optional[Decide] = None, store: Optional[SignalStore] = None,
                  clock: Callable[[], float] = time.time, sweep: Optional[Sweep] = None,
-                 due_work: Optional[DueDeliveries] = None):
+                 due_work: Optional[DueDeliveries] = None, briefing: Optional[SignalsForMe] = None):
         self.decide = decide
         self.sweep = sweep
         self.due_work = due_work
+        self.briefing = briefing
         self.store = store or SignalStore()
         self.clock = clock
         self._timers: Dict[str, asyncio.TimerHandle] = {}

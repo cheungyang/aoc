@@ -80,10 +80,11 @@ async def run_bots(dev: bool = False, agents: list = None):
     tasks.append(schedule_runner.start())
 
     # The proactive team (core/proactive/README.md): taps every agent turn from here on.
-    # With PROACTIVE_DELIVERY on, its deliveries run on the schedule runner, and a
-    # `now` delivery wakes it.
+    # With PROACTIVE_DELIVERY on, its deliveries run on the schedule runner, a `now`
+    # delivery wakes it, and a `next` one rides along on the recipient's scheduled run.
     proactive = install_proactive(wake=schedule_runner.wake)
     schedule_runner.add_due_work(proactive.due_work)
+    schedule_runner.add_briefing(proactive.briefing)
     tasks.append(proactive.start())
             
     if tasks:

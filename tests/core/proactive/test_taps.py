@@ -3,8 +3,11 @@
 The tools are real: which calls count comes from the effects table
 (core/proactive/effects.py), with the tools' own permission bundles.
 """
+from types import SimpleNamespace
+
 import pytest
 
+from core.channel.discord.output import DiscordOutput
 from core.channel.response_parser import AgentResponse
 from core.config.settings import Config
 from core.loaders.skills_loader import SkillsLoader
@@ -137,6 +140,14 @@ class TestTheEntry:
         entry = entry_for(_turn([RECEIPT, _call("load_skill", {"skill_id": "budget"})]))
         # ledger_append belongs to one of the agent's skills; filesystem to two, so it says nothing.
         assert entry.context["skills"] == ["budget", "receipts"]
+
+    def test_your_message_that_started_the_turn_is_kept_for_the_now_reaction(self):
+        receipts = SimpleNamespace(id=111)
+        entry = entry_for(_turn([RECEIPT], output=DiscordOutput(receipts, message_id=222)))
+        assert entry.context["message"] == "111/222"
+        # A turn no message of yours started (a schedule, a voice turn) keeps none.
+        assert "message" not in entry_for(_turn(output=DiscordOutput(receipts))).context
+        assert "message" not in entry_for(_turn()).context
 
     def test_an_interrupted_turn_has_no_reply_but_still_counts(self):
         entry = entry_for(_turn([RECEIPT], reply=None))

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import datetime
+import io
 import os
 import sqlite3
 import tempfile
@@ -12,6 +13,7 @@ from core.scheduler.limiter import ScheduleLimiter
 from core.scheduler.schedule_runner import ScheduleRunner, reset_conversation
 from core.scheduler.script_runner import ScriptResult
 from core.scheduler.spec import (
+    Briefing,
     Findings,
     Problems,
     PromptSchedule,
@@ -364,6 +366,90 @@ class TestDueWork(RunnerCase):
         spec = SourcedSpec()
         self.assertFalse(await runner.run_schedule(spec))
         self.assertEqual(spec.failures, 1)
+
+
+class Briefer:
+    """A briefing provider the test controls: the runs it was asked about, and how each went.
+    `block` None means it has nothing for the run; `fails` is raised instead."""
+
+    def __init__(self, block="TEAM", fails=None):
+        self.block, self.fails, self.asked, self.outcomes = block, fails, [], []
+
+    async def __call__(self, spec, ctx):
+        self.asked.append((spec.schedule_id, ctx.agent_id))
+        if self.fails:
+            raise self.fails
+        return None if self.block is None else Briefing(block=self.block, finish=self.outcomes.append)
+
+
+class TestBriefings(RunnerCase):
+    async def test_a_scheduled_run_gets_each_briefing_after_its_prompt(self):
+        runner = self.make_runner()
+        team, outcomes = Briefer("TEAM"), []
+        runner.add_briefing(team)
+        runner.add_briefing(lambda spec, ctx: Briefing(block="MORE", finish=outcomes.append))  # sync works too
+        self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.agent.execute.assert_awaited_once_with("do it\n\nTEAM\n\nMORE", session=self.session, role="user")
+        self.assertEqual(team.asked, [("agent1:p", "agent1")])
+        self.assertEqual((team.outcomes, outcomes), (["posted"], ["posted"]))
+
+    async def test_a_blank_reply_is_silent(self):
+        runner = self.make_runner()
+        team = Briefer()
+        runner.add_briefing(team)
+        self.agent.execute = AsyncMock(return_value="  \n")
+        self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.assertEqual(team.outcomes, ["silent"])
+
+    async def test_a_failed_job_or_an_exception_is_failed(self):
+        runner = self.make_runner()
+        team = Briefer()
+        runner.add_briefing(team)
+        self.session.job_id = "job-1"
+        with patch.object(runner_mod, "JobManager") as jm:
+            jm.return_value.get_job.return_value = MagicMock(status="error")
+            self.assertFalse(await runner.run_schedule(self.prompt_spec()))
+        self.agent.execute.side_effect = RuntimeError("boom")
+        self.assertFalse(await runner.run_schedule(self.prompt_spec()))
+        self.assertEqual(team.outcomes, ["failed", "failed"])
+
+    async def test_a_proactive_run_and_a_run_with_no_channel_get_none(self):
+        runner = self.make_runner()
+        team = Briefer()
+        runner.add_briefing(team)
+        self.assertTrue(await runner.run_schedule(SourcedSpec()))
+        self.assertTrue(await runner.run_schedule(self.prompt_spec(channel=None)))
+        self.bots.get_channel.return_value = None  # its channel isn't found: the run posts nowhere
+        self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.assertEqual(team.asked, [])
+        self.assertEqual([call.args[0] for call in self.agent.execute.await_args_list], ["tell them", "do it", "do it"])
+
+    async def test_a_failing_provider_is_logged_and_the_run_goes_on_without_it(self):
+        runner = self.make_runner()
+        team = Briefer("TEAM")
+        runner.add_briefing(Briefer(fails=RuntimeError("board locked")))
+        runner.add_briefing(team)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.agent.execute.assert_awaited_once_with("do it\n\nTEAM", session=self.session, role="user")
+        self.assertIn("board locked", err.getvalue())
+        self.assertEqual(team.outcomes, ["posted"])
+
+    async def test_a_provider_with_nothing_to_add_changes_nothing(self):
+        runner = self.make_runner()
+        runner.add_briefing(Briefer(block=None))
+        self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.agent.execute.assert_awaited_once_with("do it", session=self.session, role="user")
+
+    async def test_a_finish_that_fails_is_logged(self):
+        def full(outcome):
+            raise RuntimeError("disk full")
+
+        runner = self.make_runner()
+        runner.add_briefing(lambda spec, ctx: Briefing(block="TEAM", finish=full))
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertTrue(await runner.run_schedule(self.prompt_spec()))
+        self.assertIn("disk full", err.getvalue())
 
 
 class TestPromptDispatch(RunnerCase):

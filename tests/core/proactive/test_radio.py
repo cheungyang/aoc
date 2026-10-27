@@ -67,6 +67,16 @@ def test_a_line_says_who_to_whom_how_urgent_what_and_why():
     assert "🧾→🤖 dropped" in stranger
 
 
+def test_a_next_line_says_where_it_lands():
+    """Shadow times it at the first touchpoint; live, it rides along on a scheduled run."""
+    route = {"source_agent": "receipt-processor", "to_agent": "meal-planner", "verdict": "deliver", "urgency": "next",
+             "gist": "Freezer restocked", "reason": ""}
+    shadow = line({"id": 7, "mode": "shadow"}, route, TEAM)
+    assert shadow.endswith("next · Freezer restocked · waits for Ramsay's next run or your next conversation with them")
+    live = line({"id": 7, "mode": "live"}, route, TEAM)
+    assert live.endswith("next · Freezer restocked · rides along on Ramsay's next scheduled run")
+
+
 @pytest.mark.asyncio
 async def test_each_route_gets_a_line_and_only_offered_ones_take_a_label(store, outcomes):
     channel = FakeChannel()

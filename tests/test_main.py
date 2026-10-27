@@ -66,9 +66,11 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         # Should call run_bot only for agent1
         mock_runner_instance.run_bot.assert_awaited_once()
         # The proactive team runs next to the bots; its deliveries run on the
-        # schedule runner, which a `now` delivery wakes.
+        # schedule runner, which a `now` delivery wakes, and its `next` routes
+        # ride along on the runner's scheduled runs.
         self.install_proactive.assert_called_once_with(wake=mock_schedule_runner.wake)
         mock_schedule_runner.add_due_work.assert_called_once_with(self.install_proactive.return_value.due_work)
+        mock_schedule_runner.add_briefing.assert_called_once_with(self.install_proactive.return_value.briefing)
         self.install_proactive.return_value.start.assert_awaited_once()
 
     @patch('main.ScheduleRunner')

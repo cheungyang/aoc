@@ -43,3 +43,18 @@ class DeliveryPrompt(Prompt):
     window: str
     offer: str
     note: str      # the Switchboard's one sentence on what the recipient could do with it
+
+
+@dataclass
+class TeamFindingsPrompt(Prompt):
+    """What the team learned for a scheduled run: its agent's live `next` routes.
+
+    core/proactive/delivery.py (SignalsForMe) renders one item per route, and the
+    schedule runner puts the block after the run's own prompt. As in a proactive
+    turn's prompt, nothing names where a fact came from: the agent uses what fits
+    this run, in its own voice, and leaves out the rest.
+    """
+
+    template = "proactive/team_findings"
+
+    items: str     # one per route: its gist, until or window, details, offer and note

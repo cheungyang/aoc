@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS turn_ledger (
     reply_text TEXT NOT NULL DEFAULT '',
     memory TEXT NOT NULL DEFAULT '[]',   -- JSON list: the reply's memory-log lines
     effects TEXT NOT NULL DEFAULT '[]',  -- JSON list: domain tool calls, {tool, actions, args, role, status}
-    context TEXT NOT NULL DEFAULT '{}',  -- JSON: {"touched": [...], "skills": [...]}
+    context TEXT NOT NULL DEFAULT '{}',  -- JSON: {"touched": [...], "skills": [...], "message": "<channel id>/<message id>"},
+                                         -- the message being yours that started the turn, if one did
     hops INTEGER NOT NULL DEFAULT 0,     -- 1 for a turn a proactive delivery started
     decision_id INTEGER
 );
@@ -94,22 +95,27 @@ CREATE INDEX IF NOT EXISTS idx_routes_radio ON routes(radio_message_id);
 CREATE INDEX IF NOT EXISTS idx_routes_poll ON routes(poll_message_id);
 CREATE INDEX IF NOT EXISTS idx_routes_to ON routes(to_agent, verdict);
 
--- One row per route approved for delivery: live mode only (PROACTIVE_DELIVERY).
--- The delivery is a proactive turn of the recipient in its home channel
--- (core/proactive/delivery.py). A row goes approved → running → posted, silent
--- or failed, and never back. Each schedule runner tick claims a due row with one
--- conditional UPDATE, so it runs once. A row left running is failed, not
+-- One row per route delivered: live mode only (PROACTIVE_DELIVERY).
+-- A `now` or `today` route becomes a proactive turn of the recipient in its home
+-- channel (core/proactive/delivery.py). Its row goes approved → running → posted,
+-- silent or failed, and never back. Each schedule runner tick claims a due row
+-- with one conditional UPDATE, so it runs once. A row left running is failed, not
 -- retried: it may have posted, and for posts to you at most once beats at least once.
+-- A `next` route rides along on the recipient's next scheduled run instead. Its
+-- row is made `handed` when that run takes it (SignalStore.hand_over), and the run
+-- finishes it posted, silent or failed. Nothing else touches a handed row: a
+-- scheduled run can take longer than a proactive turn is given.
 CREATE TABLE IF NOT EXISTS deliveries (
     route_id INTEGER PRIMARY KEY,     -- routes.id: a route is delivered once
     to_agent TEXT NOT NULL,
-    channel TEXT NOT NULL DEFAULT '', -- the recipient's home channel: where its turn runs and posts
-    deliver_at REAL NOT NULL,         -- when it's due, epoch seconds
-    status TEXT NOT NULL,             -- approved, running, posted, silent or failed
+    channel TEXT NOT NULL DEFAULT '', -- where it posts: the recipient's home channel, or its scheduled run's
+    deliver_at REAL NOT NULL,         -- when it's due, epoch seconds; for a handed row, when the run took it
+    status TEXT NOT NULL,             -- approved, running or handed, then posted, silent or failed
     approved_at REAL,
-    claimed_at REAL,                  -- when a tick took it
+    claimed_at REAL,                  -- when a tick (or a scheduled run) took it
     finished_at REAL,
-    error TEXT NOT NULL DEFAULT ''    -- why it failed
+    error TEXT NOT NULL DEFAULT '',   -- why it failed
+    acked_at REAL                     -- when the recipient's emoji went on your message (a `now` route): G4's acknowledgment
 );
 CREATE INDEX IF NOT EXISTS idx_deliveries_due ON deliveries(status, deliver_at);
 

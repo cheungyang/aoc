@@ -17,7 +17,7 @@ Two concrete kinds, because they really are different things:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 KIND_PROMPT = "prompt"
@@ -140,6 +140,24 @@ class Problems:
     def message(self, description: str = "") -> str:
         what = description or f"The {self.source} scan"
         return f"⚠️ {what} couldn't run normally:\n{listed_issues(self.issues, self.raw)}\nReply here and I'll help fix it."
+
+
+# How a scheduled run went, as a Briefing's `finish` hears it: its reply was
+# recorded as a post, it posted nothing (a blank or silent reply), or it failed.
+RUN_POSTED, RUN_SILENT, RUN_FAILED = "posted", "silent", "failed"
+
+
+@dataclass(frozen=True)
+class Briefing:
+    """What a briefing provider adds to one scheduled run (ScheduleRunner.add_briefing).
+
+    `block` goes after the prompt build_prompt made, so the run starts from it.
+    `finish(outcome)` hears how the run went, one of RUN_POSTED, RUN_SILENT or
+    RUN_FAILED, so the provider can settle what it handed over. It may return an
+    awaitable.
+    """
+    block: str
+    finish: Callable[[str], Any]
 
 
 @dataclass

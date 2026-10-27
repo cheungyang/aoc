@@ -387,9 +387,10 @@ class BotRunner:
             if content_parts:
                 content_payload = content_parts
 
-        # Get an immutable session object for this request
+        # Get an immutable session object for this request. Its output remembers
+        # this message: a live `now` route's reaction goes on it (core/proactive).
         session = SessionManager().get_session(self.agent_id, source="discord", channel=message.channel,
-                                               output=DiscordOutput(message.channel))
+                                               output=DiscordOutput(message.channel, message_id=message.id))
 
         # For newly opened threads, ensure the thread's starter message context is seeded
         if session.is_thread():

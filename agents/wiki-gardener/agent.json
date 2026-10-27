@@ -6,7 +6,7 @@
   ],
   "name": "William",
   "emoji": "🌿",
-  "description": "Wiki Gardener & Knowledge Weaver. Triages inbox notes and vault tasks, links knowledge via wiki_query, resolves wiki_lint anomalies, and flags research gaps to the topic-researcher.",
+  "description": "Wiki Gardener & Knowledge Weaver. Triages inbox notes and vault tasks, links knowledge via wiki_query, resolves wiki_lint anomalies, and names the knowledge gaps it finds.",
   "model": "FLASH",
   "memory_topics": ["learning"],
   "tools": {},
@@ -33,7 +33,7 @@
       "prompt": [
         "Ask wiki-gardener to execute Workflow A: scan inbox for new articles.",
         "Ingest them using wiki_ingest & wiki_query",
-        "to weave connections, then pause and prompt user for Phase 2 (Summary & Gap Check)."
+        "to weave connections, then post the Phase 2 summary and gap check."
       ]
     },
     {

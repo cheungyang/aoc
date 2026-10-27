@@ -7,23 +7,26 @@ in for) names Ramsay → the Governor lets it through → team radio posts the
 line; a ✅ labels it.
 
 With the switch on, the same receipt goes on: the `now` route is approved for
-delivery and the schedule runner is woken → its tick claims the delivery → the
-runner runs Ramsay's proactive turn (stood in for) in #meal-planning → it posts
-there, or stays silent.
+delivery, your receipt message gets Ramsay's emoji, and the schedule runner is
+woken → its tick claims the delivery → the runner runs Ramsay's proactive turn
+(stood in for) in #meal-planning → it posts there, or stays silent. A `next`
+route instead rides along on Ramsay's next scheduled run, in its prompt.
 """
 import asyncio
 import random
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.channel.discord.output import DiscordOutput
 from core.channel.response_parser import AgentResponse
 from core.config.settings import Config
 from core.proactive import radio as radio_module
 from core.proactive import service as service_module
 from core.proactive.cards import PeerCard
-from core.proactive.delivery import DeliverySchedule, DueDeliveries
+from core.proactive.delivery import DeliverySchedule, DueDeliveries, SignalsForMe
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import GOOD, TeamRadio
 from core.proactive.service import ProactiveService
@@ -35,6 +38,7 @@ from core.runtime.hooks import Turn
 from core.runtime.observability.transcript import LoggingHandler
 from core.scheduler import schedule_runner as runner_mod
 from core.scheduler.schedule_runner import ScheduleRunner
+from core.scheduler.spec import PromptSchedule
 from core.storage.schedule_state import ScheduleState
 from core.storage.signals import SignalStore
 from core.tooling.hooks import set_tool_hooks, tool_hooks
@@ -52,6 +56,8 @@ REPLY = """<switchboard_response>
   </signal>
   <errors>None</errors>
 </switchboard_response>"""
+# Your receipt message in #receipts, as the Discord runner's output names it.
+RECEIPT_MESSAGE = "111/222"
 
 
 class Draw(random.Random):
@@ -72,6 +78,17 @@ class Channel:
         return None
 
 
+class Ack:
+    """The `now` reaction's Discord side (core/channel/discord/ack.py), stood in for."""
+
+    def __init__(self):
+        self.reactions = []
+
+    async def react(self, message, emoji, agent_id):
+        self.reactions.append((message, emoji, agent_id))
+        return True
+
+
 @pytest.fixture
 def call_log():
     saved = tool_hooks()
@@ -88,14 +105,19 @@ def _save_receipt(ctx):
     handler.on_tool_end("<status>ok</status>Saved.<errors>None</errors>", run_id="r1", **mine)
 
 
-def _receipt_turn():
-    """The receipt processor's turn that saved it, as it ends."""
-    ctx = SessionManager.get_session(agent_id="receipt-processor", source="tool", channel="receipts")
+def _receipt_turn(output=None):
+    """The receipt processor's turn that saved it, as it ends. With `output`, the turn
+    answers your message in #receipts, as one the Discord runner started does."""
+    ctx = SessionManager.get_session(agent_id="receipt-processor", source="tool", channel="receipts", output=output)
     ctx.turn_hints.clear()
     _save_receipt(ctx)
     return Turn(agent_id="receipt-processor", agent_config={"channels": ["receipts", "general"]}, ctx=ctx,
                 prompt="<caller>main</caller>\nhere's my receipt",
                 response=AgentResponse.from_string("Saved: 99 Ranch, $86.40."))
+
+
+def _from_your_message():
+    return DiscordOutput(SimpleNamespace(id=111), message_id=222)
 
 
 @pytest.mark.asyncio
@@ -181,10 +203,10 @@ async def test_with_the_switch_on_the_receipt_becomes_ramsays_post(tmp_path, mon
     async def switchboard(prompt):
         return ModelRun(reply=REPLY, took_ms=10, tokens_in=1, tokens_out=1)
 
-    radio_channel, woken = Channel(), asyncio.Event()
+    radio_channel, woken, ack = Channel(), asyncio.Event(), Ack()
     pipeline = Pipeline(store, run=switchboard, team=lambda: TEAM, radio=TeamRadio(radio_channel, store, team=lambda: TEAM),
                         owns=lambda agent_id: True, rng=Draw(0), tags="- food: Diet.",
-                        home={"meal-planner": "meal-planning"}.get, wake=woken.set)
+                        home={"meal-planner": "meal-planning"}.get, wake=woken.set, ack=ack)
     service = ProactiveService(decide=pipeline, store=store, sweep=pipeline.resolve)
     ramsay, meal_planning = Ramsay(reply), MealPlanning()
     runner = _runner(tmp_path, ramsay, meal_planning)
@@ -193,7 +215,7 @@ async def test_with_the_switch_on_the_receipt_becomes_ramsays_post(tmp_path, mon
          patch.object(runner_mod, "reset_conversation", return_value=0), \
          patch.object(runner_mod, "record_channel_post") as record_post, \
          patch.object(runner_mod, "record_push") as record_push:
-        SignalHook(service.turn_ended).ended(_receipt_turn())
+        SignalHook(service.turn_ended).ended(_receipt_turn(_from_your_message()))
         await asyncio.wait_for(woken.wait(), 2.0)  # a `now` delivery was approved
         (spec,) = await DueDeliveries(store)(time.time())  # the woken tick claims it
         assert await runner.run_schedule(spec)
@@ -203,13 +225,15 @@ async def test_with_the_switch_on_the_receipt_becomes_ramsays_post(tmp_path, mon
     route = decision["routes"][0]
     assert decision["mode"] == "live"
     assert radio_channel.posts == ["📻 #1 🧾→🧑‍🍳 now · Groceries from 99 Ranch · delivering now"]
+    # Your receipt got Ramsay's emoji at once, and keeps it if he then stays silent: he did take note.
+    assert ack.reactions == [(RECEIPT_MESSAGE, "🧑‍🍳", "meal-planner")]
     assert isinstance(spec, DeliverySchedule) and (spec.agent_id, spec.channel) == ("meal-planner", "meal-planning")
     (prompt,) = ramsay.prompts
     assert "Groceries from 99 Ranch" in prompt and "receipt-processor" not in prompt
     assert ramsay.sessions[0].source == "proactive" and ramsay.sessions[0].get_surface() == "scheduled"
     assert ramsay.sessions[0].thinking_level == "low"  # the spec's, through _run_prompt
     delivery = store.delivery(route["id"])
-    assert delivery["status"] == status
+    assert delivery["status"] == status and delivery["acked_at"] is not None
     if status == "posted":
         assert meal_planning.sent == [reply]
         assert store.route(route["id"])["delivered_at"] is not None
@@ -219,3 +243,41 @@ async def test_with_the_switch_on_the_receipt_becomes_ramsays_post(tmp_path, mon
         assert meal_planning.sent == []
         record_post.assert_not_called()
         record_push.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_with_the_switch_on_a_next_route_rides_along_on_ramsays_scheduled_run(tmp_path, monkeypatch, call_log):
+    monkeypatch.setattr(radio_module, "record_outcome", lambda line: None)
+    store = SignalStore(str(tmp_path / "memory.db"))
+
+    async def switchboard(prompt):
+        return ModelRun(reply=REPLY.replace('urgency="now"', 'urgency="next"'), took_ms=10, tokens_in=1, tokens_out=1)
+
+    radio_channel, ack = Channel(), Ack()
+    pipeline = Pipeline(store, run=switchboard, team=lambda: TEAM, radio=TeamRadio(radio_channel, store, team=lambda: TEAM),
+                        owns=lambda agent_id: True, rng=Draw(0), tags="- food: Diet.",
+                        home={"meal-planner": "meal-planning"}.get, ack=ack)
+    service = ProactiveService(decide=pipeline, store=store, sweep=pipeline.resolve)
+    post = "Tonight: the 99 Ranch tofu goes in the freezer."
+    ramsay, meal_planning = Ramsay(post), MealPlanning()
+    runner = _runner(tmp_path, ramsay, meal_planning)
+    runner.add_briefing(SignalsForMe(store))
+    evening = PromptSchedule(prompt="Plan tomorrow's meals.", schedule_id="meal-planner:evening",
+                             agent_id="meal-planner", cron="0 21 * * *", channel="meal-planning")
+
+    with Config().overriding(proactive_delivery=True), \
+         patch.object(runner_mod, "reset_conversation", return_value=0), \
+         patch.object(runner_mod, "record_channel_post"), patch.object(runner_mod, "record_push"):
+        SignalHook(service.turn_ended).ended(_receipt_turn(_from_your_message()))
+        await asyncio.wait_for(radio_channel.posted.wait(), 2.0)  # decided
+        assert await DueDeliveries(store)(time.time()) == []  # it isn't a proactive turn
+        assert await runner.run_schedule(evening)
+
+    route = store.decision(1)["routes"][0]
+    assert (route["verdict"], route["urgency"]) == ("deliver", "next")
+    assert ack.reactions == []  # only a `now` route reacts
+    (prompt,) = ramsay.prompts
+    assert prompt.startswith("Plan tomorrow's meals.\n\n<findings source=\"your team\">")
+    assert "Groceries from 99 Ranch" in prompt and "receipt-processor" not in prompt and "ledger_append" not in prompt
+    assert ramsay.sessions[0].source == "scheduled" and meal_planning.sent == [post]
+    assert store.delivery(route["id"])["status"] == "posted"

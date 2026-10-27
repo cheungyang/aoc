@@ -14,7 +14,7 @@ taps the turns of the agents it runs. It has **one switch**, `PROACTIVE_DELIVERY
 | `PROACTIVE_DELIVERY` | What happens |
 |---|---|
 | off (default) | **Shadow.** Turns are tapped, decided and shown on team radio, but **nothing reaches an agent or its channel**. A route only records when it *would* have been delivered. |
-| on | **Live** (stage S4). A `now` or `today` route the Governor lets through becomes a **proactive turn**: the recipient posts in its own channel, or stays silent ([Delivery](#delivery-s4)). A `next` route still only records its time. Each agent also sees the live situations its topics cover ([Live Context](#live-context)). It's turned on at G3. |
+| on | **Live** (stage S4). A `now` or `today` route the Governor lets through becomes a **proactive turn**: the recipient posts in its own channel, or stays silent, and a `now` route first puts the recipient's emoji on your message ([Delivery](#delivery-s4)). A `next` route rides along on the recipient's next scheduled run ([The next touchpoint](#the-next-touchpoint)). Each agent also sees the live situations its topics cover ([Live Context](#live-context)). It's turned on at G3. |
 
 > [!IMPORTANT]
 > Nothing here runs before a reply is out. The taps work in `ended`, after the
@@ -39,9 +39,12 @@ flowchart TD
     F -.->|"read on every run"| SB
     A -.->|"Thompson draw"| G
     B -->|"live: now at once, today once timed"| D[("deliveries")]
+    P -.->|"live now: at once"| Y["Your message: the recipient's emoji"]
     D -->|"schedule runner tick (a now route wakes it)"| PT["Proactive turn (delivery.py)"]
     PT -->|"a post, or silent"| CH["The recipient's channel"]
     PT -.->|"tapped with hops = 1: absorbed"| T
+    B -->|"live next: handed over once"| SR["The recipient's next scheduled run: team findings in its prompt"]
+    SR -->|"its post, or silent"| CH
 ```
 
 ## Files
@@ -54,15 +57,16 @@ flowchart TD
 | [pipeline.py](pipeline.py) | One decision: claim the turns, run the Switchboard, judge each route, record it, then tell team radio. A step that fails becomes the decision's error. |
 | [switchboard.py](switchboard.py) | Renders the prompt, runs `main` once, statelessly, and parses `<switchboard_response>`. |
 | [governor.py](governor.py) | The rules, the acceptance draw, and when a route would be delivered. Its docstring lists the **dormant levers**. |
-| [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. |
+| [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. A `next` route rides along on the recipient's next scheduled run instead (`SignalsForMe`). |
 | [cards.py](cards.py) | Peer cards: what each teammate wants and offers. They come from `agent.json` `proactivity`, or are derived from `description`. |
 | [radio.py](radio.py) | Team radio's lines, your labels, the reason poll, and outcome lines. |
 | [board.py](board.py) | One worker thread for every Board call. |
 
 Elsewhere:
 - **Board:** [core/storage/signals.py](../storage/signals.py), with its schema in [signals.sql](../storage/schemas/signals.sql).
-- **Prompts:** [core/prompts/templates/proactive/switchboard.md](../prompts/templates/proactive/switchboard.md), and the proactive turn's [delivery.md](../prompts/templates/proactive/delivery.md).
-- **The runner that delivers:** [core/scheduler/schedule_runner.py](../scheduler/schedule_runner.py): its wake, and its due work.
+- **Prompts:** [core/prompts/templates/proactive/switchboard.md](../prompts/templates/proactive/switchboard.md), the proactive turn's [delivery.md](../prompts/templates/proactive/delivery.md), and a scheduled run's [team_findings.md](../prompts/templates/proactive/team_findings.md).
+- **The runner that delivers:** [core/scheduler/schedule_runner.py](../scheduler/schedule_runner.py): its wake, its due work, and its briefings.
+- **The `now` reaction on Discord:** [core/channel/discord/ack.py](../channel/discord/ack.py), and the message the runner's output remembers ([output.py](../channel/discord/output.py)).
 - **Live Context:** [core/prompts/live_context.py](../prompts/live_context.py), with its query `SignalStore.live_situations` and its place in [graph_builder.py](../runtime/graph_builder.py).
 - **Discord side of team radio:** [core/channel/discord/radio.py](../channel/discord/radio.py).
 - **`!signals`:** [core/runtime/commands/typed/signals.py](../runtime/commands/typed/signals.py).
@@ -81,6 +85,7 @@ Each turn that counts leaves one `turn_ledger` row:
 | `effects` | Successful calls that the effects table counts, with trimmed arguments. |
 | `context.touched` | Paths that the turn's `filesystem` writes changed. |
 | `context.skills` | A loaded skill, or the one skill of the agent that lists a tool it called. |
+| `context.message` | Your message that started the turn, `<channel id>/<message id>`, when the Discord runner started it. A live `now` route's reaction goes on it. |
 
 **The effects table** ([effects.py](effects.py)) is the one place that says which tool calls matter. The tools know nothing of it:
 
@@ -148,7 +153,7 @@ The acceptance draw is Thompson sampling over `Beta(2 + engaged, 1 + ignored + d
 **When a route would be delivered** (`deliver_at`):
 - `now`: at once.
 - `today`: at your first 30-minute quiet stretch. If its window closes first, it moves to the next touchpoint.
-- `next`: at the recipient's next scheduled run, or your next conversation with it.
+- `next`: at the recipient's next scheduled run, or your next conversation with it. Live, it's delivered only on a scheduled run ([the next touchpoint](#the-next-touchpoint)).
 
 `resolve_times` fills these in each minute (the service's sweep).
 
@@ -156,12 +161,13 @@ The acceptance draw is Thompson sampling over `Beta(2 + engaged, 1 + ignored + d
 
 ## Delivery (S4)
 
-With the switch on, each decision is **live**: a `deliver` verdict becomes a **proactive turn**, a one-shot run of the recipient in its own home channel ([delivery.py](delivery.py)).
+With the switch on, each decision is **live**: a `now` or `today` route the Governor lets through becomes a **proactive turn**, a one-shot run of the recipient in its own home channel ([delivery.py](delivery.py)). A `next` route rides along on the recipient's next scheduled run instead ([below](#the-next-touchpoint)).
 
 | Step | What happens |
 |---|---|
-| Approve | The pipeline approves a `now` route at once, and a `today` route when `resolve_times` knows its time: one `deliveries` row on the Board, for the recipient's home channel. A recipient with no home channel gets nothing. A `next` route isn't delivered this way: it will reach the recipient's next run (part 3). |
+| Approve | The pipeline approves a `now` route at once, and a `today` route when `resolve_times` knows its time: one `deliveries` row on the Board, for the recipient's home channel. A recipient with no home channel gets nothing. |
 | Wake | A `now` approval wakes the schedule runner, so its 30 s sleep ends early. It's still one loop, one tick at a time. |
+| React | A `now` approval also puts the recipient's card emoji on your message that started it, at once: the receipt gets 🧑‍🍳 seconds after it's saved, and Ramsay's post follows. The message is the one that started the source agent's latest turn in the decision (the taps' `context.message`); with none, there's no reaction. It's added by the recipient's bot if this host runs it and it sees the channel, else by main's ([ack.py](../channel/discord/ack.py)), and only where this host holds the recipient, as the delivery's own rule says: elsewhere the post may never come. It stays even if the turn stays silent: the recipient did take note. `acked_at` records when, for G4's acknowledgment p95 ≤ 10 s. A reaction that fails is logged; the delivery goes on. |
 | Claim | Each tick, the runner's due work (`DueDeliveries`) first fails a row still running after 10 minutes (never run again) and an approved row due more than 3 hours ago (never posted late): for posts to you, at most once beats at least once. A row whose recipient this host doesn't hold right now is skipped, as `run_schedule` would; it stays approved, runs if the agent comes back, and expires otherwise. Every other due row is claimed with one conditional `UPDATE`, so it runs once. |
 | Run | A `DeliverySchedule`, through `run_schedule`: the same ownership check and limiter as a schedule. Stateless, with source `proactive`, on the scheduled surface, at thinking level `low` (posts are short; G4 wants post p95 ≤ 60 s). |
 | Post | Like a scheduled post: in the channel, in the channel inbox with its speech version ("Ramsay has a suggestion"), and in the session that answers your reply. A reply of `<silent/>` posts nothing and records nothing. |
@@ -171,7 +177,23 @@ The turn's prompt ([delivery.md](../prompts/templates/proactive/delivery.md)) sa
 
 **No chains:** the taps give a proactive turn `hops = 1` and the scheduled tap, so the Governor absorbs any signal it starts.
 
-**Rollback:** turn the switch off. The due work reads it on every tick, so nothing more is delivered. Approved rows wait; if it's turned back on, any due more than 3 hours ago expire unposted.
+**Rollback:** turn the switch off. The due work and the next touchpoint read it on every call, so nothing more is delivered. Approved rows wait; if it's turned back on, any due more than 3 hours ago expire unposted.
+
+### The next touchpoint
+
+A live `next` route isn't a proactive turn: it rides along on the recipient's next scheduled run, as findings after that run's own prompt. The runner asks each provider registered with `add_briefing` before a run; main.py registers the service's `SignalsForMe` ([delivery.py](delivery.py)).
+
+| | |
+|---|---|
+| Which routes | The recipient's live `next` routes that no run has taken: emitted in the last 7 days, still true today (`until`), and with their window, if any, still open. At most 5, oldest first. `deliver_at` isn't read: `resolve_times` sets it in shadow too. |
+| Which runs | A run whose source is `scheduled` and whose channel was found. Never a proactive turn, nor a run that posts nowhere. |
+| The block | `<findings source="your team">`, one item per route: the gist, the details (never the payload's `tool`), until and the window, what the agent could offer, and the note ([team_findings.md](../prompts/templates/proactive/team_findings.md)). Its rules: use what fits this run, in your own voice; never name another agent or how you learned it; leave out what doesn't fit. |
+| Once only | Each route is handed over once (`hand_over`: one `handed` deliveries row), so of two runs at once only one gets it. Nothing else touches a handed row: not the stuck or expiry rules, since a scheduled run can take longer than a proactive turn, and never a proactive turn. |
+| Finish | The run finishes its routes: `posted` when its reply was recorded as a post (which doesn't say it used them), `silent` when it posted nothing, `failed` when it failed. |
+
+> [!NOTE]
+> `resolve_times` moves a `today` route to `next` only once its window has
+> closed, so the window rule above leaves such a route out: it never rides along.
 
 ### Live Context
 
@@ -243,11 +265,11 @@ G3 comes after ≥ 2 weeks of shadow running in prod and ≥ 30 labeled decision
 | What | Where |
 |---|---|
 | The proactive package, with the effects table | `tests/core/proactive/` (one file per module) |
-| The whole path, shadow and live (a stub agent posts, or stays silent) | `tests/core/proactive/test_end_to_end.py` |
+| The whole path, shadow and live (a stub agent posts, or stays silent; the `now` reaction; a `next` route on a scheduled run) | `tests/core/proactive/test_end_to_end.py` |
 | The tool hooks | `tests/core/tooling/test_hooks.py`, and `test_transcript.py` for who announces |
 | The Board | `tests/core/storage/test_signals.py` |
-| The schedule runner's wake and due work | `tests/core/scheduler/test_schedule_runner.py` |
+| The schedule runner's wake, due work and briefings | `tests/core/scheduler/test_schedule_runner.py` |
 | Live Context, and its place in the system prompt | `tests/core/prompts/test_live_context.py`, `test_system_caching.py` |
-| The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_runner.py`, `test_dispatcher.py` |
+| The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_ack.py`, `test_output.py`, `test_runner.py`, `test_dispatcher.py` |
 | `!signals` | `tests/core/runtime/commands/typed/test_signals.py` |
 | The D20 replay | `tests/scripts/test_proactive_replay.py` |

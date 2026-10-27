@@ -11,16 +11,19 @@ from core.config.settings import Config
 from core.proactive import delivery as delivery_module
 from core.proactive.delivery import (
     EXPIRE_S,
+    NEXT_SINCE_S,
     STUCK_S,
     THINKING,
     DeliveryOutput,
     DeliverySchedule,
     DueDeliveries,
+    SignalsForMe,
     is_silent,
+    render_findings,
     render_prompt,
     window_text,
 )
-from core.scheduler.spec import ScheduleContext, SessionPolicy
+from core.scheduler.spec import PromptSchedule, ScheduleContext, SessionPolicy
 from core.storage.signals import SignalStore
 from core.util.local_time import get_local_timezone
 
@@ -250,3 +253,98 @@ class TestTheProvider:
         assert await DueDeliveries(store)(NOW) == []
         delivery = store.delivery(route_id)
         assert (delivery["status"], delivery["error"]) == ("failed", "KeyError: 'gist'")
+
+
+def _next(store, at=NOW, **route):
+    """A live `next` route to Ramsay: the groceries, for his next scheduled run."""
+    decision_id = store.start_decision(tap="effect", session_id="s1", first_turn_at=at, mode="live", at=at)
+    signal_id = store.add_signal({"decision_id": decision_id, "at": at, "kind": "artifact",
+                                  "gist": "Groceries from 99 Ranch, Oct 24", "evidence": "Saved: 99 Ranch, $86.40.",
+                                  "tags": "food", "payload": {"tool": "ledger_append", "vendor": "99 Ranch"},
+                                  "source_agent": "receipt-processor", "source_channel": "receipts"})
+    values = {"signal_id": signal_id, "decision_id": decision_id, "to_agent": "meal-planner",
+              "offer": "update the kitchen inventory", "asked": "next", "urgency": "next", "verdict": "deliver",
+              "note": "Check the freezer."}
+    values.update(route)
+    return store.add_route(values)
+
+
+def _evening_run():
+    """Ramsay's 21:00 run, as the schedule runner hands it to a briefing provider."""
+    spec = PromptSchedule(prompt="Plan tomorrow's meals.", schedule_id="meal-planner:evening",
+                          agent_id="meal-planner", cron="0 21 * * *", channel="meal-planning")
+    return spec, ScheduleContext(schedule_id=spec.schedule_id, agent_id="meal-planner", now=NOW, channel="meal-planning")
+
+
+class TestTheNextTouchpoint:
+
+    @pytest.mark.asyncio
+    async def test_a_scheduled_run_gets_its_next_routes_as_findings_from_the_team(self, store, live):
+        route_id = _next(store, window_start="2026-10-24", window_end="2026-10-26")
+        briefing = await SignalsForMe(store)(*_evening_run())
+        for part in ('<findings source="your team">', "- Groceries from 99 Ranch, Oct 24",
+                     'Details: {"vendor": "99 Ranch"}', "When it matters: 2026-10-24 to 2026-10-26.",
+                     "What you could offer: update the kitchen inventory", "The idea: Check the freezer.",
+                     "Use what fits this run, in your own voice", "Never name another agent, or say how you learned it",
+                     "Leave out what doesn't fit"):
+            assert part in briefing.block, part
+        # Who learned it, where, and with which tool stay out.
+        for source in ("receipt-processor", "Receipt Processor", "receipts", "ledger_append"):
+            assert source not in briefing.block, source
+        delivery = store.delivery(route_id)
+        assert (delivery["status"], delivery["channel"], delivery["deliver_at"]) == ("handed", "meal-planning", NOW)
+
+        await briefing.finish("posted")
+        assert store.delivery(route_id)["status"] == "posted" and store.route(route_id)["delivered_at"] is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome, error", [("silent", ""), ("failed", "the scheduled run failed")])
+    async def test_its_run_finishes_them_as_it_went(self, store, live, outcome, error):
+        route_id = _next(store)
+        briefing = await SignalsForMe(store)(*_evening_run())
+        await briefing.finish(outcome)
+        delivery = store.delivery(route_id)
+        assert (delivery["status"], delivery["error"]) == (outcome, error)
+        assert store.route(route_id)["delivered_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_with_the_switch_off_nothing_rides_along(self, store):
+        route_id = _next(store)
+        assert await SignalsForMe(store)(*_evening_run()) is None
+        assert store.delivery(route_id) is None
+
+    @pytest.mark.asyncio
+    async def test_a_run_with_nothing_for_its_agent_gets_no_block(self, store, live):
+        _next(store, to_agent="excursion-planner")
+        assert await SignalsForMe(store)(*_evening_run()) is None
+
+    @pytest.mark.asyncio
+    async def test_at_most_5_oldest_first_from_the_last_7_days(self, store, live):
+        stale = _next(store, at=NOW - NEXT_SINCE_S - 60, note="stale")
+        routes = [_next(store, at=NOW - 3600 * (6 - i), note=f"idea {i}") for i in range(6)]
+        block = (await SignalsForMe(store)(*_evening_run())).block
+        assert [f"The idea: idea {i}" in block for i in range(6)] == [True] * 5 + [False]
+        assert "stale" not in block
+        assert store.delivery(stale) is None and store.delivery(routes[5]) is None  # the newest waits for the next run
+
+    @pytest.mark.asyncio
+    async def test_two_runs_at_once_never_share_a_route(self, store, live):
+        route_id = _next(store)
+        provider = SignalsForMe(store)
+        briefings = await asyncio.gather(provider(*_evening_run()), provider(*_evening_run()))
+        assert sorted(b is not None for b in briefings) == [False, True]
+        assert store.delivery(route_id)["status"] == "handed"
+
+    @pytest.mark.asyncio
+    async def test_a_handed_route_is_never_a_proactive_turn_nor_failed_as_stuck(self, store, live):
+        route_id = _next(store)
+        await SignalsForMe(store)(*_evening_run())
+        due = DueDeliveries(store)
+        assert await due(NOW) == [] and await due(NOW + STUCK_S + EXPIRE_S + 1) == []
+        assert store.delivery(route_id)["status"] == "handed"  # its run finishes it, however long it takes
+
+    def test_what_a_route_doesnt_have_is_left_out(self):
+        block = render_findings([{"gist": "In Tahoe until Tue", "payload": {"tool": "calendar_add"}}])
+        assert "- In Tahoe until Tue" in block
+        for part in ("Details", "True until", "When it matters", "What you could offer", "The idea", "calendar_add"):
+            assert part not in block, part

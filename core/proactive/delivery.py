@@ -1,9 +1,10 @@
-"""Delivery: a live route becomes a proactive turn of its recipient (stage S4).
+"""Delivery: a live route reaches its recipient (stage S4).
 
 Only with the switch on (`PROACTIVE_DELIVERY`). The pipeline approves a route
 on the Board (SignalStore.approve_delivery): a `now` route at once, a `today`
-route once its quiet stretch is known. A `next` route isn't delivered this way:
-it will reach the recipient's next run (stage S4, part 3).
+route once its quiet stretch is known. Each becomes a proactive turn of its
+recipient (below). A `next` route isn't: it rides along on the recipient's
+next scheduled run (SignalsForMe, at the end).
 
 The schedule runner calls DueDeliveries on every tick (`add_due_work`), and a
 `now` approval wakes it, so that turn runs at once rather than at the next 30 s
@@ -32,20 +33,31 @@ The turn is the recipient's own, in its home channel, with source "proactive":
     a delivery never starts another.
 
 The delivery is then finished: posted, silent or failed.
+
+The next touchpoint: the runner asks SignalsForMe before each scheduled run
+that has a channel (`add_briefing`). It takes the agent's live `next` routes
+no run has taken yet, from the last NEXT_SINCE_S, still true today and with
+their window open: at most MAX_FINDINGS, oldest first. It hands them over
+(SignalStore.hand_over, once only) and adds them after the run's prompt, as
+findings from "your team" (TeamFindingsPrompt). The run finishes them as it
+went: posted if its reply was posted, which doesn't mean it used them, silent
+or failed. Nothing else touches them meanwhile: not fail_stuck, and never a
+proactive turn.
 """
 import json
 import re
 import time
+from functools import partial
 from typing import Any, Dict, List, Optional, Set
 
 from core.channel.discord.output import DiscordOutput
 from core.channel.discord.ownership import PROD, Ownership
 from core.config.settings import Config
-from core.prompts.proactive import DeliveryPrompt
+from core.prompts.proactive import DeliveryPrompt, TeamFindingsPrompt
 from core.proactive.board import on_board
 from core.proactive.switchboard import local
 from core.proactive.taps import PROACTIVE_SOURCE
-from core.scheduler.spec import PromptSchedule, ScheduleContext, SessionPolicy, WorkDecision
+from core.scheduler.spec import Briefing, PromptSchedule, ScheduleContext, SessionPolicy, WorkDecision
 from core.storage.signals import FAILED, POSTED, SILENT, SignalStore
 
 # A delivery still running after this long is failed, and never run again.
@@ -56,6 +68,10 @@ EXPIRE_S = 3 * 3600
 THINKING = "low"
 # How a voice briefing names a proactive post: "Ramsay has a suggestion".
 LABEL = "a suggestion"
+# How long a `next` route waits for its recipient's next scheduled run, and how
+# many ride along on one run, oldest first.
+NEXT_SINCE_S = 7 * 86400
+MAX_FINDINGS = 5
 
 # A reply that posts nothing: <silent/>, however it's spaced or cased.
 _SILENT = re.compile(r"<\s*silent\s*/?\s*>", re.IGNORECASE)
@@ -80,23 +96,52 @@ def window_text(start: Optional[str], end: Optional[str]) -> str:
     return f"until {end}" if end else ""
 
 
+def details_text(payload: Optional[Dict[str, Any]]) -> str:
+    """A signal's payload as a prompt shows it, as JSON, without its `tool`: that's how the
+    fact was learned, which the recipient never says. "" when nothing is left."""
+    details = {k: v for k, v in (payload or {}).items() if k != "tool"}
+    return json.dumps(details, ensure_ascii=False, default=str) if details else ""
+
+
 def render_prompt(delivery: Dict[str, Any], now: float) -> str:
     """The proactive turn's prompt for one due delivery (SignalStore.due_deliveries).
 
     It never names the source agent or its channel, and leaves the payload's
     `tool` out: that's how the fact was learned, which the recipient never says.
     """
-    payload = {k: v for k, v in (delivery.get("payload") or {}).items() if k != "tool"}
     return DeliveryPrompt(
         now=f"{local(now):%A %Y-%m-%d %H:%M}",
         gist=delivery.get("gist") or "",
         evidence=delivery.get("evidence") or "",
-        details=json.dumps(payload, ensure_ascii=False, default=str) if payload else "",
+        details=details_text(delivery.get("payload")),
         until=delivery.get("until") or "",
         window=window_text(delivery.get("window_start"), delivery.get("window_end")),
         offer=delivery.get("offer") or "",
         note=delivery.get("note") or "",
     ).render()
+
+
+def render_findings(routes: List[Dict[str, Any]]) -> str:
+    """The `<findings source="your team">` block for a scheduled run, one item per route
+    (SignalStore.pending_next): its gist, then each of details, until, window, offer and
+    note it has. Like render_prompt, it never names the source, nor the payload's `tool`."""
+    items = []
+    for route in routes:
+        lines = [f"- {route.get('gist') or ''}"]
+        details = details_text(route.get("payload"))
+        window = window_text(route.get("window_start"), route.get("window_end"))
+        if details:
+            lines.append(f"  Details: {details}")
+        if route.get("until"):
+            lines.append(f"  True until {route['until']}.")
+        if window:
+            lines.append(f"  When it matters: {window}.")
+        if route.get("offer"):
+            lines.append(f"  What you could offer: {route['offer']}")
+        if route.get("note"):
+            lines.append(f"  The idea: {route['note']}")
+        items.append("\n".join(lines))
+    return TeamFindingsPrompt(items="\n".join(items)).render()
 
 
 def held_here(agent_id: str, ownership: Any) -> bool:
@@ -233,3 +278,42 @@ class DueDeliveries:
                 await on_board(self.store.finish_delivery, route_id, FAILED, error=f"{type(e).__name__}: {e}")
                 print(f"[proactive] Could not make the turn for route #{route_id}: {type(e).__name__}: {e}")
         return specs
+
+
+class SignalsForMe:
+    """The schedule runner's briefing provider (ScheduleRunner.add_briefing): a scheduled
+    run's live `next` routes, handed to it as findings from the team (module docstring)."""
+
+    def __init__(self, store: Optional[SignalStore] = None):
+        self.store = store or SignalStore()
+
+    async def __call__(self, spec: Any, ctx: ScheduleContext) -> Optional[Briefing]:
+        # Read on every call, like the due work: with the switch off, nothing rides along.
+        if not Config().proactive_delivery:
+            return None
+        agent_id, now = spec.agent_id, ctx.now
+        routes = await on_board(self.store.pending_next, agent_id, since=now - NEXT_SINCE_S,
+                                today=f"{local(now):%Y-%m-%d}", limit=MAX_FINDINGS)
+        if not routes:
+            return None
+        block = render_findings(routes)  # first: a route is handed over only with a block to show it
+        handed = await on_board(self.store.hand_over, [r["route_id"] for r in routes], to_agent=agent_id,
+                                channel=ctx.channel or spec.channel or "", now=now)
+        if len(handed) < len(routes):  # another run took some first
+            routes = [r for r in routes if r["route_id"] in handed]
+            if not routes:
+                return None
+            block = render_findings(routes)
+        print(f"[proactive] {len(handed)} finding(s) ride along on {spec.describe()}: "
+              f"{', '.join(f'route #{i}' for i in handed)}.")
+        return Briefing(block=block, finish=partial(self.finish, handed, agent_id))
+
+    async def finish(self, route_ids: List[int], agent_id: str, outcome: str) -> None:
+        """Finishes the routes handed to a run as it went: posted, silent or failed."""
+        error = "the scheduled run failed" if outcome == FAILED else ""
+        await on_board(self._finish_all, route_ids, outcome, error)
+        print(f"[proactive] Findings for {agent_id} ({', '.join(f'route #{i}' for i in route_ids)}): {outcome}")
+
+    def _finish_all(self, route_ids: List[int], outcome: str, error: str) -> None:
+        for route_id in route_ids:
+            self.store.finish_delivery(route_id, outcome, error=error)

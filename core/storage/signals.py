@@ -14,11 +14,15 @@ its count.
 
 Live (`PROACTIVE_DELIVERY` on), a route approved for delivery gets a
 `deliveries` row: a schedule runner tick claims it once, and its proactive
-turn finishes it posted, silent or failed (core/proactive/delivery.py). Live
-Context (core/prompts/live_context.py) shows agents the live situations
-(`live_situations`).
+turn finishes it posted, silent or failed (core/proactive/delivery.py). A
+`now` route's row also keeps when the recipient's emoji went on your message
+(`ack_delivery`). A `next` route's row is made when the recipient's next
+scheduled run takes it (`pending_next`, `hand_over`), and that run finishes
+it. Live Context (core/prompts/live_context.py) shows agents the live
+situations (`live_situations`).
 """
 import json
+import sqlite3
 import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -32,8 +36,9 @@ _JSON = {
 }
 # A label, as the acceptance counts see it.
 _COUNTED_AS = {"good": "engaged", "bad": "declined"}
-# A delivery's statuses: approved → running → posted, silent or failed.
-APPROVED, RUNNING, POSTED, SILENT, FAILED = "approved", "running", "posted", "silent", "failed"
+# A delivery's statuses: approved → running → posted, silent or failed. A `next`
+# route's row starts handed (hand_over), and its scheduled run finishes it the same way.
+APPROVED, RUNNING, HANDED, POSTED, SILENT, FAILED = "approved", "running", "handed", "posted", "silent", "failed"
 FINISHED = (POSTED, SILENT, FAILED)
 # Why a delivery left running was failed (fail_stuck).
 STUCK = "stuck; not retried"
@@ -42,6 +47,9 @@ EXPIRED = "expired; not posted late"
 # Tags whose facts reach only the agents that read them (D10, decided at G3): the
 # Governor's routes (core/proactive/governor.py) and Live Context's lines (live_situations).
 SENSITIVE_TAGS = frozenset({"health", "finance"})
+# Columns added to a table after it shipped, with their definitions. signals.sql
+# makes a missing table whole, but never changes one a database already holds.
+_ADDED_COLUMNS = (("deliveries", "acked_at", "REAL"),)
 
 
 def _encode(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
@@ -71,6 +79,23 @@ class SignalStore(Store):
 
     def default_path(self) -> str:
         return Config().memory_db_path
+
+    def _create(self, conn: sqlite3.Connection, **identifiers: str) -> None:
+        """The schema, then the columns an older table lacks (_ADDED_COLUMNS), as
+        SessionStore.ensure_table adds them."""
+        super()._create(conn, **identifiers)
+        for table, column, definition in _ADDED_COLUMNS:
+            if column in self._columns(conn, table):
+                continue
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                if column not in self._columns(conn, table):  # else another connection added it first
+                    raise
+
+    @staticmethod
+    def _columns(conn: sqlite3.Connection, table: str) -> List[str]:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
 
     # -- the turn ledger -----------------------------------------------------
 
@@ -302,9 +327,16 @@ class SignalStore(Store):
                             "WHERE route_id = ? AND status = 'approved' AND deliver_at <= ?",
                             [now, route_id, now]) == 1
 
+    def ack_delivery(self, route_id: int, at: Optional[float] = None) -> None:
+        """Records when the recipient's emoji went on your message (the `now` reaction):
+        what G4's acknowledgment time is measured on. The first one counts."""
+        self.execute("UPDATE deliveries SET acked_at = ? WHERE route_id = ? AND acked_at IS NULL",
+                     [time.time() if at is None else at, route_id])
+
     def finish_delivery(self, route_id: int, status: str, *, error: str = "", at: Optional[float] = None) -> None:
-        """Records how a delivery ended: posted, silent or failed. A post also sets its route's
-        `delivered_at`. A run that outlived fail_stuck still records how it really ended."""
+        """Records how a delivery ended: posted, silent or failed. A proactive turn's, or a
+        handed row's scheduled run's. A post also sets its route's `delivered_at`. A run that
+        outlived fail_stuck still records how it really ended."""
         if status not in FINISHED:
             raise ValueError(f"a delivery finishes posted, silent or failed, not {status!r}")
         at = time.time() if at is None else at
@@ -316,7 +348,8 @@ class SignalStore(Store):
 
     def fail_stuck(self, now: float, older_than_s: float) -> List[int]:
         """Fails the deliveries running since before `now - older_than_s`, and returns their
-        route ids. A stuck run may have posted already, so it is never run again."""
+        route ids. A stuck run may have posted already, so it is never run again. A handed
+        row is left to its scheduled run, however long that takes."""
         failed = []
         with self.connect() as conn:
             stuck = [r[0] for r in conn.execute(
@@ -330,9 +363,43 @@ class SignalStore(Store):
 
     def expire_deliveries(self, now: float, older_than_s: float) -> int:
         """Fails the approved deliveries due before `now - older_than_s`, unrun, and returns how
-        many: a post that late would be stale. One guarded UPDATE, so it can't race a claim."""
+        many: a post that late would be stale. One guarded UPDATE, so it can't race a claim.
+        A handed row was never approved: it isn't one of them."""
         return self.execute("UPDATE deliveries SET status = 'failed', finished_at = ?, error = ? "
                             "WHERE status = 'approved' AND deliver_at < ?", [now, EXPIRED, now - older_than_s])
+
+    def pending_next(self, agent_id: str, *, since: float, today: str, limit: int) -> List[Dict[str, Any]]:
+        """The live `next` routes to `agent_id` that no run has taken yet, oldest first, at most
+        `limit`: what its next scheduled run is handed (core/proactive/delivery.py).
+
+        Each is a `deliver` route of a live decision, with no deliveries row, whose signal was
+        emitted since `since` and is still true on `today` (no `until`, or not past it), and
+        whose window, if any, hasn't closed. `deliver_at` isn't read: resolve_times sets it for
+        `next` routes in shadow too.
+        """
+        rows = self.query(
+            "SELECT r.id AS route_id, r.to_agent, r.offer, r.note, r.window_start, r.window_end, s.kind, s.gist, "
+            "s.payload, s.until, s.at AS signal_at "
+            "FROM routes r JOIN signals s ON s.id = r.signal_id JOIN decisions d ON d.id = r.decision_id "
+            "LEFT JOIN deliveries dl ON dl.route_id = r.id "
+            "WHERE r.to_agent = ? AND r.verdict = 'deliver' AND r.urgency = 'next' AND d.mode = 'live' "
+            "AND dl.route_id IS NULL AND s.at >= ? AND (s.until IS NULL OR s.until = '' OR s.until >= ?) "
+            "AND (r.window_end IS NULL OR r.window_end = '' OR r.window_end >= ?) "
+            "ORDER BY s.at ASC, r.id ASC LIMIT ?", [agent_id, since, today, today, limit])
+        return [_decode("signals", r) for r in rows]
+
+    def hand_over(self, route_ids: Sequence[int], *, to_agent: str, channel: str, now: float) -> List[int]:
+        """Hands routes to `to_agent`'s scheduled run in `channel`: one `handed` deliveries row
+        each, made once (INSERT OR IGNORE). Returns the ids this call handed over: a route
+        another run took first isn't one of them."""
+        handed = []
+        with self.connect() as conn:
+            for route_id in route_ids:
+                row = {"route_id": route_id, "to_agent": to_agent, "channel": channel or "", "deliver_at": now,
+                       "status": HANDED, "approved_at": now, "claimed_at": now}
+                if self.insert("deliveries", row, or_="IGNORE", conn=conn) is not None:
+                    handed.append(route_id)
+        return handed
 
     def delivery(self, route_id: int) -> Optional[Dict[str, Any]]:
         row = self.select_one("deliveries", {"route_id": route_id})

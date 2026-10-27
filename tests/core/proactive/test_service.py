@@ -156,7 +156,8 @@ class TestInstall:
         assert len(discord_radio._reaction_listeners) == 1 and len(discord_radio._vote_listeners) == 1
 
     def test_the_schedule_runner_runs_the_deliveries_and_is_woken_for_them(self, hooks):
-        from core.proactive.delivery import DueDeliveries
+        from core.channel.discord.ack import DiscordAck
+        from core.proactive.delivery import DueDeliveries, SignalsForMe
 
         def wake():
             pass
@@ -164,3 +165,7 @@ class TestInstall:
         service = service_module.install(wake=wake)
         assert isinstance(service.due_work, DueDeliveries)
         assert service.decide.wake is wake
+        # A `now` approval also reacts on your message, and a `next` route rides along on
+        # the recipient's scheduled run.
+        assert isinstance(service.decide.ack, DiscordAck)
+        assert isinstance(service.briefing, SignalsForMe)

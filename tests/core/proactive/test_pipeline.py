@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from core.proactive.cards import PeerCard
-from core.proactive.pipeline import Pipeline, dedupe_key, payload_from
+from core.proactive.pipeline import Pipeline, dedupe_key, payload_from, source_message
 from core.proactive.switchboard import ModelRun, ProposedSignal
 from core.storage.signals import SignalStore
 from core.util.local_time import get_local_timezone
@@ -138,6 +138,93 @@ async def test_live_a_recipient_with_no_home_channel_gets_no_delivery(store, cap
     assert "meal-planner has no home channel" in capsys.readouterr().out
 
 
+# -- the `now` reaction -----------------------------------------------------------
+
+class FakeAck:
+    """The `now` reaction, stood in for: where it reacted, noted in `events` too.
+    `works` is what react returns, or an exception it raises."""
+
+    def __init__(self, events=None, works=True):
+        self.calls, self.events, self.works = [], events if events is not None else [], works
+
+    async def react(self, message, emoji, agent_id):
+        self.calls.append((message, emoji, agent_id))
+        self.events.append("reaction")
+        if isinstance(self.works, Exception):
+            raise self.works
+        return self.works
+
+
+class Holds:
+    """Ownership, stood in for: the claims are known, and this host holds `held`."""
+
+    def __init__(self, held=()):
+        self.role, self.held = "prod", set(held)
+
+    def is_ready(self):
+        return True
+
+    def is_mine(self, agent_id):
+        return agent_id in self.held
+
+
+@pytest.mark.asyncio
+async def test_live_a_now_approval_puts_the_recipients_emoji_on_your_message_at_once(store):
+    events = []
+    ack = FakeAck(events)
+
+    class Radio:
+        async def decided(self, decision):
+            events.append("radio")
+
+    _turn(store, at=NOW - 60, context={"message": "111/221"})
+    turns = _turn(store, context={"message": "111/222"})  # the receipt processor's latest turn
+    decision_id = await _pipeline(store, mode="live", home=HOMES.get, ack=ack, radio=Radio())("s1", turns)
+
+    ramsay = store.decision(decision_id)["routes"][0]
+    assert ack.calls == [("111/222", "🧑‍🍳", "meal-planner")]
+    assert store.delivery(ramsay["id"])["acked_at"] == NOW
+    assert events == ["reaction", "radio"]  # before team radio hears of the decision
+
+
+def test_the_reaction_goes_on_the_message_that_started_the_source_agents_latest_turn():
+    turns = [{"id": 1, "at": 1.0, "agent_id": "receipt-processor", "context": {"message": "1/10"}},
+             {"id": 2, "at": 2.0, "agent_id": "receipt-processor", "context": {"message": "1/20"}},
+             {"id": 3, "at": 3.0, "agent_id": "receipt-processor", "context": {}},
+             {"id": 4, "at": 4.0, "agent_id": "main", "context": {"message": "1/40"}}]
+    assert source_message(turns, "receipt-processor") == "1/20"
+    assert source_message(turns, "meal-planner") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why, options, context", [
+    ("in shadow", {"mode": "shadow"}, {"message": "111/222"}),
+    ("with no message of yours", {}, {}),
+    ("for a recipient another host holds: its post may never come", {"ownership": Holds()}, {"message": "111/222"}),
+    ("with nothing approved", {"home": lambda agent_id: None}, {"message": "111/222"}),
+])
+async def test_no_reaction(store, why, options, context):
+    ack = FakeAck()
+    decision_id = await _pipeline(store, ack=ack, **{"mode": "live", "home": HOMES.get, **options})(
+        "s1", _turn(store, context=context))
+    assert ack.calls == [], why
+    delivery = store.delivery(store.decision(decision_id)["routes"][0]["id"])
+    assert delivery is None or delivery["acked_at"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("works", [False, RuntimeError("discord down")])
+async def test_a_reaction_that_fails_leaves_the_decision_whole(store, works):
+    radio, ack = FakeRadio(), FakeAck(works=works)
+    decision_id = await _pipeline(store, mode="live", home=HOMES.get, ack=ack, radio=radio)(
+        "s1", _turn(store, context={"message": "111/222"}))
+    decision = store.decision(decision_id)
+    assert len(ack.calls) == 1 and decision["errors"] == ""
+    delivery = store.delivery(decision["routes"][0]["id"])
+    assert (delivery["status"], delivery["acked_at"]) == ("approved", None)  # it's still delivered
+    assert [d["id"] for d in radio.decisions] == [decision_id]
+
+
 def _waiting_route(store, mode, urgency="today", to="excursion-planner"):
     decision_id = store.start_decision(tap="chat", session_id="s", first_turn_at=NOW, mode=mode, at=NOW)
     signal_id = store.add_signal({"decision_id": decision_id, "at": NOW, "kind": "situation", "gist": "In Tahoe"})
@@ -158,7 +245,7 @@ async def test_resolve_approves_a_today_route_only_when_its_decision_is_live(sto
     delivery = store.delivery(live)
     assert (delivery["status"], delivery["channel"], delivery["deliver_at"]) == ("approved", "weekend-planning", NOW)
     assert store.delivery(shadow) is None
-    # A `next` route is timed, but reaches the recipient's next run instead (part 3).
+    # A `next` route is timed, but rides along on the recipient's next scheduled run instead.
     assert store.route(nxt)["deliver_at"] == NOW + 60 and store.delivery(nxt) is None
 
 
