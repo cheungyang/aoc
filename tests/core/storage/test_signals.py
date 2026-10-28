@@ -457,6 +457,19 @@ def test_stats_have_the_outcomes_and_how_fast_now_routes_came(store):
     assert stats["outcomes"] == {"meal-planner": {"engaged": 1, "ignored": 1}}
     assert stats["first_live_at"] == 110.0
     assert (stats["acks"], stats["posts"]) == ([3.0], [41.0])
+    assert stats["duplicates"] == 0
+
+
+def test_stats_count_a_fact_posted_twice_to_one_agent_within_72_hours(store):
+    first, again, days_later = _approved(store), _approved(store), _approved(store)  # one fact: artifact:costco
+    eric = _approved(store, to_agent="excursion-planner")  # the same fact to another agent
+    quiet = _approved(store)
+    store.finish_delivery(first, "posted", at=1000.0)
+    store.finish_delivery(again, "posted", at=1000.0 + 3600)  # a duplicate
+    store.finish_delivery(days_later, "posted", at=1000.0 + 4 * 86400)  # a new post, days on
+    store.finish_delivery(eric, "posted", at=1100.0)
+    store.finish_delivery(quiet, "silent", at=1200.0)  # posted nothing
+    assert store.stats(since=0.0)["duplicates"] == 1
 
 
 # -- the next touchpoint (live `next` routes) ---------------------------------------

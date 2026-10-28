@@ -150,6 +150,7 @@ def test_stats(store, monkeypatch):
     assert "effect 10 s to decide, run 4.5 s" in text
     assert "Would deliver" not in text  # no delivery time known yet
     assert "Outcomes" not in text and "`now` routes" not in text  # nothing posted: shadow
+    assert "Duplicate posts" not in text
 
 
 def test_stats_show_when_deliveries_would_land(store):
@@ -189,6 +190,7 @@ def test_stats_show_what_came_of_the_posts_and_how_fast_they_came(store):
     assert "  meal-planner: 3 engaged · 1 ignored · 0 declined → 75% engaged · 0.0 declines a week" in lines
     assert ("`now` routes: reaction p95 12 s after the turn (G4 wants ≤ 10 s; 3 so far) · post p95 50 s "
             "(G4 wants ≤ 60 s; 2 so far)") in lines
+    assert "Duplicate posts: 0 (G4 wants 0: the same fact posted to one agent twice within 72 h)" in lines
     # In the first week, a decline is one decline a week: a pilot's first days aren't scaled up.
     assert "→ 33% engaged · 2.0 declines a week" in stats_text(store, now=_local(7, 12), days=30)
 

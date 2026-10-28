@@ -25,6 +25,8 @@ The rules, in order. The first one that settles a route decides:
   active        you've talked to the recipient in the last 10 minutes → absorb
   urgency cap   `now` only for an artifact, a request, or a window opening
                 within 2 h; otherwise `today`
+  no schedule   `next` for a teammate with no scheduled run (its card's
+                `scheduled`) becomes `today`: there's no run for it to ride along on
   worth posting a draw from the kind's acceptance below WORTH_POSTING → absorb.
                 Thompson sampling, per recipient/kind/tag:
                 Beta(2 + engaged, 1 + ignored + declined). A new kind gets
@@ -38,7 +40,8 @@ When a delivery happens (`deliver_at`):
   - `today` happens at the first 30-minute quiet stretch. If the window
     closes first, it moves to the next touchpoint.
   - `next` happens at the recipient's next scheduled run or your next
-    conversation with it.
+    conversation with it. Live, it's delivered only on a scheduled run
+    (delivery.SignalsForMe), hence the no-schedule rule.
 `today` and `next` times are only known later; `resolve_times` fills them in
 as the Board sees them happen.
 
@@ -214,6 +217,8 @@ class Governor:
         urgency, reason = asked, ""
         if urgency == "now" and not self._may_be_now(signal, route, now):
             urgency, reason = "today", "now only for an artifact, a request, or a window opening within 2 h"
+        if urgency == "next" and not card.scheduled:
+            urgency, reason = "today", f"{card.name} has no scheduled run to wait for"
         counts = self.store.acceptance(key)
         sampled = self.rng.betavariate(PRIOR_ENGAGED + counts["engaged"],
                                        PRIOR_DECLINED + counts["ignored"] + counts["declined"])

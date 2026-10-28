@@ -6,11 +6,13 @@
   "tools": {
     "bash": {
       "workspaces/runs": ["execute"],
+      "workspaces/repos": ["execute"],
       "pkm/workspaces/runs": ["execute"]
     },
     "filesystem": {
       "pkm/wiki/software": ["@write"],
-      "workspaces/runs": ["@write"]
+      "workspaces/runs": ["@write"],
+      "workspaces/repos": ["@write"]
     }
   },
   "skills": []

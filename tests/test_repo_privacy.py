@@ -117,6 +117,17 @@ class TestCopiedLines(unittest.TestCase):
         })
         self.assertEqual(personal, {"prefers the rice cooker on busy weekday nights"})
 
+    def test_an_outcome_line_counts_only_by_its_quoted_parts(self):
+        """Code writes it: the fact and your note are yours; the template, ids and offer are the repo's."""
+        personal = self.notes({"agents/main/memory_logs/2026-10-27.md": (
+            '- [15:49:00] [MEMORY] Switchboard #13: "The family flies to Lisbon for all of December" from '
+            'goal-setter to excursion-planner (deliver, next, offer: activity ideas) was right, the user said.\n'
+            '- [15:50:00] [FEEDBACK] Switchboard #14: "Gym at six" from a to b (deliver, now, offer: x) was wrong, '
+            'the user said. Why: wrong timing. They added: "never before my first coffee on a weekday".\n')})
+        self.assertIn("the family flies to lisbon for all of", personal)
+        self.assertIn("never before my first coffee on a weekday", personal)
+        self.assertFalse([run for run in personal if "the user said" in run or "offer" in run])
+
 
 class TestPatterns(unittest.TestCase):
 

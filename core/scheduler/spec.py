@@ -289,10 +289,18 @@ class ScriptSchedule(ScheduleSpec):
 
     kind = KIND_SCRIPT
 
-    def __init__(self, *, steps: List[ScriptStep], scripts_dir: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        steps: List[ScriptStep],
+        scripts_dir: Optional[str] = None,
+        timeout: Optional[int] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.steps = list(steps)
         self.scripts_dir = scripts_dir
+        self.timeout = timeout
 
     @property
     def script(self) -> str:

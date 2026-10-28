@@ -50,7 +50,7 @@ COMMON_KEYS = {"id", "cron", "kind", "enabled", "channel", "thread", "descriptio
 # A label is spoken in the digest ("Marvin has the market scan"), so it stays short.
 MAX_LABEL_CHARS = 60
 PROMPT_KEYS = COMMON_KEYS | {"prompt", "session_policy", "thinking_level"}
-SCRIPT_KEYS = COMMON_KEYS | {"script"}
+SCRIPT_KEYS = COMMON_KEYS | {"script", "timeout"}
 
 
 class ScheduleValidationError(ValueError):
@@ -253,6 +253,11 @@ def build_spec(
             raise ScheduleValidationError(errors)
         return PromptSchedule(prompt=prompt, session_policy=policy, thinking_level=thinking_level, **common)
 
+    timeout = entry.get("timeout")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0):
+        errors.append(f"'timeout' must be a positive integer (seconds), got {timeout!r}")
+        timeout = None
+
     raw_steps = _script_entries(entry.get("script"))
     steps = []
     if raw_steps is None:
@@ -268,7 +273,7 @@ def build_spec(
             steps.append(step)
     if errors:
         raise ScheduleValidationError(errors)
-    return ScriptSchedule(steps=steps, scripts_dir=scripts_dir, **common)
+    return ScriptSchedule(steps=steps, scripts_dir=scripts_dir, timeout=timeout, **common)
 
 
 def validate_entry(agent_id: str, entry: Any, scripts_dir: Optional[str] = None) -> List[str]:

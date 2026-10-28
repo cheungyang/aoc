@@ -18,7 +18,9 @@ Two checks, neither with a list of the user's data to keep up:
    that are mostly numbers, and any run that also appears in `templates/`
    (daily notes start from a template). A run stops at an emoji: emojis mark
    fields, like a task's 📅 date or a row's ❌ status. Addresses are read on
-   every line, frontmatter and headings included.
+   every line, frontmatter and headings included. An outcome line the
+   proactive team writes into a memory log counts only by its quoted parts
+   (the fact, your note): its template, agent ids and offer come from the repo.
 2. Patterns (runs everywhere): emails, phone numbers, card digits, home folders,
    Discord-style ids and dynamic-DNS hosts. Placeholders are allowed: example and
    internal domains, 555 numbers, 0000 digits, one-letter home folders, and ids
@@ -65,6 +67,9 @@ _STREET_TYPES = {"street": "st", "st": "st", "avenue": "ave", "ave": "ave", "roa
                  "ter": "ter", "circle": "cir", "cir": "cir", "parkway": "pkwy", "pkwy": "pkwy",
                  "highway": "hwy", "hwy": "hwy"}
 _ADDRESS = re.compile(r"\b(\d{1,6})\s+((?:[A-Z0-9][\w'-]*\s+){1,4}?)((?i:" + "|".join(_STREET_TYPES) + r"))\b")
+# An outcome line (core/knowledge/memory/outcomes.py), and its quoted parts: the fact, your note.
+_OUTCOME_LINE = re.compile(r"\[(?:MEMORY|FEEDBACK)\] (?:Switchboard #\d+:|The Switchboard missed)")
+_QUOTED = re.compile(r'"([^"\n]*)"')
 
 
 # -- Shared ------------------------------------------------------------------
@@ -165,6 +170,20 @@ def note_files(folder: Path) -> Iterator[Path]:
                 yield Path(dirpath) / name
 
 
+def note_lines(text: str) -> str:
+    """A note's text as check 1 reads it. An outcome line, which the proactive team writes
+    into main's memory log (core/knowledge/memory/outcomes.py), keeps only its quoted
+    parts, each on a line of its own: the fact and your note are yours, but its template,
+    agent ids and offer come from the repo, and the repo's tests spell them out."""
+    out = []
+    for line in text.splitlines():
+        if _OUTCOME_LINE.search(line):
+            out.extend(_QUOTED.findall(line))
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def runs_in(files: Iterator[Path]) -> Set[str]:
     found: Set[str] = set()
     for path in files:
@@ -172,7 +191,7 @@ def runs_in(files: Iterator[Path]) -> Set[str]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for _, line_keys in keys(text):
+        for _, line_keys in keys(note_lines(text)):
             found.update(line_keys)
     return found
 

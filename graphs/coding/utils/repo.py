@@ -5,7 +5,7 @@ and the account it pushes as are both declared there:
 
 ```jsonc
 "repo": {
-  "mode": "self",                     // "self" | "existing" | "create"
+  "mode": "existing",                 // "existing" | "create"
   "slug": "cheungyang/aoc",
   "default_branch": "main",
   "visibility": "private",
@@ -17,6 +17,11 @@ The credential itself is deliberately *not* here: `push_identity` names the
 account, and the token is read from a file outside the repository. That keeps the
 manifest safe to commit and means the token never enters graph state or a
 checkpoint.
+
+Every repository is named by its slug and worked on in a managed clone, this
+one (`cheungyang/aoc`) included: there is no special mode for the checkout the
+bot runs from. Its integration tests run in an external tool, so the graph
+treats it like any other repository.
 """
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -24,13 +29,16 @@ from typing import Any, Dict, Optional, Tuple
 from core.git.identity import PushIdentity, PushIdentityError, load_push_identity
 
 DEFAULT_REPO_DESCRIPTOR: Dict[str, Any] = {
-    "mode": "self",
+    "mode": "existing",
     "slug": None,
     "default_branch": "main",
     "visibility": "private",
     "push_identity": None,
     "push_identity_email": None,
 }
+# Older manifests name this repository `self`. It reads as `existing`: a managed
+# clone of its slug, like any other repository.
+LEGACY_MODES = {"self": "existing"}
 
 
 def get_repo_descriptor(source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -48,7 +56,14 @@ def get_repo_descriptor(source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not descriptor.get("slug") and source.get("target_repo"):
         descriptor["slug"] = source["target_repo"]
 
+    descriptor["mode"] = repo_mode(descriptor)
     return descriptor
+
+
+def repo_mode(descriptor: Dict[str, Any]) -> str:
+    """The descriptor's mode, lower-cased, `existing` when unset, an old `self` as `existing`."""
+    mode = str(descriptor.get("mode") or "existing").lower()
+    return LEGACY_MODES.get(mode, mode)
 
 
 def resolve_push_identity(
@@ -93,9 +108,10 @@ def get_push_identity(state: Optional[Dict[str, Any]]) -> Optional[PushIdentity]
 
 # --- Repository modes (§9) -------------------------------------------------
 #
-# self      the repo this process runs from; worktrees under workspaces/runs/
 # existing  a managed clone at workspaces/repos/<owner>__<repo>, reused
 # create    `gh repo create`, seed, then behave exactly as `existing`
+#
+# This repository too: the bot never works in the checkout it runs from.
 
 REPO_CACHE_DIR = os.path.join("workspaces", "repos")
 
@@ -146,9 +162,6 @@ def resolve_repo_root(descriptor: Dict[str, Any]) -> str:
     pure function and `ensure_repo_available` is the one that does the work.
     Returns "" when the descriptor cannot name a location.
     """
-    mode = (descriptor.get("mode") or "self").lower()
-    if mode == "self":
-        return project_root()
     slug = descriptor.get("slug")
     if not slug or "/" not in str(slug):
         return ""
@@ -165,13 +178,10 @@ async def ensure_repo_available(
     re-cloned, and `create` skips creation when the repository is already
     there. A tick may call this every five minutes.
     """
-    mode = (descriptor.get("mode") or "self").lower()
-
-    if mode == "self":
-        return project_root(), ""
+    mode = repo_mode(descriptor)
 
     if mode not in ("existing", "create"):
-        return "", f"Unknown repo.mode `{mode}`. Use `self`, `existing` or `create`."
+        return "", f"Unknown repo.mode `{mode}`. Use `existing` or `create`."
 
     slug = descriptor.get("slug")
     if not slug or "/" not in str(slug):

@@ -202,6 +202,14 @@ class TestScriptEntries(RegistryCase):
         del entry["channel"]
         self.assertEqual(self.errors(entry), [])
 
+    def test_timeout_optional_and_validated(self):
+        self.assertIsNone(build_spec("a", self.script_entry(), self.scripts).timeout)
+        spec = build_spec("a", self.script_entry(timeout=1800), self.scripts)
+        self.assertEqual(spec.timeout, 1800)
+        for bad in (0, -5, True, "300", 1.5):
+            with self.subTest(bad=bad):
+                self.assertRejected(self.script_entry(timeout=bad), "'timeout' must be a positive integer")
+
 
 class TestIdentityAndLoading(RegistryCase):
     def test_explicit_id(self):

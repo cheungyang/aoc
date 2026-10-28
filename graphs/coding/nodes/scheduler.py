@@ -171,8 +171,8 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         report.append(f"⚠️ {message}")
         return _idle(error_message=message)
 
-    # 4. Resolve the repository the mode asks for: this process's own checkout,
-    #    a managed clone, or a repository created on the spot.
+    # 4. Resolve the repository the mode asks for: a managed clone of its slug,
+    #    or a repository created on the spot. This repository is no exception.
     repo_root, repo_error = await ensure_repo_available(repo_descriptor, push_identity)
     if repo_error:
         report.append(f"⚠️ {repo_error}")

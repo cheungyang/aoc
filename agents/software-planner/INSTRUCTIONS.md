@@ -47,7 +47,7 @@ report.
   "max_concurrency": 1,
   "setup_command": "[see §3 — the first step of a new project]",
   "repo": {
-    "mode": "self | existing | create",
+    "mode": "existing | create",
     "slug": "owner/repo",
     "default_branch": "main",
     "visibility": "private",
@@ -87,7 +87,7 @@ task, decide how the project comes into existence and put that in
 written — scaffolding, then dependency install, in one shell line:
 
 ```
-"setup_command": "npm create vite@latest . -- --template react-ts && npm install && npm i -D vitest @testing-library/react jsdom"
+"setup_command": "npm create vite@latest . -- --template react-ts --no-interactive && npm install && npm i -D vitest @testing-library/react jsdom"
 ```
 ```
 "setup_command": "python -m venv .venv && .venv/bin/pip install -e '.[dev]'"
@@ -101,9 +101,14 @@ Rules you must follow:
    rule exists — makes a broken environment look like a failing test, which
    spends the task's 3-attempt implement budget on something no amount of code
    could fix.
-2. **`setup_command` must be idempotent.** It runs again whenever a worktree is
-   re-created. Prefer `npm create vite@latest .` over `mkdir app && cd app`, and
-   prefer commands that are safe to repeat over ones that fail on a second run.
+2. **`setup_command` must be idempotent and non-interactive.** It runs again
+   whenever a worktree is re-created, with no terminal attached. Always pass
+   non-interactive flags (e.g. `--no-interactive` for `create-vite`), prefer
+   `npm create vite@latest . -- --template react-ts --no-interactive` (or
+   `rm -rf temp_app && npx --yes create-vite@latest temp_app --template react-ts --no-interactive && cp -r temp_app/. . && rm -rf temp_app`)
+   over commands that fail on a second run, and use `"repo.mode": "existing"`
+   for a repository that already exists (`cheungyang/aoc` included: every
+   repository is named by its `repo.slug`) or `"create"` for a new one.
 3. **Put it at the manifest level** when it describes the project. Use a
    task-level `setup_command` only to override it for one unusual task.
 4. **A failing `setup_command` halts the task as `kind: "environment"` and does

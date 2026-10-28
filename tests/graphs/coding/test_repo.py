@@ -42,6 +42,11 @@ class TestRepoDescriptor(unittest.TestCase):
         descriptor = get_repo_descriptor({"target_repo": "owner/legacy"})
         self.assertEqual(descriptor["slug"], "owner/legacy")
 
+    def test_an_old_self_manifest_reads_as_an_existing_repository(self):
+        # This repository is named by its slug like any other: there is no `self` mode.
+        descriptor = get_repo_descriptor({"repo": {"mode": "self", "slug": "cheungyang/aoc"}})
+        self.assertEqual((descriptor["mode"], descriptor["slug"]), ("existing", "cheungyang/aoc"))
+
 
 class TestResolvePushIdentity(unittest.TestCase):
     def setUp(self):
@@ -96,17 +101,25 @@ class TestProjectRoot(unittest.TestCase):
 
 
 class TestRepoModes(unittest.IsolatedAsyncioTestCase):
-    async def test_self_mode_uses_this_checkout(self):
-        root, error = await ensure_repo_available({"mode": "self"})
+    async def test_this_repository_is_a_managed_clone_like_any_other(self):
+        # No `self` mode: an old manifest's `self` is an existing repository named by its slug.
+        cache = os.path.join(tempfile.mkdtemp(), "cheungyang__aoc")
+
+        with patch("graphs.coding.utils.repo.cache_path_for", return_value=cache), \
+             patch("core.git.ops.run_cmd_async",
+                   new=AsyncMock(return_value=(0, "", ""))) as mock_run:
+            root, error = await ensure_repo_available({"mode": "self", "slug": "cheungyang/aoc"})
 
         self.assertEqual(error, "")
-        self.assertEqual(root, project_root())
+        self.assertEqual(root, cache)
+        self.assertNotEqual(root, project_root())
+        self.assertIn("clone", mock_run.await_args.args[0])
 
-    async def test_the_mode_defaults_to_self(self):
+    async def test_the_mode_defaults_to_existing_which_needs_a_slug(self):
         root, error = await ensure_repo_available({})
 
-        self.assertEqual(error, "")
-        self.assertEqual(root, project_root())
+        self.assertEqual(root, "")
+        self.assertIn("slug", error)
 
     async def test_an_unknown_mode_is_an_error_not_a_silent_fallback(self):
         root, error = await ensure_repo_available({"mode": "teleport"})
@@ -229,8 +242,9 @@ class TestRepoModes(unittest.IsolatedAsyncioTestCase):
 
 
 class TestResolveRepoRoot(unittest.TestCase):
-    def test_self_mode_resolves_without_the_network(self):
-        self.assertEqual(resolve_repo_root({"mode": "self"}), project_root())
+    def test_without_a_slug_it_is_nowhere_never_the_bots_own_checkout(self):
+        self.assertEqual(resolve_repo_root({"mode": "self"}), "")
+        self.assertEqual(resolve_repo_root({}), "")
 
     def test_a_managed_clone_resolves_to_its_cache_path(self):
         root = resolve_repo_root({"mode": "existing", "slug": "owner/repo"})

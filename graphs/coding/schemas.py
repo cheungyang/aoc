@@ -105,7 +105,7 @@ class TaskEnvelope(TypedDict, total=False):
 
 class RepoDescriptor(TypedDict, total=False):
     """The repository the graph works against, declared in the manifest."""
-    mode: Literal["self", "existing", "create"]
+    mode: Literal["existing", "create"]   # an older manifest's "self" reads as "existing" (utils/repo.py)
     slug: Optional[str]              # owner/repo on GitHub
     default_branch: str
     visibility: Literal["private", "public"]
@@ -177,9 +177,9 @@ class CodingState(TypedDict, total=False):
     head_sha: str
     verified_sha: str
     poll_until: Optional[float]
-    # Absolute path of the checkout the tick works against. Under repo mode
-    # `self` this is the project root; under `existing`/`create` it is the
-    # cached clone, so worktrees are provisioned from the right repository.
+    # Absolute path of the checkout the tick works against: the managed clone of
+    # repo.slug (this repository's too), so worktrees are provisioned from the
+    # right repository.
     repo_root: str
     # Accumulated across the tick: the lines the runner posts, and the tasks it
     # has already touched, so one tick cannot work the same task twice.

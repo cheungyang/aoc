@@ -54,7 +54,7 @@ class ControlTestCase(unittest.IsolatedAsyncioTestCase):
         manifest = {
             "version": MANIFEST_VERSION,
             "project_name": "proj",
-            "repo": {"mode": "self", "slug": "owner/repo"},
+            "repo": {"mode": "existing", "slug": "owner/repo"},
             "queue": tasks,
         }
         manifest.update(manifest_overrides)

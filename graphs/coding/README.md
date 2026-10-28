@@ -186,7 +186,7 @@ the same verdict.
 | `head_sha` | `str` | Commit `push` sent to the task branch. Set by the scheduler from the task, reset per task. |
 | `verified_sha` | `str` | The `head_sha` verification passed on. Set by the scheduler from the task, reset per task. |
 | `poll_until` | `Optional[float]` | Epoch until which the scheduled tick keeps checking GitHub. |
-| `repo_root` | `str` | Checkout the tick works against: project root (`self`) or the cached clone. |
+| `repo_root` | `str` | Checkout the tick works against: the managed clone of `repo.slug`. |
 | `tick_report` | `List[str]` | Lines the runner posts. Accumulated across the whole tick. |
 | `tick_handled` | `List[str]` | Task ids already touched — one tick cannot work the same task twice. |
 
@@ -241,7 +241,7 @@ One queue entry in the manifest.
 
 | Field | Type | Description |
 |---|---|---|
-| `mode` | `"self" \| "existing" \| "create"` | Where the checkout comes from. |
+| `mode` | `"existing" \| "create"` | Where the checkout comes from. An older manifest's `"self"` reads as `"existing"`. |
 | `slug` | `Optional[str]` | `owner/repo` on GitHub. |
 | `default_branch` | `str` | Base for new worktrees and PRs. |
 | `visibility` | `"private" \| "public"` | Used by `gh repo create`. |
@@ -632,10 +632,11 @@ control plane runs the pipeline, it only makes a task runnable and lets the next
 
 **The git repo — [utils/repo.py](utils/repo.py)** holds the
 actual work. The worktree under `workspaces/runs/<run_id>` carries an attempt only between
-implement and push; from then on the task branch carries it. The checkout itself is resolved from `repo.mode`: `self` (this
-process's own repository, rooted by walking up to the `.git` marker — never `os.getcwd()`),
+implement and push; from then on the task branch carries it. The checkout itself is resolved from `repo.mode`:
 `existing` (a managed clone at `workspaces/repos/<owner>__<repo>`, fetched not re-cloned), or
-`create` (`gh repo create`, then behave as `existing`).
+`create` (`gh repo create`, then behave as `existing`). This repository (`cheungyang/aoc`) is no
+exception: the graph never works in the checkout the bot runs from, and its integration tests run
+in an external tool.
 
 **GitHub** holds the task branch from the **first attempt** and the review state after publish.
 `push.py` writes the branch, and only after the privacy check has passed what it would send —
@@ -674,9 +675,9 @@ on the host it ran on.
 |---|---|
 | [dag.py](utils/dag.py) | Manifest path resolution (one per project under `pkm/wiki/software/<slug>/`), project-slug normalisation, manifest discovery, and topological selection of runnable tasks. |
 | [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, and the `stage_at_or_past` guard every node opens with. |
-| [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L31-L49); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
+| [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L30-L48); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
 | [host.py](utils/host.py) | Which host is ticking: host-tagged lease owners, the local pause file, `CODING_TICK_ENABLED`, and an immediate pkm sync. See [Moving between hosts](#moving-between-hosts-nas--dev-box). |
-| [repo.py](utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection, and the `self`/`existing`/`create` repository modes. |
+| [repo.py](utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection (where the clones live), and the `existing`/`create` repository modes. |
 | [worker.py](utils/worker.py) | The single place the graph reaches `graph-worker`, so the call always carries this graph's binding. `graph_id` is the authority field that decides the worker's tool roster. |
 | [shell.py](utils/shell.py) | One implementation of "run a command in a worktree", returning `(exit_code, stdout, stderr)` and never raising. Shared by setup and verify so they cannot disagree on what a failure means. |
 | [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |

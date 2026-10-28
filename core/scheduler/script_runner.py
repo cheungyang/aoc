@@ -236,7 +236,7 @@ async def execute_command(
 ) -> ScriptResult:
     """Runs one command. stdout is the message; errors never come back silent."""
     timeout_sec = timeout if timeout is not None else default_timeout()
-    kwargs = dict(capture_output=True, text=True, check=True, timeout=timeout_sec)
+    kwargs = dict(stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True, timeout=timeout_sec)
     if cwd is not None:
         kwargs["cwd"] = cwd
     try:

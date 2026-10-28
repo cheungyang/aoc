@@ -1,5 +1,6 @@
 """The Governor (core/proactive/governor.py): what each route may become, and when."""
 import random
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
@@ -162,6 +163,17 @@ class TestVerdicts:
         imminent = _route(to="excursion-planner", offer="activity ideas", urgency="now",
                           window=("2026-10-24", "2026-10-24"))
         assert self.judge(store, signal=situation, route=imminent).urgency == "now"
+
+    def test_next_becomes_today_for_a_teammate_with_no_scheduled_run(self, store):
+        """Live, a `next` route rides along on a scheduled run: without one it would never land."""
+        gap = _signal(kind="request", tags=("travel",))
+        eric_next = _route(to="excursion-planner", offer="activity ideas", urgency="next")
+        assert self.judge(store, signal=gap, route=eric_next).urgency == "next"  # his card has a run
+        team = dict(TEAM, **{"excursion-planner": replace(TEAM["excursion-planner"], scheduled=False)})
+        governor = Governor(store, team, owns=lambda agent_id: True, rng=Draw(0.9), clock=lambda: NOW)
+        verdict = self.judge(store, signal=gap, route=eric_next, governor=governor)
+        assert (verdict.verdict, verdict.urgency, verdict.reason) == (
+            DELIVER, "today", "Eric has no scheduled run to wait for")
 
     def test_worth_posting_draws_from_the_kinds_acceptance(self, store):
         low = self.judge(store, governor=_governor(store, draw=WORTH_POSTING - 0.01))

@@ -169,6 +169,15 @@ class TestExecution(unittest.IsolatedAsyncioTestCase):
         res = await sr.run_step(ScriptStep("../x.py"))
         self.assertFalse(res.ok)
 
+    async def test_execute_command_closes_stdin(self):
+        res = await sr.execute_command(
+            [sys.executable, "-c", "import sys; print(sys.stdin.isatty(), repr(sys.stdin.read()))"],
+            "stdin_check",
+            timeout=2,
+        )
+        self.assertTrue(res.ok)
+        self.assertEqual(res.output, "False ''")
+
 
 if __name__ == "__main__":
     unittest.main()

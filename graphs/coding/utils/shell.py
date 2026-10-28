@@ -7,6 +7,7 @@ distinction the whole retry budget rests on.
 """
 import asyncio
 import os
+import signal
 from typing import Tuple
 
 # Ten minutes. Long enough for a cold dependency install, which is the slowest
@@ -26,13 +27,19 @@ async def run_in_worktree(
     traceback here would abort the tick instead of halting one task.
     """
     proc = None
+    env = os.environ.copy()
+    env.setdefault("CI", "true")
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    env.setdefault("npm_config_yes", "true")
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=os.environ.copy()
+            env=env,
+            start_new_session=True,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
@@ -45,10 +52,14 @@ async def run_in_worktree(
     except asyncio.TimeoutError:
         try:
             if proc is not None:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    proc.kill()
                 await proc.wait()
         except Exception:
             pass
         return 124, "", f"Timed out after {timeout:.0f}s: {command}"
     except Exception as e:
         return 1, "", f"Could not run: {e}"
+

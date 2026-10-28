@@ -31,7 +31,17 @@ from typing import Any, Dict, List, Optional
 
 from core.knowledge.memory.outcomes import REASONS, missed_line, record_outcome, route_line
 from core.runtime.commands.base import ChannelCommand, TypedContext
-from core.storage.signals import APPROVED, DECLINED, ENGAGED, HANDED, IGNORED, OUTCOMES, RUNNING, SignalStore
+from core.storage.signals import (
+    APPROVED,
+    DECLINED,
+    DUPLICATE_S,
+    ENGAGED,
+    HANDED,
+    IGNORED,
+    OUTCOMES,
+    RUNNING,
+    SignalStore,
+)
 from core.util.local_time import get_local_timezone
 
 RECENT = 10
@@ -243,6 +253,9 @@ def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STAT
     weeks = max(1.0, (now - (stats["first_live_at"] or now)) / (7 * 86400))
     lines += outcome_lines(stats["outcomes"], weeks)
     lines += timing_lines(stats["acks"], stats["posts"])
+    if stats["first_live_at"] is not None:
+        lines.append(f"Duplicate posts: {stats['duplicates']} (G4 wants 0: the same fact posted to one agent "
+                     f"twice within {DUPLICATE_S // 3600} h)")
     taps = []
     for tap, rows in sorted(stats["taps"].items()):
         delays = [delay for delay, _ in rows if delay is not None]

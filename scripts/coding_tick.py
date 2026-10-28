@@ -62,7 +62,9 @@ def has_work(ctx) -> bool:
         os.path.join(project_root, SOFTWARE_ROOT)
     ):
         try:
-            queue = manifest_store.load_manifest(manifest_path).get("queue") or []
+            manifest = manifest_store.load_manifest(manifest_path)
+            queue = manifest.get("queue") or []
+            max_concurrency = int(manifest.get("max_concurrency") or 1)
         except Exception:
             return True
         for task in queue:
@@ -70,6 +72,11 @@ def has_work(ctx) -> bool:
                 task, now
             ):
                 return True
+        in_flight = [
+            t for t in queue if manifest_store.lease_is_active(t, now)
+        ]
+        if len(in_flight) >= max_concurrency:
+            continue
         try:
             task, _route = select_task(queue, handled=[], now=now)
         except Exception:

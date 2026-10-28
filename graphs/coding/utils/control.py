@@ -21,7 +21,6 @@ from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.repo import (
     get_push_identity,
     get_repo_descriptor,
-    project_root,
     resolve_repo_root,
 )
 from core.git import ops as git_ops
@@ -190,20 +189,21 @@ async def reset(manifest_path: str, task_id: str, dry_run: bool = False) -> str:
     task = _require_task(manifest, task_id)
 
     descriptor = get_repo_descriptor(manifest)
-    # The same root the scheduler provisioned into. Resolving from the cwd
-    # instead made a reset run from outside the project root quietly clean up
-    # nothing and still report success.
-    repo_root = resolve_repo_root(descriptor) or project_root()
+    # The same root the scheduler provisioned into: the managed clone of repo.slug.
+    # Resolving from the cwd instead made a reset run from outside the project root
+    # quietly clean up nothing and still report success. Without a slug nothing was
+    # provisioned, so there is no worktree or local branch to clean up.
+    repo_root = resolve_repo_root(descriptor)
 
     branch = task.get("branch_name") or ""
     pr_url = task.get("pr_url") or ""
     run_id = task.get("run_id") or ""
-    workspace_path = os.path.join(repo_root, "workspaces", "runs", run_id) if run_id else ""
+    workspace_path = os.path.join(repo_root, "workspaces", "runs", run_id) if run_id and repo_root else ""
 
     planned = [f"clear the state of `{task_id}`"]
     if pr_url:
         planned.append(f"close {pr_url}")
-    if branch:
+    if branch and repo_root:
         planned.append(f"delete branch `{branch}` (local and remote)")
     if workspace_path:
         planned.append(f"remove the worktree at `{workspace_path}`")
@@ -213,7 +213,7 @@ async def reset(manifest_path: str, task_id: str, dry_run: bool = False) -> str:
 
     push_identity = get_push_identity(manifest)
     target_repo = descriptor.get("slug")
-    cwd = workspace_path if workspace_path and os.path.exists(workspace_path) else repo_root
+    cwd = workspace_path if workspace_path and os.path.exists(workspace_path) else (repo_root or ".")
 
     notes: List[str] = []
 
@@ -228,12 +228,14 @@ async def reset(manifest_path: str, task_id: str, dry_run: bool = False) -> str:
         ok, message = await git_ops.teardown_worktree(repo_root, workspace_path)
         notes.append("removed the worktree" if ok else f"could not remove the worktree ({message})")
 
-    if branch:
+    if branch and repo_root:
         ok, message = await git_ops.delete_branch(
             repo_path=repo_root, branch_name=branch, target_repo=target_repo,
             push_identity=push_identity
         )
         notes.append("deleted the branch" if ok else f"could not delete the branch ({message})")
+    elif branch:
+        notes.append(f"left branch `{branch}`: the manifest names no repo.slug")
 
     # The manifest is cleared last and unconditionally: a task left pointing at
     # a PR that is already closed is worse than one whose cleanup half-failed.
@@ -305,7 +307,9 @@ def _worktree_path(manifest: Dict[str, Any], task: Dict[str, Any]) -> str:
     run_id = task.get("run_id") or ""
     if not run_id:
         return ""
-    repo_root = resolve_repo_root(get_repo_descriptor(manifest)) or project_root()
+    repo_root = resolve_repo_root(get_repo_descriptor(manifest))
+    if not repo_root:
+        return ""
     return os.path.join(repo_root, "workspaces", "runs", run_id)
 
 

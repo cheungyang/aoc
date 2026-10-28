@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from graphs.coding.utils import manifest as manifest_store
 
@@ -26,7 +27,12 @@ def _task(**overrides):
 
 
 class ManifestFixture(unittest.IsolatedAsyncioTestCase):
-    """Every node writes through the manifest, so each test gets its own."""
+    """Every node writes through the manifest, so each test gets its own.
+
+    Every repository is a managed clone of its slug (graphs/coding/utils/repo.py):
+    a temp directory stands in for it, so no test clones anything. A test that
+    needs another answer patches `ensure_repo_available` itself.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -34,6 +40,12 @@ class ManifestFixture(unittest.IsolatedAsyncioTestCase):
         self.manifest_path = os.path.join(self.tmp.name, "build_request.json")
         self.workspace = os.path.join(self.tmp.name, "ws")
         os.makedirs(self.workspace, exist_ok=True)
+        self.repo_root = os.path.join(self.tmp.name, "clone")
+        os.makedirs(self.repo_root, exist_ok=True)
+        clone = patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                      AsyncMock(return_value=(self.repo_root, "")))
+        clone.start()
+        self.addCleanup(clone.stop)
 
     def write_manifest(self, tasks, **manifest_fields):
         manifest = {"version": "3.0", "project_name": "demo", "queue": tasks}

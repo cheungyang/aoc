@@ -148,6 +148,7 @@ Rules are checked in order. The first that settles a route decides:
 | Signal came from a proactive turn (`hops ≥ 1`) | absorb |
 | You talked to the recipient in the last 10 minutes | absorb |
 | `now` that isn't an artifact, a request or a window within 2 h | downgraded to `today` |
+| `next` to a teammate with no scheduled run that posts (its card's `scheduled`) | made `today` |
 | Acceptance draw below 0.3 | absorb |
 
 The acceptance draw is Thompson sampling over `Beta(2 + engaged, 1 + ignored + declined)`, per recipient/kind/tag:
@@ -157,7 +158,7 @@ The acceptance draw is Thompson sampling over `Beta(2 + engaged, 1 + ignored + d
 **When a route would be delivered** (`deliver_at`):
 - `now`: at once.
 - `today`: at your first 30-minute quiet stretch. If its window closes first, it moves to the next touchpoint.
-- `next`: at the recipient's next scheduled run, or your next conversation with it. Live, it's delivered only on a scheduled run ([the next touchpoint](#the-next-touchpoint)).
+- `next`: at the recipient's next scheduled run, or your next conversation with it. Live, it's delivered only on a scheduled run ([the next touchpoint](#the-next-touchpoint)), which is why a teammate without one (Ted, since `mode-a-queue` went) gets `today` instead.
 
 `resolve_times` fills these in each minute (the service's sweep).
 
@@ -219,7 +220,7 @@ Each proactive post gets one outcome, decided by code with no model ([outcomes.p
 | The line | One line in main's memory log per outcome, for tonight's dream: engaged is a precedent (`[MEMORY]`), declined or ignored a correction (`[FEEDBACK]`). |
 | Where it runs | The service's sweep, each minute, after `resolve`; and a reaction listener after team radio's, so a ✅/❌ on a radio line stays a label. The listener lets the reaction go on: a ✅ on the post still finishes its channel's inbox row. A reaction first settles the post from the ledger, so the sweep's timing changes nothing. |
 
-`!signals <id>` shows how each route's delivery went and what came of it (`posted +31 s · engaged`); `!signals why <link>` finds the decision behind a post; and `!signals stats` has G4's evidence: engaged / ignored / declined per agent (G4 wants ≥ 50% engaged, and ≤ 1 decline per agent a week, counted from the first live decision), and a `now` route's reaction and post p95 after the turn it came from (≤ 10 s, ≤ 60 s).
+`!signals <id>` shows how each route's delivery went and what came of it (`posted +31 s · engaged`); `!signals why <link>` finds the decision behind a post; and `!signals stats` has G4's evidence: engaged / ignored / declined per agent (G4 wants ≥ 50% engaged, and ≤ 1 decline per agent a week, counted from the first live decision), and a `now` route's reaction and post p95 after the turn it came from (≤ 10 s, ≤ 60 s), and duplicate posts: the same fact posted to one agent twice within 72 h (G4 wants none).
 
 ### Live Context
 
@@ -238,6 +239,34 @@ With the switch on, an agent also sees what's true right now: a `LIVE_CONTEXT` s
 
 > [!NOTE]
 > The dream reading the day's signals, to promote the lasting situations into topics (review record §6.4), isn't part of this. A dream doesn't see Live Context either: it records no memory, so it gets no block.
+
+### Pilots and the dev check
+
+The switch turns everything on at once. Three flows are the pilots G4 judges:
+
+| Pilot | Trigger | Route | What you see |
+|---|---|---|---|
+| 🧾 → 🧑‍🍳 receipts → Ramsay | Receipt Processor saves a grocery receipt (`ledger_append`, a trigger) | `now`, "update the kitchen inventory" | 🧑‍🍳 on your receipt within seconds, then Ramsay's suggestion in #meal-planning |
+| 🌼 → 🏕️ situations → Eric | You tell Daisy about a trip or visitors | `today`, "activity ideas" | Eric's idea in #weekend-planning after your first 30-minute quiet stretch, and the trip in his Live Context |
+| 🌿 → 🔬 knowledge gaps → Ted | William names a gap in his 07:00 summary | `today` (Ted has no scheduled run), "syllabi" | Ted offers a syllabus in #topic-research; say yes and he starts Mode A |
+
+**Dev check, before G3.** Run a dev instance with `PROACTIVE_DELIVERY=1` in its `.env`, claiming the pilots' agents and main (team radio posts from whoever holds main):
+
+```bash
+python main.py --dev --agents main,receipt-processor,meal-planner,day-planner,excursion-planner,wiki-gardener,topic-researcher
+```
+
+| # | Do | Expect |
+|---|---|---|
+| P1 | Post a grocery receipt in #receipts | 🧑‍🍳 on it within ~10 s; Ramsay's post in #meal-planning within ~60 s; a radio line "delivering now" |
+| P2 | Answer Ramsay: a poll vote, a few words, or ✅ | `!signals <id>` shows `posted +… · engaged` within a minute |
+| P3 | Tell Daisy "we're in Tahoe Fri–Sun with the kids" | A `today` radio line for Eric, his post after 30 quiet minutes; ask Eric about the weekend and he knows (Live Context) |
+| P4 | Ask Ted for a syllabus on something new | Mode A: an outline, and Chapter 1 saved under `pkm/wiki/topics/pending/` |
+| P5 | `!signals stats` | Outcomes per agent, and the reaction and post times |
+
+Each host keeps its own Board, so the dev check never touches prod's labels or acceptance.
+
+**Going live (G3):** set `PROACTIVE_DELIVERY=1` in prod's environment and restart. **Rollback:** unset it and restart: nothing more is delivered, and approved rows wait or expire.
 
 ## Team radio and `!signals`
 

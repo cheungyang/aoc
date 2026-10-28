@@ -17,6 +17,10 @@ channel of its own. These don't:
   - the Concierge and the graph workers (`channels: ["*"]`);
   - stateless agents;
   - script-executor.
+
+A card also says whether the agent has a scheduled run that posts in a
+channel (`scheduled`): a live `next` route rides along on one (delivery.py), so
+the Governor makes a `next` route to an agent without one `today` instead.
 """
 import re
 from dataclasses import dataclass
@@ -46,6 +50,7 @@ class PeerCard:
     offers: Tuple[str, ...]
     topics: Tuple[str, ...]      # memory_topics: the tags it reads, and so is subscribed to
     derived: bool                # no `proactivity` block: any offer is accepted
+    scheduled: bool = True       # has a scheduled run a live `next` route can ride along on
 
     def offer_named(self, offer: str) -> Optional[str]:
         """The card's offer that `offer` names, or None when it names none.
@@ -79,6 +84,16 @@ class PeerCard:
         return "\n".join(lines)
 
 
+def has_scheduled_run(config: Dict[str, Any]) -> bool:
+    """Whether the agent has an enabled prompt schedule that posts in a channel: a run a
+    live `next` route can ride along on (delivery.SignalsForMe)."""
+    for entry in config.get("schedules") or []:
+        if (isinstance(entry, dict) and entry.get("kind") == "prompt" and entry.get("channel")
+                and str(entry.get("enabled", True)).strip().lower() not in ("false", "0", "no")):
+            return True
+    return False
+
+
 def card_for(agent_id: str, config: Dict[str, Any], loader: Any) -> Optional[PeerCard]:
     """`agent_id`'s card, or None for an agent that has none (module docstring)."""
     channels = [str(c).lower() for c in (config.get("channels") or [])]
@@ -97,6 +112,7 @@ def card_for(agent_id: str, config: Dict[str, Any], loader: Any) -> Optional[Pee
         offers=offers,
         topics=tuple(config.get("memory_topics") or ()),
         derived=not offers,
+        scheduled=has_scheduled_run(config),
     )
 
 

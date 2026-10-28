@@ -736,6 +736,22 @@ class TestScriptDispatch(RunnerCase):
             self.assertFalse(await runner.run_schedule(spec))
         run.assert_not_called()
 
+    async def test_forwards_schedule_timeout_to_run_step(self):
+        step = ScriptStep("a.py")
+        spec = ScriptSchedule(
+            steps=[step],
+            timeout=1800,
+            schedule_id="script-executor:s",
+            agent_id="script-executor",
+            cron="* * * * *",
+            channel="test-channel",
+        )
+        runner = self.make_runner()
+        with patch("core.scheduler.script_runner.call_has_work", return_value=WorkDecision(True, "ready")), \
+             patch.object(runner_mod, "run_step", AsyncMock(return_value=ScriptResult("a.py", True, ""))) as run:
+            self.assertTrue(await runner.run_schedule(spec))
+        run.assert_awaited_once_with(step, scripts_dir=None, timeout=1800)
+
 
 class TestResetConversation(unittest.TestCase):
     def test_deletes_checkpoints_only(self):

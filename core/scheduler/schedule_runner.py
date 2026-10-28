@@ -514,7 +514,7 @@ class ScheduleRunner:
     async def _run_script(self, spec: ScriptSchedule, ctx: ScheduleContext, steps) -> bool:
         results = []
         for step in steps:
-            results.append(await run_step(step, scripts_dir=spec.scripts_dir))
+            results.append(await run_step(step, scripts_dir=spec.scripts_dir, timeout=spec.timeout))
 
         output = "\n".join(r.output for r in results if r.output and r.output.strip())
         # Nothing to say: post nothing. An empty tick must not surface at all.

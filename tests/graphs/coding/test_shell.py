@@ -80,6 +80,35 @@ class TestRunInWorktree(unittest.IsolatedAsyncioTestCase):
         enough, and a timeout tells the worker nothing it can act on."""
         self.assertGreaterEqual(DEFAULT_TIMEOUT_SECONDS, 600.0)
 
+    async def test_stdin_is_closed_so_interactive_prompts_never_hang(self):
+        """Docker containers run with a pseudo-TTY on fd 0 (`tty: true`); a
+        scaffolder like `create-vite` that checks `stdin.isTTY` or reads stdin
+        must see EOF immediately instead of blocking the whole tick."""
+        code, out, _ = await run_in_worktree(
+            f"{sys.executable} -c 'import sys; print(sys.stdin.isatty(), repr(sys.stdin.read()))'",
+            cwd=self.tmp.name,
+            timeout=2.0,
+        )
+
+        self.assertEqual(code, 0)
+        self.assertIn("False ''", out)
+
+    async def test_timeout_kills_the_whole_process_group(self):
+        """`create_subprocess_shell` spawns `/bin/sh -c ...`; killing only the
+        shell leaves grand-children (`npx`, `npm`) alive and holding the pipes."""
+        pid_file = os.path.join(self.tmp.name, "child.pid")
+        cmd = (
+            f'"{sys.executable}" -c '
+            '\'import os, sys, time; open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(30)\' '
+            f'"{pid_file}" && true'
+        )
+        code, _, _ = await run_in_worktree(cmd, cwd=self.tmp.name, timeout=0.3)
+        self.assertEqual(code, 124)
+        self.assertTrue(os.path.exists(pid_file))
+        child_pid = int(open(pid_file).read().strip())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child_pid, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

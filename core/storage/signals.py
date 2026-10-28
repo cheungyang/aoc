@@ -53,6 +53,9 @@ EXPIRED = "expired; not posted late"
 # Tags whose facts reach only the agents that read them (D10, decided at G3): the
 # Governor's routes (core/proactive/governor.py) and Live Context's lines (live_situations).
 SENSITIVE_TAGS = frozenset({"health", "finance"})
+# Two posts of the same fact (dedupe key) to one agent this close together are a
+# duplicate: the Governor's dedupe window (core/proactive/governor.py). G4 wants none.
+DUPLICATE_S = 72 * 3600
 # Columns added to a table after it shipped, with their definitions. signals.sql
 # makes a missing table whole, but never changes one a database already holds.
 _ADDED_COLUMNS = (
@@ -558,7 +561,8 @@ class SignalStore(Store):
         labels, tokens, and each tap's delay (its first turn to the decision's start) and run time.
         For G4: each recipient's outcomes, when the first live decision was, and for each live
         `now` route, how long after its source turn ended the recipient's emoji went on your
-        message (`acks`), and its post landed (`posts`)."""
+        message (`acks`), and its post landed (`posts`); and the posts of a fact one agent
+        already had posted within DUPLICATE_S (`duplicates`: G4 wants none)."""
         decisions = self.query("SELECT count(*), sum(tokens_in), sum(tokens_out), min(at) FROM decisions WHERE at >= ?",
                                [since])[0]
         verdicts = {r[0]: r[1] for r in self.query(
@@ -581,6 +585,16 @@ class SignalStore(Store):
             "WHERE t.decision_id = r.decision_id AND t.agent_id = s.source_agent) AS turn_at "
             "FROM deliveries dl JOIN routes r ON r.id = dl.route_id JOIN signals s ON s.id = r.signal_id "
             "JOIN decisions d ON d.id = r.decision_id WHERE d.at >= ? AND r.urgency = 'now'", [since])
+        # A post of a fact that one agent already had posted within DUPLICATE_S: each pair counts once.
+        duplicates = self.query(
+            "SELECT count(*) FROM deliveries a JOIN routes ra ON ra.id = a.route_id "
+            "JOIN signals sa ON sa.id = ra.signal_id JOIN decisions da ON da.id = ra.decision_id "
+            "WHERE da.at >= ? AND a.status = 'posted' AND sa.dedupe_key != '' AND EXISTS ("
+            "SELECT 1 FROM deliveries b JOIN routes rb ON rb.id = b.route_id JOIN signals sb ON sb.id = rb.signal_id "
+            "WHERE b.status = 'posted' AND b.route_id != a.route_id AND rb.to_agent = ra.to_agent "
+            "AND sb.dedupe_key = sa.dedupe_key AND a.finished_at - b.finished_at < ? "
+            "AND (b.finished_at < a.finished_at OR (b.finished_at = a.finished_at AND b.route_id < a.route_id)))",
+            [since, DUPLICATE_S])[0][0]
         return {
             "decisions": decisions[0] or 0,
             "tokens_in": decisions[1] or 0,
@@ -596,4 +610,5 @@ class SignalStore(Store):
                      if r["acked_at"] is not None and r["turn_at"] is not None],
             "posts": [r["finished_at"] - r["turn_at"] for r in timings
                       if r["status"] == POSTED and r["finished_at"] is not None and r["turn_at"] is not None],
+            "duplicates": duplicates,
         }

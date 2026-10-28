@@ -64,6 +64,18 @@ def test_a_derived_card_takes_any_offer():
     assert "about: Card credits and award travel." in card.text()
 
 
+@pytest.mark.parametrize("schedules, scheduled", [
+    ([{"kind": "prompt", "channel": "meal-planning", "cron": "0 21 * * *"}], True),
+    ([{"kind": "prompt", "channel": "meal-planning", "enabled": "false"}], False),
+    ([{"kind": "prompt"}], False),
+    ([{"kind": "script", "channel": "meal-planning"}], False),
+    ([], False),
+], ids=["a prompt run that posts", "disabled", "no channel", "a script", "none"])
+def test_a_card_says_whether_a_next_route_has_a_run_to_ride_along_on(schedules, scheduled):
+    card = card_for("meal-planner", dict(RAMSAY, schedules=schedules), FakeLoader(CONFIGS))
+    assert card.scheduled is scheduled
+
+
 def test_an_offer_is_named_whatever_the_filler_words():
     card = card_for("meal-planner", RAMSAY, FakeLoader(CONFIGS))
     assert card.offer_named("update kitchen inventory") == "update the kitchen inventory"

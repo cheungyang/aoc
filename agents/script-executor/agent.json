@@ -46,7 +46,8 @@
       "kind": "script",
       "channel": "software-dev",
       "cron": "*/5 * * * *",
-      "script": "coding_tick.py"
+      "script": "coding_tick.py",
+      "timeout": 1800
     },
     {
       "id": "job-reaper",

@@ -453,6 +453,21 @@ class TestHasWork(TickScriptTestCase):
         }])
         self.assertTrue(self.has_work([self.manifest_path]))
 
+    def test_active_lease_at_max_concurrency_is_not_work(self):
+        import time
+        self.write([
+            {
+                "task_id": "T1", "status": "active", "stage": "implementing",
+                "dependencies": [], "lease_owner": "host:tick_live",
+                "lease_expires_at": time.time() + 1800.0
+            },
+            {
+                "task_id": "T2", "status": "queued", "stage": "queued",
+                "dependencies": [], "verification_command": "pytest -q"
+            },
+        ])
+        self.assertFalse(self.has_work([self.manifest_path]))
+
     def test_unreadable_manifest_is_work_so_the_tick_reports_it(self):
         with open(self.manifest_path, "w", encoding="utf-8") as f:
             f.write("{not json")
