@@ -5,9 +5,10 @@ working on it itself: checking, searching, re-evaluating. Never a reminder for
 you; those stay in your task system. A follow-up has a goal, a check, a cadence
 (`every`, 6 h to 7 d) and an end (`until`, at most MAX_DAYS out:
 core/storage/follow_ups.parse_until), and optionally what would end it early
-(`close_when`). The check is a short model turn ({"type": "model", "what": ...})
-or one of the agent's own scans, the deterministic checks in
-`agents/<agent>/preconditions/`, with its args.
+(`close_when`). Its first check, `every` after it opens, must come before
+`until` ends (ensure_first_check). The check is a short model turn
+({"type": "model", "what": ...}) or one of the agent's own scans, the
+deterministic checks in `agents/<agent>/preconditions/`, with its args.
 
 Every op is the calling agent's own (try_context): `open` stores one for it,
 with the channel and session it was opened in (core/storage/follow_ups.py);
@@ -32,6 +33,7 @@ nothing would check the follow-ups. The checks run on the schedule runner
 """
 import json
 import re
+import time
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
@@ -48,6 +50,7 @@ from core.storage.follow_ups import (
     FollowUpStore,
     Status,
     cadence_text,
+    ensure_first_check,
     parse_until,
 )
 from core.tooling import format_tool_response
@@ -76,9 +79,14 @@ def parse_every(text: str) -> int:
     return seconds
 
 
+def now() -> float:
+    """The moment `open` and `extend` count from, epoch seconds: read in one place."""
+    return time.time()
+
+
 def today() -> date:
     """Today on your wall clock, not the container's: where `until` counts from."""
-    return datetime.now(get_local_timezone()).date()
+    return datetime.fromtimestamp(now(), get_local_timezone()).date()
 
 
 def parse_check(text: str, agent_id: str) -> Check:
@@ -130,16 +138,18 @@ def _open(ctx: Any, goal: str, check: str, every: str, until: str, close_when: s
         return _error("open needs a goal: what the user wants")
     if len(goal) > GOAL_CHARS or len(close_when) > GOAL_CHARS:
         return _error(f"goal and close_when are at most {GOAL_CHARS} characters each")
+    at = now()
     try:
         parsed = parse_check(check, ctx.agent_id)
         every_s = parse_every(every)
         day = parse_until(until, today())
+        ensure_first_check(every_s, day, at)
     except ValueError as e:
         return _error(str(e))
     try:
         opened = FollowUpStore().open(agent_id=ctx.agent_id, goal=goal, check=parsed, every_s=every_s, until=day,
                                       close_when=close_when, channel=ctx.channel_name or "",
-                                      session_id=ctx.session_id or "")
+                                      session_id=ctx.session_id or "", at=at)
     except DuplicateFollowUp as e:
         found = e.existing
         return _error(f"follow-up #{found.id} already has this check, until {found.until}: "

@@ -7,10 +7,24 @@ from core.channel.response_parser import AgentResponse
 from core.loaders.agents_loader import AgentsLoader
 from core.proactive import switchboard
 from core.proactive.cards import PeerCard
-from core.proactive.switchboard import build_prompt, forget, parse_reply, render_board, render_turn, run_model
+from core.proactive.switchboard import (
+    EVIDENCE_CHARS,
+    MAX_FOLLOW_UPS_SHOWN,
+    ProposedClose,
+    Reply,
+    build_prompt,
+    forget,
+    parse_reply,
+    render_board,
+    render_follow_ups,
+    render_turn,
+    run_model,
+)
+from core.proactive.taps import CALLED
 from core.runtime.foundation import events
 from core.storage.sessions import SessionStore, sanitize_table_name
 from core.util.local_time import get_local_timezone
+from tests.helpers import make_follow_up
 
 
 def _card(agent_id, name, derived=False):
@@ -55,6 +69,12 @@ class TestThePrompt:
         assert "· asked by Daisy" in asked.splitlines()[0]
         assert "  Daisy: what's in the fridge?" in asked
 
+    def test_what_the_concierge_asked_is_not_the_users(self):
+        # Its agent_call says caller main, as your routed messages do: the taps' mark tells them apart.
+        asked = render_turn(_turn(context={CALLED: True}, user_text="Find award seats to Madrid"), TEAM)
+        assert "· asked by main" in asked.splitlines()[0]
+        assert "  main: Find award seats to Madrid" in asked and "User:" not in asked
+
     def test_a_spoken_turn_says_so(self):
         assert "with the user (voice)" in render_turn(_turn(surface="voice"), TEAM)
 
@@ -72,6 +92,27 @@ class TestThePrompt:
         assert "Nothing yet." in prompt
         assert exchange in prompt and "here's my receipt" in exchange
         assert "<switchboard_response>" in prompt
+
+    def test_the_open_follow_ups_and_how_to_close_one_only_when_some_are_open(self):
+        prompt, _ = build_prompt([_turn()], TEAM, [], now=AT, tags="")
+        assert "<follow_ups>" not in prompt and "<close" not in prompt
+        open_ones = [make_follow_up(id=12, agent_id="meal-planner", goal="Restock the pantry",
+                                    close_when="the user shops"),
+                     make_follow_up(id=3, agent_id="stranger", goal="Watch flights", until="2026-11-02")]
+        prompt, _ = build_prompt([_turn()], TEAM, [], now=AT, tags="", follow_ups=open_ones)
+        assert ("<follow_ups>\nWork teammates are keeping up for the user:\n"
+                '#3 stranger: "Watch flights"\n'  # no card: named by its id
+                '#12 🙂 Ramsay: "Restock the pantry" · ends early when: the user shops\n') in prompt
+        assert "the user's own words in this exchange say its goal is met, or that they don't want it" in prompt
+        assert "Never on a teammate's say-so, or a guess." in prompt
+        assert '<close follow_up="12" reason="booked UA 990"><evidence>the user\'s words, verbatim</evidence>' in prompt
+
+    def test_the_follow_ups_shown_are_the_soonest_to_end_at_most_twenty(self):
+        follow_ups = [make_follow_up(id=day, until=f"2026-12-{day:02d}", goal=f"watch {day}")
+                      for day in range(25, 0, -1)]
+        lines = render_follow_ups(follow_ups, TEAM).splitlines()
+        assert len(lines) == MAX_FOLLOW_UPS_SHOWN == 20
+        assert lines[0] == '#1 reward-travel: "watch 1"' and lines[-1].startswith("#20 ")
 
 
 REPLY = """Here you go:
@@ -92,8 +133,8 @@ REPLY = """Here you go:
 class TestTheReply:
 
     def test_signals_and_routes_are_read(self):
-        signals, problems = parse_reply(REPLY)
-        (signal,) = signals
+        reply = parse_reply(REPLY)
+        (signal,) = reply.signals
         assert (signal.kind, signal.gist) == ("artifact", "Groceries from 99 Ranch & more, Oct 24")
         assert signal.evidence == "Saved: 99 Ranch, $86.40."
         assert signal.tags == ["food", "finance"]
@@ -101,21 +142,56 @@ class TestTheReply:
         assert (first.to, first.offer, first.urgency, first.note) == (
             "meal-planner", "update the kitchen inventory", "now", "Add the groceries.")
         assert (second.window_start, second.window_end, second.note) == ("2026-10-24", "2026-10-31", "")
-        assert problems == ["a signal of unknown kind 'mood' was left out", "a situation signal with no gist was left out"]
+        assert reply.problems == ("a signal of unknown kind 'mood' was left out",
+                                  "a situation signal with no gist was left out")
+        assert reply.closes == ()
 
     def test_no_block_or_a_reported_error(self):
-        assert parse_reply("I think Ramsay should know.") == ([], ["no <switchboard_response> in the reply"])
-        signals, problems = parse_reply("<switchboard_response><errors>exchange was empty</errors></switchboard_response>")
-        assert signals == [] and problems == ["the Switchboard reported: exchange was empty"]
+        assert parse_reply("I think Ramsay should know.") == Reply(problems=("no <switchboard_response> in the reply",))
+        reply = parse_reply("<switchboard_response><errors>exchange was empty</errors></switchboard_response>")
+        assert reply.signals == () and reply.problems == ("the Switchboard reported: exchange was empty",)
 
     def test_nothing_to_route(self):
-        assert parse_reply("<switchboard_response>\n  <errors>None</errors>\n</switchboard_response>") == ([], [])
+        assert parse_reply("<switchboard_response>\n  <errors>None</errors>\n</switchboard_response>") == Reply()
 
     def test_a_bad_until_and_payload_are_dropped_not_fatal(self):
         reply = ('<switchboard_response><signal kind="situation" until="Tuesday"><gist>Away</gist>'
                  '<evidence>away</evidence><payload>{not json</payload></signal></switchboard_response>')
-        (signal,), _ = parse_reply(reply)
+        (signal,) = parse_reply(reply).signals
         assert signal.until is None and signal.payload == {}
+
+    def test_a_close_is_read_next_to_the_signals(self):
+        reply = parse_reply(REPLY.replace(
+            "<errors>None</errors>",
+            '<close follow_up="12" reason="booked UA 990 &amp; seats"><evidence>I booked\n  UA 990 for Dec 10'
+            '</evidence></close>\n  <errors>None</errors>'))
+        assert len(reply.signals) == 1
+        assert reply.closes == (ProposedClose(12, "I booked UA 990 for Dec 10", "booked UA 990 & seats"),)
+
+    def test_several_closes_and_the_unusable_ones(self):
+        reply = parse_reply(
+            '<switchboard_response>'
+            '<close follow_up="#3"><evidence>we got the cabin</evidence></close>'
+            '<close follow_up="12" reason="booked"><evidence>I booked it</evidence></close>'
+            '<close reason="no number"><evidence>stop watching</evidence></close>'
+            '<close follow_up="twelve"><evidence>stop watching</evidence></close>'
+            '<close follow_up="7" reason="said so"/>'
+            '<close follow_up="9"><evidence> </evidence></close>'
+            '<close follow_up="12"><evidence>I booked it, really</evidence></close>'
+            '</switchboard_response>')
+        assert reply.closes == (ProposedClose(3, "we got the cabin"), ProposedClose(12, "I booked it", "booked"))
+        assert reply.problems == ("a close with no follow-up number was left out",
+                                  "a close with no follow-up number was left out",
+                                  "a close of follow-up #7 with no evidence was left out",
+                                  "a close of follow-up #9 with no evidence was left out",
+                                  "a second close of follow-up #12 was left out")
+
+    def test_a_long_quote_is_cut_at_a_word_and_stays_verbatim(self):
+        words = "I booked the flight " * 30  # 600 characters
+        (close,) = parse_reply(f'<switchboard_response><close follow_up="12"><evidence>{words}</evidence></close>'
+                               f'</switchboard_response>').closes
+        assert len(close.evidence) <= EVIDENCE_CHARS and words.startswith(close.evidence)
+        assert not close.evidence.endswith(" ")  # cut at a word, with no "[…]" to break the check
 
 
 class FakeAgent:

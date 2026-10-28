@@ -151,10 +151,10 @@ async def replay(cases: List[Labeled], run: Callable, parse: Callable) -> List[R
                 result.errors[arm] = model_run.error
                 proposed: Set[str] = set()
             else:
-                signals, problems = parse(model_run.reply)
-                proposed = {route.to for signal in signals for route in signal.routes}
-                if problems:
-                    result.errors[arm] = "; ".join(problems)
+                reply = parse(model_run.reply)
+                proposed = {route.to for signal in reply.signals for route in signal.routes}
+                if reply.problems:
+                    result.errors[arm] = "; ".join(reply.problems)
             result.proposed[arm] = proposed
             result.scores[arm] = score(case.labels, proposed)
         print(f"[proactive-replay] #{case.decision_id}: with {sorted(result.proposed['with'])}, "

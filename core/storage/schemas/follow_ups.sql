@@ -1,8 +1,9 @@
 -- Follow-ups (core/storage/follow_ups.py): an agent's own open loops.
 -- A goal, a check, a cadence and an end: one row each, opened only through the
--- follow_up tool (tools/follow_up.py), and closed by it, by `!followups cancel`, or
--- when `until` passes. The schedule runner's checks (core/proactive/follow_ups.py)
--- keep the counters and timing below, and team radio's lines keep radio_state.
+-- follow_up tool (tools/follow_up.py), and closed by it, by `!followups cancel`, by
+-- the Switchboard on your own words (core/proactive/pipeline.py), or when `until`
+-- passes. The schedule runner's checks (core/proactive/follow_ups.py) keep the
+-- counters and timing below, and team radio's lines keep radio_state.
 CREATE TABLE IF NOT EXISTS follow_ups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,                   -- whose loop it is: of the agents, only it closes it

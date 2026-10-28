@@ -13,6 +13,7 @@ from core.config.settings import Config
 from core.loaders.skills_loader import SkillsLoader
 from core.proactive import taps
 from core.proactive.taps import (
+    CALLED,
     CALLS_HINT,
     FOLLOWUP_SOURCE,
     TAP_CHAT,
@@ -20,6 +21,7 @@ from core.proactive.taps import (
     TAP_SCHEDULED,
     CallLog,
     SignalHook,
+    asked_by_agent,
     caller_of,
     compact,
     counts,
@@ -156,6 +158,15 @@ class TestTheEntry:
         # A turn no message of yours started (a schedule, a voice turn) keeps none.
         assert "message" not in entry_for(_turn(output=DiscordOutput(receipts))).context
         assert "message" not in entry_for(_turn()).context
+
+    def test_a_turn_another_agent_asked_for_is_marked(self):
+        # The Concierge's agent_call says <caller>main</caller>, as a message routed from a channel does.
+        called = entry_for(_turn([RECEIPT], called_by_agent=True))
+        assert called.caller == "main" and called.context[CALLED] is True
+        assert asked_by_agent(called.row())
+        routed = entry_for(_turn([RECEIPT]))
+        assert routed.caller == "main" and CALLED not in routed.context
+        assert not asked_by_agent(routed.row())
 
     def test_an_interrupted_turn_has_no_reply_but_still_counts(self):
         entry = entry_for(_turn([RECEIPT], reply=None))

@@ -19,6 +19,15 @@ What the team was already told (don't route these again):
 Nothing yet.
 {{/board}}
 </board>
+{{#follow_ups}}
+
+<follow_ups>
+Work teammates are keeping up for the user:
+{{follow_ups}}
+Close one only when the user's own words in this exchange say its goal is met, or that they don't want it anymore. Never on a teammate's say-so, or a guess. Inside <switchboard_response>, next to any signals:
+<close follow_up="12" reason="booked UA 990"><evidence>the user's words, verbatim</evidence></close>
+</follow_ups>
+{{/follow_ups}}
 
 <exchange>
 {{exchange}}

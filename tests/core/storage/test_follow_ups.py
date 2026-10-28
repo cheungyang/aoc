@@ -16,6 +16,7 @@ from core.storage.follow_ups import (
     cadence_text,
     check_key,
     end_of,
+    ensure_first_check,
     parse_until,
 )
 from core.util.local_time import get_local_timezone
@@ -296,6 +297,15 @@ def test_until_is_a_date_from_today_to_90_days_out_and_ends_at_the_midnight_afte
     assert end_of("someday") == 0.0  # unreadable: ending now
 
 
+def test_the_first_check_must_come_before_until_ends():
+    ends = datetime(2026, 11, 11, tzinfo=TZ).timestamp()  # 2026-11-10 ends at the midnight after it
+    ensure_first_check(12 * HOUR, "2026-11-10", ends - 12 * HOUR - 1)  # due a second before the end: it fits
+    with pytest.raises(ValueError) as refused:
+        ensure_first_check(12 * HOUR, "2026-11-10", ends - 12 * HOUR)  # due as it ends: it would never run
+    assert str(refused.value) == ("every 12h doesn't fit before 2026-11-10 ends: check more often, "
+                                  "or pick a later until")
+
+
 def test_you_close_any_agents_follow_up_and_the_last_closed_come_newest_first(store):
     first, second = _open(store), _open(store, agent_id="excursion-planner")
     cancelled = store.close(first.id, reason="booked already", by=Closer.YOU, at=NOV_1)
@@ -341,4 +351,6 @@ def test_the_words_the_tool_followups_and_the_radio_share():
         "you cancelled it: too many"
     assert replace(closed, closed_by=Closer.YOU).closed_why("Miles") == "you cancelled it"
     assert replace(closed, closed_by=Closer.UNTIL, close_reason="until passed").closed_why("Miles") == "until passed"
-    assert replace(closed, closed_by=Closer.SWITCHBOARD).closed_why("Miles") == "a signal met its goal"
+    assert replace(closed, closed_by=Closer.SWITCHBOARD, close_reason="booked UA 990").closed_why("Miles") == \
+        "you said it's done: booked UA 990"
+    assert replace(closed, closed_by=Closer.SWITCHBOARD).closed_why("Miles") == "you said it's done"

@@ -443,7 +443,7 @@ class TestTheSweep:
         store.finish_check(opened.id, Result.FOUND, NOW)
         store.close(opened.id, reason="too many pings", by=Closer.YOU, at=NOW)
         await _sweep(store, radio)()
-        assert radio.lines[-1] == ("📻 🔁 ✈️ Miles closed follow-up #1 · Business award seats SFO→MAD for the Spain "
+        assert radio.lines[-1] == ("📻 🔁 ✈️ Miles' follow-up #1 closed · Business award seats SFO→MAD for the Spain "
                                    "trip · you cancelled it: too many pings · 1 check, 1 find", ())
 
     def test_why_it_closed_and_who_closed_it(self, store):
@@ -452,8 +452,12 @@ class TestTheSweep:
                           {"reward-travel": MILES}).endswith("· booked on Iberia · 6 checks, 1 find")
         assert radio_line(replace(base, closed_by=Closer.AGENT), {"reward-travel": MILES}) \
             .endswith("· Miles closed it · 6 checks, 1 find")
+        assert radio_line(replace(base, closed_by=Closer.SWITCHBOARD, close_reason="booked UA 990"),
+                          {"reward-travel": MILES}) == (
+            "📻 🔁 ✈️ Miles' follow-up #1 closed · Business award seats SFO→MAD for the Spain trip · "
+            "you said it's done: booked UA 990 · 6 checks, 1 find")  # your words closed it, not Miles
         assert radio_line(replace(base, closed_by=Closer.UNTIL, close_reason="until passed"), {}) == (
-            "📻 🔁 🤖 reward-travel closed follow-up #1 · Business award seats SFO→MAD for the Spain trip · "
+            "📻 🔁 🤖 reward-travel's follow-up #1 closed · Business award seats SFO→MAD for the Spain trip · "
             "until passed · 6 checks, 1 find")  # no card: the robot and the id
 
     @pytest.mark.asyncio

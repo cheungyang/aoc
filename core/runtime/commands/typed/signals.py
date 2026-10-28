@@ -3,7 +3,9 @@
     !signals                          the last 10 decisions
     !signals <id>                     one decision's trace: what it saw, its signals,
                                       each route and the Governor's verdict, how its
-                                      delivery went and what came of it, your labels
+                                      delivery went and what came of it, your labels,
+                                      and each follow-up close it proposed: closed,
+                                      would close (shadow), or why not
     !signals <id> good                its routes were right
     !signals <id> bad [why] [— note]  its routes were wrong; why is one of wrong agent,
                                       wrong timing, not worth it, wrong fact
@@ -20,7 +22,7 @@ Read from the Board (core/storage/signals.py), with no model. A label here is
 the same as a ✅/❌ on team radio: it counts toward acceptance at once, in
 place of the route's outcome, and it writes a line in main's memory log
 (core/knowledge/memory/outcomes.py). Dropped routes were never offered, so
-they take no label.
+they take no label, and neither do closes.
 """
 import asyncio
 import re
@@ -40,6 +42,7 @@ from core.storage.signals import (
     IGNORED,
     OUTCOMES,
     RUNNING,
+    DecidedClose,
     SignalStore,
 )
 from core.util.local_time import get_local_timezone
@@ -107,16 +110,40 @@ def route_summary(route: Dict[str, Any]) -> str:
     return f"{route['to_agent']} {shown}{' ' + _MARK[route['label']] if route.get('label') in _MARK else ''}"
 
 
+def close_summary(close: DecidedClose, mode: str) -> str:
+    """A proposed close in the decision list: "closed #12", "would close #12" (shadow), or
+    "didn't close #12" ("wouldn't" in shadow)."""
+    if close.closed:
+        return f"closed #{close.follow_up_id}"
+    if close.stood:
+        return f"would close #{close.follow_up_id}"
+    return f"{'wouldn' if mode == 'shadow' else 'didn'}'t close #{close.follow_up_id}"
+
+
+def close_lines(close: DecidedClose, mode: str) -> List[str]:
+    """A proposed close in a trace: what came of it, its follow-up and why, then the words it quoted."""
+    named = f"follow-up #{close.follow_up_id}" + (f" ({close.agent})" if close.agent else "")
+    because = f" · {close.reason}" if close.reason else ""
+    if close.closed:
+        head = f"Close: closed {named}: \"{close.goal}\"{because}"
+    elif close.stood:
+        head = f"Close: would close {named}: \"{close.goal}\"{because}"
+    else:
+        head = f"Close: {'wouldn' if mode == 'shadow' else 'didn'}'t close {named}: {close.problem}"
+    return [head, f"  evidence: \"{close.evidence}\""]
+
+
 def recent_text(store: SignalStore, limit: int = RECENT) -> str:
     decisions = store.recent_decisions(limit)
     if not decisions:
         return "No decisions yet. They start after the next agent turn."
     lines = [f"**Last {len(decisions)} decision(s)**, newest first"]
     for d in decisions:
-        if d.get("errors") and not d["routes"]:
+        parts = [route_summary(r) for r in d["routes"]] + [close_summary(c, d["mode"]) for c in d["closes"]]
+        if d.get("errors") and not parts:
             outcome = f"failed: {d['errors'][:120]}"
         else:
-            outcome = ", ".join(route_summary(r) for r in d["routes"]) or "nothing to route"
+            outcome = ", ".join(parts) or "nothing to route"
         lines.append(f"`#{d['id']}` {when(d['at'])} · {d['tap']} in {where(d['session_id'])} · {outcome}")
     lines.append("`!signals <id>` shows one; react ✅/❌ on team radio, or `!signals <id> bad <why>`.")
     return "\n".join(lines)
@@ -180,6 +207,8 @@ def trace_text(store: SignalStore, decision_id: int) -> str:
                 why = f", {route['label_reason']}" if route.get("label_reason") else ""
                 label = f" · you: {_MARK[route['label']]}{why}"
             lines.append(f"  → {route['to_agent']} · \"{route['offer']}\" · {verdict}{asked}{reason}{delivered}{label}")
+    for close in d["closes"]:
+        lines.extend(close_lines(close, d["mode"]))
     if d.get("errors") and d["signals"]:
         lines.append(f"Problems: {d['errors']}")
     return "\n".join(lines)

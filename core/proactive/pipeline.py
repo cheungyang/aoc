@@ -1,10 +1,12 @@
 """One Switchboard decision: from a session's unread turns to verdicts on the Board.
 
   1. Claim the turns. A turn is read by one decision only.
-  2. Render the prompt: the teammates' cards, the tags, the Board, the exchange.
+  2. Render the prompt: the teammates' cards, the tags, the Board, the open
+     follow-ups, the exchange.
   3. Run the Switchboard (switchboard.run_model): the only model call.
-  4. Parse its reply. For each signal, the Governor gives a verdict on each route.
-  5. Record the decision, its signals and its routes, then tell team radio.
+  4. Parse its reply. For each signal, the Governor gives a verdict on each
+     route; each follow-up close it proposed is checked (governor.close_problem).
+  5. Record the decision, its signals, routes and closes, then tell team radio.
 
 Everything that touches the Board runs on its worker thread (board.py). In
 shadow mode, nothing reaches an agent: a `deliver` verdict only records when
@@ -20,13 +22,19 @@ puts the recipient's emoji on your message that started it, at once (`ack`):
 the receipt gets 🧑‍🍳 seconds after it's saved, and Ramsay's post follows. A
 `next` route isn't delivered as a proactive turn: it rides along on the
 recipient's next scheduled run (delivery.SignalsForMe).
+
+A close stands when its follow-up is open now and its evidence is your own
+words in these turns. Live, it closes the follow-up as the Switchboard's, with
+its reason, else your words; team radio's closed line then comes from the
+follow-ups' outbox, as for any close (follow_ups.FollowUpSweep). In shadow
+nothing closes: the decision records that it would.
 """
 import hashlib
 import json
 import random
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 from core.channel.discord.ownership import Ownership
 from core.config.settings import Config
@@ -35,11 +43,29 @@ from core.proactive.board import on_board
 from core.proactive.cards import PeerCard, cards, offer_words
 from core.proactive.delivery import held_here
 from core.proactive.effects import TRIGGER
-from core.proactive.governor import DELIVER, Governor, evidence_found, resolve_times
-from core.proactive.switchboard import ModelRun, ProposedSignal, build_prompt, local, parse_reply, run_model
+from core.proactive.governor import (
+    DELIVER,
+    NOT_OPEN,
+    Governor,
+    close_problem,
+    evidence_found,
+    resolve_times,
+    your_words,
+)
+from core.proactive.switchboard import (
+    ModelRun,
+    ProposedClose,
+    ProposedSignal,
+    Reply,
+    build_prompt,
+    local,
+    parse_reply,
+    run_model,
+)
 from core.proactive.taps import TAP_CHAT, TAP_EFFECT, TAP_SCHEDULED
 from core.runtime.foundation.routing import home_channel
-from core.storage.signals import SignalStore
+from core.storage.follow_ups import Closer, FollowUpStore, Status
+from core.storage.signals import DecidedClose, SignalStore
 
 # A decision's mode: SHADOW records when a route would be delivered; LIVE
 # delivers it. The switch, `PROACTIVE_DELIVERY`, picks one.
@@ -114,7 +140,8 @@ class Pipeline:
     `home` finds a recipient's home channel. `wake`, the schedule runner's, is
     called after a live decision approved a `now` delivery, and `ack` reacts on
     your message for it, if this host holds the recipient (`ownership`, or
-    Ownership() when not given).
+    Ownership() when not given). `follow_ups` holds the follow-ups the
+    Switchboard sees and may close: memory.db's, like the Board, when not given.
     """
 
     def __init__(self, store: Optional[SignalStore] = None, *, mode: Optional[str] = None,
@@ -123,7 +150,7 @@ class Pipeline:
                  owns: Optional[Callable[[str], bool]] = None, rng: Optional[random.Random] = None,
                  clock: Callable[[], float] = time.time, tags: Optional[str] = None,
                  home: Callable[[str], Optional[str]] = home_of, wake: Optional[Callable[[], None]] = None,
-                 ack: Optional[Ack] = None, ownership: Any = None):
+                 ack: Optional[Ack] = None, ownership: Any = None, follow_ups: Optional[FollowUpStore] = None):
         self.store = store or SignalStore()
         self.mode = mode
         self.run = run
@@ -137,6 +164,7 @@ class Pipeline:
         self.wake = wake
         self.ack = ack
         self.ownership = ownership
+        self.follow_ups = follow_ups or FollowUpStore()
 
     def current_mode(self) -> str:
         """LIVE when the switch (`PROACTIVE_DELIVERY`) is on, else SHADOW; or the mode given."""
@@ -164,16 +192,21 @@ class Pipeline:
 
         run: Optional[ModelRun] = None
         prompt = ""
-        signals: List[ProposedSignal] = []
+        reply = Reply()
         problems: List[str] = []
         approvals: List[Approval] = []
+        closes: List[DecidedClose] = []
         try:
             team = self.team()
             board = await on_board(self.store.active_signals, since=now - BOARD_S, today=f"{local(now):%Y-%m-%d}")
-            prompt, exchange = build_prompt(turns, team, board, now, tags=self.tags)
+            follow_ups = await on_board(self.follow_ups.list, status=Status.OPEN)
+            prompt, exchange = build_prompt(turns, team, board, now, tags=self.tags, follow_ups=follow_ups)
             run = await self.run(prompt)
-            signals, problems = ([], [run.error]) if run.error else parse_reply(run.reply)
-            approvals = await on_board(self._record, decision_id, turns, signals, exchange, team, now, mode)
+            reply = Reply(problems=(run.error,)) if run.error else parse_reply(run.reply)
+            problems.extend(reply.problems)
+            approvals = await on_board(self._record, decision_id, turns, list(reply.signals), exchange, team, now,
+                                       mode)
+            closes = await on_board(self._close, decision_id, turns, reply.closes, team, mode)
         except Exception as e:
             problems.append(f"{type(e).__name__}: {e}")
         if approvals:
@@ -182,8 +215,9 @@ class Pipeline:
         cost = {} if run is None else {"took_ms": run.took_ms, "tokens_in": run.tokens_in,
                                        "tokens_out": run.tokens_out, "reply": run.reply}
         await on_board(self.store.finish_decision, decision_id, prompt=prompt, errors="; ".join(problems), **cost)
-        print(f"[proactive] Decision #{decision_id} ({tap}, {len(turns)} turn(s)): {len(signals)} signal(s)"
-              f"{'; ' + '; '.join(problems) if problems else ''}")
+        closed = f", {len(closes)} close(s), {sum(c.closed for c in closes)} closed" if closes else ""
+        print(f"[proactive] Decision #{decision_id} ({tap}, {len(turns)} turn(s)): {len(reply.signals)} signal(s)"
+              f"{closed}{'; ' + '; '.join(problems) if problems else ''}")
         if self.radio is not None:
             try:
                 await self.radio.decided(await on_board(self.store.decision, decision_id))
@@ -228,6 +262,34 @@ class Pipeline:
                         card = team.get(route.to)
                         approvals.append(Approval(route_id, route.to, card.emoji if card else "", message))
         return approvals
+
+    def _close(self, decision_id: int, turns: List[Dict[str, Any]], closes: Sequence[ProposedClose],
+               team: Dict[str, PeerCard], mode: str) -> List[DecidedClose]:
+        """Each follow-up close the Switchboard proposed: checked, done if live, and kept on the
+        decision (worker thread). It stands when the follow-up is open now and the evidence is
+        your own words in these turns (governor.close_problem). Live, the follow-up closes as
+        the Switchboard's; one its agent or you closed meanwhile is just not open. In shadow
+        nothing closes."""
+        if not closes:
+            return []
+        open_now = {follow_up.id: follow_up for follow_up in self.follow_ups.list(status=Status.OPEN)}
+        words = your_words(turns)
+        decided: List[DecidedClose] = []
+        for close in closes:
+            problem = close_problem(close, open_now, words)
+            closed = False
+            if not problem and mode == LIVE:
+                closed = self.follow_ups.close(close.follow_up_id, reason=close.reason or close.evidence,
+                                               by=Closer.SWITCHBOARD, at=self.clock()) is not None
+                problem = "" if closed else NOT_OPEN
+            follow_up = open_now.get(close.follow_up_id)
+            card = team.get(follow_up.agent_id) if follow_up else None
+            decided.append(DecidedClose(
+                follow_up_id=close.follow_up_id, evidence=close.evidence, reason=close.reason, closed=closed,
+                problem=problem, agent=(card.name if card else follow_up.agent_id) if follow_up else "",
+                goal=follow_up.goal if follow_up else ""))
+        self.store.record_closes(decision_id, decided)
+        return decided
 
     def _approve(self, route_id: int, to_agent: str, deliver_at: float, now: float) -> bool:
         """Approves a route for a proactive turn in its recipient's home channel (worker thread).

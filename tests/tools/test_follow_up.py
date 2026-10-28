@@ -1,6 +1,6 @@
 """The follow_up tool (tools/follow_up.py): open, extend, close and list, for the calling agent only."""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import pytest
 
@@ -12,13 +12,15 @@ from tools import follow_up as tool_module
 from tools.follow_up import cadence_text, follow_up, parse_every
 
 TODAY = datetime.now(get_local_timezone()).date()
+# The tool's clock in these tests: 09:00 on TODAY, so a check due later today still comes before it ends.
+NOW = datetime.combine(TODAY, time(9, 0), get_local_timezone()).timestamp()
 MODEL = json.dumps({"type": "model", "what": "new award space SFO to MAD in business"})
 
 
 @pytest.fixture(autouse=True)
-def same_day(monkeypatch):
-    """The tool's today is the TODAY the cases were written from, even when a run crosses midnight."""
-    monkeypatch.setattr(tool_module, "today", lambda: TODAY)
+def same_moment(monkeypatch):
+    """The tool's clock is NOW, on the TODAY the cases were written from, even when a run crosses midnight."""
+    monkeypatch.setattr(tool_module, "now", lambda: NOW)
 
 
 @pytest.fixture
@@ -56,7 +58,7 @@ def test_open_stores_the_callers_follow_up_and_tells_it_to_announce_it(live):
                                                                                  "Alva books the flights")
     assert opened.check == Check(type="model", what="new award space SFO to MAD in business")
     assert (opened.every_s, opened.interval_s) == (43200, 43200)
-    assert opened.next_check_at == opened.opened_at + 43200
+    assert (opened.opened_at, opened.next_check_at) == (NOW, NOW + 43200)  # the moment `open` checked against
     assert (opened.channel, opened.session_id) == ("lifestyle-perk", "reward-travel:discord:lifestyle-perk")
 
 
@@ -86,6 +88,8 @@ def test_a_check_can_be_one_of_the_agents_own_scans(live):
     (dict(until="next week"), "until is a date, YYYY-MM-DD"),
     (dict(until=(TODAY - timedelta(days=1)).isoformat()), "has passed"),
     (dict(until=(TODAY + timedelta(days=91)).isoformat()), "until is at most 90 days out"),
+    (dict(every="7d", until=(TODAY + timedelta(days=3)).isoformat()),
+     f"every 7d doesn't fit before {TODAY + timedelta(days=3)} ends: check more often, or pick a later until"),
 ])
 def test_open_refuses_what_it_cant_keep(live, args, error):
     with _as():

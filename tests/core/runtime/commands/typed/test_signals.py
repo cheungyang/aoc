@@ -8,7 +8,7 @@ from core.runtime.commands.base import TypedContext
 from core.runtime.commands.registry import TYPED
 from core.runtime.commands.typed import signals as signals_module
 from core.runtime.commands.typed.signals import p95, parse_why, part_of_day, signals_text, span, stats_text, when
-from core.storage.signals import SignalStore
+from core.storage.signals import DecidedClose, SignalStore
 from core.util.local_time import get_local_timezone
 
 
@@ -97,6 +97,42 @@ def test_a_trace_shows_how_each_delivery_went_and_what_came_of_it(store):
     assert "· deliver today · approved, due 10-14 21:40" in text
     assert "· deliver next · posted on a scheduled run +11.5 h" in text
     assert "· deliver now · failed +45 s (the turn failed)" in text
+
+
+AWARD = DecidedClose(12, "I booked UA 990", "booked UA 990", closed=True, agent="Miles", goal="Award seats SFO→MAD")
+
+
+def test_a_trace_shows_each_follow_up_close_and_what_came_of_it(store):
+    live = _decision(store, mode="live")
+    store.record_closes(live, [
+        AWARD,
+        DecidedClose(13, "Miles found seats", problem="evidence not found in your own words", agent="Miles",
+                     goal="Seats to Lisbon"),
+        DecidedClose(14, "stop the cabin watch", problem="not open"),
+    ])
+    text = signals_text(str(live), store)
+    assert ('Close: closed follow-up #12 (Miles): "Award seats SFO→MAD" · booked UA 990\n'
+            '  evidence: "I booked UA 990"') in text
+    assert "Close: didn't close follow-up #13 (Miles): evidence not found in your own words" in text
+    assert "Close: didn't close follow-up #14: not open" in text
+
+    shadow = _decision(store)
+    store.record_closes(shadow, [DecidedClose(12, "I booked UA 990", "booked UA 990", agent="Miles",
+                                              goal="Award seats SFO→MAD"),
+                                 DecidedClose(14, "stop the cabin watch", problem="not open")])
+    text = signals_text(str(shadow), store)
+    assert 'Close: would close follow-up #12 (Miles): "Award seats SFO→MAD" · booked UA 990' in text
+    assert "Close: wouldn't close follow-up #14: not open" in text
+
+
+def test_the_latest_decisions_name_their_closes(store):
+    live = _decision(store, mode="live")
+    store.record_closes(live, [AWARD, DecidedClose(14, "stop the cabin watch", problem="not open")])
+    shadow = _decision(store, verdicts=(), errors="a close with no follow-up number was left out")
+    store.record_closes(shadow, [DecidedClose(12, "I booked UA 990", agent="Miles", goal="Award seats SFO→MAD")])
+    text = signals_text("", store)
+    assert f"`#{live}`" in text and "meal-planner now, stranger dropped, closed #12, didn't close #14" in text
+    assert "· would close #12" in text and "failed" not in text  # a close went through: not a failed decision
 
 
 def test_labels_take_the_offered_routes_and_a_reason(store, outcomes):

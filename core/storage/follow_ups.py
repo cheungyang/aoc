@@ -4,13 +4,17 @@ A follow-up is a goal, a check, a cadence and an end, for work the agent can do
 itself: checking, searching, re-evaluating. It exists only while there's a
 need. The follow_up tool (tools/follow_up.py) opens one for the calling agent,
 extends it, closes it, and lists the open ones; `!followups` lists them all,
-and extends or cancels one (core/runtime/commands/typed/followups.py).
+and extends or cancels one (core/runtime/commands/typed/followups.py). The
+Switchboard closes one when your own words to another teammate end it, in its
+channel or with "@Name …" (core/proactive/pipeline.py).
 
 Its end, `until`, is its last day on your wall clock: from today to MAX_DAYS
 out (`parse_until`, which the tool and `!followups` share). It ends at the
-midnight after (`end_of`). `extend` moves it later and keeps the history: the
-counts, the fingerprint and what the agent last told you. Closing and opening
-again would lose them, and old findings would look new.
+midnight after (`end_of`), and its first check must come before then
+(`ensure_first_check`): one that never checks would never offer to keep
+watching. `extend` moves it later and keeps the history: the counts, the
+fingerprint and what the agent last told you. Closing and opening again would
+lose them, and old findings would look new.
 
 Every read returns a FollowUp: every column but `check_key`, with its check a
 Check and each fixed vocabulary an enum (Status, Closer). A check is stored as
@@ -70,7 +74,7 @@ class Closer(str, Enum):
     AGENT = "agent"              # its agent
     YOU = "you"                  # you: `!followups cancel`
     UNTIL = "until"              # its `until` passing (`expire`)
-    SWITCHBOARD = "switchboard"  # the Switchboard, on a signal that matches `close_when`
+    SWITCHBOARD = "switchboard"  # the Switchboard, on your own words that end it (core/proactive/pipeline.py)
 
 
 class Result(str, Enum):
@@ -158,14 +162,15 @@ class FollowUp:
 
     def closed_why(self, who: str) -> str:
         """Why it closed, in words: its agent's reason, or "<who> closed it"; "you cancelled
-        it", with your why; or "until passed". `who` names its agent."""
+        it", with your why; "you said it's done", with the Switchboard's reason, when your own
+        words ended it; or "until passed". `who` names its agent."""
         reason = self.close_reason
         if self.closed_by is Closer.YOU:
             return f"you cancelled it: {reason}" if reason else "you cancelled it"
         if self.closed_by is Closer.UNTIL:
             return UNTIL_PASSED
         if self.closed_by is Closer.SWITCHBOARD:
-            return reason or "a signal met its goal"
+            return f"you said it's done: {reason}" if reason else "you said it's done"
         return reason or f"{who} closed it"
 
 
@@ -202,6 +207,16 @@ def end_of(until: str) -> float:
     except (TypeError, ValueError):
         return 0.0  # unreadable: treated as ending now
     return datetime.combine(day, clock.min, get_local_timezone()).timestamp()
+
+
+def ensure_first_check(every_s: int, until: str, now: float) -> None:
+    """Raises ValueError unless a follow-up opened at `now` gets its first check, `every_s`
+    on, before `until` ends: one due only as it ends, or after, never checks, so it never
+    offers to keep watching either. `extend` only moves `until` later, so it can't make
+    this worse."""
+    if now + every_s >= end_of(until):
+        raise ValueError(f"every {cadence_text(every_s)} doesn't fit before {until} ends: check more often, "
+                         "or pick a later until")
 
 
 def _normalised(value: Any) -> Any:

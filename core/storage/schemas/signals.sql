@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS decisions (
     tokens_out INTEGER,
     reply TEXT NOT NULL DEFAULT '',   -- the Switchboard's reply, as it came
     prompt TEXT NOT NULL DEFAULT '',  -- what it was asked: the with-vs-without-memory replay re-runs it
-    errors TEXT NOT NULL DEFAULT ''   -- why the run or its reply failed, if it did
+    errors TEXT NOT NULL DEFAULT '',  -- why the run or its reply failed, if it did
+    closes TEXT NOT NULL DEFAULT '[]' -- JSON list: the follow-up closes it proposed, each checked: closed, would
+                                      -- close (shadow), or why not (last: older tables get it added)
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_at ON decisions(at);
 

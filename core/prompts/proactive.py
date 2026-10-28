@@ -9,9 +9,10 @@ class SwitchboardPrompt(Prompt):
     """What the Switchboard is asked after a conversation or a scheduled run.
 
     core/proactive/switchboard.py renders the parts: the teammates' peer
-    cards, the tag list, the Board's live signals, and the exchange, one block
-    per ledger turn. The reply is a <switchboard_response> that code checks
-    field by field (switchboard.parse_reply, then the Governor).
+    cards, the tag list, the Board's live signals, the open follow-ups, and the
+    exchange, one block per ledger turn. The reply is a <switchboard_response>
+    that code checks field by field (switchboard.parse_reply, then the
+    Governor; a close, governor.close_problem).
     """
 
     template = "proactive/switchboard"
@@ -20,6 +21,7 @@ class SwitchboardPrompt(Prompt):
     teammates: str
     tags: str
     board: str
+    follow_ups: str  # one line per open follow-up it may close; "" when none is open, and the part is left out
     exchange: str
 
 

@@ -45,6 +45,15 @@ When a delivery happens (`deliver_at`):
 `today` and `next` times are only known later; `resolve_times` fills them in
 as the Board sees them happen.
 
+A follow-up close the Switchboard proposes (switchboard.ProposedClose) is
+code's call too (`close_problem`): the follow-up must be open now, and its
+evidence at least MIN_CLOSE_WORDS words (a lone "done" could be about
+anything), found word for word, as a signal's is, in what you said in the
+exchange (`your_words`). An agent's reply doesn't count, nor what one agent
+asked another (agent_call, the Concierge's too), nor the prompt a scheduled
+run, a follow-up's check or a proactive turn starts from. Live, the pipeline
+then closes it; in shadow, it records that it would.
+
 Dormant levers: designed, but not built. Each one is switched on when its
 condition holds:
 
@@ -65,14 +74,16 @@ condition holds:
                       more than 5 open, or checks cost more than expected.
 """
 import random
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence
 
 from core.channel.discord.ownership import Ownership
 from core.proactive.cards import PeerCard
-from core.proactive.switchboard import ProposedRoute, ProposedSignal, local
+from core.proactive.switchboard import ProposedClose, ProposedRoute, ProposedSignal, local
+from core.proactive.taps import TAP_SCHEDULED, asked_by_agent
 from core.storage.signals import SENSITIVE_TAGS, SignalStore
 
 DELIVER, ABSORB, DROP = "deliver", "absorb", "drop"
@@ -91,10 +102,24 @@ WORTH_POSTING = 0.3
 PRIOR_ENGAGED, PRIOR_DECLINED = 2, 1
 # Kinds that may be delivered `now`: something was made, or the user asked.
 NOW_KINDS = frozenset({"artifact", "request"})
+# Why a proposed follow-up close doesn't stand (close_problem).
+NOT_OPEN = "not open"
+TOO_SHORT = "too short to be sure"
+NOT_YOUR_WORDS = "evidence not found in your own words"
+# The fewest words a close's evidence needs: a lone "done" or "stop" could be about anything.
+MIN_CLOSE_WORDS = 2
+# A ledger turn's surface when nobody asked for it: a scheduled run, a follow-up's check,
+# a proactive turn (ExecutionContext.get_surface).
+SCHEDULED_SURFACE = "scheduled"
 
 _QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-",
                          "\u2014": "-", "\u2026": "..."})
 _EDGES = " \"'.,;:!?-"
+# A word, for MIN_CLOSE_WORDS: a run without spaces, or one Chinese character, since Chinese is
+# written without spaces (the privacy guard, core/git/privacy.py, counts them the same way).
+# Only a run with a letter or a digit in it counts (word_count).
+_CJK_CHARS = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+_WORD = re.compile(rf"[{_CJK_CHARS}]|[^\s{_CJK_CHARS}]+")
 
 
 @dataclass
@@ -132,6 +157,38 @@ def evidence_found(evidence: str, exchange: str) -> bool:
             return False
         position += len(piece)
     return True
+
+
+def word_count(text: str) -> int:
+    """How many words `text` has (_WORD): runs between spaces with a letter or a digit in
+    them, and each Chinese character. "done!" is one, "stop ..." one, "I'm done" two."""
+    return sum(1 for word in _WORD.findall(text or "") if any(ch.isalnum() for ch in word))
+
+
+def your_words(turns: Sequence[Mapping[str, Any]]) -> str:
+    """What you said in `turns` (ledger rows), one turn per line: the `user_text` of the turns
+    you started (`caller` main, as the taps record a message routed from a channel). A turn
+    another agent asked for starts from that agent's words, even when it's the Concierge,
+    whose calls say main too: the taps mark those (taps.asked_by_agent). A scheduled run, a
+    follow-up's check and a proactive turn (the scheduled tap or surface, hops 1) start from
+    a prompt. None of those count."""
+    return "\n".join(turn.get("user_text") or "" for turn in turns
+                     if turn.get("caller") == "main" and not asked_by_agent(turn)
+                     and turn.get("tap") != TAP_SCHEDULED and turn.get("surface") != SCHEDULED_SURFACE
+                     and not int(turn.get("hops") or 0))
+
+
+def close_problem(close: ProposedClose, open_ids: Collection[int], user_words: str) -> str:
+    """Why a proposed close doesn't stand, or "" when it does: the follow-up must be open now
+    (`open_ids`), and its evidence at least MIN_CLOSE_WORDS words, found word for word in what
+    you said (`user_words`, from your_words). Words found only in an agent's reply don't count."""
+    if close.follow_up_id not in open_ids:
+        return NOT_OPEN
+    if word_count(close.evidence) < MIN_CLOSE_WORDS:
+        return TOO_SHORT
+    if not evidence_found(close.evidence, user_words):
+        return NOT_YOUR_WORDS
+    return ""
 
 
 def kind_key(to: str, signal: ProposedSignal) -> str:

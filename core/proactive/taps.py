@@ -18,6 +18,8 @@ What a turn contributes:
             its tool calls point to. Never a trigger on their own. And your
             message that started the turn, when the surface names one
             (`source_message`): a live `now` route's reaction goes on it.
+            And the CALLED mark when another agent asked for the turn: what
+            it was asked is that agent's words, not yours.
 
 The taps hear about each tool call through the tool hooks
 (core/tooling/hooks.py): `CallLog` notes every finished call in its turn's
@@ -44,7 +46,7 @@ Which turns count: an agent's own work. These are skipped:
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from core.config.settings import Config
 from core.loaders.skills_loader import SkillsLoader
@@ -84,6 +86,10 @@ FOLLOWUP_SOURCE = "followup"
 GENERIC_TOOLS = frozenset({"filesystem", "load_skill", "web_search", "web_fetch", "bash", "agent_call"})
 # Statuses of a call that changed something (transcript.tool_status).
 DONE = frozenset({"ok", "partial"})
+# The context mark of a turn delegation handed over without the router choosing it
+# (ExecutionContext.called_by_agent): an agent_call. Its <caller> can't tell: the
+# Concierge's calls say main, like the router's hand-overs of your messages.
+CALLED = "called"
 
 _CALLER = re.compile(r"<caller>\s*([^<]*?)\s*</caller>")
 _CAPSULE = re.compile(r"<handoff_context\b.*?</handoff_context>", re.DOTALL)
@@ -153,6 +159,8 @@ def entry_for(turn: Turn, now: Optional[float] = None) -> Optional[LedgerEntry]:
     message = getattr(ctx.output, "source_message", None)
     if isinstance(message, str) and message:
         context["message"] = message
+    if ctx.called_by_agent:
+        context[CALLED] = True
     return LedgerEntry(
         at=time.time() if now is None else now,
         agent_id=turn.agent_id,
@@ -182,6 +190,11 @@ def caller_of(prompt: Any) -> str:
         text = prompt if isinstance(prompt, str) else ""
     match = _CALLER.search(text)
     return match.group(1) if match else ""
+
+
+def asked_by_agent(row: Mapping[str, Any]) -> bool:
+    """Whether a ledger row is a turn another agent asked for (its context's CALLED mark)."""
+    return bool((row.get("context") or {}).get(CALLED))
 
 
 def user_words(prompt: Any) -> str:

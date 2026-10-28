@@ -7,7 +7,9 @@ labels land on the routes. core/proactive/README.md walks through the flow;
 the schema is core/storage/schemas/signals.sql. JSON columns are encoded and
 decoded here, so callers pass and get plain lists and dicts. What a delivery
 reads comes back as frozen dataclasses: DueDelivery (`due_deliveries`) and
-NextRoute (`pending_next`).
+NextRoute (`pending_next`). A decision also keeps the follow-up closes the
+Switchboard proposed, each as code decided it (`record_closes`), and reads
+them back as DecidedClose.
 
 Acceptance counts are per kind of nudge (`kind_key`, recipient/kind/tag), and
 a route counts once: your label if you gave one (✅ as engaged, ❌ as
@@ -28,7 +30,7 @@ A `next` route's row is made when the recipient's next scheduled run takes it
 import json
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from core.config.settings import Config
@@ -37,6 +39,7 @@ from core.storage.util import placeholders
 
 _JSON = {
     "turn_ledger": {"memory": [], "effects": [], "context": {}},
+    "decisions": {"closes": []},
     "signals": {"payload": {}},
     "deliveries": {"message_ids": []},
 }
@@ -65,6 +68,7 @@ _ADDED_COLUMNS = (
     ("deliveries", "acked_at", "REAL"),
     ("deliveries", "message_ids", "TEXT NOT NULL DEFAULT '[]'"),
     ("routes", "outcome_at", "REAL"),
+    ("decisions", "closes", "TEXT NOT NULL DEFAULT '[]'"),
 )
 
 
@@ -177,6 +181,39 @@ def _next_route(record: Row) -> NextRoute:
     )
 
 
+@dataclass(frozen=True)
+class DecidedClose:
+    """A follow-up close the Switchboard proposed, and what code made of it, as its decision
+    keeps it (`decisions.closes`): closed (live), would close (shadow: it stood, not closed),
+    or left as it was, with the problem."""
+    follow_up_id: int     # the follow-up it named
+    evidence: str         # your words it quoted, clipped
+    reason: str = ""      # why, in the Switchboard's words; "" if it gave none
+    closed: bool = False  # it stood and, live, the follow-up was closed; never in shadow
+    problem: str = ""     # why it didn't stand (core/proactive/governor.close_problem); "" when it did
+    agent: str = ""       # the follow-up's agent, by its card's name, else its id; "" if it wasn't open
+    goal: str = ""        # the follow-up's goal; "" if it wasn't open
+
+    @property
+    def stood(self) -> bool:
+        return not self.problem
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "DecidedClose":
+        """One element of `decisions.closes`, as `record_closes` wrote it."""
+        return cls(follow_up_id=int(record.get("follow_up_id") or 0), evidence=str(record.get("evidence") or ""),
+                   reason=str(record.get("reason") or ""), closed=bool(record.get("closed")),
+                   problem=str(record.get("problem") or ""), agent=str(record.get("agent") or ""),
+                   goal=str(record.get("goal") or ""))
+
+
+def _decision_row(record: Row) -> Dict[str, Any]:
+    """A decisions row as a dict, with its closes read as DecidedClose."""
+    out = _decode("decisions", record)
+    out["closes"] = [DecidedClose.from_record(c) for c in out.get("closes") or [] if isinstance(c, Mapping)]
+    return out
+
+
 class SignalStore(Store):
     schema = ("signals",)
     pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
@@ -265,12 +302,17 @@ class SignalStore(Store):
                                   "reply": reply or "", "prompt": prompt or "", "errors": errors or ""},
                     {"id": decision_id})
 
+    def record_closes(self, decision_id: int, closes: Sequence[DecidedClose]) -> None:
+        """Keeps the follow-up closes a decision proposed, each as code decided it."""
+        self.update("decisions", _encode("decisions", {"closes": [asdict(close) for close in closes]}),
+                    {"id": decision_id})
+
     def decision(self, decision_id: int) -> Optional[Dict[str, Any]]:
-        """One decision, with its turns, signals and routes."""
+        """One decision, with its turns, signals and routes, and its closes as DecidedClose."""
         row = self.select_one("decisions", {"id": decision_id})
         if row is None:
             return None
-        out = dict(row)
+        out = _decision_row(row)
         out["turns"] = self.turns_of(decision_id)
         out["signals"] = [_decode("signals", r)
                           for r in self.select("signals", {"decision_id": decision_id}, order_by="id ASC")]
@@ -278,9 +320,9 @@ class SignalStore(Store):
         return out
 
     def recent_decisions(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """The latest decisions, newest first, each with its routes."""
+        """The latest decisions, newest first, each with its routes and its closes."""
         rows = self.select("decisions", order_by="id DESC", limit=limit)
-        return [dict(r, routes=self.routes_of(r["id"])) for r in rows]
+        return [dict(_decision_row(r), routes=self.routes_of(r["id"])) for r in rows]
 
     # -- signals and routes ----------------------------------------------------
 

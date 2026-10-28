@@ -56,7 +56,7 @@ switch on or off:
   2. it puts each one opened and each one closed on team radio, once:
 
        📻 🔁 ✈️ Miles opened follow-up #12 · <goal> · every 2d until 2026-12-15 · check: award_watch
-       📻 🔁 ✈️ Miles closed follow-up #12 · <goal> · <why> · 6 checks, 1 find
+       📻 🔁 ✈️ Miles' follow-up #12 closed · <goal> · <why> · 6 checks, 1 find
 
      An event older than ANNOUNCE_S is marked without a line, so a host that
      was down doesn't flood the thread. Each line gets one attempt, posted here
@@ -160,15 +160,21 @@ def render_prompt(follow_up: FollowUp, now: float, check: str, last: bool = Fals
 
 
 def radio_line(follow_up: FollowUp, team: Dict[str, PeerCard]) -> str:
-    """A follow-up's team radio line: opened, or closed and why (module docstring)."""
+    """A follow-up's team radio line: opened, or closed and why (module docstring). The opened
+    line names the agent that opened it. The closed line only says whose it was: its why says
+    who closed it (FollowUp.closed_why), and that may be you, your words, or `until`."""
     card = team.get(follow_up.agent_id)
     emoji, name = (card.emoji, card.name) if card else ("🤖", follow_up.agent_id)
-    head = f"📻 🔁 {emoji} {name}"
     if follow_up.is_open:
-        return (f"{head} opened follow-up #{follow_up.id} · {follow_up.goal} · every {cadence_text(follow_up.every_s)} "
-                f"until {follow_up.until} · check: {follow_up.check.text()}")
-    return (f"{head} closed follow-up #{follow_up.id} · {follow_up.goal} · {follow_up.closed_why(name)} · "
-            f"{follow_up.tally()}")
+        return (f"📻 🔁 {emoji} {name} opened follow-up #{follow_up.id} · {follow_up.goal} · "
+                f"every {cadence_text(follow_up.every_s)} until {follow_up.until} · check: {follow_up.check.text()}")
+    return (f"📻 🔁 {emoji} {possessive(name)} follow-up #{follow_up.id} closed · {follow_up.goal} · "
+            f"{follow_up.closed_why(name)} · {follow_up.tally()}")
+
+
+def possessive(name: str) -> str:
+    """Miles' for Miles, Ramsay's for Ramsay."""
+    return f"{name}'" if name.endswith("s") else f"{name}'s"
 
 
 class FollowUpSchedule(PromptSchedule):

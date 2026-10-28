@@ -10,14 +10,20 @@ from core.proactive.governor import (
     ABSORB,
     DELIVER,
     DROP,
+    NOT_OPEN,
+    NOT_YOUR_WORDS,
+    TOO_SHORT,
     WORTH_POSTING,
     Governor,
+    close_problem,
     evidence_found,
     kind_key,
     quiet_stretch,
     resolve_times,
+    your_words,
 )
-from core.proactive.switchboard import ProposedRoute, ProposedSignal
+from core.proactive.switchboard import ProposedClose, ProposedRoute, ProposedSignal
+from core.proactive.taps import CALLED
 from core.storage.signals import SignalStore
 from core.util.local_time import get_local_timezone
 
@@ -91,6 +97,49 @@ class TestSignalProblems:
         assert governor.signal_problem(_signal(kind="situation"), exchange) == "a situation needs an until date"
         assert governor.signal_problem(_signal(kind="situation", until="2026-10-01"), exchange) == "until 2026-10-01 is past"
         assert governor.signal_problem(_signal(kind="situation", until="2026-10-27"), exchange) is None
+
+
+def _ledger_turn(**fields):
+    """A ledger row as the taps write it: by default a message of yours, routed from a channel."""
+    turn = {"agent_id": "excursion-planner", "caller": "main", "tap": "chat", "surface": "text", "hops": 0,
+            "user_text": "I booked the Madrid flight on UA 990", "reply_text": "Great, enjoy Madrid!"}
+    turn.update(fields)
+    return turn
+
+
+class TestCloses:
+
+    def test_only_the_words_of_the_turns_you_started_count(self):
+        # Each turn left out differs from yours by one thing only.
+        assert your_words([
+            _ledger_turn(),
+            _ledger_turn(tap="scheduled", user_text="Post the morning plan."),  # a scheduled run's prompt
+            _ledger_turn(tap="effect", surface="scheduled", user_text="Check now: award seats"),  # a check that saved
+            _ledger_turn(hops=1, user_text="Groceries came in: offer a recipe"),  # a proactive turn's prompt
+            _ledger_turn(caller="day-planner", user_text="Is the Madrid flight booked?"),  # a teammate's request
+            _ledger_turn(context={CALLED: True}, user_text="The user booked the flight"),  # the Concierge's agent_call
+            _ledger_turn(user_text="Cancel the seat watch, please"),
+        ]) == "I booked the Madrid flight on UA 990\nCancel the seat watch, please"
+
+    def test_a_close_stands_on_your_words_for_an_open_follow_up(self):
+        words = your_words([_ledger_turn(user_text="We\u2019re all set: \u201cI booked the Madrid flight\u201d")])
+        assert close_problem(ProposedClose(12, "I booked the Madrid flight"), {3, 12}, words) == ""
+        assert close_problem(ProposedClose(12, '"we\'re all set"'), {12}, words) == ""  # curly quotes and all
+
+    def test_not_open_or_not_your_own_words(self):
+        asked = [_ledger_turn(user_text="Any news on the seats?", reply_text="I booked UA 990 for you.")]
+        assert close_problem(ProposedClose(12, "Any news on the seats"), {3}, your_words(asked)) == NOT_OPEN
+        assert close_problem(ProposedClose(12, "I booked UA 990"), {12}, your_words(asked)) == NOT_YOUR_WORDS
+        check = [_ledger_turn(tap="scheduled", surface="scheduled", user_text="Check now: did they book?")]
+        assert close_problem(ProposedClose(12, "did they book"), {12}, your_words(check)) == NOT_YOUR_WORDS
+
+    def test_one_word_is_too_short_to_be_sure(self):
+        words = your_words([_ledger_turn(user_text="Done. Stop ... I booked it. 機票訂好了")])
+        assert close_problem(ProposedClose(12, "Done."), {12}, words) == TOO_SHORT  # yours, but done with what?
+        assert close_problem(ProposedClose(12, "Stop ..."), {12}, words) == TOO_SHORT  # an ellipsis is no word
+        assert close_problem(ProposedClose(12, "booked it"), {12}, words) == ""
+        assert close_problem(ProposedClose(12, "訂好了"), {12}, words) == ""  # a Chinese character is a word
+        assert close_problem(ProposedClose(3, "Done."), {12}, words) == NOT_OPEN  # not open comes first
 
 
 class TestVerdicts:

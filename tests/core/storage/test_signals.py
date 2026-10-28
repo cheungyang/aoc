@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from core.storage.signals import DueDelivery, NextRoute, SignalStore
+from core.storage.signals import DecidedClose, DueDelivery, NextRoute, SignalStore
 
 
 def _turn(**overrides):
@@ -447,6 +447,34 @@ def test_older_tables_get_message_ids_and_outcome_at(tmp_path):
     assert store.set_outcome(route_id, "engaged", at=300.0)
     assert SignalStore(path).post_by_message("7001")["outcome"] == "engaged"
     assert store.route(route_id)["outcome_at"] == 300.0
+
+
+CLOSED = DecidedClose(12, "I booked UA 990", "booked", closed=True, agent="Miles", goal="Award seats SFO→MAD")
+REFUSED = DecidedClose(13, "Miles found seats", problem="evidence not found in your own words")
+
+
+def test_a_decision_keeps_its_closes_as_code_decided_them(store):
+    decision_id = _decision(store)
+    assert store.decision(decision_id)["closes"] == []  # none proposed
+    store.record_closes(decision_id, [CLOSED, REFUSED])
+    assert store.decision(decision_id)["closes"] == [CLOSED, REFUSED]
+    assert store.recent_decisions(1)[0]["closes"] == [CLOSED, REFUSED]
+    assert (CLOSED.stood, REFUSED.stood) == (True, False)
+
+
+def test_an_older_decisions_table_gains_closes(tmp_path):
+    """Prod's Board was made before a decision kept the follow-up closes it proposed."""
+    path = str(tmp_path / "memory.db")
+    decision_id = _decision(SignalStore(path))
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE decisions DROP COLUMN closes")
+    conn.commit()
+    conn.close()
+
+    store = SignalStore(path)
+    assert store.decision(decision_id)["closes"] == []  # the row is kept, and the column added
+    store.record_closes(decision_id, [CLOSED])
+    assert SignalStore(path).decision(decision_id)["closes"] == [CLOSED]
 
 
 def test_stats_have_the_outcomes_and_how_fast_now_routes_came(store):

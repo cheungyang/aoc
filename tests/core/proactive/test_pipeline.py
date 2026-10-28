@@ -7,7 +7,9 @@ import pytest
 from core.proactive.cards import PeerCard
 from core.proactive.pipeline import Pipeline, dedupe_key, payload_from, source_message
 from core.proactive.switchboard import ModelRun, ProposedSignal
-from core.storage.signals import SignalStore
+from core.proactive.taps import CALLED
+from core.storage.follow_ups import Check, Closer, FollowUpStore, Status
+from core.storage.signals import DecidedClose, SignalStore
 from core.util.local_time import get_local_timezone
 
 NOW = datetime(2026, 10, 24, 9, 31, tzinfo=get_local_timezone()).timestamp()
@@ -66,12 +68,19 @@ def store(tmp_path):
     return SignalStore(str(tmp_path / "memory.db"))
 
 
+@pytest.fixture
+def follow_ups(store):
+    """The follow-ups in the same memory.db as the Board, as in prod."""
+    return FollowUpStore(str(store.path))
+
+
 # Each recipient's home channel, where its deliveries run and post.
 HOMES = {"meal-planner": "meal-planning", "excursion-planner": "weekend-planning"}
 
 
 def _pipeline(store, run=None, radio=None, **options):
     options.setdefault("clock", lambda: NOW)
+    options.setdefault("follow_ups", FollowUpStore(str(store.path)))
     return Pipeline(store, run=run or FakeRun(), team=lambda: TEAM, radio=radio, owns=lambda agent_id: True,
                     rng=Draw(0), tags="- food: Diet.", **options)
 
@@ -309,6 +318,89 @@ async def test_a_board_fact_is_shown_to_the_next_run(store):
     run = FakeRun(reply="<switchboard_response><errors>None</errors></switchboard_response>")
     await _pipeline(store, run)("s2", _turn(store, session_id="s2", user_text="anything else?"))
     assert "- artifact: Groceries from 99 Ranch, Oct 24 → meal-planner now" in run.prompts[0]
+
+
+# -- follow-ups the Switchboard closes on your words --------------------------------
+
+def _watch(follow_ups, goal="Restock the pantry after the trip"):
+    """An open follow-up of Ramsay's: not the agent the exchange is with."""
+    return follow_ups.open(agent_id="meal-planner", goal=goal, check=Check(type="model", what=goal),
+                           every_s=12 * 3600, until="2026-11-30", at=NOW - 86400)
+
+
+def _closing(follow_up_id, evidence="I did the big pantry restock"):
+    return FakeRun(reply=f'<switchboard_response><close follow_up="{follow_up_id}" reason="restocked">'
+                         f"<evidence>{evidence}</evidence></close><errors>None</errors></switchboard_response>")
+
+
+SAID = "here's my receipt: I did the big pantry restock"
+
+
+@pytest.mark.asyncio
+async def test_the_switchboard_sees_the_open_follow_ups(store, follow_ups):
+    _watch(follow_ups)
+    run = FakeRun()
+    await _pipeline(store, run)("s1", _turn(store))
+    assert '#1 🧑‍🍳 Ramsay: "Restock the pantry after the trip"' in run.prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_live_your_words_close_another_agents_follow_up_as_the_switchboards(store, follow_ups):
+    pantry = _watch(follow_ups)
+    decision_id = await _pipeline(store, _closing(pantry.id), mode="live")("s1", _turn(store, user_text=SAID))
+    closed = follow_ups.get(pantry.id)
+    assert (closed.status, closed.closed_by, closed.close_reason, closed.closed_at) == (
+        Status.CLOSED, Closer.SWITCHBOARD, "restocked", NOW)
+    assert store.decision(decision_id)["closes"] == [DecidedClose(
+        pantry.id, "I did the big pantry restock", "restocked", closed=True, agent="Ramsay",
+        goal="Restock the pantry after the trip")]
+
+
+@pytest.mark.asyncio
+async def test_with_no_reason_the_close_gives_your_words(store, follow_ups):
+    pantry = _watch(follow_ups)
+    run = FakeRun(reply=f'<switchboard_response><close follow_up="{pantry.id}"><evidence>I did the big pantry '
+                        "restock</evidence></close></switchboard_response>")
+    await _pipeline(store, run, mode="live")("s1", _turn(store, user_text=SAID))
+    assert follow_ups.get(pantry.id).close_reason == "I did the big pantry restock"
+
+
+@pytest.mark.asyncio
+async def test_in_shadow_it_would_close_and_nothing_closes(store, follow_ups):
+    pantry = _watch(follow_ups)
+    decision_id = await _pipeline(store, _closing(pantry.id), mode="shadow")("s1", _turn(store, user_text=SAID))
+    assert follow_ups.get(pantry.id).is_open
+    (close,) = store.decision(decision_id)["closes"]
+    assert (close.stood, close.closed, close.agent) == (True, False, "Ramsay")
+
+
+@pytest.mark.asyncio
+async def test_a_close_that_doesnt_stand_leaves_the_follow_up_as_it_was(store, follow_ups):
+    pantry, roast = _watch(follow_ups), _watch(follow_ups, goal="Plan Sunday's roast")
+    follow_ups.close(roast.id, agent_id="meal-planner", reason="cooked")  # its agent closed it in the same exchange
+    run = FakeRun(reply="<switchboard_response>"
+                        f'<close follow_up="{pantry.id}"><evidence>Saved: 99 Ranch</evidence></close>'
+                        f"<close follow_up=\"{roast.id}\"><evidence>here's my receipt</evidence></close>"
+                        "</switchboard_response>")
+    decision_id = await _pipeline(store, run, mode="live")("s1", _turn(store))
+    assert follow_ups.get(pantry.id).is_open  # "Saved: 99 Ranch" is the agent's reply, not your words
+    decision = store.decision(decision_id)
+    assert [(c.follow_up_id, c.closed, c.problem) for c in decision["closes"]] == [
+        (pantry.id, False, "evidence not found in your own words"), (roast.id, False, "not open")]
+    assert decision["errors"] == ""  # neither is an error: the decision went as it should
+    assert follow_ups.get(roast.id).closed_by is Closer.AGENT
+
+
+@pytest.mark.asyncio
+async def test_what_the_concierge_asked_a_teammate_isnt_your_words(store, follow_ups):
+    pantry = _watch(follow_ups)
+    run = _closing(pantry.id)
+    # Its agent_call says caller main, as your routed messages do: the taps' mark tells them apart.
+    turns = _turn(store, user_text=SAID, context={CALLED: True})
+    decision_id = await _pipeline(store, run, mode="live")("s1", turns)
+    assert follow_ups.get(pantry.id).is_open
+    assert [c.problem for c in store.decision(decision_id)["closes"]] == ["evidence not found in your own words"]
+    assert "· asked by main" in run.prompts[0] and f"  main: {SAID}" in run.prompts[0]
 
 
 def _signal(gist="Groceries from 99 Ranch", payload=None, kind="artifact"):

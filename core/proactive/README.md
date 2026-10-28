@@ -13,8 +13,8 @@ taps the turns of the agents it runs. It has **one switch**, `PROACTIVE_DELIVERY
 
 | `PROACTIVE_DELIVERY` | What happens |
 |---|---|
-| off (default) | **Shadow.** Turns are tapped, decided and shown on team radio, but **nothing reaches an agent or its channel**. A route only records when it *would* have been delivered. |
-| on | **Live.** A `now` or `today` route the Governor lets through becomes a **proactive turn**: the recipient posts in its own channel, or stays silent, and a `now` route first puts the recipient's emoji on your message ([Delivery](#delivery)). A `next` route rides along on the recipient's next scheduled run ([The next touchpoint](#the-next-touchpoint)). Each agent also sees the live situations its topics cover ([Live Context](#live-context)). |
+| off (default) | **Shadow.** Turns are tapped, decided and shown on team radio, but **nothing reaches an agent or its channel**. A route only records when it *would* have been delivered, and a follow-up close that it *would* have closed. |
+| on | **Live.** A `now` or `today` route the Governor lets through becomes a **proactive turn**: the recipient posts in its own channel, or stays silent, and a `now` route first puts the recipient's emoji on your message ([Delivery](#delivery)). A `next` route rides along on the recipient's next scheduled run ([The next touchpoint](#the-next-touchpoint)). Each agent also sees the live situations its topics cover ([Live Context](#live-context)). A follow-up your own words end is closed ([The Switchboard](#the-switchboard)). |
 
 > [!IMPORTANT]
 > Nothing here runs before a reply is out. The taps work in `ended`, after the
@@ -29,9 +29,10 @@ flowchart TD
     T -->|"SignalHook.ended (taps.py)"| L[("turn_ledger")]
     L -->|"effect / scheduled: at once<br/>chat: 90 s quiet, at most 10 min"| S["service.py"]
     S --> P["pipeline.py: one decision"]
-    P -->|"prompt: cards, tags, Board, exchange"| SB["Switchboard: main, FLASH, stateless"]
+    P -->|"prompt: cards, tags, Board, open follow-ups, exchange"| SB["Switchboard: main, FLASH, stateless"]
     SB -->|"switchboard_response"| G["Governor (code)"]
     G --> B[("signals, routes")]
+    G -->|"live: a close on your own words"| FU[("follow_ups")]
     B --> R["Team radio: #general thread"]
     R -->|"your ✅/❌, reason poll"| A[("acceptance")]
     R -->|"outcome line"| M["main's memory log"]
@@ -57,9 +58,9 @@ flowchart TD
 | [taps.py](taps.py) | Turns a finished turn into a ledger entry: what was said, memory-log lines, effects, touched paths, skills. Picks the turns that count. `CallLog` hears the turn's tool calls. |
 | [effects.py](effects.py) | The **one table** of what a tool's call means to the team: `ProactiveEffect` rows, trigger or context. |
 | [service.py](service.py) | The taps' sink in the bot process. Records the entry and times the session's Switchboard run. `install()` hooks it in, from main.py. Its sweep, each minute, resolves the delivery times, settles the outcomes, then ends the follow-ups past their `until` and puts their lines on team radio: each step on its own, so one that fails is logged by name and the rest still run. |
-| [pipeline.py](pipeline.py) | One decision: claim the turns, run the Switchboard, judge each route, record it, then tell team radio. A step that fails becomes the decision's error. |
-| [switchboard.py](switchboard.py) | Renders the prompt, runs `main` once, statelessly, and parses `<switchboard_response>`. |
-| [governor.py](governor.py) | The rules, the acceptance draw, and when a route would be delivered. Its docstring lists the **dormant levers**. |
+| [pipeline.py](pipeline.py) | One decision: claim the turns, run the Switchboard, judge each route, check each follow-up close (live: close it), record it, then tell team radio. A step that fails becomes the decision's error. |
+| [switchboard.py](switchboard.py) | Renders the prompt, runs `main` once, statelessly, and parses `<switchboard_response>`: its signals and its follow-up closes. |
+| [governor.py](governor.py) | The rules, the acceptance draw, when a route would be delivered, and whether a follow-up close stands (`close_problem`, on `your_words`). Its docstring lists the **dormant levers**. |
 | [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. A `next` route rides along on the recipient's next scheduled run instead (`SignalsForMe`). |
 | [follow_ups.py](follow_ups.py) | Live only: a follow-up's due check. The schedule runner's due work claims each once and runs it as a one-shot `FollowUpSchedule`: a scan first, then a turn only for what's new. `FollowUpSweep` ends the ones past their `until`, with the switch on or off, and puts each one opened and closed on team radio. |
 | [outcomes.py](outcomes.py) | What came of each proactive post: engaged, declined or ignored, from your reply, your ✅/❌, or a day of neither. Code decides it; it counts toward acceptance unless you labeled the route. |
@@ -92,6 +93,7 @@ Each turn that counts leaves one `turn_ledger` row:
 | `context.touched` | Paths that the turn's `filesystem` writes changed. |
 | `context.skills` | A loaded skill, or the one skill of the agent that lists a tool it called. |
 | `context.message` | Your message that started the turn, `<channel id>/<message id>`, when the Discord runner started it. A live `now` route's reaction goes on it. |
+| `context.called` | `true` when another agent asked for the turn (`called_by_agent`: an `agent_call`). Its `<caller>` can't tell: the Concierge's calls say `main`, as your routed messages do. What it was asked is that agent's words, not yours: the Switchboard reads it as asked by that agent, and it never counts as your words for closing a follow-up. |
 
 **The effects table** ([effects.py](effects.py)) is the one place that says which tool calls matter. The tools know nothing of it:
 
@@ -118,6 +120,7 @@ A message routed from a channel leaves one row, for the specialist that answered
 - **No output port:** nothing is posted.
 - **Session table:** dropped after the run. The decision keeps the prompt, the reply and the tokens.
 - **System prompt:** keeps main's MEMORY and FEEDBACK. `AGENTS.md` and `SOUL.md` describe the job.
+- **What it reads** ([switchboard.md](../prompts/templates/proactive/switchboard.md)): the teammates' cards, the tags, the Board's last 72 h, the open follow-ups, and the exchange.
 
 Every field it returns is checkable, and it never gives a confidence:
 
@@ -131,6 +134,14 @@ Every field it returns is checkable, and it never gives a confidence:
   <errors>None</errors>
 </switchboard_response>
 ```
+
+**Closing a follow-up.** You may tell another teammate "I booked the Madrid flight", in its channel or with "@Name …" (Eric in #weekend-planning, or "@Eric …" anywhere), and Miles' award watch would go on. So while follow-ups are open, the prompt lists them (at most 20, soonest `until` first: `#12 ✈️ Miles: "<goal>" · ends early when: <close_when>`), and the Switchboard may propose a close next to its signals:
+
+```xml
+<close follow_up="12" reason="booked UA 990"><evidence>I booked UA 990 for Dec 10</evidence></close>
+```
+
+It proposes one only on the user's own words in the exchange, never on a teammate's say-so, or a guess. Code checks it ([governor.py](governor.py) `close_problem`): the follow-up must be open now, and the evidence at least two words (a lone "done" or "stop" could be about anything; otherwise "too short to be sure"), found word for word in what you said, the `user_text` of the turns you started (`your_words`). An agent's reply doesn't count, nor what one agent asked another (`agent_call`, the Concierge's too: its calls say `<caller>main</caller>` like your routed messages, so the taps mark those turns `called`), nor the prompt of a scheduled run, a check or a proactive turn. Live, the follow-up closes as the Switchboard's (`closed_by` switchboard, with its reason, else your words), and team radio's closed line follows from the follow-ups' sweep. In shadow nothing closes. Each close is kept on its decision (`decisions.closes`): closed, would close, or why not.
 
 ## The Governor
 
@@ -278,18 +289,18 @@ When your goal isn't met yet and an agent can keep working on it, it opens a **f
 |---|---|
 | Where it lives | One row in `follow_ups`, in `memory.db` ([follow_ups.py](../storage/follow_ups.py), [follow_ups.sql](../storage/schemas/follow_ups.sql)): the goal, the check, `every` (the cadence asked) and `interval_s` (the cadence now), `until` (its last day), `close_when` (what would end it early), and the channel and session it was opened in. Only the tool opens one. The store reads each row as a frozen `FollowUp`, its check a `Check` and its states enums. |
 | The check | A short model turn, `{"type": "model", "what": "..."}` (`what` at most 300 characters), or one of the agent's own scans (`agents/<agent>/preconditions/`) with its args, like a schedule's precondition. |
-| The tool | `follow_up` ([tools/follow_up.py](../../tools/follow_up.py)): `open`, `extend`, `close` and `list`, always the calling agent's own. `open` needs a goal (at most 300 characters), a check, `every` (6 h to 7 d) and `until` (today to 90 days out). It refuses a second open follow-up with the same check: the same agent, and the check written the same once case and spacing are set aside. `extend` moves an open one's `until` later, still at most 90 days from today, and keeps its history: its counts, its fingerprint and what it last told you (closing and opening again would lose them, and old findings would look new). `open` and `extend` work only in a conversation, once you've agreed: on the scheduled surface (a scheduled run, a delivery, a check) the agent may offer them, but not do them. `close` and `list` work everywhere, so a check closes its own follow-up when its goal is met. |
+| The tool | `follow_up` ([tools/follow_up.py](../../tools/follow_up.py)): `open`, `extend`, `close` and `list`, always the calling agent's own. `open` needs a goal (at most 300 characters), a check, `every` (6 h to 7 d) and `until` (today to 90 days out), and its first check, `every` on, must come before `until` ends: one that never checks would never offer to keep watching. It refuses a second open follow-up with the same check: the same agent, and the check written the same once case and spacing are set aside. `extend` moves an open one's `until` later, still at most 90 days from today, and keeps its history: its counts, its fingerprint and what it last told you (closing and opening again would lose them, and old findings would look new). `open` and `extend` work only in a conversation, once you've agreed: on the scheduled surface (a scheduled run, a delivery, a check) the agent may offer them, but not do them. `close` and `list` work everywhere, so a check closes its own follow-up when its goal is met. |
 | What it's for | Work the agent can do: checking, searching, re-evaluating. Reminders for you stay in your task system. |
 | Who gets it | Auto-added, like `load_skill`, to every run that keeps memory ([tools_loader.py](../loaders/tools_loader.py) `gets_follow_up`): not a stateless agent or run (a job), a dream or a replay, a graph step, nor the Concierge. Nor a run another agent asked for (`agent_call`): a follow-up belongs to the agent you're talking to, checked with its own tools. The router's hand-overs keep it: your message in an agent's channel, or one naming the agent. An agent opts out with `"proactivity": {"follow_ups": false}`. A run with the tool gets its own compiled graph, so a job that builds an agent's graph first can't take it from the agent's conversations. |
 | How it's checked | The schedule runner's third source of work ([follow_ups.py](follow_ups.py)): each tick, `DueFollowUps` claims the due checks once, at most 5, held here, and runs each as a one-shot `FollowUpSchedule` in the agent's home channel (else where it was opened). A scan check runs first, in code: nothing found, or the same findings as last time (a fingerprint), and no turn runs, except on the last check; what it couldn't read is posted once a day. A model check is a short turn every time. The turn ([follow_up.md](../prompts/templates/proactive/follow_up.md)) sees the goal, how long it has watched and what it last told you, then posts one short message or stays `<silent/>`. A claim left by a run that never finished is freed after an hour. |
 | The last check | The check after which no other would come before `until` ends (`now + every >= the midnight after until`: near the end the interval is back to `every`) offers to keep watching. Its turn always runs: a scan's with nothing new too, with what it sees now, or with what it couldn't read instead of the notice. It never stays `<silent/>`: whatever it found (one line if nothing is new), it ends with one short question, keep watching, and until when (a date, or stop)? It doesn't extend the follow-up itself: you answer in the conversation, where the agent can (`extend`), or with `!followups extend`. Since it always posts, its post is a find only when a scan found something new; otherwise it's an empty check (a problem, for a scan that couldn't read), and what it posted isn't kept as the last report. |
 | Its source | `followup`: on the scheduled surface, like a delivery (its post enters the channel inbox, and can be heard in a voice briefing). The taps read it like a scheduled run, hops 0, so what it finds can reach teammates. It's never briefed with `next` routes. |
 | Cadence | A post resets it to `every`. Every 3rd empty check in a row (nothing found, nothing new, or a silent reply) doubles it, up to 7 days. When less than two intervals are left before `until` ends, it's back to `every`. `!followups` shows both: "every 4d (asked 2d)". |
-| How it ends | The agent closes it (often in a check that met the goal), you cancel it, or `until` passes: the service's sweep closes it within a minute, with the switch on or off. A check that closes its own follow-up still counts. Before `until` passes, the last check asks whether to keep watching; extended, it goes on with its history. |
+| How it ends | The agent closes it (often in a check that met the goal), you cancel it, or `until` passes: the service's sweep closes it within a minute, with the switch on or off. A check that closes its own follow-up still counts. Said to another teammate, in its channel or with "@Name …" ("I booked the Madrid flight", told to Eric), your own words end it too: the Switchboard proposes the close and code checks your words ([The Switchboard](#the-switchboard)); live it closes, in shadow the decision records that it would. Before `until` passes, the last check asks whether to keep watching; extended, it goes on with its history. |
 | `!followups` | The open ones, soonest check first (agent, goal, cadence, next check, until, checks and finds); `closed`, the last 10 with why; `cancel <id> [why]`, any agent's, as you; `extend <id> <YYYY-MM-DD>`, any agent's, to a later `until` at most 90 days from today ([followups.py](../runtime/commands/typed/followups.py)). With the switch off and some open, a ⏸ banner says nothing is checked. |
-| Team radio | A line when one opens and when it closes, from the same sweep, once each, without reactions: `📻 🔁 ✈️ Miles opened follow-up #12 · <goal> · every 2d until 2026-12-15 · check: award_watch`, and `📻 🔁 ✈️ Miles closed follow-up #12 · <goal> · you cancelled it · 6 checks, 1 find`. A closed line waits for a running check to finish, so it counts it. Lines for events over a day old are skipped. An extension has no line: the agent says so in the conversation where you agreed, and `!followups` shows the new end. |
+| Team radio | A line when one opens and when it closes, from the same sweep, once each, without reactions: `📻 🔁 ✈️ Miles opened follow-up #12 · <goal> · every 2d until 2026-12-15 · check: award_watch`, and `📻 🔁 ✈️ Miles' follow-up #12 closed · <goal> · you cancelled it · 6 checks, 1 find`. The closed line doesn't name a closer: its why does ("you cancelled it", "you said it's done: booked UA 990" when your words to a teammate ended it, "until passed", or the agent's reason, else "Miles closed it"). A closed line waits for a running check to finish, so it counts it. Lines for events over a day old are skipped. An extension has no line: the agent says so in the conversation where you agreed, and `!followups` shows the new end. |
 | Live Context | The agent's own open follow-ups, soonest `until` first, at most 5, in their own part of its Live Context (`<your_follow_ups>`), even without memory topics: it knows what it's watching, won't offer a duplicate, and closes one when you say it's done. Only a run with the tool sees that part, since it says to close one with `follow_up`. |
-| The switch | Off: no `follow_up` in any prompt, the tool refuses every op, and nothing is checked; ending at `until` and the radio lines go on. On: the tool and the checks. |
+| The switch | Off: no `follow_up` in any prompt, the tool refuses every op, and nothing is checked; ending at `until` and the radio lines go on, and the Switchboard only records the closes it would make. On: the tool, the checks, and the Switchboard's closes. |
 
 ## Team radio and `!signals`
 
@@ -310,8 +321,8 @@ When your goal isn't met yet and an agent can keep working on it, it opens a **f
 
 | Command | Shows or does |
 |---|---|
-| `!signals` | The last 10 decisions. |
-| `!signals <id>` | One decision's full trace, with how each route's delivery went and what came of it. |
+| `!signals` | The last 10 decisions: each one's routes, and the follow-ups it closed or would close. |
+| `!signals <id>` | One decision's full trace, with how each route's delivery went and what came of it, and each follow-up close it proposed: closed, would close (shadow), or why not, with the words it quoted. |
 | `!signals <id> good` | Labels its offered routes right. |
 | `!signals <id> bad <why>` | Labels them wrong, with a reason. |
 | `!signals missed <what>` | Records a route the Switchboard should have made. |
@@ -352,4 +363,5 @@ Go live after ≥ 2 weeks of shadow running in prod and ≥ 30 labeled decisions
 | The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_ack.py`, `test_output.py`, `test_runner.py`, `test_dispatcher.py` |
 | `!signals` | `tests/core/runtime/commands/typed/test_signals.py` |
 | Follow-ups: the store, the tool, the checks, the sweep and `!followups` | `tests/core/storage/test_follow_ups.py`, `tests/tools/test_follow_up.py`, `tests/core/proactive/test_follow_ups.py`, `tests/core/runtime/commands/typed/test_followups.py` |
+| The Switchboard's follow-up closes: the prompt and the reply, the taps' mark on a turn another agent asked for, the check on your words, live and shadow, the record and its trace | `tests/core/proactive/test_switchboard.py`, `test_taps.py`, `test_governor.py`, `test_pipeline.py`; `tests/core/storage/test_signals.py`; `tests/core/runtime/commands/typed/test_signals.py` |
 | The memory replay | `tests/scripts/test_proactive_replay.py` |
