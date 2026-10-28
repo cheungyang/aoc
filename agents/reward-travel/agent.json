@@ -40,6 +40,7 @@
       "prompt": [
         "Following your flight_search skill, read travel preferences,",
         "and use seats_aero to run searches for business class award availability.",
+        "Leave out the trips an open award_watch follow-up already watches: your open follow-ups are in Live Context.",
         "Value each candidate with award_value. Send curated alert only for options it marks alert, else terminate silently."
       ]
     },

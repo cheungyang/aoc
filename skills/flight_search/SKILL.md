@@ -24,7 +24,9 @@ Run independent calls in the same step.
    3. **Product Highlights**: aircraft type or cabin product (e.g. *ANA "The Room" 77W* or *Air France A350*).
    4. **Booking Link**: the direct booking link from the trip data.
 
-Call `load_skill("flight_search")` when you need the program and alliance list (transfer partners, surcharges, sweet spots) or example calls.
+**Watching seats**: when the user wants award seats watched, offer a `follow_up` whose check is `award_watch`, and say what you'll watch and until when. Its checks bring only new matches: value them with `award_value` before you post.
+
+Call `load_skill("flight_search")` when you need the program and alliance list (transfer partners, surcharges, sweet spots), example calls, or `award_watch`'s args.
 
 ## Reference
 
@@ -72,8 +74,36 @@ seats_aero(action="trips", availability_id="<selected_id>")
 award_value(points=75000, taxes="5.60 USD", cash=4200)
 ```
 
+### Watching Award Seats
+
+An `award_watch` check runs in code at each of the follow-up's checks, with no model turn, and starts your turn only when seats fit that weren't there last time. Open it with `follow_up` once the user agrees, with `every` and `until` like any follow-up. Name the route, days and cabin in its goal: your award-search run reads your open follow-ups' goals and leaves those trips out. Its args:
+
+- `origins`, `destinations`: 1 to 6 IATA codes each.
+- `depart`: `[from, to]`, YYYY-MM-DD: the departure days.
+- `cabins`: of `economy`, `premium`, `business`, `first`; `["business"]` if left out.
+- `seats`: 1 to 9, 1 if left out: the seats left needed in the cabin, one per traveler.
+- `programs`: seats.aero sources, e.g. `["aeroplan", "united"]`; every program if left out.
+- `max_miles`: the most miles per person; no limit if left out.
+- `connections`: `"any"` (the default), `"nonstop"`, or `"us_only"`: every connection at a US airport (a nonstop passes).
+- `max_stops`: the most connections; no limit if left out.
+
+Each match is a line: the day, route, program, cabin, miles and taxes, seats left, the flights and where they connect, and the availability id. Call `trips` on that id for the booking links, value the match with `award_value`, and close the follow-up when the user books.
+
+Business seats for four from the Bay Area to Spain, Dec 1-7, connecting only in the US, checked twice a day:
+```python
+follow_up(
+    op="open",
+    goal="Business award seats SFO/OAK to MAD/BCN for four, Dec 1-7",
+    check='{"type": "award_watch", "origins": ["SFO", "OAK"], "destinations": ["MAD", "BCN"], "depart": ["2026-12-01", "2026-12-07"], "seats": 4, "connections": "us_only"}',
+    every="12h",
+    until="2026-11-30",
+    close_when="the user books the flights",
+)
+```
+
 ### Required Tools
 - `seats_aero`: Required to perform cached searches, trip segment drilldown, nonstop destination discovery, and live inventory queries.
 - `award_value`: CPP and value band for each candidate.
 - `filesystem`: Required to read the cards (`pkm/wallet/credit-card/`) and travel preferences (`pkm/wallet/travel/`).
 - `web_search`: Cash fares to value awards against.
+- `follow_up`: Watching award seats with an `award_watch` check.

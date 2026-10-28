@@ -70,15 +70,28 @@ def test_a_check_can_be_one_of_the_agents_own_scans(live):
     assert check.spec() == {"type": "credit_windows", "days": 7}  # the schedule form, flattened
 
 
+def test_an_award_watch_check_is_built_when_it_opens(live):
+    watch = {"origins": ["SFO", "OAK"], "destinations": ["MAD"], "depart": ["2026-12-01", "2026-12-07"],
+             "seats": 4, "connections": "us_only"}
+    with _as():
+        assert _open(check=json.dumps({"type": "award_watch", **watch}))["errors"] == "None"
+    assert FollowUpStore().list()[0].check == Check(type="award_watch", args=watch)
+
+
 @pytest.mark.parametrize("args, error", [
     (dict(goal="  "), "open needs a goal"),
     (dict(goal="x" * 301), "at most 300 characters"),
     (dict(close_when="x" * 301), "at most 300 characters"),
-    (dict(check=""), "check is a JSON object with a type (model, credit_windows)"),
+    (dict(check=""), "check is a JSON object with a type (model, award_watch, credit_windows)"),
     (dict(check="watch the seats"), "check is a JSON object with a type"),
-    (dict(check=json.dumps({"type": "award_watch"})), "check type 'award_watch' isn't one you can use: model, "
-                                                      "credit_windows"),
+    (dict(check=json.dumps({"type": "hotel_watch"})), "check type 'hotel_watch' isn't one you can use: model, "
+                                                      "award_watch, credit_windows"),
     (dict(check=json.dumps({"type": "market_screen"})), "isn't one you can use"),  # another agent's scan
+    # A scan check is built when it opens, so a bad arg is refused at once.
+    (dict(check=json.dumps({"type": "award_watch"})), "check: 'award_watch' needs origins"),
+    (dict(check=json.dumps({"type": "award_watch", "origins": ["SFO"], "destinations": ["MAD"],
+                            "depart": ["2026-12-01", "2026-12-07"], "seats": 12})),
+     "check: 'award_watch' seats is a whole number from 1 to 9"),
     (dict(check=json.dumps({"type": "model"})), 'a model check is {"type": "model", "what": "<what to look for>"}'),
     (dict(check=json.dumps({"type": "model", "what": "x", "when": "daily"})), "a model check is"),
     (dict(check=json.dumps({"type": "model", "what": "x" * 301})), "a model check's what is at most 300 characters"),

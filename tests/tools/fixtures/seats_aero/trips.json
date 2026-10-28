@@ -1,0 +1,123 @@
+{
+  "data": [
+    {
+      "ID": "2pYR1aB2cD3eF4gH5iJ6kL7mN8o",
+      "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+      "AvailabilitySegments": [
+        {
+          "ID": "2pYR1sA1bC2dE3fG4hI5jK6lM7n",
+          "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+          "AvailabilityTripID": "2pYR1aB2cD3eF4gH5iJ6kL7mN8o",
+          "FlightNumber": "UA1580",
+          "Distance": 2565,
+          "FareClass": "I",
+          "AircraftName": "Boeing 757-200",
+          "AircraftCode": "752",
+          "OriginAirport": "SFO",
+          "DestinationAirport": "EWR",
+          "DepartsAt": "2026-12-06T07:00:00Z",
+          "ArrivesAt": "2026-12-06T15:29:00Z",
+          "Source": "united",
+          "Cabin": "business",
+          "Order": 0
+        },
+        {
+          "ID": "2pYR1sB2cD3eF4gH5iJ6kL7mN8p",
+          "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+          "AvailabilityTripID": "2pYR1aB2cD3eF4gH5iJ6kL7mN8o",
+          "FlightNumber": "UA121",
+          "Distance": 3830,
+          "FareClass": "I",
+          "AircraftName": "Boeing 767-300",
+          "AircraftCode": "763",
+          "OriginAirport": "EWR",
+          "DestinationAirport": "BCN",
+          "DepartsAt": "2026-12-06T17:45:00Z",
+          "ArrivesAt": "2026-12-07T07:55:00Z",
+          "Source": "united",
+          "Cabin": "business",
+          "Order": 1
+        }
+      ],
+      "TotalDuration": 955,
+      "Stops": 1,
+      "Carriers": "UA",
+      "RemainingSeats": 2,
+      "MileageCost": 88000,
+      "TotalTaxes": 560,
+      "TaxesCurrency": "USD",
+      "TaxesCurrencySymbol": "$",
+      "TotalSegmentDistance": 6395,
+      "FlightNumbers": "UA1580, UA121",
+      "DepartsAt": "2026-12-06T07:00:00Z",
+      "ArrivesAt": "2026-12-07T07:55:00Z",
+      "Cabin": "business",
+      "Source": "united",
+      "CreatedAt": "2026-10-28T09:15:44Z",
+      "UpdatedAt": "2026-10-28T09:15:44Z"
+    },
+    {
+      "ID": "2pYR2bC3dE4fG5hI6jK7lM8nO9p",
+      "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+      "AvailabilitySegments": [
+        {
+          "ID": "2pYR2sC3dE4fG5hI6jK7lM8nO9q",
+          "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+          "AvailabilityTripID": "2pYR2bC3dE4fG5hI6jK7lM8nO9p",
+          "FlightNumber": "UA58",
+          "Distance": 5685,
+          "FareClass": "I",
+          "AircraftName": "Boeing 787-9",
+          "AircraftCode": "789",
+          "OriginAirport": "SFO",
+          "DestinationAirport": "FRA",
+          "DepartsAt": "2026-12-06T15:40:00Z",
+          "ArrivesAt": "2026-12-07T11:35:00Z",
+          "Source": "united",
+          "Cabin": "business",
+          "Order": 0
+        },
+        {
+          "ID": "2pYR2sD4eF5gH6iJ7kL8mN9oP0r",
+          "AvailabilityID": "2pYQ7Kd3mWcB0nTqL5vX8rHsF2a",
+          "AvailabilityTripID": "2pYR2bC3dE4fG5hI6jK7lM8nO9p",
+          "FlightNumber": "LH1132",
+          "Distance": 680,
+          "FareClass": "P",
+          "AircraftName": "Airbus A321",
+          "AircraftCode": "321",
+          "OriginAirport": "FRA",
+          "DestinationAirport": "BCN",
+          "DepartsAt": "2026-12-07T13:10:00Z",
+          "ArrivesAt": "2026-12-07T15:15:00Z",
+          "Source": "united",
+          "Cabin": "business",
+          "Order": 1
+        }
+      ],
+      "TotalDuration": 935,
+      "Stops": 1,
+      "Carriers": "UA, LH",
+      "RemainingSeats": 4,
+      "MileageCost": 88000,
+      "TotalTaxes": 560,
+      "TaxesCurrency": "USD",
+      "TaxesCurrencySymbol": "$",
+      "TotalSegmentDistance": 6365,
+      "FlightNumbers": "UA58, LH1132",
+      "DepartsAt": "2026-12-06T15:40:00Z",
+      "ArrivesAt": "2026-12-07T15:15:00Z",
+      "Cabin": "business",
+      "Source": "united",
+      "CreatedAt": "2026-10-28T09:15:44Z",
+      "UpdatedAt": "2026-10-28T09:15:44Z"
+    }
+  ],
+  "origin_coordinates": {"Lat": 37.6189, "Lon": -122.375},
+  "destination_coordinates": {"Lat": 41.2971, "Lon": 2.0785},
+  "booking_links": [
+    {"label": "Book on United", "link": "https://www.united.com/en/us/book-flight/united-awards", "primary": true},
+    {"label": "Book on Air Canada", "link": "https://www.aircanada.com/aeroplan/redeem", "primary": false}
+  ],
+  "revalidation_id": "2pYR3cD4eF5gH6iJ7kL8mN9oP0q"
+}
