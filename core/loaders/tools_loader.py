@@ -15,12 +15,18 @@ def gets_follow_up(ctx, config) -> bool:
     no memory (a dream, a replay), a graph step, nor the Concierge, which answers in every
     channel (`channels: ["*"]`). An agent opts out with `"proactivity": {"follow_ups": false}`.
 
+    Nor a run another agent asked for (`ctx.called_by_agent`: agent_call): a follow-up
+    belongs to the agent you're talking to, checked with its own tools, so only the router's
+    hand-overs (direct_call, handoff) keep it.
+
     A compiled graph keeps the roster it was built with, so the runtime keys its graphs
     by this too (core/runtime/agent.py): a job that builds an agent's graph first doesn't
     take the tool from its next conversation."""
     if not Config().proactive_delivery:
         return False
     if ctx.is_stateless() or not ctx.record_memory or ctx.graph_id or ctx.source == "graph":
+        return False
+    if ctx.called_by_agent:
         return False
     config = config or {}
     if config.get("stateless") or "*" in [str(channel) for channel in config.get("channels") or []]:

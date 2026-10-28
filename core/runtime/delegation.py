@@ -15,6 +15,12 @@ custom events Discord and voice listen for, the channel permission check and the
 `<caller>` prefix. Adding a caller is fine. Adding a second copy of this path is
 not.
 
+Who chose the target travels on as `routed`: True only for the router's two
+nodes, where you chose the agent (by its channel, or by name), so it's the one
+you're talking to. Any other caller leaves it False, and the callee's context
+says so (`called_by_agent`): a called agent gets no `follow_up`, since a
+follow-up belongs to the agent you talk to, checked with its own tools.
+
 Keeping one function is the point. The duplicate this replaces was the reason a
 reaction emoji could appear on one path and not the other.
 
@@ -127,6 +133,7 @@ async def stream_delegate(
     run_async: bool = False,
     record_memory: bool = True,
     model: Optional[str] = None,
+    routed: bool = False,
 ) -> DelegationResult:
     """Runs `agent_id` on `prompt` and streams its reply into the caller's stream.
 
@@ -137,6 +144,8 @@ async def stream_delegate(
     tool models see doesn't expose them. `record_memory=False` keeps the callee's
     `<system_memory_log>` from being saved (and is inherited by anything it
     delegates to); `model` overrides the callee's model tier for this call.
+    `routed` is True only for the router's hand-overs (graphs/main: direct_call,
+    handoff). Every other call mints the callee's context `called_by_agent`.
     """
     if not agent_id or prompt is None or not channel:
         return DelegationResult(
@@ -184,6 +193,7 @@ async def stream_delegate(
         graph_id=active_sess.graph_id if active_sess else None,
         record_memory=record_memory,
         model=model,
+        called_by_agent=not routed,
         output=output,
     )
 

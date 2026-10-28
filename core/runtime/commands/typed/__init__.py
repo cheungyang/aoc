@@ -12,7 +12,7 @@ answers messages there:
     job.py         !job <id>       one job, and how it went
     kill.py        !kill <id>      stops a job
     signals.py     !signals        what the proactive team decided, and your labels
-    followups.py   !followups      the agents' follow-ups, and your cancel
+    followups.py   !followups      the agents' follow-ups, and your cancel or extend
     help.py        !help           every command, typed or spoken
 
 For the voice room (VoiceRoomCommand), through VoiceControls (../ports.py):

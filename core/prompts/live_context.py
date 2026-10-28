@@ -17,6 +17,10 @@ watching?", and it closes one when you say it's done:
 
     - #12 Business award seats SFO→MAD · every 2d until 2026-12-15
 
+That part tells the agent to close one with `follow_up`, so only a run with the
+tool sees it (core/loaders/tools_loader.gets_follow_up): not a run another agent
+asked for, nor one with no context to say whose run it is.
+
 The block is empty, and so left out, unless the switch (`PROACTIVE_DELIVERY`)
 is on. It's empty too for a stateless agent, and a stateless or non-recording
 run (a job, a dream, a replay): a dream that saw it could write it into
@@ -25,7 +29,8 @@ but still sees its follow-ups. Each part is left out when it has no line.
 
 core/runtime/graph_builder.py puts it right after the agent's memory and before
 the channel block: it changes a few times a day. It's rendered on every model
-call, so each agent's block is kept for CACHE_S.
+call, so each agent's block is kept for CACHE_S: one with its follow-ups, and
+one without.
 """
 import time
 from dataclasses import dataclass
@@ -34,6 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.config.settings import Config
 from core.knowledge.memory.inject import memory_topics
+from core.loaders.tools_loader import gets_follow_up
 from core.prompts.base import Prompt
 from core.runtime.foundation.context import try_context
 from core.storage.follow_ups import FollowUp, FollowUpStore, Status, cadence_text
@@ -47,8 +53,8 @@ MAX_AGE_S = 14 * 86400
 # How long an agent's block is kept: it changes a few times a day, and is asked for on every model call.
 CACHE_S = 60.0
 
-# agent_id -> (when it was rendered, the block)
-_cache: Dict[str, Tuple[float, str]] = {}
+# (agent_id, whether its follow-ups show) -> (when it was rendered, the block)
+_cache: Dict[Tuple[str, bool], Tuple[float, str]] = {}
 
 
 @dataclass
@@ -73,7 +79,8 @@ def follow_up_lines(follow_ups: List[FollowUp]) -> str:
 
 
 def get_live_context_prompt(agent_id: str, config: Optional[dict] = None, *, now: Optional[float] = None) -> str:
-    """The LIVE_CONTEXT block for `agent_id`, or "" (module docstring). Kept per agent for CACHE_S."""
+    """The LIVE_CONTEXT block for `agent_id`, or "" (module docstring). Kept for CACHE_S per
+    agent, and per whether its follow-ups show: only to a run that has the follow_up tool."""
     if not Config().proactive_delivery:
         return ""
     ctx = try_context()
@@ -84,19 +91,22 @@ def get_live_context_prompt(agent_id: str, config: Optional[dict] = None, *, now
         config = AgentsLoader().get_agent_config(agent_id) or {}
     if config.get("stateless"):
         return ""
+    with_follow_ups = ctx is not None and gets_follow_up(ctx, config)
     now = time.time() if now is None else now
-    cached = _cache.get(agent_id)
+    key = (agent_id, with_follow_ups)
+    cached = _cache.get(key)
     if cached is not None and now - cached[0] < CACHE_S:
         return cached[1]
-    block = _render(agent_id, config, now)
-    _cache[agent_id] = (now, block)
+    block = _render(agent_id, config, now, with_follow_ups)
+    _cache[key] = (now, block)
     return block
 
 
-def _render(agent_id: str, config: dict, now: float) -> str:
+def _render(agent_id: str, config: dict, now: float, with_follow_ups: bool) -> str:
     """The block, or "" when neither part has a line. Never raises: a part that can't be
     read is left out, and the turn goes on."""
-    situations, follow_ups = _situations(agent_id, config, now), _follow_ups(agent_id)
+    situations = _situations(agent_id, config, now)
+    follow_ups = _follow_ups(agent_id) if with_follow_ups else ""
     if not situations and not follow_ups:
         return ""
     return LiveContextPrompt(lines=situations, follow_ups=follow_ups).render()

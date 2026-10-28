@@ -51,11 +51,22 @@ Sweep = Callable[[], Awaitable[None]]
 
 
 def in_order(*sweeps: Sweep) -> Sweep:
-    """One sweep that runs each of `sweeps` in turn."""
+    """One sweep that runs each of `sweeps` in turn, each on its own: one that raises is
+    logged by its name, and the rest still run. Ending the follow-ups past their `until`
+    and their radio lines don't wait on settling the outcomes."""
     async def sweep() -> None:
         for each in sweeps:
-            await each()
+            try:
+                await each()
+            except Exception as e:
+                print(f"[proactive] The sweep's {sweep_name(each)} failed: {type(e).__name__}: {e}")
     return sweep
+
+
+def sweep_name(sweep: Sweep) -> str:
+    """How the log names a sweep: Pipeline.resolve, Outcomes.settle, FollowUpSweep."""
+    name = getattr(sweep, "__qualname__", None) or type(sweep).__name__
+    return name.rsplit("<locals>.", 1)[-1]
 
 
 def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
@@ -71,8 +82,10 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
     resolves the delivery times, then settles what came of each proactive post
     (outcomes.py), which also hears ✅/❌ after team radio does, then ends the
     follow-ups whose `until` passed and puts those opened and closed on team
-    radio (follow_ups.FollowUpSweep, with the switch on or off). With the
-    switch off, nothing is delivered: a route records when it would have been.
+    radio (follow_ups.FollowUpSweep, with the switch on or off). Each step runs
+    on its own (`in_order`): one that fails is logged, and the next still runs.
+    With the switch off, nothing is delivered: a route records when it would
+    have been.
     Returns the service, whose `start()` runs next to the bots, and whose
     `due_work` and `briefing` (delivery.py) and `follow_ups` (follow_ups.py)
     main.py hands to the schedule runner."""

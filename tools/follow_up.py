@@ -3,30 +3,36 @@
 An agent opens a follow-up when your goal isn't met yet and it can keep
 working on it itself: checking, searching, re-evaluating. Never a reminder for
 you; those stay in your task system. A follow-up has a goal, a check, a cadence
-(`every`, 6 h to 7 d) and an end (`until`, at most MAX_DAYS out), and optionally
-what would end it early (`close_when`). The check is a short model turn
-({"type": "model", "what": ...}) or one of the agent's own scans, the
-deterministic checks in `agents/<agent>/preconditions/`, with its args.
+(`every`, 6 h to 7 d) and an end (`until`, at most MAX_DAYS out:
+core/storage/follow_ups.parse_until), and optionally what would end it early
+(`close_when`). The check is a short model turn ({"type": "model", "what": ...})
+or one of the agent's own scans, the deterministic checks in
+`agents/<agent>/preconditions/`, with its args.
 
 Every op is the calling agent's own (try_context): `open` stores one for it,
 with the channel and session it was opened in (core/storage/follow_ups.py);
-`close` ends one of its open ones; `list` shows them. A second open follow-up
-with the same check is refused. `open`'s reply tells the agent to say it will
-keep watching, and until when.
+`extend` moves one's `until` later, keeping its history; `close` ends one of
+its open ones; `list` shows them. A second open follow-up with the same check
+is refused. `open`'s reply tells the agent to say it will keep watching, and
+until when; `extend`'s, to say it's extended.
 
-`open` works only in a conversation, once you've agreed: on the scheduled
-surface (a scheduled run, a proactive delivery, a follow-up's own check) the
-agent can offer one in its message, but not open it. `close` and `list` work
+`open` and `extend` work only in a conversation, once you've agreed: on the
+scheduled surface (a scheduled run, a proactive delivery, a follow-up's own
+check) the agent can offer them in its message, but not do them. A
+follow-up's last check asks whether to keep watching; you answer in the
+conversation, where the agent can extend it. `close` and `list` work
 everywhere, so a check can close its own follow-up when its goal is met.
 
 The tools loader gives the tool to every run that keeps memory, with the switch
-on (core/loaders/tools_loader.gets_follow_up). With the switch off every op is
-refused: nothing would check the follow-ups. The checks run on the schedule
-runner (core/proactive/follow_ups.py).
+on (core/loaders/tools_loader.gets_follow_up), but not to a run another agent
+asked for (agent_call): a follow-up belongs to the agent you're talking to, and
+its checks use that agent's own tools. With the switch off every op is refused:
+nothing would check the follow-ups. The checks run on the schedule runner
+(core/proactive/follow_ups.py).
 """
 import json
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 
 from langchain_core.tools import tool
@@ -34,18 +40,26 @@ from langchain_core.tools import tool
 from core.config.settings import Config
 from core.runtime.foundation.context import try_context
 from core.scheduler.preconditions import PreconditionError, agent_preconditions, build_precondition
-from core.storage.follow_ups import MODEL_CHECK, Check, DuplicateFollowUp, FollowUp, FollowUpStore, Status, cadence_text
+from core.storage.follow_ups import (
+    MODEL_CHECK,
+    Check,
+    DuplicateFollowUp,
+    FollowUp,
+    FollowUpStore,
+    Status,
+    cadence_text,
+    parse_until,
+)
 from core.tooling import format_tool_response
 from core.util.local_time import get_local_timezone
 
 NAME = "follow_up"
 GOAL_CHARS = 300
 MIN_EVERY_S, MAX_EVERY_S = 6 * 3600, 7 * 86400
-MAX_DAYS = 90
 MODEL_FORM = '{"type": "model", "what": "<what to look for>"}'
-# Where `open` is refused: posts nobody asked for (ExecutionContext.get_surface).
+# Where `open` and `extend` are refused: posts nobody asked for (ExecutionContext.get_surface).
 SCHEDULED = "scheduled"
-NOT_HERE = "open a follow-up in a conversation, after the user agreed; you can offer it in your message"
+NOT_HERE = "open or extend a follow-up in a conversation, after the user agreed; you can offer it in your message"
 
 _EVERY = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([mhd])\s*$", re.IGNORECASE)
 _UNIT_S = {"m": 60, "h": 3600, "d": 86400}
@@ -62,18 +76,9 @@ def parse_every(text: str) -> int:
     return seconds
 
 
-def parse_until(text: str, today: date) -> str:
-    """`until` as YYYY-MM-DD: from `today` to MAX_DAYS after it. Raises ValueError."""
-    try:
-        day = date.fromisoformat((text or "").strip())
-    except ValueError:
-        raise ValueError("until is a date, YYYY-MM-DD") from None
-    latest = today + timedelta(days=MAX_DAYS)
-    if day < today:
-        raise ValueError(f"until {day} has passed: it's {today} today")
-    if day > latest:
-        raise ValueError(f"until is at most {MAX_DAYS} days out: {latest} or sooner")
-    return day.isoformat()
+def today() -> date:
+    """Today on your wall clock, not the container's: where `until` counts from."""
+    return datetime.now(get_local_timezone()).date()
 
 
 def parse_check(text: str, agent_id: str) -> Check:
@@ -128,7 +133,7 @@ def _open(ctx: Any, goal: str, check: str, every: str, until: str, close_when: s
     try:
         parsed = parse_check(check, ctx.agent_id)
         every_s = parse_every(every)
-        day = parse_until(until, datetime.now(get_local_timezone()).date())
+        day = parse_until(until, today())
     except ValueError as e:
         return _error(str(e))
     try:
@@ -144,30 +149,50 @@ def _open(ctx: Any, goal: str, check: str, every: str, until: str, close_when: s
         f"until {opened.until}. Say in your reply that you'll keep watching, and until when ({opened.until})."))
 
 
+def _extend(ctx: Any, follow_up_id: Optional[int], until: str) -> str:
+    if follow_up_id is None:
+        return _error("extend needs the follow-up's id (list shows them)")
+    try:
+        day = parse_until(until, today())
+    except ValueError as e:
+        return _error(str(e))
+    store = FollowUpStore()
+    extended = store.extend(int(follow_up_id), day, agent_id=ctx.agent_id)
+    if extended is not None:
+        return format_tool_response(NAME, payload=f"Extended follow-up #{extended.id} until {extended.until}. "
+                                                  "Say so in your reply.")
+    current = store.get(int(follow_up_id))
+    if current is None or not current.is_open or current.agent_id != ctx.agent_id:
+        return _error(f"you have no open follow-up #{follow_up_id}")
+    return _error(f"until is after {current.until}: follow-up #{current.id} already runs until then")
+
+
 @tool
-def follow_up(op: Literal["open", "close", "list"], goal: str = "", check: str = "", every: str = "",
+def follow_up(op: Literal["open", "extend", "close", "list"], goal: str = "", check: str = "", every: str = "",
               until: str = "", close_when: str = "", id: Optional[int] = None, reason: str = "") -> str:
     """Keep working on the user's unmet goal: a check you run on a cadence until an end date.
-    Only for work you can do (checking, searching, re-evaluating), never reminders. Offer
-    first, say in your reply what you'll watch until when, and close it when the goal is met
-    or the user says stop.
+    Only a check you can run with your own tools (checking, searching, re-evaluating), never
+    reminders. Offer first, say in your reply what you'll watch until when, and close it
+    when the goal is met or the user says stop.
 
     Args:
-        op: open, close, or list yours.
+        op: open, extend, close, or list yours.
         goal, check, every, until, close_when: for open. check is JSON:
             {"type": "model", "what": "..."} or one of your scans with its args.
-            every: 6h to 7d. until: YYYY-MM-DD, within 90 days. close_when: optional.
-        id, reason: for close.
+            every: 6h to 7d. until: YYYY-MM-DD, within 90 days.
+        id, until: for extend. id, reason: for close.
     """
     if not Config().proactive_delivery:
         return _error("follow-ups are off: nothing would check them")
     ctx = try_context()
     if ctx is None:
         return _error("no active execution context; this tool must be called from an agent run")
+    if op in ("open", "extend") and ctx.get_surface() == SCHEDULED:
+        return _error(NOT_HERE)
     if op == "open":
-        if ctx.get_surface() == SCHEDULED:
-            return _error(NOT_HERE)
         return _open(ctx, goal, check, every, until, close_when)
+    if op == "extend":
+        return _extend(ctx, id, until)
     if op == "close":
         if id is None:
             return _error("close needs the follow-up's id (list shows them)")
@@ -178,4 +203,4 @@ def follow_up(op: Literal["open", "close", "list"], goal: str = "", check: str =
     if op == "list":
         follow_ups = FollowUpStore().list(agent_id=ctx.agent_id, status=Status.OPEN)
         return format_tool_response(NAME, payload="\n".join(map(line, follow_ups)) or "You have no open follow-ups.")
-    return _error(f"op is open, close or list, not {op!r}")
+    return _error(f"op is open, extend, close or list, not {op!r}")

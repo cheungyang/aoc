@@ -187,6 +187,18 @@ class TestExecutionContextSurface(unittest.TestCase):
         self.assertEqual(ctx.with_graph("coding").get_surface(), "voice")
         self.assertEqual(ctx.with_agent("b").get_surface(), "voice")
 
+    def test_a_turn_another_agent_asked_for_stays_called(self):
+        """`called_by_agent` (core/loaders/tools_loader.gets_follow_up): False unless delegation
+        says so. The same turn's derivations keep it; a context for another agent is one this
+        turn asked, so it's called."""
+        yours = SessionManager.get_session(agent_id="a", source="discord", channel="general")
+        called = SessionManager.get_session(agent_id="a", source="tool", channel="general", called_by_agent=True)
+        self.assertFalse(yours.called_by_agent)
+        for ctx in (yours, called):
+            self.assertEqual(ctx.with_graph("coding").called_by_agent, ctx.called_by_agent)
+            self.assertEqual(ctx.with_surface("voice").called_by_agent, ctx.called_by_agent)
+            self.assertTrue(ctx.with_agent("b").called_by_agent)
+
     def test_surface_scope_tags_contexts_minted_inside_it(self):
         """A scheduled script declares itself once; everything it mints follows."""
         with surface_scope("scheduled"):

@@ -1,4 +1,4 @@
-"""The follow_up tool (tools/follow_up.py): open, close and list, for the calling agent only."""
+"""The follow_up tool (tools/follow_up.py): open, extend, close and list, for the calling agent only."""
 import json
 from datetime import datetime, timedelta
 
@@ -8,10 +8,17 @@ from core.config.settings import Config
 from core.storage.follow_ups import Check, Closer, FollowUpStore, Status
 from core.util.local_time import get_local_timezone
 from tests.helpers import execution_context, envelope
+from tools import follow_up as tool_module
 from tools.follow_up import cadence_text, follow_up, parse_every
 
 TODAY = datetime.now(get_local_timezone()).date()
 MODEL = json.dumps({"type": "model", "what": "new award space SFO to MAD in business"})
+
+
+@pytest.fixture(autouse=True)
+def same_day(monkeypatch):
+    """The tool's today is the TODAY the cases were written from, even when a run crosses midnight."""
+    monkeypatch.setattr(tool_module, "today", lambda: TODAY)
 
 
 @pytest.fixture
@@ -96,6 +103,55 @@ def test_the_edges_of_the_cadence_and_the_end_are_allowed(live):
     assert (cadence_text(21600), cadence_text(172800), cadence_text(23400)) == ("6h", "2d", "390m")
 
 
+def test_its_description_says_own_tools_and_stays_short():
+    """Every prompt that has the tool carries this, so the rule cost about 20 characters:
+    it was 617 before it. `extend` fit in the same budget."""
+    assert "Only a check you can run with your own tools" in follow_up.description
+    assert "op: open, extend, close, or list yours." in follow_up.description
+    assert len(follow_up.description) <= 650
+
+
+def test_extend_moves_the_callers_until_later_and_tells_it_to_say_so(live):
+    later = (TODAY + timedelta(days=60)).isoformat()
+    with _as():
+        _open()
+        reply = _call(op="extend", id=1, until=later)
+    assert reply["errors"] == "None"
+    assert reply["payload"] == f"Extended follow-up #1 until {later}. Say so in your reply."
+    extended = FollowUpStore().get(1)
+    assert (extended.until, extended.status, extended.agent_id) == (later, Status.OPEN, "reward-travel")
+
+
+@pytest.mark.parametrize("args, error", [
+    (dict(until=(TODAY + timedelta(days=60)).isoformat()), "extend needs the follow-up's id (list shows them)"),
+    (dict(id=1, until="next month"), "until is a date, YYYY-MM-DD"),
+    (dict(id=1, until=(TODAY - timedelta(days=1)).isoformat()), "has passed"),
+    (dict(id=1, until=(TODAY + timedelta(days=91)).isoformat()), "until is at most 90 days out"),
+    (dict(id=1, until=(TODAY + timedelta(days=30)).isoformat()),
+     f"until is after {TODAY + timedelta(days=30)}: follow-up #1 already runs until then"),
+    (dict(id=1, until=(TODAY + timedelta(days=20)).isoformat()), "until is after"),
+    (dict(id=2, until=(TODAY + timedelta(days=60)).isoformat()), "you have no open follow-up #2"),
+])
+def test_extend_refuses_what_it_cant_keep(live, args, error):
+    with _as():
+        _open()
+        reply = _call(op="extend", **args)
+    assert reply["errors"].startswith("Error: ") and error in reply["errors"], reply["errors"]
+    assert FollowUpStore().get(1).until == (TODAY + timedelta(days=30)).isoformat()
+
+
+def test_extend_is_only_for_the_callers_own_open_follow_up(live):
+    later = (TODAY + timedelta(days=60)).isoformat()
+    with _as():
+        _open()
+    with _as("excursion-planner", "weekend-planning"):
+        assert "you have no open follow-up #1" in _call(op="extend", id=1, until=later)["errors"]  # not its own
+    with _as():
+        _call(op="close", id=1)
+        assert "you have no open follow-up #1" in _call(op="extend", id=1, until=later)["errors"]  # closed
+    assert FollowUpStore().get(1).until == (TODAY + timedelta(days=30)).isoformat()
+
+
 def test_a_second_open_follow_up_with_the_same_check_is_refused(live):
     with _as():
         _open()
@@ -138,7 +194,7 @@ def test_close_ends_only_the_callers_own_open_follow_up(live):
     assert (closed.status, closed.close_reason, closed.closed_by) == (Status.CLOSED, "booked on Iberia", Closer.AGENT)
 
 
-@pytest.mark.parametrize("op", ["open", "close", "list"])
+@pytest.mark.parametrize("op", ["open", "extend", "close", "list"])
 def test_with_the_switch_off_every_op_is_refused(op):
     with _as():
         reply = _open(op=op, id=1)
@@ -151,12 +207,16 @@ def test_it_needs_an_agent_run(live):
 
 
 @pytest.mark.parametrize("source", ["scheduled", "proactive", "followup"])
-def test_open_is_refused_on_the_scheduled_surface(live, source):
+def test_open_and_extend_are_refused_on_the_scheduled_surface(live, source):
+    until = (TODAY + timedelta(days=30)).isoformat()
+    refused = ("Error: open or extend a follow-up in a conversation, after the user agreed; you can offer it in "
+               "your message")
+    with _as():
+        _open()
     with execution_context(agent_id="reward-travel", source=source, channel="lifestyle-perk", stateless=False):
-        reply = _open()
-    assert reply["errors"] == ("Error: open a follow-up in a conversation, after the user agreed; you can offer "
-                               "it in your message")
-    assert FollowUpStore().list() == []
+        assert _open(check=json.dumps({"type": "model", "what": "seats to Lisbon"}))["errors"] == refused
+        assert _call(op="extend", id=1, until=(TODAY + timedelta(days=60)).isoformat())["errors"] == refused
+    assert [(f.id, f.until) for f in FollowUpStore().list()] == [(1, until)]
 
 
 def test_a_check_can_list_and_close_its_own_follow_up(live):

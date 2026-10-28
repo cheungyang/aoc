@@ -124,6 +124,15 @@ class ExecutionContext:
     - `thinking_level` is an authority field: the reasoning depth for this
       call's model requests, overriding the agent's per-surface level (a
       schedule entry's `thinking_level`). Not inherited, like `model`.
+    - `called_by_agent` is an authority field: True when the turn was handed
+      over by delegation the router didn't choose: another agent's model
+      asked for it (`agent_call`), or Python code did (`ask_worker`, the dream
+      standup). False for the router's hand-overs (your message in an agent's
+      channel, or one naming the agent) and for every turn nobody handed over.
+      A called agent isn't the one you're talking to, so it gets no
+      `follow_up` (core/loaders/tools_loader.gets_follow_up). `stream_delegate`
+      sets it on the callee's context; `with_graph` and `with_surface` keep it;
+      `with_agent` sets it, since the agent it derives is one this turn asked.
     - `output` is where the turn's output goes (foundation/output.py): set by
       the adapter that starts the turn, kept by derived contexts, and handed on
       by delegation. None for a turn nobody sees (a job, a script).
@@ -144,6 +153,7 @@ class ExecutionContext:
     record_memory: bool = True
     model: Optional[str] = None
     thinking_level: Optional[str] = None
+    called_by_agent: bool = False
     output: Optional[Any] = field(default=None, repr=False, compare=False)
     turn_hints: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _secret: Any = field(default=None, repr=False, compare=False)
@@ -203,6 +213,7 @@ class ExecutionContext:
         record_memory: bool = True,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        called_by_agent: bool = False,
         output: Optional[Any] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
@@ -217,6 +228,7 @@ class ExecutionContext:
             record_memory=record_memory,
             model=model,
             thinking_level=thinking_level,
+            called_by_agent=called_by_agent,
             output=output,
             _secret=_CONTEXT_SECRET,
         )
@@ -236,11 +248,13 @@ class ExecutionContext:
         """Derives a child context for a different agent, keeping graph.
 
         Model and thinking overrides belong to the agent they were set for, so
-        they are dropped, and the new agent starts with its own turn hints.
+        they are dropped, and the new agent starts with its own turn hints. It's
+        an agent this turn asked, not the one you're talking to: `called_by_agent`.
         """
         if agent_id == self.agent_id:
             return self
-        return replace(self, agent_id=agent_id, model=None, thinking_level=None, turn_hints={})
+        return replace(self, agent_id=agent_id, model=None, thinking_level=None, turn_hints={},
+                       called_by_agent=True)
 
     def with_surface(self, surface: Optional[str]) -> "ExecutionContext":
         """Derives a context tagged with `surface`, keeping the same session identity."""

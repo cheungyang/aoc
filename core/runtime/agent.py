@@ -46,8 +46,8 @@ class Agent(BaseAgent):
         if ctx.model:
             cache_key += f"|{ctx.model}"
         # A run that gets the follow_up tool has another roster, so another compiled graph
-        # too: a stateless or non-recording run of the same agent doesn't get it
-        # (core/loaders/tools_loader.py).
+        # too: a stateless or non-recording run of the same agent doesn't get it, nor a run
+        # another agent asked for (core/loaders/tools_loader.py).
         if gets_follow_up(ctx, self.config):
             cache_key += f"|{FOLLOW_UP}"
         if cache_key not in self._graphs:

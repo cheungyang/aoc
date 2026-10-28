@@ -1,7 +1,7 @@
 """Follow-ups in memory.db (core/storage/follow_ups.py)."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
@@ -15,6 +15,8 @@ from core.storage.follow_ups import (
     Status,
     cadence_text,
     check_key,
+    end_of,
+    parse_until,
 )
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
@@ -251,6 +253,47 @@ def test_expire_closes_the_ones_whose_until_passed(store):
         Status.CLOSED, "until passed", Closer.UNTIL, NOV_1)
     assert store.get(last_day.id).is_open
     assert store.expire("2026-11-01", NOV_1) == []
+
+
+def test_extend_moves_until_later_and_keeps_the_history(store):
+    opened = _open(store)
+    _checked(store, opened.id, Result.FOUND, fingerprint="f1", report="Two seats on Iberia, 70k each.")
+    checked = _checked(store, opened.id, Result.EMPTY)
+    extended = store.extend(opened.id, "2026-12-31")
+    assert extended.until == "2026-12-31"
+    assert replace(extended, until=checked.until) == checked  # the counts, fingerprint and report stay
+    assert (extended.checks, extended.finds, extended.last_fingerprint) == (2, 1, "f1")
+    for not_later in ("2026-12-31", "2026-12-15"):
+        assert store.extend(opened.id, not_later) is None
+    assert store.get(opened.id).until == "2026-12-31"
+    # The new until is the one that counts: due on it, and not expired the day after the old one.
+    assert opened.id in [f.id for f in store.due(NOV_1 + 60 * DAY, "2026-12-31")]
+    assert store.expire("2026-12-01", NOV_1 + 30 * DAY) == []
+
+
+def test_only_an_open_follow_up_extends_and_only_its_owners(store):
+    opened = _open(store)
+    assert store.extend(opened.id, "2026-12-31", agent_id="excursion-planner") is None  # not its own
+    assert store.extend(opened.id, "2026-12-15", agent_id="reward-travel").until == "2026-12-15"
+    assert store.extend(opened.id, "2026-12-31").until == "2026-12-31"  # no agent given: anyone's (`!followups`)
+    store.close(opened.id)
+    assert store.extend(opened.id, "2027-01-15") is None  # closed
+    assert store.extend(999, "2027-01-15") is None
+    with pytest.raises(ValueError):
+        store.extend(opened.id, "next month")
+
+
+def test_until_is_a_date_from_today_to_90_days_out_and_ends_at_the_midnight_after():
+    today = date(2026, 11, 1)
+    assert (parse_until(" 2026-11-01 ", today), parse_until("2027-01-30", today)) == ("2026-11-01", "2027-01-30")
+    for text, error in (("next week", "until is a date, YYYY-MM-DD"),
+                        ("2026-10-31", "until 2026-10-31 has passed: it's 2026-11-01 today"),
+                        ("2027-01-31", "until is at most 90 days out: 2027-01-30 or sooner")):
+        with pytest.raises(ValueError) as refused:
+            parse_until(text, today)
+        assert str(refused.value) == error
+    assert end_of("2026-11-30") == datetime(2026, 12, 1, tzinfo=TZ).timestamp()
+    assert end_of("someday") == 0.0  # unreadable: ending now
 
 
 def test_you_close_any_agents_follow_up_and_the_last_closed_come_newest_first(store):

@@ -20,12 +20,14 @@ from core.proactive.follow_ups import (
     FollowUpSchedule,
     FollowUpSweep,
     fingerprint,
+    is_last_check,
     radio_line,
 )
 from core.scheduler.preconditions import PreconditionError
 from core.scheduler.spec import Findings, Problems, ScheduleContext, SessionPolicy, WorkDecision
 from core.storage.follow_ups import Check, Closer, FollowUpStore, Result, Status
 from core.util.local_time import get_local_timezone
+from tests.helpers import make_follow_up
 
 NOW = datetime(2026, 11, 1, 9, 0, tzinfo=get_local_timezone()).timestamp()  # a Sunday
 HOUR, DAY = 3600, 86400
@@ -231,6 +233,97 @@ class TestTheCheck:
         assert channel.sent == [] and output.outcome == "silent"
         await output.deliver(TURN, AgentResponse.from_string("Iberia opened two seats on Dec 10."))
         assert channel.sent == ["Iberia opened two seats on Dec 10."] and output.text == channel.sent[0]
+
+
+class TestTheLastCheck:
+    """The check after which no other comes before `until` ends: its turn always runs, offers
+    to keep watching, and its post is a find only for a scan's new findings."""
+
+    def test_it_is_the_check_no_other_would_follow_before_until_ends(self):
+        last_day = make_follow_up(until="2026-11-01", every_s=12 * HOUR, interval_s=12 * HOUR)
+        ends = datetime(2026, 11, 2, tzinfo=get_local_timezone()).timestamp()  # the midnight after it
+        assert not is_last_check(last_day, ends - 12 * HOUR - 1)
+        assert is_last_check(last_day, ends - 12 * HOUR)  # the next would be due as it ends
+        assert not is_last_check(replace(last_day, until="2026-11-02"), ends - 12 * HOUR)  # extended: not yet
+        # A late check with a stretched interval isn't the last: near the end the next comes `every` on.
+        assert not is_last_check(replace(last_day, interval_s=2 * DAY), ends - 30 * HOUR)
+
+    def test_a_scan_with_nothing_new_runs_its_turn_on_the_last_check_only(self, store, scan):
+        found = Findings("award_watch", "Iberia, Dec 10: 2 seats at 70k", ())
+        scan.decision = WorkDecision(True, "award space", detail=found)
+        seen = replace(_open(store, check=AWARD, every_s=DAY, until="2026-11-02"),
+                       last_fingerprint=fingerprint(scan.decision))
+        before = FollowUpSchedule(seen, store=store)  # a day before the last check
+        assert tuple(before.has_work(_ctx(before))) == (False, "nothing new since the last check")
+        last = FollowUpSchedule(replace(seen, until="2026-11-01"), store=store)
+        decision = last.has_work(_ctx(last))
+        assert decision and decision.detail is found
+        prompt = last.build_prompt(_ctx(last), decision)
+        assert "Your check found nothing new since the last one: what it sees now is below." in prompt
+        assert prompt.endswith('<findings source="award_watch">\nIberia, Dec 10: 2 seats at 70k\n</findings>')
+        # Nothing found, or nothing it could read: the turn runs all the same, and says which.
+        scan.decision = WorkDecision(False, "no award space under 80k")
+        quiet = FollowUpSchedule(replace(seen, until="2026-11-01"), store=store)
+        decision = quiet.has_work(_ctx(quiet))
+        assert decision
+        assert "Your award_watch check found nothing new: no award space under 80k" in quiet.build_prompt(
+            _ctx(quiet), decision)
+        problems = Problems("award_watch", ("seats.aero refused the key (401)",))
+        scan.decision = WorkDecision(False, "award_watch can't run", detail=problems)
+        broken = FollowUpSchedule(replace(seen, until="2026-11-01"), store=store)
+        decision = broken.has_work(_ctx(broken))
+        assert decision and decision.detail is problems  # a turn, so the runner posts no notice: the turn says it
+        assert ("Your award_watch check couldn't read what it needed: seats.aero refused the key (401)."
+                in broken.build_prompt(_ctx(broken), decision))
+
+    def test_only_the_last_checks_prompt_offers_to_keep_watching(self, store):
+        opened = _open(store, every_s=DAY, until="2026-11-01")  # a model check
+        last = FollowUpSchedule(opened, store=store)
+        prompt = last.build_prompt(_ctx(last), last.has_work(_ctx(last)))
+        for part in ("This is your follow-up #1: work you told the user you'd keep doing, and this is its last check.",
+                     "It ends on 2026-11-01: no other check comes before then.",
+                     "end with one short question, and no other: keep watching, and until when (a date, or stop)?",
+                     "Don't extend it yourself: the user answers in the conversation, where you can.",
+                     "Never reply <silent/> to this check: if nothing is new, say so in one line, then ask.",
+                     "Check now: new award space SFO to MAD in business"):
+            assert part in prompt, part
+        assert "reply with exactly <silent/>" not in prompt and "decide whether this check is worth one" not in prompt
+        earlier = FollowUpSchedule(replace(opened, until="2026-11-02"), store=store)
+        prompt = earlier.build_prompt(_ctx(earlier), earlier.has_work(_ctx(earlier)))
+        assert "reply with exactly <silent/> and nothing else" in prompt
+        assert "decide whether this check is worth one" in prompt
+        assert "last check" not in prompt and "keep watching" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_its_post_is_a_find_only_for_a_scans_new_findings(self, store, scan):
+        new = WorkDecision(True, "award space", detail=Findings("award_watch", "Iberia, Dec 10: 2 seats at 70k"))
+        cases = {  # what the scan decides (None: a model check), and the fingerprint it had
+            "new findings": (new, ""),
+            "the same findings": (new, fingerprint(new)),
+            "nothing found": (WorkDecision(False, "no award space"), ""),
+            "a problem": (WorkDecision(False, "can't run", detail=Problems("award_watch", ("401",))), ""),
+            "a model check": (None, ""),
+        }
+        counted = {}
+        for i, (case, (decision, seen)) in enumerate(cases.items()):
+            check = MODEL if decision is None else replace(AWARD, args=dict(AWARD.args, n=i))
+            opened = _open(store, check=check, every_s=DAY, until="2026-11-01")
+            store.update("follow_ups", {"last_fingerprint": seen, "last_report": "Nothing under 80k yet."},
+                         {"id": opened.id})
+            store.claim(opened.id, NOW)
+            scan.decision = decision
+            spec = FollowUpSchedule(store.get(opened.id), store=store)
+            assert spec.has_work(_ctx(spec)), case  # the last check always runs its turn
+            reply = "Still 2 seats at 70k on Dec 10. Keep watching, and until when?"
+            await spec.output_for(Channel()).deliver(TURN, AgentResponse.from_string(reply))
+            spec.on_success(_ctx(spec))
+            counted[case] = store.get(opened.id)
+        assert {case: (f.checks, f.finds, f.empty_checks) for case, f in counted.items()} == {
+            "new findings": (1, 1, 0), "the same findings": (1, 0, 1), "nothing found": (1, 0, 1),
+            "a problem": (0, 0, 0), "a model check": (1, 0, 1)}
+        assert counted["new findings"].last_report.startswith("Still 2 seats")  # only a find keeps what it posted
+        assert {f.last_report for case, f in counted.items() if case != "new findings"} == {"Nothing under 80k yet."}
+        assert all(f.claimed_at is None for f in counted.values())
 
 
 class TestTheProvider:

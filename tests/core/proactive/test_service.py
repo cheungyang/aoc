@@ -126,6 +126,24 @@ async def test_turns_left_unread_by_a_restart_are_picked_up(store, fast):
     assert decide.calls == [("s1", ["before the restart"])]
 
 
+@pytest.mark.asyncio
+async def test_each_sweep_fails_on_its_own(capsys):
+    """Settling the outcomes raising doesn't stop expiry and the follow-ups' radio lines."""
+    swept = []
+
+    class Outcomes:
+        async def settle(self):
+            raise RuntimeError("database is locked")
+
+    class FollowUpSweep:
+        async def __call__(self):
+            swept.append("follow-ups")
+
+    await service_module.in_order(Outcomes().settle, FollowUpSweep())()
+    assert swept == ["follow-ups"]
+    assert "The sweep's Outcomes.settle failed: RuntimeError: database is locked" in capsys.readouterr().out
+
+
 class TestInstall:
     """main.py's install: every agent turn and tool call is tapped. Delivery waits on
     the one switch, PROACTIVE_DELIVERY."""

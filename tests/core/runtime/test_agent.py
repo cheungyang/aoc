@@ -714,5 +714,21 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             self.assertIs(await agent._get_graph(conversation), built_for_conversation)
         self.assertEqual(sorted(agent._graphs), ["", "|follow_up"])
 
+    @patch('core.runtime.agent.GraphBuilder')
+    async def test_a_run_another_agent_asked_for_uses_the_graph_without_the_tool(self, mock_builder_class):
+        """agent_call's callee gets no follow_up, whichever run builds the agent's graph first."""
+        from core.config.settings import Config
+        mock_builder_class.return_value.build_graph = AsyncMock(side_effect=lambda ctx, config: object())
+        agent = Agent("reward-travel", {"channels": ["lifestyle-perk"]})
+        called = SessionManager.get_session(agent_id="reward-travel", source="tool", channel="lifestyle-perk",
+                                            called_by_agent=True)
+        routed = SessionManager.get_session(agent_id="reward-travel", source="tool", channel="lifestyle-perk")
+        job = SessionManager.get_session(agent_id="reward-travel", source="job")
+        with Config().overriding(proactive_delivery=True):
+            built_for_called = await agent._get_graph(called)  # built first: without the tool
+            self.assertIsNot(await agent._get_graph(routed), built_for_called)
+            self.assertIs(await agent._get_graph(job), built_for_called)  # reused: also without it
+        self.assertEqual(sorted(agent._graphs), ["", "|follow_up"])
+
 if __name__ == "__main__":
     unittest.main()

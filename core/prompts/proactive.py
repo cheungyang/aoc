@@ -68,7 +68,10 @@ class FollowUpPrompt(Prompt):
     what would end it early, its age and its checks, what the agent last told
     the user, and what to check now. A scan check's findings follow it, in
     their own block. A reply of <silent/> posts nothing (delivery.is_silent),
-    and a check whose goal is met closes the follow-up itself.
+    and a check whose goal is met closes the follow-up itself. The last check
+    before `until` ends never stays silent: it ends with one short question,
+    whether to keep watching and until when, and the user answers in the
+    conversation, where the agent can extend it.
     """
 
     template = "proactive/follow_up"
@@ -83,3 +86,4 @@ class FollowUpPrompt(Prompt):
     last_report: str   # what the last find posted, clipped; "" if none yet
     reported: str      # when that was
     check: str         # "Check now: ..." for a model check; a scan check's findings follow
+    last_check: bool = False  # no other check would come before `until` ends: offer to keep watching

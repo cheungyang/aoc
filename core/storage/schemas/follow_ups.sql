@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS follow_ups (
     check_key TEXT NOT NULL,                  -- the agent and its check, normalised: two equal keys are the same check
     every_s INTEGER NOT NULL,                 -- the cadence the agent asked for, in seconds
     interval_s INTEGER NOT NULL,              -- the cadence now: every_s at open, then the checks adapt it
-    until TEXT NOT NULL,                      -- YYYY-MM-DD, on your wall clock: its last day
+    until TEXT NOT NULL,                      -- YYYY-MM-DD, on your wall clock: its last day; extend only moves it later
     close_when TEXT NOT NULL DEFAULT '',      -- what would end it early, in words; '' if nothing
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     opened_at REAL NOT NULL,

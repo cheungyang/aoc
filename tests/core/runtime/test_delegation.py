@@ -281,6 +281,32 @@ class TestStreamDelegate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capture["session"].channel, "software-dev")
 
     @patch('core.runtime.delegation.AgentsLoader')
+    async def test_only_the_routers_hand_overs_are_routed(self, mock_agents_loader):
+        """The router's direct_call and handoff pass routed=True: the callee is the agent
+        you're talking to. Any other call mints a called agent's context, which gets no
+        follow_up (core/loaders/tools_loader.gets_follow_up)."""
+        called_by_agent = {}
+        for routed in (True, False):
+            capture = {}
+            mock_agents_loader.return_value.get_agent.return_value = _streaming_agent(
+                {"channels": ["software-dev"]}, capture=capture
+            )
+            await stream_delegate("agent1", "hello", "software-dev", routed=routed)
+            called_by_agent[routed] = capture["session"].called_by_agent
+        self.assertEqual(called_by_agent, {True: False, False: True})
+
+    @patch('core.runtime.delegation.AgentsLoader')
+    async def test_an_agent_call_mints_a_called_agents_context(self, mock_agents_loader):
+        from tools.agent_call import agent_call
+
+        capture = {}
+        mock_agents_loader.return_value.get_agent.return_value = _streaming_agent(
+            {"channels": ["software-dev"]}, capture=capture
+        )
+        await agent_call.ainvoke({"agent_id": "agent1", "prompt": "hello", "channel": "software-dev"})
+        self.assertIs(capture["session"].called_by_agent, True)
+
+    @patch('core.runtime.delegation.AgentsLoader')
     async def test_stateless_agent_uses_execute(self, mock_agents_loader):
         mock_loader = MagicMock()
         mock_agents_loader.return_value = mock_loader

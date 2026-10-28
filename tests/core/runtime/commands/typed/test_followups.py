@@ -1,4 +1,4 @@
-"""`!followups` (core/runtime/commands/typed/followups.py): the agents' follow-ups, and your cancel."""
+"""`!followups` (core/runtime/commands/typed/followups.py): the agents' follow-ups, and your cancel or extend."""
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -98,7 +98,30 @@ def test_cancel_closes_any_agents_follow_up_as_yours(store):
     assert followups_text("cancel 99", store, NOW) == "No open follow-up #99. `!followups` lists the open ones."
     for args in ("cancel", "cancel the cabin one"):
         assert followups_text(args, store, NOW) == "Usage: `!followups cancel <id> [why]`"
-    assert followups_text("everything", store, NOW) == "Usage: `!followups [closed | cancel <id> [why]]`"
+    assert followups_text("everything", store, NOW) == (
+        "Usage: `!followups [closed | cancel <id> [why] | extend <id> <YYYY-MM-DD>]`")
+
+
+def test_extend_moves_any_agents_until_later(store):
+    cabin = _open(store, "Tahoe cabin under $400", agent_id="excursion-planner", checks=4, finds=1)
+    assert followups_text(f"extend #{cabin.id} 2026-12-31", store, NOW) == (
+        f'Extended follow-up #{cabin.id} (excursion-planner): "Tahoe cabin under $400", until 2026-12-31.')
+    extended = store.get(cabin.id)
+    assert (extended.until, extended.checks, extended.finds) == ("2026-12-31", 4, 1)  # its history stays
+    assert followups_text(f"extend {cabin.id} 2026-12-20", store, NOW) == (
+        f"Can't extend #{cabin.id}: it already runs until 2026-12-31. Give a later date.")
+    assert followups_text(f"extend {cabin.id} 2027-01-31", store, NOW) == (
+        f"Can't extend #{cabin.id}: until is at most 90 days out: 2027-01-30 or sooner.")
+    assert followups_text(f"extend {cabin.id} 2026-10-31", store, NOW) == (
+        f"Can't extend #{cabin.id}: until 2026-10-31 has passed: it's 2026-11-01 today.")
+    assert followups_text("extend 99 2026-12-31", store, NOW) == (
+        "No open follow-up #99. `!followups` lists the open ones.")
+    store.close(cabin.id)
+    assert followups_text(f"extend {cabin.id} 2027-01-15", store, NOW) == (
+        f"No open follow-up #{cabin.id}. `!followups` lists the open ones.")  # closed
+    assert store.get(cabin.id).until == "2026-12-31"
+    for args in ("extend", f"extend {cabin.id}", "extend the cabin to 2027-01-15", f"extend {cabin.id} 2027-01-15 ok"):
+        assert followups_text(args, store, NOW) == "Usage: `!followups extend <id> <YYYY-MM-DD>`"
 
 
 @pytest.mark.asyncio

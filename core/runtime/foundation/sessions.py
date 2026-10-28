@@ -24,6 +24,7 @@ class SessionManager:
         record_memory: bool = True,
         model: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        called_by_agent: bool = False,
         output: Optional[Any] = None,
     ) -> ExecutionContext:
         """
@@ -42,6 +43,8 @@ class SessionManager:
         is non-recording too. `model` overrides the agent's model tier for this call.
         `thinking_level` overrides the agent's reasoning depth for this call (a schedule
         entry's `thinking_level`); like `model`, it is never inherited.
+        `called_by_agent` marks a turn delegation handed over without the router
+        choosing it (stream_delegate sets it): that run gets no `follow_up`.
         `output` is where the turn's output goes (foundation/output.py): the
         adapter starting the turn passes its own.
         """
@@ -59,6 +62,7 @@ class SessionManager:
             record_memory=record_memory,
             model=model,
             thinking_level=thinking_level,
+            called_by_agent=called_by_agent,
             output=output,
         )
 

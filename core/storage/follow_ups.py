@@ -3,8 +3,14 @@
 A follow-up is a goal, a check, a cadence and an end, for work the agent can do
 itself: checking, searching, re-evaluating. It exists only while there's a
 need. The follow_up tool (tools/follow_up.py) opens one for the calling agent,
-closes it, and lists the open ones; `!followups` lists them all and cancels one
-(core/runtime/commands/typed/followups.py).
+extends it, closes it, and lists the open ones; `!followups` lists them all,
+and extends or cancels one (core/runtime/commands/typed/followups.py).
+
+Its end, `until`, is its last day on your wall clock: from today to MAX_DAYS
+out (`parse_until`, which the tool and `!followups` share). It ends at the
+midnight after (`end_of`). `extend` moves it later and keeps the history: the
+counts, the fingerprint and what the agent last told you. Closing and opening
+again would lose them, and old findings would look new.
 
 Every read returns a FollowUp: every column but `check_key`, with its check a
 Check and each fixed vocabulary an enum (Status, Closer). A check is stored as
@@ -43,6 +49,8 @@ from core.storage.base import Row, Store
 from core.util.local_time import get_local_timezone
 
 UNTIL_PASSED = "until passed"
+# The furthest `until` can be, in days from today: a follow-up has an end in sight.
+MAX_DAYS = 90
 # The check that is a short model turn. Any other type is one of the agent's scans.
 MODEL_CHECK = "model"
 # Empty checks in a row that double the interval (the 3rd, the 6th, ...), and the
@@ -119,7 +127,7 @@ class FollowUp:
     check: Check                             # what each check runs (`check_spec`)
     every_s: int                             # the cadence the agent asked for, in seconds
     interval_s: int                          # the cadence now: every_s at open, then the checks adapt it
-    until: str                               # YYYY-MM-DD, on your wall clock: its last day
+    until: str                               # YYYY-MM-DD, on your wall clock: its last day; `extend` moves it later
     opened_at: float                         # epoch seconds
     next_check_at: float                     # when its check is due: opened_at + every_s at first
     close_when: str = ""                     # what would end it early, in words; "" if nothing
@@ -170,8 +178,25 @@ def cadence_text(seconds: int) -> str:
     return f"{seconds // 60}m"
 
 
-def _end_of(until: str) -> float:
-    """When `until` (YYYY-MM-DD) ends on your wall clock: the midnight after it."""
+def parse_until(text: str, today: date) -> str:
+    """`until` as YYYY-MM-DD: from `today` to MAX_DAYS after it. Raises ValueError, in words
+    the tool and `!followups` both show."""
+    try:
+        day = date.fromisoformat((text or "").strip())
+    except ValueError:
+        raise ValueError("until is a date, YYYY-MM-DD") from None
+    latest = today + timedelta(days=MAX_DAYS)
+    if day < today:
+        raise ValueError(f"until {day} has passed: it's {today} today")
+    if day > latest:
+        raise ValueError(f"until is at most {MAX_DAYS} days out: {latest} or sooner")
+    return day.isoformat()
+
+
+def end_of(until: str) -> float:
+    """When `until` (YYYY-MM-DD) ends on your wall clock: the midnight after it. The
+    near-until rule (`finish_check`) and the last check (core/proactive/follow_ups.py)
+    count from it."""
     try:
         day = date.fromisoformat(until) + timedelta(days=1)
     except (TypeError, ValueError):
@@ -281,6 +306,25 @@ class FollowUpStore(Store):
             return None
         return self.get(follow_up_id)
 
+    def extend(self, follow_up_id: int, until: str, *, agent_id: Optional[str] = None) -> Optional[FollowUp]:
+        """Moves an open follow-up's `until` later, with `agent_id` only if it's that agent's.
+        Returns it, or None if there was no such open follow-up or `until` isn't later than
+        its own. One guarded UPDATE; the dates compare as YYYY-MM-DD text, so anything but
+        a date raises ValueError first.
+
+        Only `until` changes: the counts, the fingerprint and the last report stay. The
+        near-until rule (`finish_check`), `due` and `expire` read the new one on their own.
+        """
+        day = date.fromisoformat(until).isoformat()
+        sql = "UPDATE follow_ups SET until = ? WHERE id = ? AND status = 'open' AND until < ?"
+        params: List[Any] = [day, follow_up_id, day]
+        if agent_id is not None:
+            sql += " AND agent_id = ?"
+            params.append(agent_id)
+        if self.execute(sql, params) != 1:
+            return None
+        return self.get(follow_up_id)
+
     def get(self, follow_up_id: int) -> Optional[FollowUp]:
         record = self.select_one("follow_ups", {"id": follow_up_id})
         return _follow_up(record) if record else None
@@ -375,7 +419,7 @@ class FollowUpStore(Store):
                     interval = current.every_s
                 elif result is Result.EMPTY and values["empty_checks"] % EMPTY_STREAK == 0:
                     interval = min(interval * 2, MAX_INTERVAL_S)
-                if _end_of(current.until) - now < 2 * interval:
+                if end_of(current.until) - now < 2 * interval:
                     interval = current.every_s
                 values.update(interval_s=interval, next_check_at=now + interval)
             self.update("follow_ups", values, {"id": follow_up_id}, conn=conn)

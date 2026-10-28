@@ -28,7 +28,14 @@ The check is the agent's own turn, in its home channel, with source "followup":
   - the turn (FollowUpPrompt) knows the goal, how long it has watched and what
     the agent last told you. It posts one short message, or replies <silent/>
     and posts nothing. When the goal is met it closes the follow-up itself: the
-    tool closes on this surface, but won't open a new one;
+    tool closes on this surface, but won't open or extend one;
+  - the last check, when no other would come before `until` ends
+    (`is_last_check`), always runs its turn: a scan's with nothing new too,
+    with what it sees now, or with what it couldn't read instead of the
+    notice. That turn never replies <silent/>: whatever it found, it ends with
+    one short question, whether to keep watching and until when. You answer
+    in the conversation, where the agent can extend it (tools/follow_up.py),
+    or with `!followups extend`. An extension posts no radio line;
   - its post is like a scheduled one: in the channel, in the channel inbox with
     its speech version, and in the session that answers your reply;
   - the taps read it like a scheduled run, hops = 0, so what it finds can still
@@ -38,6 +45,10 @@ The check is the agent's own turn, in its home channel, with source "followup":
 Then the store counts the check (`finish_check`): a post is FOUND, a silent
 reply or no work EMPTY, a scan that couldn't read PROBLEM, and a failed turn, or
 one whose post reached no channel, FAILED. It sets the next check from that.
+The last check always posts, so there a post is FOUND only when a scan found
+something new; otherwise it's EMPTY, or PROBLEM for a scan that couldn't read,
+and what it posted isn't kept as the last report: a model check's last post may
+be only the offer.
 
 FollowUpSweep is one of the proactive service's sweeps, every minute, with the
 switch on or off:
@@ -68,7 +79,7 @@ from core.proactive.taps import FOLLOWUP_SOURCE, clip
 from core.runtime.foundation.routing import home_channel
 from core.scheduler.preconditions import build_precondition
 from core.scheduler.spec import Findings, Problems, PromptSchedule, ScheduleContext, SessionPolicy, WorkDecision
-from core.storage.follow_ups import Check, FollowUp, FollowUpStore, Result, Status, cadence_text
+from core.storage.follow_ups import Check, FollowUp, FollowUpStore, Result, Status, cadence_text, end_of
 from core.storage.signals import POSTED, SILENT
 
 # A check still claimed after this long never finished: its claim is freed, and it's due again.
@@ -101,18 +112,37 @@ def checks_text(checks: int) -> str:
     return "you've checked it once since" if checks == 1 else f"you've checked it {checks} times since"
 
 
-def check_line(check: Check, decision: Optional[WorkDecision]) -> str:
-    """What the turn is to look at: a model check's `what`, or what a scan check found."""
+def is_last_check(follow_up: FollowUp, now: float) -> bool:
+    """Whether a check at `now` is its follow-up's last: no other would come before `until`
+    ends. That's when `every` from now reaches the end, whatever the interval now: as the
+    end nears, `finish_check` puts the interval back to `every`, so the next check comes
+    `every` from now whenever that's before the end. Counting a stretched interval would
+    call a late check the last too soon, and the real last one would offer again."""
+    return now + follow_up.every_s >= end_of(follow_up.until)
+
+
+def check_line(check: Check, decision: Optional[WorkDecision], new: bool = True) -> str:
+    """What the turn is to look at: a model check's `what`, or what a scan check found. On
+    the last check a scan's turn runs with nothing new too (`new` False): it says so, and
+    what the scan couldn't read, if that's why."""
     if check.is_model:
         return f"Check now: {check.what}"
-    if decision is not None and isinstance(decision.detail, Findings):
-        return "Your check found something new: below."
+    detail = decision.detail if decision is not None else None
     reason = decision.reason if decision is not None else ""
+    if isinstance(detail, Problems):
+        return f"Your {check.type} check couldn't read what it needed: {'; '.join(detail.issues)}."
+    if not new:
+        if isinstance(detail, Findings):
+            return "Your check found nothing new since the last one: what it sees now is below."
+        return f"Your {check.type} check found nothing new{f': {reason}' if reason else '.'}"
+    if isinstance(detail, Findings):
+        return "Your check found something new: below."
     return f"Your {check.type} check found something new{f': {reason}' if reason else '.'}"
 
 
-def render_prompt(follow_up: FollowUp, now: float, check: str) -> str:
-    """The check's prompt for one claimed follow-up (module docstring). `check` is its check_line."""
+def render_prompt(follow_up: FollowUp, now: float, check: str, last: bool = False) -> str:
+    """The check's prompt for one claimed follow-up (module docstring). `check` is its check_line,
+    and `last` whether it's the last check, which offers to keep watching."""
     found_at = follow_up.last_found_at
     return FollowUpPrompt(
         id=follow_up.id,
@@ -125,6 +155,7 @@ def render_prompt(follow_up: FollowUp, now: float, check: str) -> str:
         last_report=follow_up.last_report,
         reported=f"{local(found_at):%A %Y-%m-%d}" if found_at else "",
         check=check,
+        last_check=last,
     ).render()
 
 
@@ -158,7 +189,8 @@ class FollowUpSchedule(PromptSchedule):
         self.store = store or FollowUpStore()
         self.output: Optional[DeliveryOutput] = None
         self.found: Optional[str] = None  # a scan check's fingerprint of what it found (has_work)
-        self.skipped = Result.EMPTY       # how a check with no work ends: EMPTY, or PROBLEM
+        self.new = False                  # whether a scan check found something new (has_work)
+        self.skipped = Result.EMPTY       # how a check with nothing new ends: EMPTY, or PROBLEM
         check = follow_up.check
         precondition = None
         if not check.is_model:
@@ -183,22 +215,31 @@ class FollowUpSchedule(PromptSchedule):
 
     def has_work(self, ctx: ScheduleContext) -> WorkDecision:
         """Off the loop. A model check always runs; a scan check only on findings new since
-        the last check (module docstring)."""
+        the last check, but on the last check whatever it found (module docstring)."""
         if self.precondition is None:
             return WorkDecision(True, f"follow-up #{self.follow_up_id} is due")
         decision = self._check_precondition(ctx)
-        if not decision:
+        if decision:
+            self.found = fingerprint(decision)
+            self.new = self.found != self.follow_up.last_fingerprint
+            if self.new:
+                return decision
+            decision = WorkDecision(False, "nothing new since the last check", detail=decision.detail)
+        else:
             self.skipped = Result.PROBLEM if isinstance(decision.detail, Problems) else Result.EMPTY
-            return decision
-        self.found = fingerprint(decision)
-        if self.found == self.follow_up.last_fingerprint:
-            self.skipped = Result.EMPTY
-            return WorkDecision(False, "nothing new since the last check")
+        if is_last_check(self.follow_up, ctx.now):
+            # The turn runs all the same, to offer to keep watching. It sees what the scan saw,
+            # or what it couldn't read: the turn says so, and the runner posts no notice.
+            return WorkDecision(True, decision.reason, detail=decision.detail)
         return decision
 
     def build_prompt(self, ctx: ScheduleContext, decision: Optional[WorkDecision] = None) -> str:
-        """The FollowUpPrompt, and after it a scan check's findings block."""
-        prompt = render_prompt(self.follow_up, ctx.now, check_line(self.follow_up.check, decision))
+        """The FollowUpPrompt, and after it a scan check's findings block: new ones, or on the
+        last check what the scan sees now."""
+        last = is_last_check(self.follow_up, ctx.now)
+        # Before the last check a scan's turn runs only on something new, as has_work decided.
+        line = check_line(self.follow_up.check, decision, new=self.new or not last)
+        prompt = render_prompt(self.follow_up, ctx.now, line, last=last)
         if decision is not None and isinstance(decision.detail, Findings):
             return f"{prompt}\n\n{decision.detail.as_block()}"
         return prompt
@@ -214,12 +255,16 @@ class FollowUpSchedule(PromptSchedule):
         return self.output
 
     def on_success(self, ctx: ScheduleContext) -> None:
-        """A post is a find, kept as what the agent last told you. A silent reply is an empty
-        check, but keeps a scan's new fingerprint: the agent judged those findings not worth
-        a post, so they don't come back as new."""
+        """A post is a find, kept as what the agent last told you. The last check always posts,
+        to offer to keep watching, so there only a scan's new findings make its post a find;
+        otherwise it counts as the check went (EMPTY, or PROBLEM), and isn't kept. A silent
+        reply is an empty check, but keeps a scan's new fingerprint: the agent judged those
+        findings not worth a post, so they don't come back as new."""
         outcome = self.output.outcome if self.output is not None else None
-        if outcome == POSTED:
+        if outcome == POSTED and (self.new or not is_last_check(self.follow_up, ctx.now)):
             self._finish(Result.FOUND, fingerprint=self.found, report=clip(self.output.text, REPORT_CHARS))
+        elif outcome == POSTED:
+            self._finish(self.skipped, "its last check, which always posts", fingerprint=self.found)
         elif outcome == SILENT:
             self._finish(Result.EMPTY, fingerprint=self.found)
         else:

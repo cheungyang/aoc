@@ -152,6 +152,7 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["prompt"], "scan this receipt")
         self.assertEqual(kwargs["channel"], "receipts")
         self.assertEqual(kwargs["caller"], "main")
+        self.assertIs(kwargs["routed"], True)  # the agent you're talking to: it keeps follow_up
         self.assertEqual(concierge.calls, 0)
 
     async def test_delegated_reply_is_attributed_in_history(self):
@@ -325,6 +326,7 @@ class TestHandoffNode(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((kwargs["agent_id"], kwargs["channel"], kwargs["caller"]),
                          ("topic-researcher", "topic-research", "main"))
         self.assertEqual(kwargs["prompt"], "Ted create a syllabus on THIS topic\n\n<handoff_context/>")
+        self.assertIs(kwargs["routed"], True)  # you named it: it keeps follow_up
         self.assertEqual(concierge.calls, 0)
 
     async def test_the_readers_are_told_before_the_reply_streams(self):

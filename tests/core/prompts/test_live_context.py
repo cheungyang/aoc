@@ -1,5 +1,6 @@
 """Live Context (core/prompts/live_context.py): what's true right now, from teammates' signals."""
 import re
+from contextlib import contextmanager
 from datetime import datetime
 
 import pytest
@@ -133,13 +134,27 @@ def _follow_up_lines(block):
     return match.group(1).splitlines() if match else []
 
 
+@contextmanager
+def _run(**run):
+    """A turn of excursion-planner's: a message in its own channel, unless `run` says otherwise.
+    Its follow-ups show only to a run that has the follow_up tool."""
+    values = dict(agent_id="excursion-planner", source="discord", channel="weekend-planning")
+    values.update(run)
+    token = current_execution_context.set(SessionManager.get_session(**values))
+    try:
+        yield
+    finally:
+        current_execution_context.reset(token)
+
+
 def test_it_shows_the_agents_own_open_follow_ups_soonest_until_first(store, live):
     _situation(store, "In Tahoe")
     later = _follow_up("Ski rental deal", until="2026-12-20")
     sooner = _follow_up()
     _follow_up("Award seats to MAD", agent_id="reward-travel")  # another agent's
     FollowUpStore().close(_follow_up("Done already", until="2026-11-02").id)
-    block = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    with _run():
+        block = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
     assert _lines(block) == ["In Tahoe"]  # the situations, as before
     assert _follow_up_lines(block) == [
         f"- #{sooner.id} Tahoe cabin under $400 for MLK weekend · every 2d until 2026-11-30",
@@ -152,18 +167,40 @@ def test_it_shows_the_agents_own_open_follow_ups_soonest_until_first(store, live
 def test_at_most_5_follow_ups(store, live):
     for day in (16, 15, 14, 13, 12, 11, 10):
         _follow_up(f"Watch {day}", until=f"2026-11-{day}")
-    lines = _follow_up_lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW))
+    with _run():
+        lines = _follow_up_lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW))
     assert [line.split(" · ")[0].split(" ", 2)[2] for line in lines] == [f"Watch {d}" for d in (10, 11, 12, 13, 14)]
 
 
 def test_follow_ups_show_even_for_an_agent_without_memory_topics(store, live):
     _situation(store, "In Tahoe")
     _follow_up()
-    block = get_live_context_prompt("excursion-planner", {"channels": ["weekend-planning"]}, now=NOW)
+    with _run():
+        block = get_live_context_prompt("excursion-planner", {"channels": ["weekend-planning"]}, now=NOW)
     assert block.startswith("<LIVE_CONTEXT>\n<your_follow_ups>\n") and block.endswith("</your_follow_ups>\n</LIVE_CONTEXT>")
     assert _lines(block) == [] and "teammates learned" not in block
 
 
+def test_follow_ups_show_only_to_a_run_with_the_tool_and_each_block_is_kept(store, live):
+    _situation(store, "In Tahoe")
+    _follow_up()
+    with _run(source="tool"):  # the router's hand-over: the agent you're talking to
+        routed = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    with _run(source="tool", called_by_agent=True):  # agent_call: another agent asked
+        called = get_live_context_prompt("excursion-planner", ERIC, now=NOW + 1)
+    assert _lines(routed) == _lines(called) == ["In Tahoe"]
+    assert len(_follow_up_lines(routed)) == 1 and "<your_follow_ups>" not in called
+    # Within the window each run gets its own block back.
+    with _run(source="tool"):
+        assert get_live_context_prompt("excursion-planner", ERIC, now=NOW + 2) == routed
+    with _run(source="tool", called_by_agent=True):
+        assert get_live_context_prompt("excursion-planner", ERIC, now=NOW + 3) == called
+    assert set(live_context._cache) == {("excursion-planner", True), ("excursion-planner", False)}
+    # With no context, no run has the tool: no follow-ups.
+    assert "<your_follow_ups>" not in get_live_context_prompt("excursion-planner", ERIC, now=NOW + 4)
+
+
 def test_with_the_switch_off_there_are_no_follow_ups_either(store):
     _follow_up()
-    assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""
+    with _run():
+        assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""

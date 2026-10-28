@@ -1,14 +1,18 @@
-"""`!followups`: the agents' follow-ups (core/storage/follow_ups.py), and your cancel.
+"""`!followups`: the agents' follow-ups (core/storage/follow_ups.py), and your cancel or extend.
 
-    !followups                    the open ones, soonest check first: agent, goal,
-                                  cadence, next check, until, checks and finds
-    !followups closed             the last 10 closed, newest first, with why
-    !followups cancel <id> [why]  closes one, any agent's, as yours
+    !followups                           the open ones, soonest check first: agent, goal,
+                                         cadence, next check, until, checks and finds
+    !followups closed                    the last 10 closed, newest first, with why
+    !followups cancel <id> [why]         closes one, any agent's, as yours
+    !followups extend <id> <YYYY-MM-DD>  moves one's until later, any agent's, to at most
+                                         90 days out; its checks and finds stay
 
 Read from memory.db, with no model. A cancel closes the follow-up as you
 (`closed_by` "you"): team radio says so (core/proactive/follow_ups.py), and it
-leaves its agent's Live Context. With the switch off and follow-ups still open,
-a banner says nothing checks them. Agents are named by id, as in `!signals`.
+leaves its agent's Live Context. An extend takes the same dates as the tool's
+(`parse_until`) and posts no radio line: `!followups` and the agent's Live
+Context show the new end. With the switch off and follow-ups still open, a
+banner says nothing checks them. Agents are named by id, as in `!signals`.
 """
 import asyncio
 import time
@@ -17,7 +21,7 @@ from typing import Optional
 
 from core.config.settings import Config
 from core.runtime.commands.base import ChannelCommand, TypedContext
-from core.storage.follow_ups import Closer, FollowUp, FollowUpStore, Status, cadence_text
+from core.storage.follow_ups import Closer, FollowUp, FollowUpStore, Status, cadence_text, parse_until
 from core.util.local_time import get_local_timezone
 
 RECENT = 10
@@ -91,6 +95,24 @@ def cancel_text(store: FollowUpStore, args: str) -> str:
     return f"Cancelled follow-up #{closed.id} ({closed.agent_id}): \"{closed.goal}\"."
 
 
+def extend_text(store: FollowUpStore, args: str, now: float) -> str:
+    words = (args or "").split()
+    head = words[0].lstrip("#") if words else ""
+    if len(words) != 2 or not head.isdigit():
+        return "Usage: `!followups extend <id> <YYYY-MM-DD>`"
+    try:
+        day = parse_until(words[1], local(now).date())
+    except ValueError as e:
+        return f"Can't extend #{head}: {e}."
+    extended = store.extend(int(head), day)
+    if extended is not None:
+        return f"Extended follow-up #{extended.id} ({extended.agent_id}): \"{extended.goal}\", until {extended.until}."
+    current = store.get(int(head))
+    if current is None or not current.is_open:
+        return f"No open follow-up #{head}. `!followups` lists the open ones."
+    return f"Can't extend #{head}: it already runs until {current.until}. Give a later date."
+
+
 def followups_text(args: str, store: Optional[FollowUpStore] = None, now: Optional[float] = None) -> str:
     """The reply to `!followups <args>` (module docstring)."""
     store = store or FollowUpStore()
@@ -103,13 +125,15 @@ def followups_text(args: str, store: Optional[FollowUpStore] = None, now: Option
         return closed_text(store)
     if head == "cancel":
         return cancel_text(store, words[1] if len(words) > 1 else "")
+    if head == "extend":
+        return extend_text(store, words[1] if len(words) > 1 else "", now)
     return f"Usage: `!followups {FollowUpsCommand.usage}`"
 
 
 class FollowUpsCommand(ChannelCommand):
     name = "followups"
-    usage = "[closed | cancel <id> [why]]"
-    summary = "The agents' follow-ups: the open ones, the last closed, or cancel one."
+    usage = "[closed | cancel <id> [why] | extend <id> <YYYY-MM-DD>]"
+    summary = "The agents' follow-ups: the open ones, the last closed; cancel or extend one."
 
     async def run(self, ctx: TypedContext, args: str) -> None:
         # memory.db is a file: read and written off the event loop.

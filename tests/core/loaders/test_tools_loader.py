@@ -326,6 +326,8 @@ class TestFollowUpTool(unittest.TestCase):
             "a graph step": (self._ctx(graph_id="coding"), self.CONFIG),
             "the Concierge": (self._ctx(agent_id="main", channel="general"), {"channels": ["*"]}),
             "an opt-out": (self._ctx(), dict(self.CONFIG, proactivity={"follow_ups": False})),
+            # agent_call: the follow-up belongs to the agent you're talking to, not to this one.
+            "a run another agent asked for": (self._ctx(source="tool", called_by_agent=True), self.CONFIG),
         }
         with Config().overriding(proactive_delivery=True):
             for name, (ctx, config) in excluded.items():
@@ -334,6 +336,7 @@ class TestFollowUpTool(unittest.TestCase):
             for name, ctx, config in (
                 ("a message", self._ctx(), self.CONFIG),
                 ("a spoken turn", self._ctx(source="voice"), self.CONFIG),
+                ("the router's hand-over", self._ctx(source="tool"), self.CONFIG),
                 ("proactivity without the opt-out", self._ctx(), dict(self.CONFIG, proactivity={"offers": ["x"]})),
             ):
                 with self.subTest(name):

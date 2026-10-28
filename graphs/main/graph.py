@@ -134,6 +134,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             prompt=user_prompt,
             channel=(ctx.channel_name if ctx else ""),
             caller=(ctx.agent_id if ctx else owner_agent_id),
+            routed=True,  # the channel chose it: the agent you're talking to
         )
 
         if not result.ok:
@@ -220,6 +221,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             prompt=with_capsule(user_prompt, capsule),
             channel=home,
             caller=(ctx.agent_id if ctx else owner_agent_id),
+            routed=True,  # you named it: the agent you're talking to
         )
         if not result.ok:
             print(f"[graphs.main] Hand-off to '{target}' failed: {result.error}", file=sys.stderr)
