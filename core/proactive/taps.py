@@ -29,6 +29,9 @@ a scheduled run, and after 90 s of quiet for a conversation (service.py).
 A proactive delivery's turn (source "proactive", delivery.py) counts too. It
 is read at once, with the scheduled tap, and its entry has hops = 1: the
 Governor absorbs any signal it starts, so a delivery never starts another.
+A follow-up's check (source "followup", follow_ups.py) is on the scheduled
+surface, so it's tapped like a scheduled run, with hops = 0: what it finds can
+still reach teammates.
 
 Which turns count: an agent's own work. These are skipped:
   - the host's routing turn, and any agent reachable everywhere
@@ -75,6 +78,8 @@ MAX_TOUCHED = 8
 SKIPPED_SOURCES = frozenset({"job", "graph", "voice_replay"})
 # The source of a proactive delivery's turn (delivery.py). It counts: hops = 1.
 PROACTIVE_SOURCE = "proactive"
+# The source of a follow-up's check (follow_ups.py). It counts like a scheduled run: hops = 0.
+FOLLOWUP_SOURCE = "followup"
 # Tools too common to tell which skill a turn used.
 GENERIC_TOOLS = frozenset({"filesystem", "load_skill", "web_search", "web_fetch", "bash", "agent_call"})
 # Statuses of a call that changed something (transcript.tool_status).

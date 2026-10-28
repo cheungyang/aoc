@@ -1,6 +1,6 @@
 """A voice turn (core/voice/turn.py), run through the room: the pipeline, the
 two lanes (the speaker gets the <speech> block, the channel the text), latency
-and the turn trace, and unanswered words merged into the next turn (B19)."""
+and the turn trace, and unanswered words merged into the next turn."""
 import asyncio
 import time
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -116,7 +116,7 @@ async def test_an_interruption_while_the_agent_works_discards_its_answer(mock_bo
     # Nothing is spoken for the discarded turn
     assert vm.reply.tts.streams == []
     vm.audio_queue.put.assert_not_awaited()
-    # Never heard, so the request rides along with the next turn (B19).
+    # Never heard, so the request rides along with the next turn.
     assert vm.floor.unanswered() == [first]
 
 
@@ -377,7 +377,7 @@ async def test_a_delegates_error_is_shown_and_never_read_out(mock_bot_runner, tm
 
 
 # ---------------------------------------------------------------------------
-# Latency work: lanes, the transcript mirror, headers, and the turn trace
+# Latency: lanes, the transcript mirror, headers, and the turn trace
 # ---------------------------------------------------------------------------
 
 async def _run_turn(vm, agent):
@@ -390,7 +390,7 @@ async def _run_turn(vm, agent):
 
 @pytest.mark.asyncio
 async def test_delegation_header_is_shown_but_not_spoken(mock_bot_runner, tmp_path):
-    """B14: the '🌼 Daisy: ' attribution was read aloud before every delegated answer."""
+    """The '🌼 Daisy: ' attribution used to be read aloud before every delegated answer."""
     vm, agent, text_channel = _streaming_fixture(mock_bot_runner, tmp_path, [
         {"type": "token", "content": "🌼 Daisy: ", "agent_id": "day-planner", "is_header": True},
         {"type": "token", "content": _spoken_reply("You have two meetings today."), "agent_id": "day-planner"},
@@ -532,7 +532,7 @@ async def test_turn_trace_waits_for_queued_audio_before_recording(mock_bot_runne
 
 
 # ---------------------------------------------------------------------------
-# B19: unanswered words are merged into the next turn, not dropped
+# Unanswered words are merged into the next turn, not dropped
 # ---------------------------------------------------------------------------
 
 def _scripted_agent(agent, replies):

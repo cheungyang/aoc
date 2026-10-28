@@ -5,8 +5,8 @@ reclaims dead leases, picks exactly one task, advances it as far as it safely ca
 implement, push, verify, audit, publish, or sync a review decision off GitHub — and then returns.
 There is no in-graph waiting and no human-in-the-loop interrupt: *"retry" is simply another tick*.
 The previous interrupt-driven topology was removed because its durable state lived in a LangGraph
-checkpoint keyed to the caller's session, so a halted run could not be resumed from anywhere else
-(C4/C5). Durable state now lives where it can be inspected and hand-edited: the manifest on disk,
+checkpoint keyed to the caller's session, so a halted run could not be resumed from anywhere else.
+Durable state now lives where it can be inspected and hand-edited: the manifest on disk,
 the git repository, and the pull requests on GitHub ([graph.py:L1-L7](graph.py#L1-L7)).
 
 > [!IMPORTANT]
@@ -214,7 +214,7 @@ One queue entry in the manifest.
 | `commit_url` | `Optional[str]` | Merge commit URL. |
 | `error_message` | `Optional[str]` | Legacy free-text error. |
 | `stage` | `TaskStage` | Where the task got to — the resume point. |
-| `attempts` | `Dict[str, int]` | Per-stage counters, e.g. `{"implement": 2, "publish": 1}`, so a flaky `gh` does not burn the LLM budget (B1). |
+| `attempts` | `Dict[str, int]` | Per-stage counters, e.g. `{"implement": 2, "publish": 1}`, so a flaky `gh` does not burn the LLM budget. |
 | `lease_owner` | `Optional[str]` | Holder of the current claim. |
 | `lease_expires_at` | `Optional[float]` | Epoch expiry of the claim. |
 | `impl_digest` | `Optional[str]` | Digest of the *uncommitted* worktree after implement. Only meaningful between implement and push, on the host that ran implement — once committed, every tree would share one digest. |
@@ -222,7 +222,7 @@ One queue entry in the manifest.
 | `head_sha` | `Optional[str]` | The commit on the task branch that the later stages vouch for; recorded by `push`. Unique per attempt and identical on every host and on GitHub. |
 | `verified_sha` | `Optional[str]` | The `head_sha` verification passed on. "Already verified" means `verified_sha == head_sha`. |
 | `audited_sha` | `Optional[str]` | The `head_sha` the advisory audit ran for. |
-| `review_cursor` | `Optional[str]` | Highest review comment id already actioned (E5). |
+| `review_cursor` | `Optional[str]` | Highest review comment id already actioned. |
 | `review_feedback` | `Optional[List[str]]` | Reviewer comments harvested but not yet acted on. Durable so feedback survives a hand-off through the scheduler (e.g. re-provisioning on another host); cleared once implement consumes it. |
 | `poll_until` | `Optional[float]` | Review polling window; outside it the task is dormant. |
 | `last_error` | `Optional[TaskError]` | Classified last failure. |
@@ -310,7 +310,7 @@ setup itself, so this host never executes a project's install scripts.
 > queue cost a network round trip on every scheduled tick. Setup failures are recorded as
 > `environment`, never against the implement budget — the code is not what went wrong. Dependents
 > branch from the default branch, not from a prerequisite's branch, which the merge has deleted by
-> then (F3).
+> then.
 
 ### implement
 
@@ -356,7 +356,7 @@ the scheduler (e.g. re-provisioning on another host) where the in-memory comment
 
 A worker reply of "I was not allowed to" is not a worker that failed to think; three more attempts
 cannot grant it a tool, so a blocked reply halts instead of retrying. `git` is ground truth for what
-changed — the model's own `<modified_files>` list is ignored (§7.6).
+changed — the model's own `<modified_files>` list is ignored.
 
 ### push
 
@@ -397,7 +397,7 @@ commit" as success, so a retry is idempotent), `git rev-parse HEAD`. Manifest: `
 a hit; halts with `last_error`).
 
 > [!NOTE]
-> Why push moved here from publish: verification will run remotely (E2B) and fetches the commit
+> Why push moved here from publish: verification can run remotely (E2B) and then fetches the commit
 > from GitHub — the sandbox never sees this host's disk — and the remote branch is the source of
 > truth, so a tick on a *different host* can resume from `origin/<branch>`. Neither works for code
 > that only exists in a local worktree. `head_sha` then names exactly what verify and audit looked
@@ -454,7 +454,7 @@ Manifest: `persist_task` / `yield_task` / `bump_attempt` (`infra`).
 
 > [!NOTE]
 > Two things this node deliberately does *not* do: it does not require a PR to exist — gating local
-> tests behind a network operation is what turned a GitHub hiccup into "tests failed" (A3) — and it
+> tests behind a network operation is what turned a GitHub hiccup into "tests failed" — and it
 > does not re-run for a commit it has already tested. `classify_failure` is conservative on purpose:
 > anything it cannot *prove* is an environment problem stays `verification` and goes back to the
 > worker, because misreading a real test failure as a broken environment would halt a task one more
@@ -533,9 +533,9 @@ re-enters with the same code and spends no tokens.
 `comment_pull_request`. Manifest: `bump_attempt`, `yield_task`, `persist_task` (status
 `awaiting_review`, `pr_url`, `pr_number`, `head_sha`, `poll_until = now + 1h`, lease released).
 
-Two rules from §6.3 hold throughout:
+Two rules hold throughout:
 
-- **A URL is only reported if `gh` confirmed it.** Fabricated links (D2) are gone, so a link in the
+- **A URL is only reported if `gh` confirmed it.** Fabricated links are gone, so a link in the
   channel is proof the PR exists.
 - **A pushed branch is never thrown away.** If the PR call fails, the task halts with a
   clickable compare URL, and the next tick *adopts* the PR you open from it — `_upsert_pull_request`
@@ -602,10 +602,10 @@ added after a "request changes" does not override it. A `CLOSED` PR is an abort.
 > [`first_line_command()`](nodes/sync_review.py#L36-L46)
 > matches the first line **exactly**. Prose cannot trigger it, a quoted `/approve` cannot, and a
 > code block mentioning it cannot — this is the direct fix for the gate that read "ok" inside
-> "looks broken" and defaulted to *approved* when it found nothing (E1, E2). Comment harvesting
+> "looks broken" and defaulted to *approved* when it found nothing. Comment harvesting
 > excludes the machine user (otherwise the system reacts to its own test-result comments) and
 > ignores ids at or below `review_cursor`, so a resume does not re-action a comment already
-> addressed (E5). Inline review threads live in a different API from issue comments and are fetched
+> addressed. Inline review threads live in a different API from issue comments and are fetched
 > separately; a review written entirely on the lines would otherwise look like silence.
 
 ## Durable State
@@ -641,7 +641,7 @@ in an external tool.
 **GitHub** holds the task branch from the **first attempt** and the review state after publish.
 `push.py` writes the branch, and only after the privacy check has passed what it would send —
 every attempt is a commit on it, never on the default branch, and
-the PR squash-merges the history away. Verification fetches that commit (it will run remotely, on
+the PR squash-merges the history away. Verification fetches that commit (it can run remotely, on
 E2B, and never sees this host's disk), and the remote branch is the source of truth, so a tick on a
 *different host* can resume: [`provision_worktree`](../../core/git/ops.py#L146-L208)
 checks out `origin/<branch>` (`worktree add -B`) when it exists and only starts from the base
@@ -654,7 +654,7 @@ but it is not an approval.
 itself. `get_runnable_tasks()` evaluates topological dependencies over the manifest: status
 `queued`/`pending`, all dependencies *completed*, not currently leased. Dependencies gate on
 completion rather than on the prerequisite's branch existing, so a dependent cannot start against a
-branch the merge deleted (F3). There is one manifest per project and deliberately no global
+branch the merge deleted. There is one manifest per project and deliberately no global
 fallback — a run that was never told which project it was for used to find *a* queue, the wrong one.
 
 **How a new tick rebuilds context.** It is handed only a `build_request_path`. From there:

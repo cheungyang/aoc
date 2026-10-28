@@ -2,9 +2,9 @@
 
 When a live decision approves a `now` route, the proactive pipeline
 (core/proactive/pipeline.py) reacts on your message that started it, before
-the recipient's post arrives (proposal D17): the receipt gets 🧑‍🍳 seconds
-after it's saved, and Ramsay's post follows. This module is that reaction's
-Discord side, the pipeline's `ack`.
+the recipient's post arrives: the receipt gets 🧑‍🍳 seconds after it's
+saved, and Ramsay's post follows. This module is that reaction's Discord side,
+the pipeline's `ack`.
 
 The message is "<channel id>/<message id>" (DiscordOutput.source_message). Its
 channel is found through the bots: the recipient's own bot if this host runs

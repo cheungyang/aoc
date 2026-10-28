@@ -9,6 +9,7 @@ from core.prompts import live_context
 from core.prompts.live_context import CACHE_S, MAX_AGE_S, get_live_context_prompt
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
+from core.storage.follow_ups import Check, FollowUpStore
 from core.storage.signals import SignalStore
 from core.util.local_time import get_local_timezone
 
@@ -117,3 +118,52 @@ def test_an_unreadable_board_leaves_it_out(live, monkeypatch, capsys):
     monkeypatch.setattr(SignalStore, "live_situations", locked)
     assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""
     assert "No Live Context for excursion-planner: RuntimeError: database is locked" in capsys.readouterr().out
+
+
+# -- the agent's own follow-ups --------------------------------------------------------
+
+def _follow_up(goal="Tahoe cabin under $400 for MLK weekend", agent_id="excursion-planner", until="2026-11-30"):
+    return FollowUpStore().open(agent_id=agent_id, goal=goal, check=Check(type="model", what=goal),
+                                every_s=2 * 86400, until=until, channel="weekend-planning")
+
+
+def _follow_up_lines(block):
+    match = re.search(r"<your_follow_ups>\n<description>.+?</description>\n<content>(.*?)</content>\n"
+                      r"</your_follow_ups>", block, re.DOTALL)
+    return match.group(1).splitlines() if match else []
+
+
+def test_it_shows_the_agents_own_open_follow_ups_soonest_until_first(store, live):
+    _situation(store, "In Tahoe")
+    later = _follow_up("Ski rental deal", until="2026-12-20")
+    sooner = _follow_up()
+    _follow_up("Award seats to MAD", agent_id="reward-travel")  # another agent's
+    FollowUpStore().close(_follow_up("Done already", until="2026-11-02").id)
+    block = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    assert _lines(block) == ["In Tahoe"]  # the situations, as before
+    assert _follow_up_lines(block) == [
+        f"- #{sooner.id} Tahoe cabin under $400 for MLK weekend · every 2d until 2026-11-30",
+        f"- #{later.id} Ski rental deal · every 2d until 2026-12-20",
+    ]
+    assert "<description>What you said you'd keep working on; close one with follow_up when the user says " \
+           "it's done or no longer wanted.</description>" in block
+
+
+def test_at_most_5_follow_ups(store, live):
+    for day in (16, 15, 14, 13, 12, 11, 10):
+        _follow_up(f"Watch {day}", until=f"2026-11-{day}")
+    lines = _follow_up_lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW))
+    assert [line.split(" · ")[0].split(" ", 2)[2] for line in lines] == [f"Watch {d}" for d in (10, 11, 12, 13, 14)]
+
+
+def test_follow_ups_show_even_for_an_agent_without_memory_topics(store, live):
+    _situation(store, "In Tahoe")
+    _follow_up()
+    block = get_live_context_prompt("excursion-planner", {"channels": ["weekend-planning"]}, now=NOW)
+    assert block.startswith("<LIVE_CONTEXT>\n<your_follow_ups>\n") and block.endswith("</your_follow_ups>\n</LIVE_CONTEXT>")
+    assert _lines(block) == [] and "teammates learned" not in block
+
+
+def test_with_the_switch_off_there_are_no_follow_ups_either(store):
+    _follow_up()
+    assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""

@@ -11,7 +11,7 @@ know about and a state dump silently omits.
 Connections are short-lived by design. Every call opens a socket, authenticates,
 issues its commands and closes. There are no subscriptions here, so a pooled or
 long-lived connection would buy nothing and cost a reconnect state machine. If
-Phase 4+ ever needs event streaming, that is the point to revisit this.
+event streaming is ever needed, that is the point to revisit this.
 
 Synchronous, via `websocket-client`. See the note in requirements.txt.
 """

@@ -14,6 +14,7 @@ from core.loaders.skills_loader import SkillsLoader
 from core.proactive import taps
 from core.proactive.taps import (
     CALLS_HINT,
+    FOLLOWUP_SOURCE,
     TAP_CHAT,
     TAP_EFFECT,
     TAP_SCHEDULED,
@@ -121,6 +122,13 @@ class TestTheEntry:
         # Read at once like a scheduled run, even with a trigger effect.
         assert (entry.hops, entry.tap, entry.source, entry.surface) == (1, TAP_SCHEDULED, "proactive", "scheduled")
         assert entry_for(_turn([RECEIPT])).hops == 0
+
+    def test_a_follow_ups_check_counts_like_a_scheduled_run_with_hops_0(self):
+        turn = _turn(source=FOLLOWUP_SOURCE, prompt="This is your follow-up #12: work you told the user...")
+        assert counts(turn)
+        entry = entry_for(turn)
+        # Read at once like a scheduled run, and what it finds can still reach teammates.
+        assert (entry.hops, entry.tap, entry.source, entry.surface) == (0, TAP_SCHEDULED, "followup", "scheduled")
 
     def test_filesystem_writes_become_touched_paths_not_effects(self):
         with Config().overriding(pkm_dir="/vault"):

@@ -58,3 +58,28 @@ class TeamFindingsPrompt(Prompt):
     template = "proactive/team_findings"
 
     items: str     # one per route: its gist, until or window, details, offer and note
+
+
+@dataclass
+class FollowUpPrompt(Prompt):
+    """A follow-up's check: the agent's own open loop, due now.
+
+    core/proactive/follow_ups.py renders it from one claimed row: the goal,
+    what would end it early, its age and its checks, what the agent last told
+    the user, and what to check now. A scan check's findings follow it, in
+    their own block. A reply of <silent/> posts nothing (delivery.is_silent),
+    and a check whose goal is met closes the follow-up itself.
+    """
+
+    template = "proactive/follow_up"
+
+    id: int
+    now: str
+    goal: str
+    close_when: str
+    opened: str        # the day it was opened
+    until: str
+    checks: str        # how many checks since, in words
+    last_report: str   # what the last find posted, clipped; "" if none yet
+    reported: str      # when that was
+    check: str         # "Check now: ..." for a model check; a scan check's findings follow

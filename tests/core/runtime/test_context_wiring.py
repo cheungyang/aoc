@@ -1,4 +1,4 @@
-"""Regression guards for the ExecutionContext refactor (Phase 0a).
+"""Regression guards for the ExecutionContext wiring.
 
 These pin the four behaviours that were previously broken or unenforceable:
 
@@ -64,7 +64,7 @@ class TestGraphBindingIsolation(unittest.IsolatedAsyncioTestCase):
 
         async def _build(ctx, config):
             # Graph construction resolves the tool roster and skills, so it has to run with
-            # the context already bound. Before Phase 0a it ran under the caller's identity.
+            # the context already bound. It used to run under the caller's identity.
             seen["ambient"] = try_context()
             graph = MagicMock()
             graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="ok")]})

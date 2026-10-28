@@ -186,7 +186,7 @@ def _playing_vm(mock_bot_runner):
 
 @pytest.mark.asyncio
 async def test_speech_over_the_reply_ducks_it_and_stops_it_only_once_confirmed(mock_bot_runner):
-    """B19: speech onset used to stop the reply outright, even for a cough."""
+    """Speech onset used to stop the reply outright, even for a cough."""
     vm, mock_vc = _playing_vm(mock_bot_runner)
     utterance = _spoken("Actually, make it Friday.")
     vm.floor.utterance_opened(utterance)
@@ -315,8 +315,8 @@ async def test_a_switch_moves_the_focus_and_greets_without_a_model_call(mock_bot
 
 @pytest.mark.asyncio
 async def test_after_a_switch_turns_run_exactly_as_typed_in_the_focus_channel(mock_bot_runner, tmp_path):
-    """I1: Concierge, on #day-planning's discord session; graphs/main then
-    reaches Daisy's own session, as for a typed message."""
+    """The turn runs as Concierge, on #day-planning's discord session; graphs/main
+    then reaches Daisy's own session, as for a typed message."""
     vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     calls = _capture_sessions(main_agent)
     with _focused(loader):
@@ -335,7 +335,7 @@ async def test_after_a_switch_turns_run_exactly_as_typed_in_the_focus_channel(mo
 
 @pytest.mark.asyncio
 async def test_take_me_to_concierge_continues_generals_conversation(mock_bot_runner, tmp_path):
-    """D1: the lobby is #general, not a conversation of the voice room's own."""
+    """The lobby is #general, not a conversation of the voice room's own."""
     vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     calls = _capture_sessions(main_agent)
     with _focused(loader):
@@ -449,7 +449,7 @@ async def test_aki_is_reached_through_concierge_like_any_agent(mock_bot_runner, 
 
 @pytest.mark.asyncio
 async def test_nothing_said_to_one_agent_reaches_the_next(mock_bot_runner, tmp_path):
-    """I3: unanswered words and a closing question belong to the old focus."""
+    """Unanswered words and a closing question belong to the old focus."""
     vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
     calls = _capture_sessions(main_agent)
     with _focused(loader):
@@ -576,7 +576,7 @@ async def test_a_channel_missing_from_discord_is_reported_not_switched_to(mock_b
 
 @pytest.mark.asyncio
 async def test_a_new_voice_session_starts_in_the_lobby_again(mock_bot_runner, tmp_path):
-    """B20's successor: a join must not keep talking into the last conversation."""
+    """Each join is a new voice session: it must not keep talking into the last conversation."""
     vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
     with _focused(loader):
         await _turn(vm, "Switch me to Daisy.")
@@ -610,7 +610,7 @@ async def test_join_typed_in_a_text_channel_starts_there(mock_bot_runner, tmp_pa
 
 
 # ---------------------------------------------------------------------------
-# Part 3: voice briefings from the channel inbox
+# Voice briefings from the channel inbox
 # ---------------------------------------------------------------------------
 
 DAISY_SPEECH = "Yesterday you noted the afternoon slipped away. How's your energy this morning, one to ten?"

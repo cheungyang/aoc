@@ -356,7 +356,7 @@ async def test_cleanup_discards_the_open_utterance(make_sink, vad):
     assert sink.user_states == {}
 
 
-# --- Part 4: only your account is heard (L1), and where the speech is ---------------
+# --- only your account is heard, and where the speech is ----------------------------
 
 @pytest.mark.asyncio
 async def test_only_the_owners_audio_is_heard(make_sink, vad, capsys):

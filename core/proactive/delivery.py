@@ -1,4 +1,4 @@
-"""Delivery: a live route reaches its recipient (stage S4).
+"""Delivery: a live route reaches its recipient.
 
 Only with the switch on (`PROACTIVE_DELIVERY`). The pipeline approves a route
 on the Board (SignalStore.approve_delivery): a `now` route at once, a `today`
@@ -67,7 +67,7 @@ from core.storage.signals import FAILED, POSTED, SILENT, SignalStore
 STUCK_S = 10 * 60
 # An approved delivery due longer ago than this is failed unrun: never posted late.
 EXPIRE_S = 3 * 3600
-# Posts are short, and G4 wants post p95 <= 60 s: raise it if their quality suffers.
+# Posts are short, and the target is post p95 <= 60 s: raise it if their quality suffers.
 THINKING = "low"
 # How a voice briefing names a proactive post: "Ramsay has a suggestion".
 LABEL = "a suggestion"
@@ -161,7 +161,8 @@ class DeliveryOutput:
     A DiscordOutput that posts nothing for a silent reply. `outcome` says what
     reached the channel (posted or silent), so the delivery is finished right,
     and `message_ids` which messages it posted: your ✅ or ❌ on one of them is
-    the post's outcome (outcomes.py).
+    the post's outcome (outcomes.py). `text` is what it posted: a follow-up's
+    check keeps it as what it last told you (core/proactive/follow_ups.py).
     """
 
     def __init__(self, channel: Any):
@@ -169,6 +170,7 @@ class DeliveryOutput:
         self.discord = DiscordOutput(channel)
         self.outcome: Optional[str] = None
         self.message_ids: List[str] = []
+        self.text = ""
 
     async def deliver(self, ctx: Any, response: Any) -> None:
         if is_silent(response):
@@ -176,6 +178,7 @@ class DeliveryOutput:
             return
         sent = await dispatch_discord_output(channel=self.channel, response=response, source=ctx.source)
         self.message_ids = [str(message.id) for message in sent or () if getattr(message, "id", None) is not None]
+        self.text = getattr(response, "text", None) or ""
         self.outcome = POSTED
 
     async def notify(self, text: str) -> None:

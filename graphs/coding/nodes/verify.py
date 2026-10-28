@@ -1,9 +1,9 @@
 """verify — runs the task's verification command in the worktree.
 
-The only blocking quality gate (§7). Two things it deliberately does not do:
+The only blocking quality gate. Two things it deliberately does not do:
 
 - it does not require a PR to exist. Gating local tests behind a network
-  operation is what turned a GitHub hiccup into "tests failed" (A3);
+  operation is what turned a GitHub hiccup into "tests failed";
 - it does not re-run for a commit it has already tested. It tests the pushed
   `head_sha` and records it as `verified_sha`, so a resumed tick — on this host
   or another — goes straight to publish.
@@ -118,7 +118,7 @@ async def verify_node(state: CodingState) -> Dict[str, Any]:
     verification_cmd = (current_task.get("verification_command") or "").strip()
     if not verification_cmd:
         # An authoring error, not a coding error: retrying the LLM three times
-        # cannot fix a missing command (B4), so halt with the actual problem.
+        # cannot fix a missing command, so halt with the actual problem.
         message = (
             f"`{task_id}` has no `verification_command`. Add one to the manifest "
             f"(the task cannot be verified, so it will not be published)."

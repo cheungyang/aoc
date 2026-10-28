@@ -11,13 +11,14 @@ Two rules shape this module, mirroring `core.git.identity`:
    to fix it -- an expired token should cost zero LLM tokens, not a whole run.
 
 Why a module and not a tool: the agent-facing surface is a single `home_assistant`
-tool (see the integration plan). This layer knows about HTTP, retries and secrets;
-it knows nothing about actions, permissions or agents. That split is what lets the
-guard layer in Phase 3 sit between them and be impossible to route around.
+tool (agents/home-steward/tools/home_assistant.py). This layer knows about HTTP,
+retries and secrets; it knows nothing about actions, permissions or agents. That
+split is what lets the guard layer in `guards.py` sit between them and be
+impossible to route around.
 
 Scope note: this is the REST half. The WebSocket half (entity/device/area
-registries) arrives in Phase 2 as a sibling module -- the registries are the only
-thing REST cannot reach, and they need a different transport.
+registries) is the sibling module `ws.py` -- the registries are the only thing
+REST cannot reach, and they need a different transport.
 """
 import os
 import re
@@ -125,7 +126,8 @@ def write_enabled() -> bool:
 
     Read here rather than in the guard layer so that "can this process write at
     all?" has exactly one answer, available before any action is dispatched.
-    Enforcement lands with the guards in Phase 3; nothing in this module mutates.
+    `guards.authorise` checks it first, on every write; this module only reports
+    it (`describe`).
     """
     return str(Config().get(WRITE_ENABLED_ENV_VAR, "")).strip().lower() in {"1", "true", "yes", "on"}
 

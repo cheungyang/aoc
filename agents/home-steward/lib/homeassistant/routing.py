@@ -35,9 +35,10 @@ READ_BACKENDS = {
     "inventory": WS,
 }
 
-# Mutating actions. Declared here so the guard layer and the permission model can
-# reason about the full vocabulary before the actions themselves are implemented
-# (Phase 4) -- a guard that only knows about actions that already exist is a
+# Mutating actions. Declared here in full, including any the tool does not
+# dispatch (see WRITE_IMPLEMENTED in agents/home-steward/tools/home_assistant.py),
+# so the guard layer and the permission model can reason about the whole
+# vocabulary -- a guard that only knows about actions that already exist is a
 # guard that fails open the moment one is added.
 WRITE_BACKENDS = {
     "call_service": REST,

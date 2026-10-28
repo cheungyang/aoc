@@ -296,7 +296,7 @@ class TestRepoLocking(unittest.IsolatedAsyncioTestCase):
 
 class TestProvisionHasNoHeadFallback(unittest.IsolatedAsyncioTestCase):
     async def test_a_missing_base_ref_fails_instead_of_branching_from_head(self):
-        # F3: falling back to HEAD builds the work on whatever happened to be
+        # Falling back to HEAD builds the work on whatever happened to be
         # checked out, and the result looks successful.
         repo = tempfile.mkdtemp()
         workspace = os.path.join(tempfile.mkdtemp(), "ws")

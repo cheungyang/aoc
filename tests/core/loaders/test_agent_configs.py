@@ -50,7 +50,7 @@ class TestCheckedInConfigs(unittest.TestCase):
                     self.assertIsNotNone(chirp3_voice(config["voice"]["name"]), config["voice"]["name"])
 
     def test_one_agent_listens_in_one_voice_channel(self):
-        """I5: one voice room for the system; a second bot in it would
+        """One voice room for the system; a second bot in it would
         transcribe and answer the same words. The host names the room, and the
         lobby is a channel it hosts (#general): the room's chat holds no
         conversation of its own."""
@@ -70,7 +70,7 @@ class TestCheckedInConfigs(unittest.TestCase):
         self.assertEqual(bots, ["main"])
 
     def test_every_agent_you_can_switch_to_has_its_own_voice(self):
-        """D2: in the one voice room, the voice is how you hear who is answering."""
+        """In the one voice room, the voice is how you hear who is answering."""
         from core.loaders.agents_loader import AgentsLoader
         from core.voice.room.focus import FocusDirectory
 

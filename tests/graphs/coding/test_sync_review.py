@@ -87,7 +87,7 @@ class TestEvaluateSignals(unittest.TestCase):
         self.assertEqual(decision, "pending")
 
     def test_approve_inside_prose_is_not_an_approval(self):
-        """The direct fix for a gate that read 'ok' inside 'looks broken' (E1)."""
+        """The direct fix for a gate that read 'ok' inside 'looks broken'."""
         status = {
             "state": "OPEN",
             "comments": [{"author": {"login": "alice"}, "body": "I'd /approve once tests pass"}],
@@ -104,7 +104,7 @@ class TestEvaluateSignals(unittest.TestCase):
         self.assertEqual(decision, "pending")
 
     def test_silence_is_pending_not_approval(self):
-        """The old gate defaulted to approved when it found nothing (E2)."""
+        """The old gate defaulted to approved when it found nothing."""
         decision, _ = evaluate_signals({"state": "OPEN"}, self.reviewers)
         self.assertEqual(decision, "pending")
 

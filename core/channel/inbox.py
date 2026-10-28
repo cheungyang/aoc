@@ -18,7 +18,7 @@ better than failing the run, reply or reaction that caused it.
     store_speech   the speech writer's result for a row
 
 A row's agent is whoever answers an untagged message in its channel
-(`routing.answering_agent`): the voice focus target of Part 1.
+(`routing.answering_agent`), as for the voice focus on that channel.
 """
 import asyncio
 import sys
@@ -89,8 +89,8 @@ def _notify(row: InboxRow) -> None:
 # --- whose row ----------------------------------------------------------------------
 
 def inbox_channel(channel: Any) -> Optional[str]:
-    """The inbox key for a channel object or name. None for a thread (out of
-    scope, as in Part 1) or for nothing."""
+    """The inbox key for a channel object or name. None for a thread (the
+    inbox has no rows for threads) or for nothing."""
     if channel is None:
         return None
     if not isinstance(channel, str) and names.is_thread(channel):

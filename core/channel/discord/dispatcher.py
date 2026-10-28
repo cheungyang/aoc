@@ -6,11 +6,12 @@ from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
 from core.channel.chunks import safe_chunks
 
-# Sources whose reply is posted: a message in the channel, a schedule, and a
-# proactive delivery (core/proactive/delivery.py).
-POSTED_SOURCES = ("discord", "scheduled", "proactive")
+# Sources whose reply is posted: a message in the channel, a schedule, a
+# proactive delivery (core/proactive/delivery.py) and a follow-up's check
+# (core/proactive/follow_ups.py).
+POSTED_SOURCES = ("discord", "scheduled", "proactive", "followup")
 # Sources whose reply may carry a poll.
-POLL_SOURCES = ("discord", "proactive")
+POLL_SOURCES = ("discord", "proactive", "followup")
 
 
 async def dispatch_discord_output(

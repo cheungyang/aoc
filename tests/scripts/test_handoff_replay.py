@@ -57,7 +57,7 @@ def test_the_report_counts_passes_against_the_target():
                           reply_matches=True),
                CaseResult("b", "Ted, go", reply_matches=False, failures=["reply doesn't name 'x'"])]
     report = render(cases, results, dry=False, show_capsule=False)
-    assert "Passed 1 of 2 (G2 target: 9 of 10)." in report
+    assert "Passed 1 of 2 (target: 9 of 10)." in report
     assert "❌ reply doesn't name 'x'" in report
 
 

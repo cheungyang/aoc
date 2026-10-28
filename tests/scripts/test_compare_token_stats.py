@@ -36,7 +36,7 @@ class TestVoiceStats(unittest.TestCase):
         self.assertEqual(sorted(stats["model_calls"]), [0, 2])
 
     def test_a_voice_window_can_end_before_now(self):
-        """G3's first_token check: the weeks before shadow mode, against the weeks in it."""
+        """The first_token check: the weeks before shadow mode, against the weeks in it."""
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "memory.db")
             store = SessionStore(db)

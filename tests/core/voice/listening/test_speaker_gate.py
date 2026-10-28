@@ -189,7 +189,7 @@ def test_configure_reads_the_mode_and_owners():
     gate = sg.SpeakerGate(model=FakeModel())
     assert gate.configure({"speaker_gate": "SHADOW", "owner_user_ids": [123, "456", " "]}) == "shadow"
     assert gate.owner_user_ids == {"123", "456"}
-    assert gate.configure({"speaker_gate": "enforce"}) == "enforce", "not built yet: it scores as shadow does"
+    assert gate.configure({"speaker_gate": "enforce"}) == "enforce", "it scores as shadow does"
     assert gate.configure({"speaker_gate": "loud"}) == "off"
     assert gate.configure(None) == "off" and gate.owner_user_ids == set()
 

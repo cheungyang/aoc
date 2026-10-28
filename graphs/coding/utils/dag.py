@@ -124,7 +124,7 @@ def get_runnable_tasks(queue: List[TaskEnvelope], max_count: int = 1) -> List[Ta
     currently leased by another run.
 
     Dependencies gate on completion rather than on the prerequisite's branch
-    existing, so a dependent cannot start against a branch the merge deleted (F3).
+    existing, so a dependent cannot start against a branch the merge deleted.
     """
     completed_ids = get_completed_task_ids(queue)
     runnable = []

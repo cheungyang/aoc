@@ -115,8 +115,8 @@ async def implement_node(state: CodingState) -> Dict[str, Any]:
         agent_error = str(e)
         print(f"implement: agent_call error: {e}")
 
-    # git is the ground truth for what changed; the model's own file list is not
-    # (§7.6), so the XML file list is ignored entirely.
+    # git is the ground truth for what changed; the model's own file list is
+    # not, so the XML file list is ignored entirely.
     modified_files = await _modified_files(workspace_path)
     digest = await compute_worktree_digest(workspace_path)
 

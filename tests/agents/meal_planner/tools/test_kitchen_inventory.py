@@ -46,7 +46,7 @@ class TestKitchenInventory(KitchenFilesCase):
             "\n### 2026-10-16 晚餐提案 (Dinner Recommendations)\n- **提案一（清爽海味）**：香煎鮭魚 ＋ 蒜炒小黃瓜\n"))
 
     def test_a_purchase_gets_its_purchase_date_and_no_guessed_expiry(self):
-        # D7: 入庫日期 is the purchase date; 保鮮至 only when known, else expiry counts from 入庫日期.
+        # 入庫日期 is the purchase date; 保鮮至 only when known, else expiry counts from 入庫日期.
         reply = self.call(op="add", items=[
             {"name": "藍莓 (Blueberries)", "qty": "1 盒", "section": "Fruits", "note": "冷藏保存"}])
         self.assertEqual(json.loads(reply["payload"])["changed"][0],

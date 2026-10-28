@@ -1,7 +1,7 @@
 """Tests for the Home Assistant REST client.
 
-The acceptance criterion for Phase 1 is "unit tests green; token never appears in
-any log", so the redaction tests here are load-bearing rather than decorative.
+The token must never reach a log line, a URL or an exception message, so the
+redaction tests here are load-bearing rather than decorative.
 No test touches the network: every request goes through an injected fake session.
 """
 import os

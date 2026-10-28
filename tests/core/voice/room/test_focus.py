@@ -67,7 +67,7 @@ class TestLiveDirectory(unittest.TestCase):
         self.assertEqual(actual, self.EXPECTED)
 
     def test_the_lobby_is_general(self):
-        """D1: the lobby is Concierge in #general, not a voice-only session."""
+        """The lobby is Concierge in #general, not a voice-only session."""
         lobby = self.directory.lobby
         self.assertEqual((lobby.key, lobby.channel_name, lobby.agent_id, lobby.is_lobby),
                          ("general", "general", "main", True))
@@ -179,7 +179,7 @@ class TestDirectoryRules(unittest.TestCase):
 
 
 class TestSessionParity(unittest.TestCase):
-    """I1: a voice turn under a focus is answered from the session an untagged
+    """A voice turn under a focus is answered from the session an untagged
     typed message in that channel would be -- never a voice-only one."""
 
     def test_every_focus_answers_from_the_typed_messages_session(self):

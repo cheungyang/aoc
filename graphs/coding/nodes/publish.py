@@ -9,9 +9,9 @@ Everything here is deterministic and idempotent, and nothing here calls the LLM.
 That is what makes retrying safe: if `gh` is down, the next tick re-enters this
 node with the same code and tries again, spending no tokens.
 
-Two rules from §6.3 hold throughout:
+Two rules hold throughout:
 
-- **A URL is only reported if `gh` confirmed it.** Fabricated links (D2) are
+- **A URL is only reported if `gh` confirmed it.** Fabricated links are
   gone, so a link in Discord is proof the PR exists.
 - **A pushed branch is never thrown away.** If the PR call fails, the task
   halts with a compare URL you can click, and the next tick adopts the PR you

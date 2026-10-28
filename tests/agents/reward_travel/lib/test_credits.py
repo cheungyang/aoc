@@ -56,7 +56,7 @@ class TestCreditWindows(CardFilesCase):
         self.assertEqual((coffee.status, coffee.flag), ("used", None))
 
     def test_an_auto_credit_is_never_flagged(self):
-        """D6: a streaming credit, used by a subscription every month."""
+        """A streaming credit, used by a subscription every month."""
         self.add_row(AUTO_ROW)
         for day in (date(2026, 10, 16), date(2026, 10, 30)):
             with self.subTest(day=day):

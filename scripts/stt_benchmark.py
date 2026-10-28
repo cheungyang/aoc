@@ -11,7 +11,7 @@ so the watchdog ends turns exactly as it does in production.
 Per utterance, from the VAD's view of the speech:
 
     endpoint  last voiced frame -> end of turn   (adaptive; was a fixed 900 ms)
-    stt       end of turn -> transcript ready    (Phase 3 target: p50 <= 300 ms)
+    stt       end of turn -> transcript ready    (target: p50 <= 300 ms)
     ready     last voiced frame -> transcript    (what the listener waits for)
 
 plus the live session's own timings, word error rate against the script, and
@@ -87,7 +87,7 @@ CASES = (
     # only the adaptive rule keeps it one turn.
     Case("continuation", ("Remind me to call the", "dentist tomorrow morning."), gap_ms=900),
     # A finished sentence, then more: two turns (VoiceManager merges them if the
-    # first wasn't answered yet; see the B19 tests).
+    # first wasn't answered yet; tests/core/voice/test_turn.py checks that).
     Case("split", ("Add milk to the shopping list.", "And eggs."), gap_ms=1000, turns=2),
 )
 

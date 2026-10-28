@@ -50,11 +50,11 @@ FINISHED = (POSTED, SILENT, FAILED)
 STUCK = "stuck; not retried"
 # Why an approved delivery was failed unrun: it was due too long ago (expire_deliveries).
 EXPIRED = "expired; not posted late"
-# Tags whose facts reach only the agents that read them (D10, decided at G3): the
+# Tags whose facts reach only the agents that read them (health and finance): the
 # Governor's routes (core/proactive/governor.py) and Live Context's lines (live_situations).
 SENSITIVE_TAGS = frozenset({"health", "finance"})
 # Two posts of the same fact (dedupe key) to one agent this close together are a
-# duplicate: the Governor's dedupe window (core/proactive/governor.py). G4 wants none.
+# duplicate: the Governor's dedupe window (core/proactive/governor.py). The target is none.
 DUPLICATE_S = 72 * 3600
 # Columns added to a table after it shipped, with their definitions. signals.sql
 # makes a missing table whole, but never changes one a database already holds.
@@ -234,7 +234,7 @@ class SignalStore(Store):
         the situations emitted since `since`, with their evidence found and still true on
         `today` (`until` today or later), whose tags meet `topics`.
 
-        As for the Governor's routes (D10), a health or finance fact shows only to an agent
+        As for the Governor's routes, a health or finance fact shows only to an agent
         that reads that tag, and a sensitive one only to an agent that reads either. A fact
         emitted twice (the same dedupe key) shows once, as its newest wording.
         """
@@ -342,7 +342,7 @@ class SignalStore(Store):
 
     def ack_delivery(self, route_id: int, at: Optional[float] = None) -> None:
         """Records when the recipient's emoji went on your message (the `now` reaction):
-        what G4's acknowledgment time is measured on. The first one counts."""
+        what the acknowledgment time is measured on. The first one counts."""
         self.execute("UPDATE deliveries SET acked_at = ? WHERE route_id = ? AND acked_at IS NULL",
                      [time.time() if at is None else at, route_id])
 
@@ -559,10 +559,10 @@ class SignalStore(Store):
     def stats(self, since: float) -> Dict[str, Any]:
         """Counts since `since`: decisions (and when the first was), routes by verdict,
         labels, tokens, and each tap's delay (its first turn to the decision's start) and run time.
-        For G4: each recipient's outcomes, when the first live decision was, and for each live
-        `now` route, how long after its source turn ended the recipient's emoji went on your
-        message (`acks`), and its post landed (`posts`); and the posts of a fact one agent
-        already had posted within DUPLICATE_S (`duplicates`: G4 wants none)."""
+        For the posts' targets: each recipient's outcomes, when the first live decision was, and
+        for each live `now` route, how long after its source turn ended the recipient's emoji went
+        on your message (`acks`), and its post landed (`posts`); and the posts of a fact one agent
+        already had posted within DUPLICATE_S (`duplicates`: the target is none)."""
         decisions = self.query("SELECT count(*), sum(tokens_in), sum(tokens_out), min(at) FROM decisions WHERE at >= ?",
                                [since])[0]
         verdicts = {r[0]: r[1] for r in self.query(

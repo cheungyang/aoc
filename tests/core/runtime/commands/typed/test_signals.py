@@ -184,13 +184,13 @@ def test_stats_show_what_came_of_the_posts_and_how_fast_they_came(store):
 
     # Two weeks since the first live decision: the declines are counted over those, not the shadow days before.
     lines = stats_text(store, now=_local(19, 12), days=30).splitlines()
-    assert ("Outcomes of the posts: 4 engaged · 1 ignored · 2 declined → 57% engaged (G4 wants ≥ 50% engaged, "
+    assert ("Outcomes of the posts: 4 engaged · 1 ignored · 2 declined → 57% engaged (target ≥ 50% engaged, "
             "and ≤ 1 decline per agent a week)") in lines
     assert "  excursion-planner: 1 engaged · 0 ignored · 2 declined → 33% engaged · 1.0 declines a week" in lines
     assert "  meal-planner: 3 engaged · 1 ignored · 0 declined → 75% engaged · 0.0 declines a week" in lines
-    assert ("`now` routes: reaction p95 12 s after the turn (G4 wants ≤ 10 s; 3 so far) · post p95 50 s "
-            "(G4 wants ≤ 60 s; 2 so far)") in lines
-    assert "Duplicate posts: 0 (G4 wants 0: the same fact posted to one agent twice within 72 h)" in lines
+    assert ("`now` routes: reaction p95 12 s after the turn (target ≤ 10 s; 3 so far) · post p95 50 s "
+            "(target ≤ 60 s; 2 so far)") in lines
+    assert "Duplicate posts: 0 (target 0: the same fact posted to one agent twice within 72 h)" in lines
     # In the first week, a decline is one decline a week: a pilot's first days aren't scaled up.
     assert "→ 33% engaged · 2.0 declines a week" in stats_text(store, now=_local(7, 12), days=30)
 

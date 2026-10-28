@@ -4,9 +4,9 @@ After a turn, it reads what happened and names the teammates who could use it,
 as signals with routes (core/prompts/templates/proactive/switchboard.md). It
 runs as `main`, FLASH, in a stateless session that records no memory, so no
 conversation sees it. Its system prompt keeps main's MEMORY and FEEDBACK,
-where the dream turns your team radio corrections into rules (review record
-§13.1). The run's session table is dropped afterwards; the decision keeps the
-prompt, the reply and the tokens.
+where the dream turns your team radio corrections into rules. The run's
+session table is dropped afterwards; the decision keeps the prompt, the reply
+and the tokens.
 
 This module renders the prompt's parts from the Board, runs the model, and
 parses the reply into proposals. What a proposal may become is decided by the
@@ -36,7 +36,7 @@ from core.util.local_time import get_local_timezone
 AGENT = "main"
 MODEL = "FLASH"
 # Matching an exchange to cards needs little depth, and every run costs its
-# thinking tokens: G3 weighs tokens/day against precision.
+# thinking tokens: `!signals stats` weighs tokens a day against precision.
 THINKING = "low"
 TIMEOUT_S = 90.0
 

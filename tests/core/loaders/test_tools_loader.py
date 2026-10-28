@@ -6,7 +6,9 @@ from unittest.mock import patch, MagicMock
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from core.loaders.tools_loader import ToolsLoader
+from core.config.settings import Config
+from core.loaders.tools_loader import FOLLOW_UP, ToolsLoader, gets_follow_up
+from core.runtime.foundation.sessions import SessionManager
 from tests.helpers import make_context
 
 
@@ -293,6 +295,65 @@ class TestCheckPermission(unittest.TestCase):
         # Sibling directory with similar prefix (should not match)
         sibling_path = os.path.join(workspace_root, "pkm", "wiki_gardener", "index.md")
         self.assertFalse(self.loader.check_permission(make_context(agent_id="agent1"), "filesystem", "read", path=sibling_path))
+
+
+class TestFollowUpTool(unittest.TestCase):
+    """follow_up is added only with the switch on, to a run that keeps memory."""
+
+    CONFIG = {"channels": ["lifestyle-perk", "general"]}
+
+    def setUp(self):
+        ToolsLoader._instance = None
+        self.addCleanup(setattr, ToolsLoader, "_instance", None)
+
+    @staticmethod
+    def _ctx(**overrides):
+        values = dict(agent_id="reward-travel", source="discord", channel="lifestyle-perk", stateless=False)
+        values.update(overrides)
+        return SessionManager.get_session(**values)
+
+    def test_it_needs_the_switch(self):
+        self.assertFalse(gets_follow_up(self._ctx(), self.CONFIG))
+        with Config().overriding(proactive_delivery=True):
+            self.assertTrue(gets_follow_up(self._ctx(), self.CONFIG))
+
+    def test_only_a_run_that_keeps_memory_gets_it(self):
+        excluded = {
+            "a stateless agent": (self._ctx(), dict(self.CONFIG, stateless=True)),
+            "a stateless run": (self._ctx(stateless=True), self.CONFIG),
+            "a job": (self._ctx(source="job", channel=None, stateless=True), self.CONFIG),
+            "a dream or a replay": (self._ctx(record_memory=False), self.CONFIG),
+            "a graph step": (self._ctx(graph_id="coding"), self.CONFIG),
+            "the Concierge": (self._ctx(agent_id="main", channel="general"), {"channels": ["*"]}),
+            "an opt-out": (self._ctx(), dict(self.CONFIG, proactivity={"follow_ups": False})),
+        }
+        with Config().overriding(proactive_delivery=True):
+            for name, (ctx, config) in excluded.items():
+                with self.subTest(name):
+                    self.assertFalse(gets_follow_up(ctx, config))
+            for name, ctx, config in (
+                ("a message", self._ctx(), self.CONFIG),
+                ("a spoken turn", self._ctx(source="voice"), self.CONFIG),
+                ("proactivity without the opt-out", self._ctx(), dict(self.CONFIG, proactivity={"offers": ["x"]})),
+            ):
+                with self.subTest(name):
+                    self.assertTrue(gets_follow_up(ctx, config))
+
+    @patch("core.loaders.skills_loader.SkillsLoader.needs_load_skill", return_value=False)
+    @patch("core.loaders.agents_loader.AgentsLoader.get_agent_config")
+    def test_the_roster_has_it_only_where_the_predicate_says(self, get_config, _needs_load_skill):
+        get_config.return_value = self.CONFIG
+        loader = ToolsLoader()
+        granted = {"set_thinking": {}, FOLLOW_UP: {}}  # a grant naming it adds it nowhere else
+
+        def roster(ctx):
+            with patch.object(ToolsLoader, "_merge_tool_permissions", return_value=dict(granted)):
+                return [t.name for t in loader.get_tools(ctx)]
+
+        self.assertEqual(roster(self._ctx()), ["set_thinking"])  # the switch is off
+        with Config().overriding(proactive_delivery=True):
+            self.assertEqual(roster(self._ctx()), [FOLLOW_UP, "set_thinking"])
+            self.assertEqual(roster(self._ctx(record_memory=False)), ["set_thinking"])
 
 
 if __name__ == "__main__":

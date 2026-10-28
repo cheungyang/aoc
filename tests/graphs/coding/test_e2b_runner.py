@@ -107,7 +107,7 @@ class TestHappyPath(E2BCase):
         self.assertTrue(self.sbx.killed)
 
     async def test_every_step_runs_under_pipefail(self):
-        """`cmd | tail` reported success for a failing run in the spike."""
+        """Without pipefail, `cmd | tail` reports success for a failing run."""
         await self.run_steps(self.runner())
 
         verify = self.sbx.calls[-1]["cmd"]

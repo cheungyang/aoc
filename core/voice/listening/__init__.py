@@ -1,7 +1,7 @@
 """The user's side of the conversation: hearing them, and taking turns.
 
     vad_sink.py       cuts the speaker's audio into utterances, streamed as they
-                      talk; only your account's audio is heard (Part 4, L1)
+                      talk; only your account's audio is heard
     floor.py          what an utterance means -- a new turn, an interruption, or
                       listening noise -- and which words are still unanswered
     turn_taking.py    the rules both decide by: when a turn has ended, and when
@@ -10,7 +10,7 @@
 An utterance -- one stretch of the user's speech, its audio and its transcript
 -- is core/voice/foundation/utterance.py: the engines transcribe it too.
 
-Hearing only you (Part 4):
+Hearing only you:
 
     speaker_gate.py   does an utterance sound like you? Your voiceprint, and a
                       verdict per utterance (shadow mode: scored and recorded only)

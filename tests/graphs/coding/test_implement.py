@@ -68,7 +68,7 @@ class TestImplementNode(ManifestFixture):
         self.assertEqual(self.stored()["attempts"]["implement"], 1)
 
     async def test_git_is_the_source_of_truth_for_modified_files(self):
-        """The model's own file list is ignored; only git status counts (§7.6)."""
+        """The model's own file list is ignored; only git status counts."""
         task = _task()
         self.write_manifest([task])
         xml = ("<worker_handoff><modified_files><file>imaginary.py</file></modified_files>"

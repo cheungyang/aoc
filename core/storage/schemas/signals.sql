@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     tokens_in INTEGER,
     tokens_out INTEGER,
     reply TEXT NOT NULL DEFAULT '',   -- the Switchboard's reply, as it came
-    prompt TEXT NOT NULL DEFAULT '',  -- what it was asked: G3's with-vs-without-memory replay re-runs it
+    prompt TEXT NOT NULL DEFAULT '',  -- what it was asked: the with-vs-without-memory replay re-runs it
     errors TEXT NOT NULL DEFAULT ''   -- why the run or its reply failed, if it did
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_at ON decisions(at);
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
     claimed_at REAL,                  -- when a tick (or a scheduled run) took it
     finished_at REAL,
     error TEXT NOT NULL DEFAULT '',   -- why it failed
-    acked_at REAL,                    -- when the recipient's emoji went on your message (a `now` route): G4's acknowledgment
+    acked_at REAL,                    -- when the recipient's emoji went on your message (a `now` route): the acknowledgment time
     message_ids TEXT NOT NULL DEFAULT '[]' -- JSON list: the Discord messages its proactive turn posted, where
                                            -- your ✅/❌ is its outcome. Never a handed row's: that run's post
                                            -- says nothing about the item

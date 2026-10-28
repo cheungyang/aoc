@@ -11,8 +11,8 @@
     !signals missed                   the ones you reported
     !signals stats                    the last 14 days: decisions, verdicts, the
                                       precision of your labels, tokens, each tap's
-                                      delay, when deliveries would land, and for G4,
-                                      what came of the posts and how fast they came
+                                      delay, when deliveries would land, what came
+                                      of the posts and how fast they came
     !signals why <message link>       the decision behind a team radio line, or
                                       behind a proactive post
 
@@ -49,11 +49,11 @@ STATS_DAYS = 14
 PARTS_OF_DAY = ("night", "morning", "afternoon", "evening")
 # The urgencies a route is delivered at, soonest first (core/proactive/governor.py).
 URGENCIES = ("now", "today", "next")
-# G3: at least this many labels, and at least this share of them right.
+# The labels' targets: at least this many labels, and at least this share of them right.
 LABELS_NEEDED = 30
 TARGET_PRECISION = 0.8
-# G4: at least this share of the posts engaged, at most this many declines per agent a
-# week, and a `now` route's reaction and post at most this long after the turn (p95).
+# The posts' targets: at least this share of them engaged, at most this many declines per
+# agent a week, and a `now` route's reaction and post at most this long after the turn (p95).
 TARGET_ENGAGED = 0.5
 DECLINES_A_WEEK = 1
 REACTION_P95_S = 10
@@ -223,7 +223,7 @@ def missed_text(store: SignalStore, what: str) -> str:
                          + [f"{when(m['at'])} · {m['text']}" for m in recent])
     store.add_missed(what)
     record_outcome(missed_line(what))
-    return "Noted as a missed route. It counts toward G3, and goes into the Switchboard's memory tonight."
+    return "Noted as a missed route. It counts in `!signals stats`, and goes into the Switchboard's memory tonight."
 
 
 def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STATS_DAYS) -> str:
@@ -244,7 +244,7 @@ def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STAT
         f"over {ran:g} day{'' if ran == 1 else 's'})",
         f"Routes: {verdicts.get('deliver', 0)} deliver · {verdicts.get('absorb', 0)} absorb · "
         f"{verdicts.get('drop', 0)} dropped",
-        f"Your labels: {good} ✅ · {bad} ❌ → precision {precision} (G3 wants ≥ {TARGET_PRECISION} "
+        f"Your labels: {good} ✅ · {bad} ❌ → precision {precision} (target ≥ {TARGET_PRECISION} "
         f"over ≥ {LABELS_NEEDED} labels; {labeled} so far)",
         f"Missed routes you reported: {stats['missed']}",
     ]
@@ -254,7 +254,7 @@ def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STAT
     lines += outcome_lines(stats["outcomes"], weeks)
     lines += timing_lines(stats["acks"], stats["posts"])
     if stats["first_live_at"] is not None:
-        lines.append(f"Duplicate posts: {stats['duplicates']} (G4 wants 0: the same fact posted to one agent "
+        lines.append(f"Duplicate posts: {stats['duplicates']} (target 0: the same fact posted to one agent "
                      f"twice within {DUPLICATE_S // 3600} h)")
     taps = []
     for tap, rows in sorted(stats["taps"].items()):
@@ -269,7 +269,7 @@ def stats_text(store: SignalStore, now: Optional[float] = None, days: int = STAT
 
 def delivery_lines(rows: List[Dict[str, Any]]) -> List[str]:
     """When the routes to deliver would land: per urgency, and by time of day. The
-    evidence for the dormant quiet-hours and delivery-window levers at G3."""
+    evidence for the dormant quiet-hours and delivery-window levers."""
     if not rows:
         return []
     delays: Dict[str, List[float]] = {}
@@ -284,7 +284,7 @@ def delivery_lines(rows: List[Dict[str, Any]]) -> List[str]:
 
 
 def outcome_lines(outcomes: Dict[str, Dict[str, int]], weeks: float) -> List[str]:
-    """What came of the proactive posts, in all and per recipient: G4's engagement, and
+    """What came of the proactive posts, in all and per recipient: the engagement, and
     each agent's declines a week, over `weeks`."""
     if not outcomes:
         return []
@@ -295,7 +295,7 @@ def outcome_lines(outcomes: Dict[str, Dict[str, int]], weeks: float) -> List[str
         return f"{engaged} {ENGAGED} · {ignored} {IGNORED} · {declined} {DECLINED} → {share:.0%} engaged"
 
     every = {outcome: sum(counts.get(outcome, 0) for counts in outcomes.values()) for outcome in OUTCOMES}
-    lines = [f"Outcomes of the posts: {counted(every)} (G4 wants ≥ {TARGET_ENGAGED:.0%} engaged, and "
+    lines = [f"Outcomes of the posts: {counted(every)} (target ≥ {TARGET_ENGAGED:.0%} engaged, and "
              f"≤ {DECLINES_A_WEEK} decline per agent a week)"]
     for agent_id, counts in sorted(outcomes.items()):
         lines.append(f"  {agent_id}: {counted(counts)} · {counts.get(DECLINED, 0) / weeks:.1f} declines a week")
@@ -309,14 +309,14 @@ def p95(values: List[float]) -> float:
 
 
 def timing_lines(acks: List[float], posts: List[float]) -> List[str]:
-    """How fast `now` routes came, from the end of the turn each came from (G4): the
+    """How fast `now` routes came, from the end of the turn each came from: the
     recipient's emoji on your message, and its post."""
     parts = []
     if acks:
-        parts.append(f"reaction p95 {span(p95(acks))} after the turn (G4 wants ≤ {REACTION_P95_S} s; "
+        parts.append(f"reaction p95 {span(p95(acks))} after the turn (target ≤ {REACTION_P95_S} s; "
                      f"{len(acks)} so far)")
     if posts:
-        parts.append(f"post p95 {span(p95(posts))} (G4 wants ≤ {POST_P95_S} s; {len(posts)} so far)")
+        parts.append(f"post p95 {span(p95(posts))} (target ≤ {POST_P95_S} s; {len(posts)} so far)")
     return ["`now` routes: " + " · ".join(parts)] if parts else []
 
 

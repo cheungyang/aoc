@@ -1,4 +1,4 @@
-"""The D20 replay (scripts/proactive_replay.py): its scoring, its memory switch, and its flow, without a model."""
+"""The memory replay (scripts/proactive_replay.py): its scoring, its memory switch, and its flow, without a model."""
 import pytest
 
 from core.proactive.switchboard import ModelRun, parse_reply

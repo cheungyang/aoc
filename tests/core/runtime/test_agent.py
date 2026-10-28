@@ -604,7 +604,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
     @patch('core.runtime.history.pruner.ContextPruner.aauto_prune_session')
     @patch('core.runtime.agent.LoggingHandler')
     async def test_execute_prunes_after_the_turn_not_before(self, mock_logging_handler_class, mock_auto_prune):
-        """B22: pruning used to run before the graph, on the critical path."""
+        """Pruning used to run before the graph, on the critical path."""
         order = []
         mock_auto_prune.side_effect = lambda **kw: order.append("prune")
 
@@ -697,6 +697,22 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         await agent.execute("test prompt", session=session)
         await asyncio.sleep(0)
         mock_auto_prune.assert_not_called()
+
+    @patch('core.runtime.agent.GraphBuilder')
+    async def test_a_run_with_the_follow_up_tool_gets_its_own_graph(self, mock_builder_class):
+        """Its roster differs (core/loaders/tools_loader.gets_follow_up), so its compiled graph does:
+        a job that builds the agent's graph first doesn't take the tool from its conversations."""
+        from core.config.settings import Config
+        mock_builder_class.return_value.build_graph = AsyncMock(side_effect=lambda ctx, config: object())
+        agent = Agent("reward-travel", {"channels": ["lifestyle-perk"]})
+        conversation = SessionManager.get_session(agent_id="reward-travel", source="discord", channel="lifestyle-perk")
+        job = SessionManager.get_session(agent_id="reward-travel", source="job")
+        with Config().overriding(proactive_delivery=True):
+            built_for_job = await agent._get_graph(job)
+            built_for_conversation = await agent._get_graph(conversation)
+            self.assertIsNot(built_for_conversation, built_for_job)
+            self.assertIs(await agent._get_graph(conversation), built_for_conversation)
+        self.assertEqual(sorted(agent._graphs), ["", "|follow_up"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ from core.runtime.commands.spoken.wait import WaitCommand
 from core.runtime.commands.spoken.where_am_i import WhereAmICommand
 from core.runtime.commands.typed.compact import CompactCommand
 from core.runtime.commands.typed.enroll import EnrollCommand
+from core.runtime.commands.typed.followups import FollowUpsCommand
 from core.runtime.commands.typed.gate import GateCommand
 from core.runtime.commands.typed.help import HelpCommand
 from core.runtime.commands.typed.inbox import InboxCommand
@@ -75,8 +76,8 @@ class CommandRegistry:
 # `!name`, typed to the Discord bot (core/channel/discord/runner.py).
 TYPED = CommandRegistry([
     NewCommand(), NewAllCommand(), CompactCommand(), RestartCommand(), JobsCommand(), JobCommand(), KillCommand(),
-    SignalsCommand(), JoinCommand(), LeaveCommand(), InboxCommand(), EnrollCommand(), VoiceprintCommand(),
-    GateCommand(),
+    SignalsCommand(), FollowUpsCommand(), JoinCommand(), LeaveCommand(), InboxCommand(), EnrollCommand(),
+    VoiceprintCommand(), GateCommand(),
 ])
 
 # Said in the voice room (core/voice/turn.py), tried in this order: a stop

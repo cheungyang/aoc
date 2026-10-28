@@ -62,7 +62,7 @@ def _log_google_health(writes) -> str:
     if not has_permission("log_workout"):
         return "not logged: no permission"
     # The one call outside core.tooling: google_health's write path takes the
-    # ExecutionContext and a ToolsLoader. It moves behind core.tooling with the MCP step (P2).
+    # ExecutionContext and a ToolsLoader.
     from core.loaders.tools_loader import ToolsLoader
     from core.runtime.foundation.context import try_context
     from tools.google_health import (

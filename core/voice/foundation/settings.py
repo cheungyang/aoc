@@ -51,7 +51,7 @@ WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
 # --- Turn taking -----------------------------------------------------------
 # How long a silence ends the turn depends on what was said so far
 # (core/voice/listening/turn_taking.py): a finished sentence ends quickly, a trailing
-# "and" or "um" waits longer, and no words yet keeps the old fixed wait.
+# "and" or "um" waits longer, and no words yet keeps the default wait.
 END_OF_TURN_COMPLETE_MS = 800
 END_OF_TURN_DEFAULT_MS = 900
 END_OF_TURN_CONTINUING_MS = 1200
@@ -64,12 +64,11 @@ BARGE_IN_MIN_WORDS = 2
 # unless it is older than this.
 UNANSWERED_MAX_AGE_S = 90
 
-# --- Hearing only you (Part 4) ---------------------------------------------
+# --- Hearing only you ------------------------------------------------------
 # The voiceprint gate (core/voice/listening/speaker_gate.py) scores how much
 # an utterance sounds like your enrolled voice. `voice_config.speaker_gate`
 # picks the mode per voice session: "off", "shadow" (score and record every
-# utterance, change nothing) or "enforce" (not built yet: until the thresholds
-# below are set from your drives, it behaves as "shadow").
+# utterance, change nothing) or "enforce" (it behaves as "shadow").
 SPEAKER_GATE_MODES = ("off", "shadow", "enforce")
 # A WeSpeaker model trained on VoxCeleb, as exported by sherpa-onnx. CAM++ is
 # about twice as fast as ResNet34 for the same separation; time both on the NAS
@@ -77,8 +76,8 @@ SPEAKER_GATE_MODES = ("off", "shadow", "enforce")
 SPEAKER_MODEL_FILE = os.getenv("AOC_SPEAKER_MODEL", "wespeaker_en_voxceleb_CAM++.onnx")
 SPEAKER_MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
 # Cosine similarity to your voiceprint: at or above ACCEPT it's you, at or
-# below REJECT it isn't, in between the gate keeps listening. Provisional, from
-# synthetic voices; they're replaced by values set from your drives (phase 4.4).
+# below REJECT it isn't, in between the gate keeps listening. Provisional:
+# set from synthetic voices, not from your drives.
 SPEAKER_ACCEPT = 0.60
 SPEAKER_REJECT = 0.40
 # The first verdict is on this much audio, then again every step until decided.

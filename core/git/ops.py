@@ -186,7 +186,7 @@ async def provision_worktree(
         #    silently discard that work (and the next push would be rejected as
         #    non-fast-forward), so the remote branch wins whenever it exists.
         #    No fallback to HEAD on failure: branching from whatever happens to
-        #    be checked out silently builds the work on the wrong commit (F3). A
+        #    be checked out silently builds the work on the wrong commit. A
         #    missing base ref is a real problem and is reported as one.
         remote_ref = f"origin/{branch_name}"
         code, _, _ = await run_cmd_async(

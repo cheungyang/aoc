@@ -3,8 +3,8 @@
     listening/  the user's side: the VAD cuts their speech into utterances, and
                 the floor decides what each one means -- a turn, an interruption
                 or listening noise -- and which words are still unanswered. The
-                voiceprint gate scores whether each one sounds like you (Part 4:
-                `voice_config.speaker_gate`, `!enroll`)
+                voiceprint gate scores whether each one sounds like you
+                (`voice_config.speaker_gate`, `!enroll`)
     engines/    speech-to-text and text-to-speech
     speech/     the agent's answer, to the text channel and the speaker
     room/       joining the voice room, and the focus: which agent and text

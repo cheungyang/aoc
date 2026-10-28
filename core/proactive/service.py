@@ -22,6 +22,7 @@ from core.channel.discord.ack import DiscordAck
 from core.channel.discord.radio import DiscordRadio, on_poll_vote, on_reaction
 from core.proactive.board import on_board
 from core.proactive.delivery import DueDeliveries, SignalsForMe
+from core.proactive.follow_ups import DueFollowUps, FollowUpSweep
 from core.proactive.outcomes import Outcomes
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import TeamRadio
@@ -41,7 +42,8 @@ CONCURRENT_RUNS = 2
 CATCH_UP_S = 30.0
 
 # How often the would-deliver times of `today` and `next` routes are resolved,
-# and the outcomes of proactive posts settled.
+# the outcomes of proactive posts settled, and the follow-ups whose `until`
+# passed ended, with team radio told of those opened and closed.
 SWEEP_S = 60.0
 
 Decide = Callable[[str, List[dict]], Awaitable[None]]
@@ -67,18 +69,23 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
     a `now` delivery, calls `wake` (the schedule runner's) and puts the
     recipient's emoji on your message (core/channel/discord/ack.py). Its sweep
     resolves the delivery times, then settles what came of each proactive post
-    (outcomes.py), which also hears ✅/❌ after team radio does. With the switch
-    off, nothing is delivered: a route records when it would have been.
+    (outcomes.py), which also hears ✅/❌ after team radio does, then ends the
+    follow-ups whose `until` passed and puts those opened and closed on team
+    radio (follow_ups.FollowUpSweep, with the switch on or off). With the
+    switch off, nothing is delivered: a route records when it would have been.
     Returns the service, whose `start()` runs next to the bots, and whose
-    `due_work` and `briefing` (delivery.py) main.py hands to the schedule runner."""
+    `due_work` and `briefing` (delivery.py) and `follow_ups` (follow_ups.py)
+    main.py hands to the schedule runner."""
     if decide is None:
-        radio, outcomes = TeamRadio(DiscordRadio()), Outcomes()
+        radio_channel = DiscordRadio()  # team radio's thread: the routes' lines and the follow-ups'
+        radio, outcomes = TeamRadio(radio_channel), Outcomes()
         on_reaction(radio.reacted)
         on_reaction(outcomes.reacted)  # after team radio: a ✅/❌ on a radio line stays a label
         on_poll_vote(radio.voted)
         pipeline = Pipeline(radio=radio, wake=wake, ack=DiscordAck())
-        decide, sweep = pipeline, in_order(pipeline.resolve, outcomes.settle)
-    service = ProactiveService(decide=decide, sweep=sweep, due_work=DueDeliveries(), briefing=SignalsForMe())
+        decide, sweep = pipeline, in_order(pipeline.resolve, outcomes.settle, FollowUpSweep(radio_channel))
+    service = ProactiveService(decide=decide, sweep=sweep, due_work=DueDeliveries(), briefing=SignalsForMe(),
+                               follow_ups=DueFollowUps())
     set_tool_hooks(list(tool_hooks()) + [CallLog()])
     set_turn_hooks(list(turn_hooks()) + [SignalHook(service.turn_ended)])
     print("[proactive] Tapping agent turns.")
@@ -88,15 +95,18 @@ def install(decide: Optional[Decide] = None, sweep: Optional[Sweep] = None,
 class ProactiveService:
     """Records tapped turns and runs `decide` on them when their tap says so.
     `due_work` is the schedule runner's provider of due deliveries, and `briefing`
-    its provider of findings for a scheduled run (delivery.py)."""
+    its provider of findings for a scheduled run (delivery.py). `follow_ups` is
+    its provider of the follow-ups' due checks (follow_ups.py)."""
 
     def __init__(self, decide: Optional[Decide] = None, store: Optional[SignalStore] = None,
                  clock: Callable[[], float] = time.time, sweep: Optional[Sweep] = None,
-                 due_work: Optional[DueDeliveries] = None, briefing: Optional[SignalsForMe] = None):
+                 due_work: Optional[DueDeliveries] = None, briefing: Optional[SignalsForMe] = None,
+                 follow_ups: Optional[DueFollowUps] = None):
         self.decide = decide
         self.sweep = sweep
         self.due_work = due_work
         self.briefing = briefing
+        self.follow_ups = follow_ups
         self.store = store or SignalStore()
         self.clock = clock
         self._timers: Dict[str, asyncio.TimerHandle] = {}

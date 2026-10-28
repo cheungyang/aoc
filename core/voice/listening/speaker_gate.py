@@ -1,4 +1,4 @@
-"""The voiceprint gate (Part 4, L2): does an utterance sound like you?
+"""The voiceprint gate: does an utterance sound like you?
 
     the model     a speaker-embedding network (WeSpeaker, trained on VoxCeleb),
                   run with onnxruntime -- already here for Silero VAD -- on
@@ -13,7 +13,7 @@
     voicing       the share of sounding 30 ms frames that have a pitch:
                   0.8 or more for talking, a quarter or less for a whisper (on
                   synthetic voices), whatever the volume or microphone.
-                  Recorded now, acted on later (the whisper check).
+                  Recorded only: nothing acts on it.
 
 Only the speech is scored (`Utterance.speech_pcm`): not the VAD's pre-roll,
 nor the end-of-turn silence. Modes, per voice session
@@ -23,10 +23,9 @@ nor the end-of-turn silence. Modes, per voice session
     shadow    every finished utterance is scored on a worker thread and
               recorded (core/storage/speaker_gate_log.py), with nothing
               you hear changed
-    enforce   comes once the thresholds are set from your drives; until
-              then it counts as "shadow"
+    enforce   counts as "shadow": nothing is blocked
 
-Outside "off", only your account is heard at all (L1, the VAD sink's owner
+Outside "off", only your account is heard at all (the VAD sink's owner
 filter): `voice_config.owner_user_ids`, else the account you enrolled from.
 """
 import asyncio
@@ -321,7 +320,7 @@ class SpeakerGate:
             self._log(f"Unknown speaker_gate mode {mode!r}; the gate is off.")
             mode = "off"
         if mode == "enforce":
-            self._log("enforce isn't built yet: scoring and recording as in shadow mode.")
+            self._log("enforce blocks nothing: scoring and recording as in shadow mode.")
         self.mode = mode
         owners = config.get("owner_user_ids")
         self.owner_user_ids = {str(o) for o in owners if str(o).strip()} if isinstance(owners, list) else set()
@@ -361,7 +360,7 @@ class SpeakerGate:
         return stored
 
     def owner_ids(self) -> Set[str]:
-        """Whose audio is heard (L1): voice_config.owner_user_ids, else the
+        """Whose audio is heard: voice_config.owner_user_ids, else the
         account your voiceprint was enrolled from. Empty means everyone's, and
         always when the gate is off. Called by the VAD sink for every packet."""
         if self.mode == "off":

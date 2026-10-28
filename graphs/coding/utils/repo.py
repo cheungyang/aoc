@@ -106,7 +106,7 @@ def get_push_identity(state: Optional[Dict[str, Any]]) -> Optional[PushIdentity]
     return identity
 
 
-# --- Repository modes (§9) -------------------------------------------------
+# --- Repository modes ------------------------------------------------------
 #
 # existing  a managed clone at workspaces/repos/<owner>__<repo>, reused
 # create    `gh repo create`, seed, then behave exactly as `existing`
@@ -119,7 +119,7 @@ REPO_CACHE_DIR = os.path.join("workspaces", "repos")
 def project_root() -> str:
     """The repository root, from this file's location — never `os.getcwd()`.
 
-    Concurrent ticks cannot share a working directory (§8.4), and a scheduled
+    Concurrent ticks cannot share a working directory, and a scheduled
     run's cwd is whatever the scheduler chose, so deriving the root from the
     process's cwd made the answer depend on who was asking.
 

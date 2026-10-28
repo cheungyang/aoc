@@ -145,8 +145,8 @@ async def test_leave_channel(mock_bot_runner):
 
 @pytest.mark.asyncio
 async def test_a_successful_join_is_reported_with_its_room(mock_bot_runner):
-    """B20's successor: a new voice session must not keep the last one's
-    conversation, so the voice manager hears about every join."""
+    """A new voice session must not keep the last one's conversation, so the
+    voice manager hears about every join."""
     joined = []
     connection = _connection(mock_bot_runner, on_joined=joined.append)
     mock_guild = _guild_with_room(mock_bot_runner, AsyncMock(return_value=MagicMock()))

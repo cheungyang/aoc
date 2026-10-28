@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Times the voiceprint gate's speaker model on this machine (Part 4).
+"""Times the voiceprint gate's speaker model on this machine.
 
 Run it on the NAS before the gate scores its first drive there:
 

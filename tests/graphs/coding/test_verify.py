@@ -83,7 +83,7 @@ class TestVerifyNode(ManifestFixture):
         self.assertEqual(meta["repo"], "org/repo")
 
     async def test_missing_verification_command_is_a_config_halt(self):
-        """No amount of LLM retries can add a command to the manifest (B4)."""
+        """No amount of LLM retries can add a command to the manifest."""
         task = _task(verification_command="")
         self.write_manifest([task])
 
@@ -127,7 +127,7 @@ class TestVerifyNode(ManifestFixture):
         self.assertEqual(self.stored()["status"], "halted")
 
     async def test_verify_does_not_require_a_pr(self):
-        """Local tests must not be gated on a network operation (A3)."""
+        """Local tests must not be gated on a network operation."""
         task = _task()
         self.write_manifest([task])
 

@@ -5,7 +5,7 @@ resumed, finished or discarded -- on the event loop, in the order the audio
 arrived. The floor streams it to the recognizer and decides what it is:
 
   * a new turn, when the agent is idle;
-  * an interruption: barge-in is two-stage (B19). Speech over the reply first
+  * an interruption: barge-in is two-stage. Speech over the reply first
     ducks it, and stops it only once the words confirm an interruption;
   * listening noise ("okay", "mm-hmm"), which lets the reply carry on.
 
@@ -50,7 +50,7 @@ class Floor:
         self._speaking: Dict[int, Utterance] = {}
         # Utterances whose turn hasn't been answered yet, oldest first. A turn
         # cancelled before its answer was heard leaves them here, and the next
-        # turn sends them together with the new words (B19).
+        # turn sends them together with the new words.
         self._pending: List[Utterance] = []
         # The reply of the turn in progress, once it is final: a question at its
         # end makes a lone "yes" over its audio an answer, not a backchannel.

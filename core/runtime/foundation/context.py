@@ -24,7 +24,9 @@ SURFACES = frozenset({"voice", "text", "scheduled", "tool", "job"})
 # (source "proactive", run by the schedule runner for the proactive team) is a
 # post nobody asked for, as a schedule's is: it's booked as scheduled, gets the
 # scheduled <voice_mode> block, and its post can be heard later in a voice briefing.
-SOURCE_SURFACES = {"proactive": "scheduled"}
+# So is a follow-up's check (source "followup", core/proactive/follow_ups.py), and
+# on this surface the follow_up tool won't open a new one.
+SOURCE_SURFACES = {"proactive": "scheduled", "followup": "scheduled"}
 
 # A surface declared for a block of work that has no context of its own yet.
 # A scheduled script wraps its entry point in `surface_scope("scheduled")`, so

@@ -7,7 +7,8 @@ ExecutionContext. Tests that exercise a tool therefore need to run inside one.
 Also holds `llm_result`, a real LLMResult builder shared by the logging-handler,
 token-usage-handler and logging-util tests, `GOLDEN_INPUT`, the structured reply
 shared by the missing-speech and speech-coverage tests, `FakeTTS` for voice
-tests that speak, and `FakeSpeakerModel` for tests of the voiceprint gate.
+tests that speak, `FakeSpeakerModel` for tests of the voiceprint gate, and
+`make_follow_up`, a FollowUp for tests that need one without a store.
 """
 import re
 from contextlib import contextmanager
@@ -62,6 +63,19 @@ def envelope(response: str) -> dict:
     if match:
         parts["errors"] = match.group(1)
     return parts
+
+
+def make_follow_up(**fields):
+    """A FollowUp (core/storage/follow_ups.py) without a store: #1, reward-travel's model check
+    on award seats, opened at 0 and never checked, unless `fields` say otherwise."""
+    from core.storage.follow_ups import Check, FollowUp
+
+    values = dict(id=1, agent_id="reward-travel", goal="Business award seats SFO→MAD",
+                  check=Check(type="model", what="new award space SFO to MAD in business"),
+                  every_s=12 * 3600, interval_s=12 * 3600, until="2026-11-30", opened_at=0.0,
+                  next_check_at=12 * 3600.0)
+    values.update(fields)
+    return FollowUp(**values)
 
 
 LLM_USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}

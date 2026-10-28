@@ -157,7 +157,7 @@ class TestAttempts(ManifestTestCase):
 
         self.assertEqual(bump_attempt(self.path, "A", "publish"), 1)
         self.assertEqual(bump_attempt(self.path, "A", "publish"), 2)
-        # A flaky publish must not consume the implement budget (B1).
+        # A flaky publish must not consume the implement budget.
         self.assertEqual(bump_attempt(self.path, "A", "implement"), 1)
 
         attempts = self.read()["queue"][0]["attempts"]

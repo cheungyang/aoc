@@ -301,7 +301,7 @@ class TestSeatsAeroTool(unittest.TestCase):
 
 
 class TestTaxesLabel(unittest.TestCase):
-    """Trip taxes carry their ISO currency code (money in tool output, D8)."""
+    """Trip taxes carry their ISO currency code (money in tool output)."""
 
     def taxes(self, **fields):
         from tools.seats_aero import _format_trips_list

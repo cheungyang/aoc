@@ -1,4 +1,4 @@
-"""fitness-coach's grants (agent.json, plan §6.8): its own tools write its files; it can read every
+"""fitness-coach's grants (agent.json): its own tools write its files; it can read every
 source they read (the audit path), but nothing else writes."""
 import os
 import unittest

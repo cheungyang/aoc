@@ -1,4 +1,4 @@
-"""Outcomes: what came of each proactive post (stage S4; proposal §7.7, D9).
+"""Outcomes: what came of each proactive post.
 
 A proactive turn's post (delivery.py) gets one outcome, decided by code, with
 no model:

@@ -226,7 +226,7 @@ class TestJobManager(unittest.TestCase):
         current_execution_context.reset(token)
         self.assertIsNone(current_execution_context.get())
 
-    # --- Reaper (Phase 0.4) -------------------------------------------------
+    # --- Reaper -------------------------------------------------------------
 
     def _add(self, job_id, status, age_seconds=0.0, agent_id="agent1"):
         session = SessionManager.get_session(agent_id=agent_id, source="discord", channel="general", job_id=job_id)
@@ -348,7 +348,7 @@ class TestJobManager(unittest.TestCase):
 
 
 class TestProductionIsolation(unittest.TestCase):
-    """Guards the tests/conftest.py redirection (Phase 0.3)."""
+    """Guards the tests/conftest.py redirection of production paths."""
 
     PROD_SESSIONS = os.path.realpath(
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "sessions"))

@@ -12,6 +12,10 @@ woken → its tick claims the delivery → the runner runs Ramsay's proactive tu
 (stood in for) in #meal-planning → it posts there, or stays silent → your ✅
 on the post is its outcome. A `next` route instead rides along on Ramsay's
 next scheduled run, in its prompt, and gets no outcome.
+
+A follow-up of Ramsay's runs the same way: the tick claims its due check → the
+runner runs his check in #meal-planning → it posts or stays silent, and the
+store counts it. A scan check that can't read posts the problem instead.
 """
 import asyncio
 import random
@@ -24,10 +28,12 @@ import pytest
 from core.channel.discord.output import DiscordOutput
 from core.channel.response_parser import AgentResponse
 from core.config.settings import Config
+from core.proactive import follow_ups as follow_ups_module
 from core.proactive import radio as radio_module
 from core.proactive import service as service_module
 from core.proactive.cards import PeerCard
 from core.proactive.delivery import DeliverySchedule, DueDeliveries, SignalsForMe
+from core.proactive.follow_ups import DueFollowUps, FollowUpSchedule
 from core.proactive.outcomes import Outcomes
 from core.proactive.pipeline import Pipeline
 from core.proactive.radio import GOOD, TeamRadio
@@ -40,7 +46,8 @@ from core.runtime.hooks import Turn
 from core.runtime.observability.transcript import LoggingHandler
 from core.scheduler import schedule_runner as runner_mod
 from core.scheduler.schedule_runner import ScheduleRunner
-from core.scheduler.spec import PromptSchedule
+from core.scheduler.spec import Problems, PromptSchedule, WorkDecision
+from core.storage.follow_ups import Check, FollowUpStore
 from core.storage.schedule_state import ScheduleState
 from core.storage.signals import SignalStore
 from core.tooling.hooks import set_tool_hooks, tool_hooks
@@ -289,3 +296,70 @@ async def test_with_the_switch_on_a_next_route_rides_along_on_ramsays_scheduled_
     assert ramsay.sessions[0].source == "scheduled" and meal_planning.sent == [post]
     assert store.delivery(route["id"])["status"] == "posted"
     assert store.unsettled_posts() == []  # the run's post says nothing about the item: no outcome
+
+
+def _ramsays_follow_up(tmp_path, monkeypatch, check):
+    """Ramsay's follow-up, due now: his home channel is #meal-planning."""
+    monkeypatch.setattr(follow_ups_module, "home_channel", lambda agent_id, loader: "meal-planning")
+    store = FollowUpStore(str(tmp_path / "memory.db"))
+    follow_up = store.open(agent_id="meal-planner", goal="Wagyu on sale at 99 Ranch, for the anniversary dinner",
+                           check=check, every_s=12 * 3600, until="2099-12-31", channel="meal-planning",
+                           at=time.time() - 12 * 3600 - 60)
+    return store, follow_up
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply, finds", [
+    ("99 Ranch has A5 Wagyu at $89/lb through Sunday. Want me to plan the dinner around it?", 1),
+    ("<silent/>", 0),
+])
+async def test_with_the_switch_on_a_follow_ups_check_runs_as_its_agents_turn(tmp_path, monkeypatch, reply, finds):
+    store, follow_up = _ramsays_follow_up(tmp_path, monkeypatch, Check(type="model", what="Wagyu sales at 99 Ranch"))
+    ramsay, meal_planning, briefed = Ramsay(reply), MealPlanning(), []
+    runner = _runner(tmp_path, ramsay, meal_planning)
+    runner.add_briefing(lambda spec, ctx: briefed.append(spec))
+
+    with Config().overriding(proactive_delivery=True), \
+         patch.object(runner_mod, "reset_conversation", return_value=0), \
+         patch.object(runner_mod, "record_channel_post") as record_post, \
+         patch.object(runner_mod, "record_push") as record_push:
+        (spec,) = await DueFollowUps(store)(time.time())  # the tick claims it
+        assert await DueFollowUps(store)(time.time()) == []  # once
+        assert await runner.run_schedule(spec)
+
+    assert isinstance(spec, FollowUpSchedule) and (spec.agent_id, spec.channel) == ("meal-planner", "meal-planning")
+    (prompt,) = ramsay.prompts
+    assert "This is your follow-up #1" in prompt and "Check now: Wagyu sales at 99 Ranch" in prompt
+    session = ramsay.sessions[0]
+    assert (session.source, session.get_surface(), session.is_stateless()) == ("followup", "scheduled", False)
+    assert briefed == []  # a check never carries the team's `next` routes
+    checked = store.get(follow_up.id)
+    assert (checked.checks, checked.finds, checked.claimed_at) == (1, finds, None)
+    if finds:
+        assert meal_planning.sent == [reply] and checked.last_report == reply
+        record_post.assert_called_once_with(meal_planning, reply, origin="followup:1", loader=runner.loader)
+        assert record_push.call_args.kwargs["label"] == "a follow-up"
+    else:
+        assert meal_planning.sent == [] and checked.last_report == ""
+        record_post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_scan_check_that_cant_read_is_posted_once_as_the_follow_ups(tmp_path, monkeypatch):
+    problems = Problems("price_watch", ("99 Ranch's weekly ad didn't load",))
+    scan = SimpleNamespace(evaluate=lambda ctx: WorkDecision(False, "price_watch can't run", detail=problems))
+    monkeypatch.setattr(follow_ups_module, "build_precondition", lambda config, agent_id=None: scan)
+    store, follow_up = _ramsays_follow_up(tmp_path, monkeypatch, Check(type="price_watch", args={"item": "wagyu"}))
+    ramsay, meal_planning = Ramsay("never asked"), MealPlanning()
+    runner = _runner(tmp_path, ramsay, meal_planning)
+
+    with Config().overriding(proactive_delivery=True), \
+         patch.object(runner_mod, "record_channel_post"), patch.object(runner_mod, "record_push"):
+        (spec,) = await DueFollowUps(store)(time.time())
+        assert not await runner.run_schedule(spec)
+
+    assert ramsay.prompts == []  # no turn
+    assert meal_planning.sent == ["⚠️ The scheduled check `follow-up #1 (price_watch)` couldn't run normally:\n"
+                                  "- 99 Ranch's weekly ad didn't load\nReply here and I'll help fix it."]
+    checked = store.get(follow_up.id)
+    assert (checked.checks, checked.claimed_at) == (0, None)  # a problem counts nothing

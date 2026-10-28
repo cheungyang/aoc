@@ -1,5 +1,5 @@
 """Voice briefings: the digest, "next agent", what an agent left you, and
-live announcements -- checked against the drive in the plan (Part 3, 3.1) --
+live announcements -- checked against one sample drive, joined at 8:10 --
 and the briefing as a voice room hook."""
 import asyncio
 import unittest
@@ -55,7 +55,7 @@ def entries(*rows):
 
 class TestDigest(unittest.TestCase):
 
-    def test_the_drive_in_the_plan(self):
+    def test_a_morning_with_two_questions_waiting(self):
         self.assertEqual(
             compose_digest(entries(TED, DAISY, FRANKIE, WILLIAM), HOUR),
             "Morning. Two agents have something for you. Ted and Daisy are waiting for your answer. "

@@ -3,7 +3,7 @@
 There is one topology. A tick advances what it safely can and returns; "retry"
 is another tick. The previous interrupt-driven graph has been removed — its
 durable state lived in a checkpoint keyed by the caller's session, which is why
-a halted run could not be resumed from anywhere else (C4/C5).
+a halted run could not be resumed from anywhere else.
 """
 from langgraph.graph import StateGraph, START, END
 
@@ -21,7 +21,7 @@ from graphs.coding.adapters import prepare_input, format_output
 
 
 def create_graph(checkpointer=None, **kwargs):
-    """Compiles the tick reconciler of §4.2.
+    """Compiles the tick reconciler.
 
     `checkpointer` is accepted and ignored: the loader passes one to every
     graph, but durable state here lives in the manifest, git and GitHub. It is

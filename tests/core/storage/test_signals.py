@@ -331,7 +331,7 @@ def test_the_now_reaction_is_recorded_once(store):
 
 
 def test_an_old_deliveries_table_gets_acked_at(tmp_path):
-    """A dev database may hold the deliveries table as S4's first part made it."""
+    """A dev database may hold an older deliveries table, without `acked_at`."""
     path = str(tmp_path / "memory.db")
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE deliveries (route_id INTEGER PRIMARY KEY, to_agent TEXT NOT NULL, "
@@ -424,7 +424,7 @@ def test_a_label_wins_over_an_outcome_and_takes_its_count(store):
 
 
 def test_older_tables_get_message_ids_and_outcome_at(tmp_path):
-    """A dev database may hold the routes and deliveries tables as S4's third part left them."""
+    """A dev database may hold older routes and deliveries tables, without `outcome_at` and `message_ids`."""
     path = str(tmp_path / "memory.db")
     route_id = _approved(SignalStore(path))
     conn = sqlite3.connect(path)

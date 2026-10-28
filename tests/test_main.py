@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, call
 import os
 import sys
 import asyncio
@@ -67,11 +67,14 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         mock_runner_instance.run_bot.assert_awaited_once()
         # The proactive team runs next to the bots; its deliveries run on the
         # schedule runner, which a `now` delivery wakes, and its `next` routes
-        # ride along on the runner's scheduled runs.
+        # ride along on the runner's scheduled runs. The follow-ups' due checks
+        # run on it too.
         self.install_proactive.assert_called_once_with(wake=mock_schedule_runner.wake)
-        mock_schedule_runner.add_due_work.assert_called_once_with(self.install_proactive.return_value.due_work)
-        mock_schedule_runner.add_briefing.assert_called_once_with(self.install_proactive.return_value.briefing)
-        self.install_proactive.return_value.start.assert_awaited_once()
+        proactive = self.install_proactive.return_value
+        self.assertEqual(mock_schedule_runner.add_due_work.call_args_list,
+                         [call(proactive.due_work), call(proactive.follow_ups)])
+        mock_schedule_runner.add_briefing.assert_called_once_with(proactive.briefing)
+        proactive.start.assert_awaited_once()
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

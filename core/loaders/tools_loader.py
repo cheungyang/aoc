@@ -2,6 +2,32 @@ import os
 import sys
 import importlib
 
+from core.config.settings import Config
+
+# The follow-ups tool (tools/follow_up.py): auto-added, like load_skill, to
+# the runs `gets_follow_up` allows.
+FOLLOW_UP = "follow_up"
+
+
+def gets_follow_up(ctx, config) -> bool:
+    """Whether a run gets the `follow_up` tool: only with the switch on (PROACTIVE_DELIVERY),
+    and only a run that keeps memory. Not a stateless agent or context, a run that records
+    no memory (a dream, a replay), a graph step, nor the Concierge, which answers in every
+    channel (`channels: ["*"]`). An agent opts out with `"proactivity": {"follow_ups": false}`.
+
+    A compiled graph keeps the roster it was built with, so the runtime keys its graphs
+    by this too (core/runtime/agent.py): a job that builds an agent's graph first doesn't
+    take the tool from its next conversation."""
+    if not Config().proactive_delivery:
+        return False
+    if ctx.is_stateless() or not ctx.record_memory or ctx.graph_id or ctx.source == "graph":
+        return False
+    config = config or {}
+    if config.get("stateless") or "*" in [str(channel) for channel in config.get("channels") or []]:
+        return False
+    proactivity = config.get("proactivity")
+    return not (isinstance(proactivity, dict) and proactivity.get("follow_ups") is False)
+
 
 class ToolsLoader:
     _instance = None
@@ -265,6 +291,13 @@ class ToolsLoader:
         if SkillsLoader().needs_load_skill(ctx):
             if "load_skill" not in allowed_tool_names:
                 allowed_tool_names.append("load_skill")
+
+        # Auto-include follow_up for the runs that keep memory, with the switch on.
+        # The predicate alone decides: a grant that names it doesn't add it elsewhere.
+        from core.loaders.agents_loader import AgentsLoader
+        allowed_tool_names = [name for name in allowed_tool_names if name != FOLLOW_UP]
+        if gets_follow_up(ctx, AgentsLoader().get_agent_config(agent_id)):
+            allowed_tool_names.append(FOLLOW_UP)
                 
         # Shared tools load for any agent that is granted them; an agent's own
         # tools load only for that agent (core/loaders/agent_code.py).

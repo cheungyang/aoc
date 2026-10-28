@@ -2,8 +2,7 @@
 
 Every voice turn asks the agent for one (`<voice_mode>`), so a reply without
 it is a bug to see and fix, not a mode. Every miss is logged and noted in the
-room's text channel, right under the reply (core/voice/speech/reply.py) --
-all of them for now; sampling can come once the misses are understood. So
+room's text channel, right under the reply (core/voice/speech/reply.py). So
 the user never hears silence, a deterministic fallback -- no model call --
 speaks the reply's first sentence and says where the rest is.
 """

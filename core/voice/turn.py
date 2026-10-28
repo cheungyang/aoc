@@ -108,7 +108,7 @@ class VoiceTurn:
             self._log(f"Error in voice pipeline: {format_error_message(e)}")
         finally:
             # Answered, or heard at least in part: done with these words.
-            # Otherwise they ride along with the next turn (B19).
+            # Otherwise they ride along with the next turn.
             if self.answered or self.speech.heard:
                 room.floor.forget(utterances)
             if not self.is_current() and not cancelled:

@@ -5,7 +5,7 @@ The live transcriber supplies the text while the user is still talking:
 
   * `end_of_turn_ms` reads the words heard so far to decide how long a silence
     ends the turn. A finished sentence ends quickly; a trailing "and" or "um"
-    waits longer; with no words yet, the old fixed wait applies.
+    waits longer; with no words yet, the default wait applies.
   * `confirms_barge_in` and `is_backchannel` decide what speech over a busy
     agent means: an interruption ("stop", "actually, make it Friday"), or just
     "mm-hmm" while listening, which must not cut the answer off.

@@ -300,7 +300,7 @@ def _resolve_base_ref(
 
     Dependents branch from the default branch, not from the prerequisite's
     branch: by the time a dependent runs, its prerequisite is merged and that
-    branch is deleted, which used to fall back silently to HEAD (F3).
+    branch is deleted, which used to fall back silently to HEAD.
     """
     default_branch = repo_descriptor.get("default_branch") or "main"
     return state.get("base_branch") or state.get("base_ref") or f"origin/{default_branch}"

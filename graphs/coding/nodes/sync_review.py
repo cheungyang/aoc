@@ -3,7 +3,7 @@
 GitHub is the only approval surface. There is no interrupt, no chat approval and
 no keyword classification: a decision is a state on the PR, evaluated by an exact
 rule. That is the direct fix for the gate that read "ok" inside "looks broken"
-and defaulted to *approved* when it found nothing (E1, E2).
+and defaulted to *approved* when it found nothing.
 
 Signals, first match wins:
 
@@ -126,7 +126,7 @@ def harvest_comments(
 
     Filtered to the people who review, excluding the machine user — otherwise the
     system reacts to its own test-result comments — and to ids beyond the cursor,
-    so a resume does not re-action a comment already addressed (E5).
+    so a resume does not re-action a comment already addressed.
     """
     allowed = {r.lower() for r in (reviewers or [])}
     bot = (bot_login or "").lower()

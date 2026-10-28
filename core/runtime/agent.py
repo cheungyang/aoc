@@ -14,6 +14,7 @@ from core.runtime.foundation import events
 from core.runtime.graph_builder import GraphBuilder
 from core.runtime.hooks import Turn, turn_hooks
 from core.runtime.streaming import StreamHandler
+from core.loaders.tools_loader import FOLLOW_UP, gets_follow_up
 
 
 class Agent(BaseAgent):
@@ -44,6 +45,11 @@ class Agent(BaseAgent):
         cache_key = ctx.graph_id or ""
         if ctx.model:
             cache_key += f"|{ctx.model}"
+        # A run that gets the follow_up tool has another roster, so another compiled graph
+        # too: a stateless or non-recording run of the same agent doesn't get it
+        # (core/loaders/tools_loader.py).
+        if gets_follow_up(ctx, self.config):
+            cache_key += f"|{FOLLOW_UP}"
         if cache_key not in self._graphs:
             self._graphs[cache_key] = await GraphBuilder().build_graph(ctx, self.config)
         return self._graphs[cache_key]

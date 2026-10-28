@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Proactive replay: labeled shadow decisions, re-run with and without main's memory (D20).
+"""Proactive replay: labeled shadow decisions, re-run with and without main's memory.
 
-G3 decides whether the Concierge keeps its dream (D20). The dream turns your
+It shows whether the Concierge's dream is worth keeping. The dream turns your
 team radio labels into main's MEMORY and FEEDBACK, which the Switchboard reads.
 This replay measures whether that memory makes the Switchboard better.
 

@@ -39,7 +39,7 @@ class TaskError(TypedDict, total=False):
     stage: str
     # "llm" | "verification" | "git" | "github" | "config" | "privacy" | "unknown".
     # Infrastructure failures must not consume the LLM budget, so the manifest
-    # counts attempts per stage rather than once per task (B1). "privacy" is a
+    # counts attempts per stage rather than once per task. "privacy" is a
     # push the privacy guard stopped: nothing was pushed.
     kind: str
     message: str
@@ -90,7 +90,7 @@ class TaskEnvelope(TypedDict, total=False):
     verified_sha: Optional[str]
     audited_sha: Optional[str]
     # Highest review comment id already actioned, so a resume does not re-read
-    # the whole thread (E5).
+    # the whole thread.
     review_cursor: Optional[str]
     # Reviewer comments harvested but not yet acted on. Durable so feedback
     # survives a hand-off through the scheduler (e.g. re-provisioning the

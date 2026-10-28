@@ -42,7 +42,7 @@ from core.runtime.foundation.routing import home_channel
 from core.storage.signals import SignalStore
 
 # A decision's mode: SHADOW records when a route would be delivered; LIVE
-# delivers it (stage S4). The switch, `PROACTIVE_DELIVERY`, picks one.
+# delivers it. The switch, `PROACTIVE_DELIVERY`, picks one.
 SHADOW = "shadow"
 LIVE = "live"
 # How far back the Switchboard sees the Board, so it doesn't route a fact twice.
@@ -249,8 +249,8 @@ class Pipeline:
             print(f"[proactive] Could not wake the schedule runner: {type(e).__name__}: {e}")
 
     async def _acknowledge(self, approvals: List[Approval]) -> None:
-        """The `now` reaction (proposal D17): each approval's recipient emoji on your message
-        that started it, and when, on the Board (`acked_at`, G4's acknowledgment time).
+        """The `now` reaction: each approval's recipient emoji on your message that
+        started it, and when, on the Board (`acked_at`, the acknowledgment time).
 
         Only where this host holds the recipient (delivery.held_here, the delivery's own
         rule): elsewhere its post may never come. One reaction per message and emoji. It

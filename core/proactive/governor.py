@@ -3,10 +3,10 @@
 The Switchboard proposes and code disposes. Every rule here is code, and no
 number comes from a model. Each route gets one verdict:
 
-  deliver   a proactive turn for the recipient at `deliver_at`. Live (stage
-            S4) that is a post in the recipient's own channel; in shadow it is
-            only the time it would have been.
-  absorb    no post: the fact is only good to know (Live Context, S4)
+  deliver   a proactive turn for the recipient at `deliver_at`. Live, that is
+            a post in the recipient's own channel; in shadow it is only the
+            time it would have been.
+  absorb    no post: the fact is only good to know (Live Context)
   drop      not allowed, with the reason
 
 The rules, in order. The first one that settles a route decides:
@@ -46,23 +46,23 @@ When a delivery happens (`deliver_at`):
 as the Board sees them happen.
 
 Dormant levers: designed, but not built. Each one is switched on when its
-condition holds, and decided at the gate named (review record §7.5):
+condition holds:
 
   quiet_hours         hold today/next deliveries overnight. When: the "would
                       deliver" times in shadow include ones you don't like, or a
-                      night post annoys you. G3/G4.
+                      night post annoys you.
   delivery_window     deliver `today` only within set hours, and by a set time at
-                      the latest. When: `today` items land late or at odd hours. G4.
+                      the latest. When: `today` items land late or at odd hours.
   per_signal_cap      at most 2 posts from one signal. When: one signal fans out
-                      to 3 or more posts. G3/G4.
+                      to 3 or more posts.
   per_agent_daily_cap at most N posts per agent per day. When: an agent posts
-                      more than 3 a day for a week. G4/G6.
+                      more than 3 a day for a week.
   global_daily_cap    at most N posts a day. When: more than 10 posts a day in
-                      total. G4/G6.
+                      total.
   long_shot_cap       at most 1 low-acceptance nudge a day. When: long shots are
-                      more than 20% of posts, or you decline many of them. G6.
+                      more than 20% of posts, or you decline many of them.
   open_follow_ups_cap at most N open follow-ups per agent. When: one agent keeps
-                      more than 5 open, or checks cost more than expected. G5.
+                      more than 5 open, or checks cost more than expected.
 """
 import random
 import time
@@ -77,8 +77,8 @@ from core.storage.signals import SENSITIVE_TAGS, SignalStore
 
 DELIVER, ABSORB, DROP = "deliver", "absorb", "drop"
 
-# SENSITIVE_TAGS (health, finance) reach only the teammates that read them (D10,
-# decided at G3). The Board defines them: Live Context follows the same rule.
+# SENSITIVE_TAGS (health, finance) reach only the teammates that read them. The
+# Board defines them: Live Context follows the same rule.
 DEDUPE_S = 72 * 3600
 ACTIVE_S = 10 * 60
 QUIET_STRETCH_S = 30 * 60
@@ -86,7 +86,7 @@ NOW_WINDOW_S = 2 * 3600
 HORIZON_DAYS = 7
 # The acceptance draw a nudge needs to be worth a post rather than absorbed,
 # and the prior every kind starts from: a kind with no history is posted about
-# 9 times in 10 (calibrated at G3, from shadow data).
+# 9 times in 10 (calibrated from shadow data).
 WORTH_POSTING = 0.3
 PRIOR_ENGAGED, PRIOR_DECLINED = 2, 1
 # Kinds that may be delivered `now`: something was made, or the user asked.

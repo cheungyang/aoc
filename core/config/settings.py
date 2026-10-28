@@ -144,8 +144,8 @@ class Config:
     # -------------------------------------------------------------------------
     # The team's one switch. Off: shadow. Every agent turn is still tapped and
     # decided, and team radio shows each decision, but nothing reaches an agent;
-    # a route only records when it would have been delivered. On (stage S4,
-    # turned on at G3): approved routes are delivered. `PROACTIVE_DELIVERY`.
+    # a route only records when it would have been delivered. On: approved
+    # routes are delivered. `PROACTIVE_DELIVERY`.
     proactive_delivery = Setting("PROACTIVE_DELIVERY", False, bool)
 
     # -------------------------------------------------------------------------

@@ -36,7 +36,7 @@ class TestGraphTopology(unittest.TestCase):
 
         Honouring it would key durable state to the caller's session again,
         which is the reason a halted run could not be resumed from anywhere
-        else (C4/C5).
+        else.
         """
         from langgraph.checkpoint.memory import MemorySaver
         from graphs.coding.graph import create_graph

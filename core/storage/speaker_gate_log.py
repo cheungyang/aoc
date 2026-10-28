@@ -29,7 +29,7 @@ class Label(str, Enum):
 
 
 class Effect(str, Enum):
-    """What an utterance did, which `enforce` would block if it isn't you."""
+    """What an utterance did, so a would-be rejection shows what it set off."""
     TURN = "TURN"          # it started a turn
     MERGE = "MERGE"        # it joined words still waiting for an answer
     BARGE_IN = "BARGE_IN"  # its words stopped the reply

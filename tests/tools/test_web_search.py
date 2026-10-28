@@ -43,7 +43,7 @@ class TestWebSearchTool(unittest.IsolatedAsyncioTestCase):
     @patch.dict(os.environ, {"BRAVE_API_KEY": "test_key"})
     @patch('tools.web_search.requests.get')
     async def test_concurrent_searches_do_not_block_each_other(self, mock_get):
-        """B13: requests.get blocks, so it must not run on the event loop.
+        """requests.get blocks, so it must not run on the event loop.
 
         Two searches awaited together overlap on worker threads: the pair
         takes about one request's time, not two.

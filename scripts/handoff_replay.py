@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hand-off replay: real conversation points, a hand-off line each, scored.
 
-G2's evidence for hand-offs (core/runtime/foundation/addressing.py,
+The evidence for hand-offs (core/runtime/foundation/addressing.py,
 core/runtime/history/handoff.py). Each case is a moment in a real channel's
 history and a line you might say there to another agent -- "Ted, create a
 syllabus on THIS topic" in #pkm-wiki. A case passes when
@@ -54,7 +54,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 CASES_PATH = os.path.join(REPO, "sessions", "handoff_replay_cases.json")
-# The target G2 sets: this many cases of ten.
+# The target: this many cases of ten.
 TARGET = 9
 # How long one agent turn may take before its case fails (a turn once hung for hours).
 CASE_TIMEOUT_S = 240.0
@@ -277,7 +277,7 @@ def render(cases: List[dict], results: List[CaseResult], dry: bool, show_capsule
         out.append(f"Capsule build: p50 {builds[len(builds) // 2]:.1f} ms, max {builds[-1]:.1f} ms.")
     if not dry:
         passed = sum(r.passed for r in results)
-        out.append(f"Passed {passed} of {len(results)} (G2 target: {TARGET} of 10).")
+        out.append(f"Passed {passed} of {len(results)} (target: {TARGET} of 10).")
     return "\n".join(out)
 
 

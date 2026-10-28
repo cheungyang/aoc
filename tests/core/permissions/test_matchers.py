@@ -138,7 +138,7 @@ class TestThroughCheckPermission(unittest.TestCase):
 
     def test_a_star_grant_permits_reads_on_a_named_entity(self):
         """Regression: this returned False, so `@observe` on `"*"` could not
-        read any specific entity -- the exact grant the plan documents."""
+        read any specific entity -- the exact grant home-steward's agent.json holds."""
         loader = loader_for({"home_assistant": {"*": ["@observe"]}})
         self.assertTrue(
             loader.check_permission(self.ctx, "home_assistant", "get_state", "light.porch")

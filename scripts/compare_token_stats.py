@@ -151,7 +151,8 @@ def _agent_for_table(table, agent_ids):
 
 def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
     """Token use of voice turns and the latency of each pipeline stage, since `since_ts`
-    (and before `until_ts`, if given: a before/after comparison, as G3's first_token check).
+    (and before `until_ts`, if given: a before/after comparison, such as the first_token check
+    before and after shadow mode).
 
     Token rows are tagged `surface='voice'` (including the agents a voice turn
     delegates to); latency comes from the `turn_trace` rows VoiceManager writes
@@ -297,7 +298,7 @@ def get_health_stats(db_path=None, since_ts=0):
 
 
 def print_health_stats(since_ts=0, db_path=None):
-    """The Phase 2 "done when" checks: round trips per turn, denied reads, failed load_skill."""
+    """The health checks: model calls per user turn, denied tool permissions, failed load_skill."""
     stats = get_health_stats(db_path=db_path, since_ts=since_ts)
     if stats is None:
         return

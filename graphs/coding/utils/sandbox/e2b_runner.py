@@ -9,7 +9,7 @@ The host never executes the code under test. Per run:
   it; that `codeload` URL carries a short-lived token scoped to one download,
   and it is the only credential that ever reaches the sandbox.
 - **Exit codes are real.** Every step runs under `bash -o pipefail`, and this
-  runner adds no pipes of its own: the Phase 0 spike watched `cmd | tail` report
+  runner adds no pipes of its own: without pipefail, `cmd | tail` reports
   success for both a failing test run and an OOM-killed install. Output is
   truncated here, in Python, after the exit code is known.
 - **Runner failures are not code failures.** A sandbox that will not start or a

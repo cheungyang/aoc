@@ -72,8 +72,8 @@ class VADSink(voice_recv.AudioSink):
 
     `config` is the agent's voice_config, for its VAD thresholds. `owners`, if
     given, returns the Discord user ids (as strings) whose audio is heard: the
-    owner filter of Part 4 (L1). Anyone else's packets are dropped before the
-    VAD; an empty set, or a speaker Discord can't name, is heard as before.
+    owner filter. Anyone else's packets are dropped before the VAD. With an
+    empty set everyone is heard, and so is a speaker Discord can't name.
     """
 
     def __init__(self, floor, loop=None, config: Optional[dict] = None, min_speech_ms=250,
@@ -154,7 +154,7 @@ class VADSink(voice_recv.AudioSink):
         self._post(self.floor.utterance_audio, state.utterance, chunk)
 
     def _from_owner(self, user, user_name: str) -> bool:
-        """The owner filter (L1): whether `user`'s audio is heard at all."""
+        """The owner filter: whether `user`'s audio is heard at all."""
         try:
             owners = self.owners() if self.owners is not None else None
         except Exception as e:
@@ -247,7 +247,7 @@ class VADSink(voice_recv.AudioSink):
         user_key = ssrc if ssrc else (user_id if isinstance(user_id, (int, str)) else "default")
         user_name = getattr(user, "display_name", str(user)) if user else (f"Speaker-{ssrc}" if ssrc else "Speaker")
 
-        # Only your account is heard (Part 4, L1).
+        # Only your account is heard.
         if user is not None and not self._from_owner(user, user_name):
             return
 

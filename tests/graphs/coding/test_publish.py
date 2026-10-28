@@ -112,7 +112,7 @@ class TestPublishNode(ManifestFixture):
         self.assertEqual(result["pr_url"], "https://github.com/org/repo/pull/4")
 
     async def test_a_failed_pr_reports_a_compare_url(self):
-        """Never throw away a pushed branch; hand back a link that works (§6.3)."""
+        """Never throw away a pushed branch; hand back a link that works."""
         task = _task()
         self.write_manifest([task])
 

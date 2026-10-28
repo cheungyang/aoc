@@ -161,6 +161,13 @@ class TestExecutionContextSurface(unittest.TestCase):
         self.assertIsNone(ctx.surface)
         self.assertEqual(ctx.get_surface(), "scheduled")
 
+    def test_a_follow_ups_check_runs_on_the_scheduled_surface(self):
+        """So does a follow-up's check: the follow_up tool won't open a new one there. It isn't
+        a stateless context, so it keeps the tool, and closes its own follow-up."""
+        ctx = SessionManager.get_session(agent_id="reward-travel", source="followup", channel="lifestyle-perk")
+        self.assertEqual(ctx.get_surface(), "scheduled")
+        self.assertFalse(ctx.is_stateless())
+
     def test_surface_does_not_change_session_identity(self):
         text = SessionManager.get_session(agent_id="a", source="discord", channel="general")
         voice = text.with_surface("voice")

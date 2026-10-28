@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TTS benchmark and voice audition (voice-first plan, Phase 0, section 4.3).
+"""TTS benchmark and voice audition.
 
 Measures today's engine against the candidates that could replace it, on the
 kind of replies this system actually speaks (scripts/tts_benchmark_utterances.json):
@@ -23,7 +23,7 @@ Output goes to scratch/tts_benchmark/<timestamp>/ (gitignored and dockerignored)
 results.json, summary.md, audio/<candidate>/<utterance>.{wav,mp3}, and pairs/ plus
 ab_key/ when pairs are requested.
 
-What each metric means here (targets are the plan's, verbatim):
+What each metric means here, and its target:
 
 - Time to first audio (TTFA): from the moment the first text is available to the
   first audio bytes, p50/p90 over utterances x runs; <= 400 ms p50 for streaming.
@@ -140,7 +140,7 @@ EDGE_MP3_BITS_PER_SECOND = 48_000
 PCM_SAMPLE_RATE = 24_000
 PCM_BYTES_PER_SECOND = PCM_SAMPLE_RATE * 2
 
-# Targets, from the plan's section 4.3 table.
+# Targets: the summary marks each result pass or fail against these.
 TARGET_TTFA_P50_MS = 400.0
 TARGET_RTF = 0.5
 TARGET_PREFERENCE = 0.80
@@ -1761,7 +1761,7 @@ def score_picks(picks: Dict[str, str], key: Sequence[Dict[str, str]]) -> Dict[st
 
 
 def pair_candidates(available: Sequence[str]) -> List[str]:
-    """Everything but the baseline; Chirp once, as the streaming variant the plan would ship."""
+    """Everything but the baseline; Chirp once, as the streaming variant the voice uses."""
     chosen = [c for c in available if c != BASELINE]
     if "chirp-stream" in chosen and "chirp-unary" in chosen:
         chosen.remove("chirp-unary")

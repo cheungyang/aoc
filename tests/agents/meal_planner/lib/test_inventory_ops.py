@@ -81,7 +81,7 @@ class TestAdd(unittest.TestCase):
         self.assertEqual(result.traces, ["藍莓 (Blueberries): 2026-10-23, written in the note; days_left 7"])
 
     def test_without_a_known_expiry_none_is_written_and_it_is_estimated(self):
-        # D7: 保鮮至 only when known; otherwise expiry counts from 入庫日期.
+        # 保鮮至 only when known; otherwise expiry counts from 入庫日期.
         doc, result = run("add", {"name": "藍莓 (Blueberries)", "qty": "1 盒", "section": "Fruits", "note": "冷藏保存"})
         self.assertIn("| 藍莓 (Blueberries) | 1 盒 | 2026-10-16 | 冷藏保存 |\n", doc.render())
         self.assertEqual(result.changed[0]["days_left"], 5)

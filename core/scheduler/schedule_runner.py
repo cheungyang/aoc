@@ -19,14 +19,16 @@ time. Each tick fires the due cron entries, then the due work: every provider
 registered with `add_due_work` returns the specs due now, and each runs as a
 task through `run_schedule`, with the same ownership check and limiter as a
 schedule. A provider claims its own items, so none runs twice
-(core/proactive/delivery.py claims each delivery with one conditional UPDATE).
+(core/proactive/delivery.py claims each delivery with one conditional UPDATE,
+and core/proactive/follow_ups.py each follow-up's due check).
 Such a spec may bring its own source and output (`source`, `output_for`), and
 say when its reply posted nothing (`is_silent`): then nothing is recorded.
 
 A scheduled run that posts somewhere can also be briefed: each provider
 registered with `add_briefing` may add a block after its prompt (the team's
 findings for that agent, core/proactive/delivery.py), and then hears how the
-run went: posted, silent or failed.
+run went: posted, silent or failed. Only source "scheduled" is briefed: never a
+proactive delivery or a follow-up's check.
 
 Every post it makes also puts its channel in the channel inbox (core/voice/briefing),
 unless the schedule's priority is IGNORE, so a voice briefing can tell you

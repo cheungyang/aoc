@@ -161,7 +161,9 @@ class TestInstall:
         assert len(discord_radio._vote_listeners) == 1
 
     @pytest.mark.asyncio
-    async def test_its_sweep_resolves_the_times_then_settles_the_outcomes(self, hooks, monkeypatch):
+    async def test_its_sweep_resolves_the_times_settles_the_outcomes_then_sweeps_the_follow_ups(self, hooks,
+                                                                                                monkeypatch):
+        from core.proactive.follow_ups import FollowUpSweep
         from core.proactive.pipeline import Pipeline
         swept = []
 
@@ -171,14 +173,21 @@ class TestInstall:
         async def settle(self):
             swept.append("settle")
 
+        async def follow_ups(self):
+            swept.append(("follow-ups", self.radio))
+
         monkeypatch.setattr(Pipeline, "resolve", resolve)
         monkeypatch.setattr(Outcomes, "settle", settle)
-        await service_module.install().sweep()
-        assert swept == ["resolve", "settle"]
+        monkeypatch.setattr(FollowUpSweep, "__call__", follow_ups)
+        service = service_module.install()
+        await service.sweep()
+        # Expiry and the follow-ups' lines go to the same team radio thread as the routes' lines.
+        assert swept == ["resolve", "settle", ("follow-ups", service.decide.radio.channel)]
 
     def test_the_schedule_runner_runs_the_deliveries_and_is_woken_for_them(self, hooks):
         from core.channel.discord.ack import DiscordAck
         from core.proactive.delivery import DueDeliveries, SignalsForMe
+        from core.proactive.follow_ups import DueFollowUps
 
         def wake():
             pass
@@ -190,3 +199,5 @@ class TestInstall:
         # the recipient's scheduled run.
         assert isinstance(service.decide.ack, DiscordAck)
         assert isinstance(service.briefing, SignalsForMe)
+        # The follow-ups' due checks run on the schedule runner too.
+        assert isinstance(service.follow_ups, DueFollowUps)
