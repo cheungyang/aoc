@@ -61,7 +61,7 @@ from core.proactive.board import on_board
 from core.proactive.switchboard import local
 from core.proactive.taps import PROACTIVE_SOURCE
 from core.scheduler.spec import Briefing, PromptSchedule, ScheduleContext, SessionPolicy, WorkDecision
-from core.storage.signals import FAILED, POSTED, SILENT, SignalStore
+from core.storage.signals import FAILED, POSTED, SILENT, DueDelivery, NextRoute, SignalStore
 
 # A delivery still running after this long is failed, and never run again.
 STUCK_S = 10 * 60
@@ -106,7 +106,7 @@ def details_text(payload: Optional[Dict[str, Any]]) -> str:
     return json.dumps(details, ensure_ascii=False, default=str) if details else ""
 
 
-def render_prompt(delivery: Dict[str, Any], now: float) -> str:
+def render_prompt(delivery: DueDelivery, now: float) -> str:
     """The proactive turn's prompt for one due delivery (SignalStore.due_deliveries).
 
     It never names the source agent or its channel, and leaves the payload's
@@ -114,35 +114,35 @@ def render_prompt(delivery: Dict[str, Any], now: float) -> str:
     """
     return DeliveryPrompt(
         now=f"{local(now):%A %Y-%m-%d %H:%M}",
-        gist=delivery.get("gist") or "",
-        evidence=delivery.get("evidence") or "",
-        details=details_text(delivery.get("payload")),
-        until=delivery.get("until") or "",
-        window=window_text(delivery.get("window_start"), delivery.get("window_end")),
-        offer=delivery.get("offer") or "",
-        note=delivery.get("note") or "",
+        gist=delivery.gist,
+        evidence=delivery.evidence,
+        details=details_text(delivery.payload),
+        until=delivery.until or "",
+        window=window_text(delivery.window_start, delivery.window_end),
+        offer=delivery.offer,
+        note=delivery.note,
     ).render()
 
 
-def render_findings(routes: List[Dict[str, Any]]) -> str:
+def render_findings(routes: List[NextRoute]) -> str:
     """The `<findings source="your team">` block for a scheduled run, one item per route
     (SignalStore.pending_next): its gist, then each of details, until, window, offer and
     note it has. Like render_prompt, it never names the source, nor the payload's `tool`."""
     items = []
     for route in routes:
-        lines = [f"- {route.get('gist') or ''}"]
-        details = details_text(route.get("payload"))
-        window = window_text(route.get("window_start"), route.get("window_end"))
+        lines = [f"- {route.gist}"]
+        details = details_text(route.payload)
+        window = window_text(route.window_start, route.window_end)
         if details:
             lines.append(f"  Details: {details}")
-        if route.get("until"):
-            lines.append(f"  True until {route['until']}.")
+        if route.until:
+            lines.append(f"  True until {route.until}.")
         if window:
             lines.append(f"  When it matters: {window}.")
-        if route.get("offer"):
-            lines.append(f"  What you could offer: {route['offer']}")
-        if route.get("note"):
-            lines.append(f"  The idea: {route['note']}")
+        if route.offer:
+            lines.append(f"  What you could offer: {route.offer}")
+        if route.note:
+            lines.append(f"  The idea: {route.note}")
         items.append("\n".join(lines))
     return TeamFindingsPrompt(items="\n".join(items)).render()
 
@@ -192,29 +192,32 @@ class DeliverySchedule(PromptSchedule):
     """One due delivery as a one-shot schedule: the recipient's turn in its home channel.
 
     It never goes through the registry: it has no cron, and is made from a
-    claimed row (DueDeliveries). Its schedule id is `proactive:<agent>`, so the
-    schedule state keeps one row per agent, not one per delivery. Its priority
+    claimed DueDelivery (DueDeliveries). Its schedule id is `proactive:<agent>`, so
+    the schedule state keeps one row per agent, not one per delivery. Its priority
     is the default, so its post enters the channel inbox with a speech version.
     """
 
     source = PROACTIVE_SOURCE
 
-    def __init__(self, delivery: Dict[str, Any], *, store: Optional[SignalStore] = None,
+    def __init__(self, delivery: DueDelivery, *, store: Optional[SignalStore] = None,
                  now: Optional[float] = None):
         self.delivery = delivery
-        self.route_id = delivery["route_id"]
         self.store = store or SignalStore()
         self.output: Optional[DeliveryOutput] = None
         super().__init__(
             prompt=render_prompt(delivery, time.time() if now is None else now),
             session_policy=SessionPolicy.STATELESS,
             thinking_level=THINKING,
-            schedule_id=f"proactive:{delivery['to_agent']}",
-            agent_id=delivery["to_agent"],
+            schedule_id=f"proactive:{delivery.to_agent}",
+            agent_id=delivery.to_agent,
             cron="",
-            channel=delivery.get("channel") or None,
+            channel=delivery.channel or None,
             label=LABEL,
         )
+
+    @property
+    def route_id(self) -> int:
+        return self.delivery.route_id
 
     def has_work(self, ctx: ScheduleContext) -> WorkDecision:
         return WorkDecision(True, f"route #{self.route_id} is due")
@@ -273,13 +276,13 @@ class DueDeliveries:
         ownership = self.ownership or Ownership()
         specs = []
         for delivery in await on_board(self.store.due_deliveries, now):
-            route_id = delivery["route_id"]
-            if not held_here(delivery["to_agent"], ownership):
+            route_id = delivery.route_id
+            if not held_here(delivery.to_agent, ownership):
                 # Left approved: it runs if the agent comes back here, and expires otherwise.
                 if route_id not in self._waiting:
                     self._waiting.add(route_id)
                     print(f"[proactive] The delivery of route #{route_id} waits: this host doesn't hold "
-                          f"{delivery['to_agent']} right now.")
+                          f"{delivery.to_agent} right now.")
                 continue
             if not await on_board(self.store.claim_delivery, route_id, now):
                 continue  # another tick took it
@@ -309,10 +312,10 @@ class SignalsForMe:
         if not routes:
             return None
         block = render_findings(routes)  # first: a route is handed over only with a block to show it
-        handed = await on_board(self.store.hand_over, [r["route_id"] for r in routes], to_agent=agent_id,
+        handed = await on_board(self.store.hand_over, [r.route_id for r in routes], to_agent=agent_id,
                                 channel=ctx.channel or spec.channel or "", now=now)
         if len(handed) < len(routes):  # another run took some first
-            routes = [r for r in routes if r["route_id"] in handed]
+            routes = [r for r in routes if r.route_id in handed]
             if not routes:
                 return None
             block = render_findings(routes)

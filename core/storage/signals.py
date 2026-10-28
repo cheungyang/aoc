@@ -5,7 +5,9 @@ keep. A Switchboard run claims the rows it reads, then records its decision,
 the signals it emitted and their routes. The Governor's verdicts and your
 labels land on the routes. core/proactive/README.md walks through the flow;
 the schema is core/storage/schemas/signals.sql. JSON columns are encoded and
-decoded here, so callers pass and get plain lists and dicts.
+decoded here, so callers pass and get plain lists and dicts. What a delivery
+reads comes back as frozen dataclasses: DueDelivery (`due_deliveries`) and
+NextRoute (`pending_next`).
 
 Acceptance counts are per kind of nudge (`kind_key`, recipient/kind/tag), and
 a route counts once: your label if you gave one (✅ as engaged, ❌ as
@@ -26,6 +28,7 @@ A `next` route's row is made when the recipient's next scheduled run takes it
 import json
 import sqlite3
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from core.config.settings import Config
@@ -84,6 +87,94 @@ def _decode(table: str, row: Optional[Row]) -> Optional[Dict[str, Any]]:
             except (TypeError, ValueError):
                 out[column] = empty
     return out
+
+
+def _payload(text: Optional[str]) -> Dict[str, Any]:
+    """A signal's payload column as a dict, read as `_decode` reads it: {} when it's blank or
+    can't be read, and when it isn't an object."""
+    try:
+        payload = json.loads(text) if text else {}
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+@dataclass(frozen=True)
+class DueDelivery:
+    """An approved delivery that's due, with what its proactive turn needs (`due_deliveries`):
+    its route's offer, note, urgency and window, and its signal's fact and source."""
+    route_id: int                       # routes.id: a route is delivered once
+    to_agent: str                       # the recipient: whose proactive turn it is
+    urgency: str                        # now or today: the urgency the Governor granted
+    kind: str                           # situation, artifact, request, event or focus
+    gist: str                           # the fact, in one line
+    channel: str = ""                   # where it posts: the recipient's home channel
+    evidence: str = ""                  # the words the fact came from; "" if none
+    # The fact's details, with the `tool` it was learned by. Left out of the hash: a dict has none.
+    payload: Dict[str, Any] = field(default_factory=dict, hash=False)
+    tags: str = ""                      # comma-separated, from TAGS.md
+    until: Optional[str] = None         # YYYY-MM-DD: when the fact stops being true, if it says
+    source_agent: str = ""              # who learned it: never named to the recipient
+    source_channel: str = ""            # where it was learned: never named either
+    offer: str = ""                     # what the recipient could offer
+    note: str = ""                      # the idea, in the Switchboard's words
+    window_start: Optional[str] = None  # YYYY-MM-DD: when it starts to matter, if it says
+    window_end: Optional[str] = None    # YYYY-MM-DD: when it stops mattering, if it says
+
+
+def _due_delivery(record: Row) -> DueDelivery:
+    return DueDelivery(
+        route_id=record["route_id"],
+        to_agent=record["to_agent"],
+        urgency=record["urgency"],
+        kind=record["kind"],
+        gist=record["gist"],
+        channel=record["channel"],
+        evidence=record["evidence"],
+        payload=_payload(record["payload"]),
+        tags=record["tags"],
+        until=record["until"],
+        source_agent=record["source_agent"],
+        source_channel=record["source_channel"],
+        offer=record["offer"],
+        note=record["note"],
+        window_start=record["window_start"],
+        window_end=record["window_end"],
+    )
+
+
+@dataclass(frozen=True)
+class NextRoute:
+    """A live `next` route no scheduled run has taken yet (`pending_next`): what its recipient's
+    next scheduled run is handed, as findings from the team."""
+    route_id: int                       # routes.id
+    to_agent: str                       # the recipient: whose scheduled run takes it
+    kind: str                           # its signal's kind: situation, artifact, request, event or focus
+    gist: str                           # the fact, in one line
+    signal_at: float                    # when its signal was emitted, epoch seconds: the oldest go first
+    # The fact's details, with the `tool` it was learned by. Left out of the hash: a dict has none.
+    payload: Dict[str, Any] = field(default_factory=dict, hash=False)
+    until: Optional[str] = None         # YYYY-MM-DD: when the fact stops being true, if it says
+    offer: str = ""                     # what the recipient could offer
+    note: str = ""                      # the idea, in the Switchboard's words
+    window_start: Optional[str] = None  # YYYY-MM-DD: when it starts to matter, if it says
+    window_end: Optional[str] = None    # YYYY-MM-DD: when it stops mattering, if it says
+
+
+def _next_route(record: Row) -> NextRoute:
+    return NextRoute(
+        route_id=record["route_id"],
+        to_agent=record["to_agent"],
+        kind=record["kind"],
+        gist=record["gist"],
+        signal_at=record["signal_at"],
+        payload=_payload(record["payload"]),
+        until=record["until"],
+        offer=record["offer"],
+        note=record["note"],
+        window_start=record["window_start"],
+        window_end=record["window_end"],
+    )
 
 
 class SignalStore(Store):
@@ -319,16 +410,16 @@ class SignalStore(Store):
                "status": APPROVED, "approved_at": time.time() if at is None else at}
         return self.insert("deliveries", row, or_="IGNORE") is not None
 
-    def due_deliveries(self, now: float) -> List[Dict[str, Any]]:
-        """The approved deliveries due by `now`, soonest first, each with what its turn needs:
-        its route's offer, note, urgency and window, and its signal's kind, gist, evidence,
-        payload, tags, until and source."""
+    def due_deliveries(self, now: float) -> List[DueDelivery]:
+        """The approved deliveries due by `now`, soonest first, each a DueDelivery with what its
+        turn needs: its route's offer, note, urgency and window, and its signal's kind, gist,
+        evidence, payload, tags, until and source."""
         rows = self.query(
-            "SELECT d.*, r.offer, r.note, r.urgency, r.window_start, r.window_end, s.kind, s.gist, s.evidence, "
-            "s.payload, s.tags, s.until, s.source_agent, s.source_channel "
+            "SELECT d.route_id, d.to_agent, d.channel, r.offer, r.note, r.urgency, r.window_start, r.window_end, "
+            "s.kind, s.gist, s.evidence, s.payload, s.tags, s.until, s.source_agent, s.source_channel "
             "FROM deliveries d JOIN routes r ON r.id = d.route_id JOIN signals s ON s.id = r.signal_id "
             "WHERE d.status = 'approved' AND d.deliver_at <= ? ORDER BY d.deliver_at ASC, d.route_id ASC", [now])
-        return [_decode("signals", r) for r in rows]
+        return [_due_delivery(r) for r in rows]
 
     def claim_delivery(self, route_id: int, now: float) -> bool:
         """Takes a due delivery for one run; True only for the claim that changed the row.
@@ -385,9 +476,9 @@ class SignalStore(Store):
         return self.execute("UPDATE deliveries SET status = 'failed', finished_at = ?, error = ? "
                             "WHERE status = 'approved' AND deliver_at < ?", [now, EXPIRED, now - older_than_s])
 
-    def pending_next(self, agent_id: str, *, since: float, today: str, limit: int) -> List[Dict[str, Any]]:
+    def pending_next(self, agent_id: str, *, since: float, today: str, limit: int) -> List[NextRoute]:
         """The live `next` routes to `agent_id` that no run has taken yet, oldest first, at most
-        `limit`: what its next scheduled run is handed (core/proactive/delivery.py).
+        `limit`, each a NextRoute: what its next scheduled run is handed (core/proactive/delivery.py).
 
         Each is a `deliver` route of a live decision, with no deliveries row, whose signal was
         emitted since `since` and is still true on `today` (no `until`, or not past it), and
@@ -403,7 +494,7 @@ class SignalStore(Store):
             "AND dl.route_id IS NULL AND s.at >= ? AND (s.until IS NULL OR s.until = '' OR s.until >= ?) "
             "AND (r.window_end IS NULL OR r.window_end = '' OR r.window_end >= ?) "
             "ORDER BY s.at ASC, r.id ASC LIMIT ?", [agent_id, since, today, today, limit])
-        return [_decode("signals", r) for r in rows]
+        return [_next_route(r) for r in rows]
 
     def hand_over(self, route_ids: Sequence[int], *, to_agent: str, channel: str, now: float) -> List[int]:
         """Hands routes to `to_agent`'s scheduled run in `channel`: one `handed` deliveries row

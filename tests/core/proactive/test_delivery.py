@@ -1,4 +1,4 @@
-"""Delivery (core/proactive/delivery.py): a live route's proactive turn, from a claimed row."""
+"""Delivery (core/proactive/delivery.py): a live route's proactive turn, from a claimed delivery."""
 import asyncio
 from datetime import datetime
 from types import SimpleNamespace
@@ -24,7 +24,7 @@ from core.proactive.delivery import (
     window_text,
 )
 from core.scheduler.spec import PromptSchedule, ScheduleContext, SessionPolicy
-from core.storage.signals import SignalStore
+from core.storage.signals import NextRoute, SignalStore
 from core.util.local_time import get_local_timezone
 
 NOW = datetime(2026, 10, 24, 9, 31, tzinfo=get_local_timezone()).timestamp()
@@ -57,8 +57,9 @@ def _approved(store, deliver_at=NOW, **signal):
     return route_id
 
 
-def _row(store, route_id):
-    return next(r for r in store.due_deliveries(NOW) if r["route_id"] == route_id)
+def _due(store, route_id):
+    """The route's DueDelivery, as the provider reads it."""
+    return next(d for d in store.due_deliveries(NOW) if d.route_id == route_id)
 
 
 class Channel:
@@ -88,7 +89,7 @@ class Holds:
 class TestThePrompt:
 
     def test_it_has_the_fact_the_offer_and_the_rules_and_never_the_source(self, store):
-        prompt = render_prompt(_row(store, _approved(store, until="2026-10-27")), NOW)
+        prompt = render_prompt(_due(store, _approved(store, until="2026-10-27")), NOW)
         for part in ("It is Saturday 2026-10-24 09:31.", "Groceries from 99 Ranch, Oct 24",
                      'The words it came from: "Saved: 99 Ranch, $86.40."', '"vendor": "99 Ranch"', "True until 2026-10-27",
                      "What you could offer: update the kitchen inventory", "The idea: Add them.", "first person",
@@ -101,7 +102,7 @@ class TestThePrompt:
             assert source not in prompt, source
 
     def test_what_it_doesnt_have_is_left_out(self, store):
-        prompt = render_prompt(_row(store, _approved(store, evidence="", payload={})), NOW)
+        prompt = render_prompt(_due(store, _approved(store, evidence="", payload={})), NOW)
         assert "The words it came from" not in prompt and "Details" not in prompt
         assert "True until" not in prompt and "When it matters" not in prompt
 
@@ -142,26 +143,27 @@ async def test_a_silent_reply_posts_nothing():
 class TestTheTurn:
 
     def test_it_is_the_recipients_one_shot_turn_in_its_home_channel(self, store):
-        row = _row(store, _approved(store))
-        spec = DeliverySchedule(row, store=store, now=NOW)
+        due = _due(store, _approved(store))
+        spec = DeliverySchedule(due, store=store, now=NOW)
         assert (spec.agent_id, spec.channel, spec.source) == ("meal-planner", "meal-planning", "proactive")
         assert spec.schedule_id == "proactive:meal-planner"  # one schedule-state row per agent
+        assert spec.route_id == due.route_id
         assert spec.session_policy is SessionPolicy.STATELESS
         assert spec.thinking_level == THINKING == "low"
         ctx = ScheduleContext(schedule_id=spec.schedule_id, agent_id=spec.agent_id, now=NOW)
         assert spec.has_work(ctx)
-        assert spec.build_prompt(ctx) == render_prompt(row, NOW)
+        assert spec.build_prompt(ctx) == render_prompt(due, NOW)
 
     @pytest.mark.asyncio
     async def test_its_run_finishes_the_delivery(self, store):
         posted, silent, failed, nowhere = (_approved(store) for _ in range(4))
         ctx = ScheduleContext(schedule_id="proactive:meal-planner", agent_id="meal-planner", now=NOW)
         for route_id, reply in ((posted, "Want these in the kitchen inventory?"), (silent, "<silent/>")):
-            spec = DeliverySchedule(_row(store, route_id), store=store, now=NOW)
+            spec = DeliverySchedule(_due(store, route_id), store=store, now=NOW)
             await spec.output_for(Channel()).deliver(TURN, AgentResponse.from_string(reply))
             spec.on_success(ctx)
-        DeliverySchedule(_row(store, failed), store=store, now=NOW).on_failure(ctx)
-        DeliverySchedule(_row(store, nowhere), store=store, now=NOW).on_success(ctx)  # its channel wasn't found
+        DeliverySchedule(_due(store, failed), store=store, now=NOW).on_failure(ctx)
+        DeliverySchedule(_due(store, nowhere), store=store, now=NOW).on_success(ctx)  # its channel wasn't found
 
         statuses = [store.delivery(r)["status"] for r in (posted, silent, failed, nowhere)]
         assert statuses == ["posted", "silent", "failed", "failed"]
@@ -348,7 +350,9 @@ class TestTheNextTouchpoint:
         assert store.delivery(route_id)["status"] == "handed"  # its run finishes it, however long it takes
 
     def test_what_a_route_doesnt_have_is_left_out(self):
-        block = render_findings([{"gist": "In Tahoe until Tue", "payload": {"tool": "calendar_add"}}])
+        route = NextRoute(route_id=1, to_agent="meal-planner", kind="situation", gist="In Tahoe until Tue",
+                          signal_at=NOW, payload={"tool": "calendar_add"})
+        block = render_findings([route])
         assert "- In Tahoe until Tue" in block
         for part in ("Details", "True until", "When it matters", "What you could offer", "The idea", "calendar_add"):
             assert part not in block, part

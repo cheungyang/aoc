@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from core.storage.signals import SignalStore
+from core.storage.signals import DueDelivery, NextRoute, SignalStore
 
 
 def _turn(**overrides):
@@ -260,20 +260,28 @@ def test_a_delivery_is_approved_once(store):
 def test_a_due_delivery_comes_with_what_its_turn_needs(store):
     route_id = _approved(store, note="Add them.", window_start="2026-10-24", window_end="2026-10-25")
     (due,) = store.due_deliveries(now=200.0)
-    assert (due["route_id"], due["to_agent"], due["channel"]) == (route_id, "meal-planner", "meal-planning")
-    assert (due["offer"], due["note"], due["urgency"]) == ("update kitchen inventory", "Add them.", "now")
-    assert (due["window_start"], due["window_end"], due["until"]) == ("2026-10-24", "2026-10-25", None)
-    assert (due["kind"], due["gist"], due["evidence"], due["tags"]) == ("artifact", "Groceries from Costco", "Costco",
-                                                                      "food")
-    assert due["payload"] == {"vendor": "Costco"}
-    assert (due["source_agent"], due["source_channel"]) == ("receipt-processor", "receipts")
+    assert isinstance(due, DueDelivery)
+    assert (due.route_id, due.to_agent, due.channel) == (route_id, "meal-planner", "meal-planning")
+    assert (due.offer, due.note, due.urgency) == ("update kitchen inventory", "Add them.", "now")
+    assert (due.window_start, due.window_end, due.until) == ("2026-10-24", "2026-10-25", None)
+    assert (due.kind, due.gist, due.evidence, due.tags) == ("artifact", "Groceries from Costco", "Costco", "food")
+    assert due.payload == {"vendor": "Costco"}
+    assert (due.source_agent, due.source_channel) == ("receipt-processor", "receipts")
+
+
+def test_a_due_deliverys_payload_is_a_dict_whatever_was_stored(store):
+    route_id = _approved(store)
+    for stored, read in (("not json", {}), ("[1, 2]", {}), ("", {}), ('{"vendor": "Costco"}', {"vendor": "Costco"})):
+        store.execute("UPDATE signals SET payload = ? WHERE id = (SELECT signal_id FROM routes WHERE id = ?)",
+                      [stored, route_id])
+        assert store.due_deliveries(now=200.0)[0].payload == read, stored
 
 
 def test_due_skips_deliveries_not_due_yet_and_taken_ones(store):
     due, later, taken = _approved(store, deliver_at=200.0), _approved(store, deliver_at=500.0), _approved(store)
     assert store.claim_delivery(taken, now=200.0)
-    assert [d["route_id"] for d in store.due_deliveries(now=300.0)] == [due]
-    assert [d["route_id"] for d in store.due_deliveries(now=500.0)] == [due, later]
+    assert [d.route_id for d in store.due_deliveries(now=300.0)] == [due]
+    assert [d.route_id for d in store.due_deliveries(now=500.0)] == [due, later]
 
 
 def test_a_delivery_is_claimed_once(store):
@@ -497,10 +505,13 @@ def test_pending_next_is_the_live_next_routes_no_run_has_taken(store):
     store.hand_over([taken], to_agent="meal-planner", channel="meal-planning", now=200.0)
 
     pending = store.pending_next("meal-planner", since=100.0, today=TODAY, limit=5)
-    assert [r["route_id"] for r in pending] == [older, newer]  # oldest first
-    assert (pending[0]["gist"], pending[0]["payload"], pending[0]["offer"]) == (
+    assert all(isinstance(r, NextRoute) for r in pending)
+    assert [r.route_id for r in pending] == [older, newer]  # oldest first
+    assert (pending[0].gist, pending[0].payload, pending[0].offer) == (
         "Groceries from Costco", {"vendor": "Costco"}, "update kitchen inventory")
-    assert [r["route_id"] for r in store.pending_next("meal-planner", since=100.0, today=TODAY, limit=1)] == [older]
+    assert (pending[0].to_agent, pending[0].kind, pending[0].signal_at) == ("meal-planner", "artifact", 110.0)
+    assert (pending[0].until, pending[0].window_end) == (TODAY, TODAY)
+    assert [r.route_id for r in store.pending_next("meal-planner", since=100.0, today=TODAY, limit=1)] == [older]
 
 
 def test_a_route_is_handed_over_once(store):
