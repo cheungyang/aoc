@@ -420,13 +420,15 @@ class SpeakerGate:
             self._log(f"Could not record utterance #{utterance.id}: {type(e).__name__}: {e}")
 
     async def _transcript(self, utterance: Utterance) -> Optional[str]:
+        """What was heard. For a vocabulary echo, which the turn got as no
+        words, that is the recital itself: it's what you'd want to review."""
         if self._transcribe is None:
             return None
         try:
             transcript = await asyncio.wait_for(self._transcribe(utterance), 15)
         except Exception:
             return None
-        return getattr(transcript, "text", None)
+        return getattr(transcript, "heard", None) or getattr(transcript, "text", None)
 
     def _keep_clip(self, record_id: int, pcm: bytes) -> str:
         """Saves the utterance's audio for review, and drops clips past their days."""

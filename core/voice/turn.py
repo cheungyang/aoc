@@ -63,6 +63,14 @@ class TurnRoom(VoiceControls, Protocol):
         """The words named another agent (a HANDOFF event): moves the focus to
         its channel. Returns that text channel, or None to stay."""
 
+    async def say_undo_hint(self, say: Any) -> None:
+        """Once the reply is said: how to undo a hand-off it made out of a
+        conversation ("Say 'go back' for Daisy."), if it made one."""
+
+    async def switch_to_agent(self, agent: str, say: Any) -> bool:
+        """The agent's reply handed you to `agent`, a teammate (<switch
+        to="..."/>): moves the focus to its channel, greeted in its voice."""
+
 
 class VoiceTurn:
     """One turn: its utterances, its trace, and whether it was answered."""
@@ -146,6 +154,11 @@ class VoiceTurn:
             trace.meta["stt_final_after_end_ms"] = round(final_ms)
         if len(utterances) > 1:
             trace.meta["merged_utterances"] = len(utterances)
+        # The recognizer reciting its vocabulary came back as no words (stt.py);
+        # the trace says so, since the turn it would have been never runs.
+        echoes = [t.echo for t in transcripts if t.echo]
+        if echoes:
+            trace.meta["stt_echo"] = echoes
         if not newest:
             # Noise, not words. Anything older stays unanswered.
             self._log("Transcription empty. Ignoring.")
@@ -163,13 +176,18 @@ class VoiceTurn:
         # 3. A spoken command. "Stop" or "wait" on its own is for the
         #    pipeline, not the agent: the reply has already stopped, and
         #    "wait" keeps the unanswered words for what the user says next.
-        #    "Next agent" or "switch me to Daisy" moves the focus instead of
-        #    starting a turn, and leaves anything unanswered with the old one.
+        #    "Next agent", "switch me to Daisy" or just "Daisy." moves the
+        #    focus instead of starting a turn, and leaves anything unanswered
+        #    with the old one.
         say = partial(room.reply.say, is_current=is_current)
-        command = await SPOKEN.answer(newest, SpokenContext(voice=room, heard=newest, say=say, turn=self,
-                                                            log=self._log))
+        spoken = SpokenContext(voice=room, heard=newest, say=say, turn=self, log=self._log)
+        command = await SPOKEN.answer(newest, spoken)
         if command is not None:
-            trace.meta["outcome"] = command.outcome
+            # A command may say this run ended otherwise than usual: a bare
+            # name dropped as noise had no words, it switched nothing. Which
+            # command it was tells a "go back" (a switch undone) from a switch.
+            trace.meta["outcome"] = spoken.outcome or command.outcome
+            trace.meta["command"] = command.name
             self.answered = not self._held
             return
 
@@ -208,4 +226,9 @@ class VoiceTurn:
             agent, transcript, author, session, channel, self.speech,
             is_current=is_current, on_final=room.floor.set_reply, speaker=focus.agent_id,
             on_handoff=room.handed_off,
+            on_switch=lambda teammate: room.switch_to_agent(teammate, say),
         )
+        # A hand-off out of a conversation, like any move, says how to undo
+        # it: after the named agent's reply, which is its greeting.
+        if self.answered:
+            await room.say_undo_hint(say)

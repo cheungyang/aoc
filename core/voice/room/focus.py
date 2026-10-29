@@ -197,3 +197,7 @@ class FocusDirectory:
     def words_to_switch(self, focus: VoiceFocus) -> str:
         """What to say to get to `focus`: \"switch to Frankie\"."""
         return f"switch to {self.spoken_alias(focus)}"
+
+    def go_back_hint(self, focus: VoiceFocus) -> str:
+        """How to undo a move that left `focus`: \"Say 'go back' for Grace.\"."""
+        return f"Say 'go back' for {self.who(focus)}."

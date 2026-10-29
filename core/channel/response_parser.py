@@ -151,6 +151,24 @@ def split_question(speech: Optional[str]) -> tuple[Optional[str], Optional[str]]
     return cleaned or None, question or None
 
 
+# A reply that hands the user to a teammate ends with <switch to="goal-setter"/>
+# (core/prompts/templates/system/team.md): the voice room moves there, and the
+# channel shows where to go.
+_SWITCH_RE = re.compile(
+    r"<switch\b[^>]*?\bto\s*=\s*[\"']([^\"']*)[\"'][^>]*?/?>(?:\s*</switch\s*>)?", re.IGNORECASE
+)
+
+
+def _extract_switch(text: str) -> tuple[str, Optional[str]]:
+    """Extracts and strips <switch to="..."/> directives, wherever they are
+    (inside <speech> too, so the voice never reads one out). The last one
+    counts."""
+    targets = [m.group(1).strip() for m in _SWITCH_RE.finditer(text)]
+    if not targets:
+        return text, None
+    return _SWITCH_RE.sub("", text).strip(), targets[-1] or None
+
+
 @dataclass
 class AgentResponse:
     text: str
@@ -163,10 +181,13 @@ class AgentResponse:
     # The direct question marked inside <speech>, on a scheduled run whose
     # post may be heard later (see core/prompts/templates/voice/scheduled_voice_mode.md).
     question: Optional[str] = None
+    # The teammate the reply hands the user to: the agent id in <switch to="..."/>.
+    switch_to: Optional[str] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text = reply_text
+        text, switch_to = _extract_switch(text)
         text, speech = _extract_speech(text)
         speech, question = split_question(speech)
         text, poll_data = _extract_poll(text)
@@ -182,4 +203,5 @@ class AgentResponse:
             system_memory_log=system_memory_log,
             speech=speech,
             question=question,
+            switch_to=switch_to,
         )

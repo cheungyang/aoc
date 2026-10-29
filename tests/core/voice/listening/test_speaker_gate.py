@@ -263,6 +263,18 @@ async def test_a_would_be_rejection_keeps_its_audio_for_review():
 
 
 @pytest.mark.asyncio
+async def test_a_dropped_vocabulary_echo_is_recorded_as_heard():
+    """The turn got no words (stt.py); the log keeps the recital, which is how
+    the 2026-10-28 hand-off to William was traced back to it."""
+    gate = gate_with(FakeModel(lambda ms: 0.06))
+    u = utterance(speech_ms=1836)
+    u.transcript = Transcript("", "gemini_live", heard="- Aki, agent designer\n- William, wiki gardener",
+                              echo="a roster of 4 vocabulary terms")
+    (record,) = await _observed(gate, u)
+    assert record.transcript == "- Aki, agent designer\n- William, wiki gardener"
+
+
+@pytest.mark.asyncio
 async def test_nothing_is_scored_when_off_without_a_voiceprint_or_while_enrolling():
     off = gate_with()
     off.configure({"speaker_gate": "off"})

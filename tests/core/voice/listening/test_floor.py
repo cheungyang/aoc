@@ -41,6 +41,7 @@ class Turns:
 def make_floor(busy=False, gate=None):
     stt = MagicMock()
     stt.transcribe = AsyncMock(return_value=Transcript("Okay.", "gemini_live"))
+    stt.echo.return_value = None  # words are words here; echoes are test_voice_manager.py's
     audio = MagicMock()
     audio.is_playing.return_value = busy
     connection = MagicMock(agent_id="main")

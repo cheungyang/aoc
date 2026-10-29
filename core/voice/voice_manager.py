@@ -25,18 +25,21 @@ it, and forwards what Discord tells it: you moving between voice channels
 (`member_moved`), and the bot being ready (`auto_join`).
 """
 import asyncio
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+import time
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import discord
+import numpy as np
 
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation.output import TurnOutput
 from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
+from core.voice.foundation import settings
 from core.voice.hooks import VoiceHook
 from core.voice.listening.enrollment import EnrollmentFlow
 from core.voice.listening.floor import Floor
 from core.voice.listening.gate_commands import gate_command, mark_from_reaction, voiceprint_command
-from core.voice.listening.speaker_gate import SpeakerGate
+from core.voice.listening.speaker_gate import VOICING_FRAME, SpeakerGate, voiced_share
 from core.voice.listening.vad_sink import VADSink
 from core.voice.room.connection import (
     VoiceConnection,
@@ -99,6 +102,17 @@ class VoiceManager:
         self._current_task = None
         # Where the next turn goes. None means the lobby (see `focus`).
         self._focus: Optional[VoiceFocus] = None
+        # The focus before the last move, by key, and what has happened since:
+        # where "go back" returns, and whether it still may.
+        self._previous_key: Optional[str] = None
+        self._moved_at = 0.0
+        self._turns_since_move = 0
+        # When each focus last had a turn (time.monotonic()): whether a move
+        # away from it leaves a conversation.
+        self._last_turn_at: Dict[str, float] = {}
+        # How to undo a hand-off this turn made out of a conversation, said
+        # once the named agent's reply is (see `handed_off`).
+        self._undo_hint: Optional[str] = None
         self._side_tasks = set()
         # Features built on the room (see hooks.py), called in this order.
         self.hooks: List[VoiceHook] = list(hooks)
@@ -177,9 +191,14 @@ class VoiceManager:
         self.speaker_gate.configure(config if isinstance(config, dict) else self.config)
 
     def _reset_focus(self) -> None:
-        """Back to the lobby (on first use), with nothing left unanswered."""
+        """Back to the lobby (on first use), with nothing left unanswered and
+        nowhere to go back to."""
         self._focus = None
         self.floor.clear()
+        self._previous_key = None
+        self._turns_since_move = 0
+        self._last_turn_at.clear()
+        self._undo_hint = None
 
     def room(self):
         """The voice channel the bot is in, or None."""
@@ -262,12 +281,17 @@ class VoiceManager:
     def set_focus(self, focus: VoiceFocus, *, interrupt: bool = True) -> None:
         """Moves the focus. Nothing said to the old one carries over: a turn in
         flight is stopped (unless it is the turn asking: `interrupt=False`), and
-        its unanswered words and last reply are forgotten."""
+        its unanswered words and last reply are forgotten. The old focus is
+        where "go back" returns."""
         previous, self._focus = self._focus, focus
         if interrupt and self.busy():
             self.interrupt(f"focus moved to {focus.label}")
         self.floor.clear()
         if previous is None or previous.key != focus.key:
+            if previous is not None:
+                self._previous_key = previous.key
+                self._moved_at = time.monotonic()
+                self._turns_since_move = 0
             self._spawn(self._announce_focus(focus))
 
     async def arrive(self, focus: VoiceFocus, say: Say) -> None:
@@ -291,10 +315,66 @@ class VoiceManager:
         For hooks; `switch_to_named` handles what you say."""
         return await self.switcher.switch_to(focus, self.directory(), say)
 
-    async def switch_to_named(self, phrase: str, say: Say) -> bool:
-        """"Switch me to …" (core/runtime/commands/spoken/switch.py): the agent
-        or channel `phrase` names, or a near miss. False: it names none."""
-        return await self.switcher.switch_to_named(phrase, say)
+    async def switch_to_named(self, phrase: str, say: Say, *, asked: bool = True, bare: bool = False,
+                              turn: Any = None) -> Optional[str]:
+        """"Switch me to …", or a name on its own (core/runtime/commands/spoken/switch.py):
+        the agent or channel `phrase` names, or, `asked` for by a switch
+        phrase, a near miss. A `bare` name must sound like a voice (`turn`'s
+        newest utterance). A move that leaves a conversation says how to come
+        back. Returns the turn's outcome, or None: the words are a request for
+        the agent."""
+        return await self.switcher.switch_to_named(
+            phrase, say, asked=asked, bare=bare, noise=lambda: self._not_a_voice(turn),
+            live=self._conversation_live)
+
+    async def switch_to_agent(self, agent: str, say: Say) -> bool:
+        """An agent's reply handed you to `agent`, a teammate's id or name
+        (<switch to="..."/>, core/voice/speech/reply.py): the room moves to its
+        channel, as "switch to ..." would, saying how to come back. False: it
+        has no channel to go to."""
+        return await self.switcher.switch_to_agent(agent, say, live=self._conversation_live)
+
+    async def go_back(self, say: Say) -> bool:
+        """"Go back" (core/runtime/commands/spoken/go_back.py): to the focus
+        before the last move. Only until you've talked in the new place, or
+        within GO_BACK_WINDOW_S of the move; after that the words are a request
+        for the agent, and "back to Grace" names where to go."""
+        if self._previous_key is None:
+            return False
+        if self._turns_since_move and time.monotonic() - self._moved_at > settings.GO_BACK_WINDOW_S:
+            return False
+        directory = self.directory()
+        target = directory.get(self._previous_key)
+        if target is None:
+            return False
+        self._log(f"↩️ Going back to #{target.channel_name}.")
+        return await self.switcher.switch_to(target, directory, say)
+
+    def _conversation_live(self, focus: VoiceFocus) -> bool:
+        """Whether you were talking in `focus` a moment ago: one of its
+        agent's turns ran within LIVE_CONVERSATION_S. Never the lobby."""
+        if focus.is_lobby:
+            return False
+        last = self._last_turn_at.get(focus.key)
+        return last is not None and time.monotonic() - last <= settings.LIVE_CONVERSATION_S
+
+    @staticmethod
+    def _not_a_voice(turn: Any) -> Optional[str]:
+        """Why `turn`'s newest utterance doesn't sound like a voice speaking
+        -- too little of it has a pitch -- or None. None too when there's no
+        audio to tell from. The voiceprint gate's figure is used when it has
+        scored the utterance already."""
+        utterances = getattr(turn, "utterances", None)
+        if not isinstance(utterances, (list, tuple)) or not utterances:
+            return None
+        newest = utterances[-1]
+        share = getattr(getattr(newest, "gate", None), "voiced_share", None)
+        if not isinstance(share, (int, float)):
+            pcm = newest.speech_pcm() if hasattr(newest, "speech_pcm") else b""
+            if len(pcm) < 3 * VOICING_FRAME * 2:  # under 90 ms of 16-bit audio: too little to tell
+                return None
+            share = voiced_share(np.frombuffer(pcm, dtype=np.int16))
+        return f"{share:.2f} voiced" if share < settings.BARE_NAME_MIN_VOICED else None
 
     def whereabouts(self) -> Tuple[str, str]:
         """"Where am I" (core/runtime/commands/spoken/where_am_i.py): where the
@@ -313,19 +393,34 @@ class VoiceManager:
     def handed_off(self, event: dict):
         """The words named another agent (graphs/main's HANDOFF): the room
         follows the conversation to that agent's channel, as "switch to …"
-        would, but with no greeting -- the agent's reply is the greeting.
-        Returns the text channel the reply goes on in; None leaves the turn
-        where it is."""
+        would, but with no greeting -- the agent's reply is the greeting. A
+        move out of a conversation says how to undo it once the reply is said
+        (`say_undo_hint`). Returns the text channel the reply goes on in;
+        None leaves the turn where it is."""
         directory = self.directory()
         focus = directory.for_channel(event.get("channel"))
         channel = self.focus_channel(focus) if focus is not None else None
         if channel is None:
             self._log(f"Hand-off to #{event.get('channel')}: no such focus or channel; the reply stays here.")
             return None
+        here = self.focus()
         self._log(f"🎧 Hand-off: now with {directory.who(focus)} in #{focus.channel_name}.")
         # The turn being answered is the one handing off; it must not cancel itself.
         self.set_focus(focus, interrupt=False)
+        # The turn was said where you were, so out of any agent's channel this
+        # is a move out of a conversation; out of the lobby, never.
+        if here.key != focus.key and self._conversation_live(here):
+            self._undo_hint = directory.go_back_hint(here)
         return channel
+
+    async def say_undo_hint(self, say: Say) -> None:
+        """After a reply that handed you to another agent out of a
+        conversation: how to undo the move, "Say 'go back' for Daisy.", in
+        the voice of the agent you're with now. After the reply, so the
+        answer isn't kept waiting."""
+        hint, self._undo_hint = self._undo_hint, None
+        if hint:
+            await say(hint, self.focus().agent_id)
 
     async def _announce_focus(self, focus: VoiceFocus) -> None:
         """Shows where the room is now, for a glance at Discord: a line in the
@@ -398,7 +493,12 @@ class VoiceManager:
         return False
 
     def turn_starting(self, focus: VoiceFocus) -> None:
-        """A turn is about to run in `focus`'s channel: every hook's `turn`."""
+        """A turn is about to run in `focus`'s channel: every hook's `turn`.
+        It is also a conversation there, now; and once you've talked in the
+        new place, "go back" soon stops being a command."""
+        self._turns_since_move += 1
+        self._last_turn_at[focus.key] = time.monotonic()
+        self._undo_hint = None  # one a cancelled turn never said is stale now
         self._call_hooks("turn", focus)
 
     def _hook_failed(self, hook: VoiceHook, point: str, error: Exception) -> None:

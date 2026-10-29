@@ -6,6 +6,7 @@ from core.runtime.commands.base import Command, CommandContext
 from core.runtime.commands.control.claim import ClaimCommand
 from core.runtime.commands.control.release import ReleaseCommand
 from core.runtime.commands.control.status import StatusCommand
+from core.runtime.commands.spoken.go_back import GoBackCommand
 from core.runtime.commands.spoken.next_agent import NextAgentCommand
 from core.runtime.commands.spoken.stop import StopCommand
 from core.runtime.commands.spoken.switch import SwitchCommand
@@ -81,9 +82,10 @@ TYPED = CommandRegistry([
 ])
 
 # Said in the voice room (core/voice/turn.py), tried in this order: a stop
-# first; "next agent" and "where am I" before the switch phrases, which would
-# otherwise take them for a near miss.
-SPOKEN = CommandRegistry([StopCommand(), WaitCommand(), NextAgentCommand(), WhereAmICommand(), SwitchCommand()])
+# first; then "next agent", "where am I" and "go back" before the switch,
+# which would otherwise take them for a name ("back", "next agent").
+SPOKEN = CommandRegistry([StopCommand(), WaitCommand(), NextAgentCommand(), WhereAmICommand(), GoBackCommand(),
+                          SwitchCommand()])
 
 # Typed in the ownership control thread (core/channel/discord/ownership.py).
 CONTROL = CommandRegistry([ClaimCommand(), ReleaseCommand(), StatusCommand()])

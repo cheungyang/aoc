@@ -39,9 +39,21 @@ class VoiceControls(Protocol):
     def whereabouts(self) -> Tuple[str, str]:
         """Where the room is, and the agent who says so."""
 
-    async def switch_to_named(self, phrase: str, say: Say) -> bool:
-        """Moves to the agent or channel `phrase` names, or suggests a near miss.
-        False: it names nothing, and the words are a request for the agent."""
+    async def switch_to_named(self, phrase: str, say: Say, *, asked: bool = True, bare: bool = False,
+                              turn: Any = None) -> Optional[str]:
+        """Moves to the agent or channel `phrase` names, saying how to come
+        back if that leaves a conversation. Only what a switch phrase `asked`
+        for ("switch me to Daisy") gets "Do you mean ...?" for a name that
+        isn't exact. A `bare` name, with no switch words at all ("Grace."),
+        must sound like a voice (`turn`'s newest utterance). Returns the
+        turn's outcome when it answered (a switch, a suggestion, noise
+        dropped); None when the words are a request for the agent: they name
+        no one, or a bare name is the agent you're with."""
+
+    async def go_back(self, say: Say) -> bool:
+        """"Go back": returns to where the room was before its last move.
+        False: there's nowhere to go back to, or you've moved on since, and
+        the words are a request for the agent."""
 
     async def next_agent(self, say: Say) -> bool:
         """Moves to the next channel with something for you. False: no feature offers that."""

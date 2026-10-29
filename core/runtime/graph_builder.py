@@ -18,6 +18,7 @@ from core.prompts.system import (
     get_tool_rules_prompt,
 )
 from core.prompts.live_context import get_live_context_prompt
+from core.prompts.team import get_team_prompt
 from core.prompts.voice import get_voice_mode_prompt
 from core.runtime.history.budget import cap_tool_output
 from langgraph.types import interrupt
@@ -50,6 +51,10 @@ class GraphBuilder:
             graphs_loader = GraphsLoader()
             subgraphs_prompt = graphs_loader.get_graphs_overview(ctx)
 
+            # 2.6. Team: the teammates the user can be handed to (empty for an
+            # agent that doesn't talk with the user)
+            team_prompt = get_team_prompt(agent_id)
+
             # 3. Knowledge Prompt
             knowledge_prompt = get_knowledge_prompt()
 
@@ -66,7 +71,7 @@ class GraphBuilder:
             # Every block is a part of one system_instruction; tool schemas are NOT
             # in this list -- the LLM client sends them in a separate request field.
             #   formatting, agent definition, tool rules,
-            #   skills, subgraphs                                -> change on deploy
+            #   skills, subgraphs, team                          -> change on deploy
             #   knowledge                                        -> changes once a day
             #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
             #   live context (teammates' live situations)        -> changes a few times a day
@@ -86,6 +91,7 @@ class GraphBuilder:
                 tool_rules_prompt,
                 skills_prompt,
                 subgraphs_prompt,
+                team_prompt,
                 knowledge_prompt,
                 agent_memory_prompt,
                 live_context_prompt,

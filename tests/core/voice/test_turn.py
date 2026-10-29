@@ -7,7 +7,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from core.runtime.observability.turn_trace import Outcome
 from core.voice.foundation import settings as voice_settings
+from core.voice.foundation.utterance import Utterance
 from core.voice.speech.missing_speech import alert
 from core.voice.speech.reply import ERROR_LINE
 from core.voice.voice_manager import VoiceManager
@@ -726,3 +728,30 @@ async def test_unanswered_words_expire(mock_bot_runner, tmp_path):
 
     assert prompts == ["Good morning."]
     assert vm.floor.unanswered() == []
+
+
+@pytest.mark.asyncio
+async def test_the_recognizer_reciting_its_vocabulary_is_noise_not_a_request(mock_bot_runner, tmp_path):
+    """2026-10-28, 18:44: 1.8 s of noise came back as the vocabulary list, and
+    its last line handed the room from Grace to William. A recital is no
+    words: nothing runs, and the trace says why (stt.py)."""
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    prompts = _scripted_agent(agent, [None])
+    vm.stt.vocabulary = ["Aki", "agent designer", "William", "wiki gardener"]
+    noise = Utterance(user=MagicMock(display_name="Sam", bot=False))
+    noise.pcm += bytes(32 * 1836)
+    noise.stream = MagicMock(timings={}, result=AsyncMock(return_value="- Aki, agent designer\n- William, wiki gardener"))
+    traces = []
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
+               side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
+        with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+             patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+            mock_loader.return_value.get_agent.return_value = agent
+            vm.floor.utterance_opened(noise)
+            vm.floor.utterance_finished(noise)
+            await vm._current_task
+
+    assert prompts == []
+    assert vm.focus().is_lobby, "the room stays where it was"
+    assert traces[0].meta["outcome"] == Outcome.NO_TRANSCRIPT
+    assert traces[0].meta["stt_echo"] == ["a roster of 4 vocabulary terms"]

@@ -64,6 +64,21 @@ BARGE_IN_MIN_WORDS = 2
 # unless it is older than this.
 UNANSWERED_MAX_AGE_S = 90
 
+# --- Switching by voice ----------------------------------------------------
+# A bare agent name ("Grace.") switches only when its utterance sounds like a
+# voice: at least this share of its sounding frames has a pitch
+# (listening/speaker_gate.py `voiced_share`). Below it, the name is dropped as
+# noise. In the prod gate log every real switch was 0.40 or more voiced; a
+# "Receipt Processor." the recognizer made out of noise was 0.21.
+BARE_NAME_MIN_VOICED = 0.3
+# A move that leaves a conversation you had in the last this-many seconds --
+# a switch however said, a hand-off, an agent handing you over -- says how to
+# undo it: "Frankie here. Say 'go back' for Grace." Never out of the lobby.
+LIVE_CONVERSATION_S = 300
+# "Go back" undoes the room's last move until you've talked in the new place,
+# and in any case for this long after the move.
+GO_BACK_WINDOW_S = 90
+
 # --- Hearing only you ------------------------------------------------------
 # The voiceprint gate (core/voice/listening/speaker_gate.py) scores how much
 # an utterance sounds like your enrolled voice. `voice_config.speaker_gate`

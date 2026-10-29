@@ -6,6 +6,7 @@ own text comes from agents/<id>/, and its memory from the PKM. The voice block
 is in core/prompts/voice.py, and Live Context's in core/prompts/live_context.py.
 """
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -112,6 +113,13 @@ def time_stamp(now=None) -> str:
     """The local-time stamp put in front of user messages, e.g. "[Fri 06:42]"."""
     now = now or get_local_now()
     return f"[{now.strftime('%a %H:%M')}]"
+
+
+# What `time_stamp` writes, for code that reads a stamped message back: the
+# hand-off rule looks for a name at the start of your words, and the stamp
+# must not stand in front of it (core/runtime/foundation/addressing.py).
+# `%a` is the locale's day abbreviation, so any letters, with an optional dot.
+TIME_STAMP = re.compile(r"\[\w+\.? \d{1,2}:\d{2}\]")
 
 
 def stamp_user_message(content):

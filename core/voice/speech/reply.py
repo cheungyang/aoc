@@ -18,7 +18,7 @@ Discord runner's stream buffer): voice never renders a channel itself.
 """
 import asyncio
 import os
-from typing import Any, Callable, Dict, List, Optional, Protocol
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
 import discord
 
@@ -158,7 +158,8 @@ class ReplyStreamer:
     async def stream(self, agent, transcript: str, author: str, session, channel, speech: TurnSpeech,
                      is_current: IsCurrent, on_final: Callable[[str], None],
                      speaker: Optional[str] = None,
-                     on_handoff: Optional[Callable[[dict], Any]] = None) -> bool:
+                     on_handoff: Optional[Callable[[dict], Any]] = None,
+                     on_switch: Optional[Callable[[str], Awaitable[Any]]] = None) -> bool:
         """Streams the agent and fans its events out to a text lane and a speech lane.
 
         Speech and text diverge here, deliberately. The speaker gets the
@@ -178,6 +179,10 @@ class ReplyStreamer:
         channel and returns it. The text lane then ends the reply here with the
         pointer and goes on there, under what was said; the named agent's
         reply is heard in its own voice, as any delegate's is.
+
+        `on_switch(agent_id)` is awaited once the reply has been said, when the
+        agent handed you to a teammate (<switch to="..."/>): the room moves to
+        the teammate's channel, and the teammate greets you.
 
         Returns whether the agent answered: False if a newer turn took over
         first, leaving the words unanswered. `on_final` gets what the user
@@ -270,6 +275,12 @@ class ReplyStreamer:
             speech_lane.put_nowait(("end", closing, said_by))
             text_lane.put_nowait(None)
             await asyncio.gather(text_task, speech_task)
+            # The reply handed you to a teammate: once it's said, the room
+            # follows (the teammate's greeting queues behind the reply).
+            switch_to = getattr(response, "switch_to", None) if replied and not failed else None
+            if isinstance(switch_to, str) and switch_to and on_switch is not None and is_current():
+                trace.event("switch", agent=switch_to)
+                await on_switch(switch_to)
             return True
         finally:
             for task in (text_task, speech_task):

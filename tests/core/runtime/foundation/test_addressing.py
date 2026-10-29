@@ -176,6 +176,42 @@ class TestNamingIsNotAddressing(unittest.TestCase):
         self.assertIsNone(who(None))
 
 
+class TestRosters(unittest.TestCase):
+    """Naming three or more different agents is about them, to none of them."""
+
+    # What speech-to-text recited on 2026-10-28 instead of transcribing 1.8 s of
+    # noise, as the router got it: its last line handed Grace's room to William.
+    ROSTER = (
+        "[Wed 18:44] Here is the list of added phrases:\n\n- Aki, agent designer\n- Butler, home steward\n"
+        "- Daisy, day planner\n- Elephant, software planner\n- Grace, goal setter\n- Miles, reward travel\n"
+        "- Ramsay, meal planner\n- Receipt Processor, receipt processor\n- Ted, topic researcher\n"
+        "- William, wiki gardener"
+    )
+
+    def test_the_roster_that_moved_the_voice_room(self):
+        self.assertIsNone(who(self.ROSTER))
+        without_grace = aliases_for({k: v for k, v in AGENTS.items() if k != "goal-setter"})
+        self.assertIsNone(who(self.ROSTER, without_grace), "as routed in #project-planning")
+
+    def test_a_list_of_agents_addresses_none_of_them(self):
+        for text in ("- Ted, topic researcher\n- William, wiki gardener\n- Grace, goal setter",
+                     "Ted, William, Grace", "@Ted @William @Daisy"):
+            with self.subTest(text=text):
+                self.assertIsNone(who(text))
+
+    def test_two_names_still_address_the_one_spoken_to(self):
+        self.assertEqual(who("Ted, ask William what he meant"), "topic-researcher")
+        self.assertEqual(who("William said it leans on caching, what do you make of it, Ted?"), "topic-researcher")
+
+    def test_one_agent_by_two_names_is_one_agent(self):
+        self.assertEqual(who("Ted -- topic researcher -- take this"), "topic-researcher")
+
+    def test_three_names_with_a_vocative_are_still_a_roster(self):
+        """The cost of the rule, kept small on purpose: in the channels' history,
+        no message named three agents while speaking to one of them."""
+        self.assertIsNone(who("Ted, compare what William and Daisy said"))
+
+
 class TestWhatTheRunnerAdds(unittest.TestCase):
     """The words around yours, which the Discord runner and delegation add."""
 
@@ -190,6 +226,28 @@ class TestWhatTheRunnerAdds(unittest.TestCase):
 
     def test_a_caller_tag_is_ignored(self):
         self.assertEqual(who("<caller>main</caller>\nTed, go"), "topic-researcher")
+
+    def test_the_time_stamp_is_ignored(self):
+        """Every message reaches the router stamped; in front of your words, the
+        stamp hid every name-first form."""
+        self.assertEqual(message_text("[Wed 18:44] Ted, take this"), "Ted, take this")
+        self.assertEqual(who("[Wed 18:44] Ted create a syllabus"), "topic-researcher")
+        self.assertEqual(who("[Wed 18:44] ask Ted to build it"), "topic-researcher")
+
+    def test_the_stamp_the_agent_writes_is_the_one_read_back(self):
+        from core.prompts.system import stamp_user_message
+
+        self.assertEqual(who(stamp_user_message("Ted, take this")), "topic-researcher")
+        self.assertEqual(who(stamp_user_message([{"type": "text", "text": "Ramsay, add these"}])), "meal-planner")
+
+    def test_a_stamp_with_the_other_wrappers(self):
+        self.assertEqual(message_text("<caller>main</caller>\n[Wed 18:44] Ted, go"), "Ted, go")
+        self.assertEqual(message_text("[Wed 18:44] [Wed 18:44] Ted, go"), "Ted, go")
+        text = '[Wed 18:44] [Thread starter message from Alva: "the plan"]\n\nTed, take this'
+        self.assertEqual(message_text(text), "Ted, take this")
+
+    def test_only_a_leading_stamp_is_a_stamp(self):
+        self.assertEqual(message_text("Ted, move [Wed 18:44] to Friday"), "Ted, move [Wed 18:44] to Friday")
 
 
 class TestAliases(unittest.TestCase):

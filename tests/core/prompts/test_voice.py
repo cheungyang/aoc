@@ -38,6 +38,15 @@ class TestVoiceModePrompt(unittest.TestCase):
         self.assertIn("Begin each response with a <speech>...</speech> block", prompt)
         self.assertIn("Before calling tools, write a one-sentence <speech> block", prompt)
 
+    def test_the_block_says_the_words_were_heard_and_may_be_misheard(self):
+        """The prod logs: "recipe tree" read right and said aloud; "Frankie." from
+        324 ms of audio cost two model calls and a poll to ask what was meant."""
+        self.assertIn("The user's words come from speech recognition", VOICE_MODE)
+        self.assertIn("say so first in <speech>", VOICE_MODE)
+        self.assertIn("ask for a quick yes", VOICE_MODE, "no write on the strength of a guess")
+        self.assertIn("no poll and no tool call", VOICE_MODE)
+        self.assertNotIn("speech recognition", SCHEDULED_VOICE_MODE, "a scheduled post has no words of yours")
+
     def test_a_typed_turn_does_not(self):
         self.assertEqual(self._prompt_in(agent_id="main", source="discord", channel="general"), "")
 

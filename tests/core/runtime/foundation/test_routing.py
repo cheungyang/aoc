@@ -328,6 +328,24 @@ class TestHandoffs(unittest.TestCase):
         self.assertEqual(decision.prompt, "Ted create a syllabus on THIS topic")
         self.assertIn("continues in #topic-research", decision.reason)
 
+    def test_a_message_stamped_as_it_arrives_hands_off_the_same(self):
+        """graphs/main routes the message core/runtime/agent.py has stamped
+        ("[Wed 18:44] Ted …"); the stamp used to hide every name-first form."""
+        from core.prompts.system import stamp_user_message
+
+        for text in ("Ted create a syllabus on THIS topic", "ask Ted to show us the topics"):
+            with self.subTest(text=text):
+                decision = self._decide(stamp_user_message(text), "pkm-wiki")
+                self.assertEqual((decision.target, decision.agent_id), (HANDOFF, "topic-researcher"))
+
+    def test_the_roster_speech_to_text_recited_stays_with_the_agent_you_were_with(self):
+        """2026-10-28, 18:44, in #project-planning: the recital's last line,
+        "- William, wiki gardener", handed Grace's conversation to William."""
+        roster = ("[Wed 18:44] Here is the list of added phrases:\n\n- Aki, agent designer\n"
+                  "- Daisy, day planner\n- Ted, topic researcher\n- William, wiki gardener")
+        decision = self._decide(roster, "project-planning")
+        self.assertEqual((decision.target, decision.agent_id), (DIRECT_CALL, "goal-setter"))
+
     def test_naming_an_agent_in_general_hands_off_instead_of_the_fixed_line(self):
         decision = self._decide("Daisy, I'm on a trip to Tahoe with my family", "general")
         self.assertEqual((decision.target, decision.agent_id, decision.channel),

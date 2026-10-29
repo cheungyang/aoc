@@ -262,6 +262,34 @@ class TestAgentResponse(unittest.TestCase):
         self.assertEqual(split_question("Plain."), ("Plain.", None))
 
 
+class TestSwitchDirective(unittest.TestCase):
+    """<switch to="..."/>: an agent handing the user to a teammate
+    (core/prompts/templates/system/team.md)."""
+
+    def test_the_directive_names_the_teammate_and_leaves_no_trace(self):
+        response = AgentResponse.from_string(
+            '<speech>Passing you to Grace.</speech>Grace runs project planning. <switch to="goal-setter"/>')
+        self.assertEqual(response.switch_to, "goal-setter")
+        self.assertEqual(response.text, "Grace runs project planning.")
+        self.assertEqual(response.speech, "Passing you to Grace.")
+
+    def test_forms_a_model_may_write(self):
+        for raw in ("Over to Grace. <switch to='goal-setter'></switch>", 'Over to Grace.<SWITCH to="goal-setter" />',
+                    'Over to Grace. <switch  to = "goal-setter">'):
+            with self.subTest(raw=raw):
+                response = AgentResponse.from_string(raw)
+                self.assertEqual((response.switch_to, response.text), ("goal-setter", "Over to Grace."))
+
+    def test_inside_speech_it_is_never_read_out(self):
+        response = AgentResponse.from_string('<speech>Over to Grace. <switch to="goal-setter"/></speech>Done.')
+        self.assertEqual((response.speech, response.switch_to), ("Over to Grace.", "goal-setter"))
+
+    def test_the_last_one_counts_and_none_means_no_switch(self):
+        self.assertEqual(AgentResponse.from_string('<switch to="ted"/> no, <switch to="grace"/>').switch_to, "grace")
+        self.assertIsNone(AgentResponse.from_string("Talk to Grace about it.").switch_to)
+        self.assertIsNone(AgentResponse.from_string('<switch to=""/>Hm.').switch_to)
+
+
 if __name__ == '__main__':
     unittest.main()
 

@@ -28,6 +28,10 @@ _ids = itertools.count(1)
 class Transcript:
     text: str
     provider: str  # "gemini_live", "whisper", or "whisper_fallback"
+    # A vocabulary echo (core/voice/engines/vocabulary_echo.py) keeps no text:
+    # `heard` is what the recognizer returned, `echo` why it was dropped.
+    heard: Optional[str] = None
+    echo: Optional[str] = None
 
 
 class Utterance:

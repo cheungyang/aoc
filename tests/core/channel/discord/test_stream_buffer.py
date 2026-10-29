@@ -221,3 +221,40 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
         mock_msg1.edit.assert_called_with(content="B" * 50)
         mock_msg2.delete.assert_called_once()
         self.assertEqual(len(buffer.messages), 1)
+
+    def test_a_switch_directive_never_shows_whole_or_half_streamed(self):
+        for text in ('Over to Grace. <switch to="goal-setter"/>', 'Over to Grace. <switch to="goal-se',
+                     "Over to Grace. <swi", 'Over to Grace. <switch to="goal-setter"></switch>'):
+            with self.subTest(text=text):
+                self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(text), "Over to Grace.")
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream('A <switch to="x"/> B'), "A  B",
+                         "a self-closing tag hides nothing after it")
+
+    async def test_a_reply_handing_you_to_a_teammate_says_where_to_find_them(self):
+        from unittest.mock import patch
+        from core.channel.response_parser import AgentResponse
+        channel = AsyncMock()
+        channel.send.return_value = AsyncMock()
+        buffer = DiscordStreamBuffer(channel, edit_interval=60)
+        raw = 'Grace runs your project planning. <switch to="goal-setter"/>'
+        response = AgentResponse.from_string(raw)
+        with patch("core.channel.discord.stream_buffer.switch_pointer",
+                   return_value="→ Over to 🚀 Grace in #project-planning") as pointer:
+            await buffer.append_token(raw)
+            await buffer.finalize(response.text, response=response)
+        pointer.assert_called_once_with("goal-setter", channel)
+        self.assertEqual([c.args[0] for c in channel.send.await_args_list],
+                         ["Grace runs your project planning.", "→ Over to 🚀 Grace in #project-planning"])
+
+    async def test_no_pointer_without_a_switch_or_for_no_one_to_go_to(self):
+        from unittest.mock import patch
+        from core.channel.response_parser import AgentResponse
+        for raw, pointer_line in (("Plain reply.", "unused"), ('Hm. <switch to="nobody"/>', None)):
+            with self.subTest(raw=raw):
+                channel = AsyncMock()
+                channel.send.return_value = AsyncMock()
+                buffer = DiscordStreamBuffer(channel, edit_interval=60)
+                response = AgentResponse.from_string(raw)
+                with patch("core.channel.discord.stream_buffer.switch_pointer", return_value=pointer_line):
+                    await buffer.finalize(response.text, response=response)
+                self.assertEqual(len(channel.send.await_args_list), 1)

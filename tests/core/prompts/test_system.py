@@ -79,6 +79,18 @@ class TestPromptUtil(unittest.TestCase):
             parts = [{"type": "image_url", "image_url": "x"}]
             self.assertEqual(stamp_user_message(parts), [{"type": "text", "text": "[Fri 06:42]"}, *parts])
 
+    def test_the_stamp_pattern_reads_every_stamp_written(self):
+        """What the hand-off rule strips to find a name at the start of your
+        words (core/runtime/foundation/addressing.py)."""
+        from core.prompts.system import TIME_STAMP, time_stamp
+
+        tz = ZoneInfo("America/Los_Angeles")
+        for day in range(19, 26):  # a Monday through a Sunday
+            for hour, minute in ((0, 0), (9, 5), (23, 59)):
+                stamp = time_stamp(datetime.datetime(2026, 10, day, hour, minute, tzinfo=tz))
+                with self.subTest(stamp=stamp):
+                    self.assertTrue(TIME_STAMP.fullmatch(stamp))
+
     def test_get_formatting_prompt(self):
         prompt = get_formatting_prompt()
         self.assertIn("<formatting_rules>", prompt)

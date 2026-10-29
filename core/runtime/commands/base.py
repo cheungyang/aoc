@@ -66,6 +66,10 @@ class SpokenContext(CommandContext):
     say: Optional[Say] = None           # say(text, agent_id): a line in that agent's voice
     turn: Optional[SpokenTurn] = None   # the turn it was said in
     log: Callable[[str], None] = print
+    # Set by a command whose run ended otherwise than its usual `outcome`: a
+    # bare name that turned out to be noise. The turn trace records this one
+    # when it's set.
+    outcome: Optional[str] = None
 
 
 @dataclass

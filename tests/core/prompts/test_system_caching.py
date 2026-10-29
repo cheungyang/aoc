@@ -188,6 +188,17 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertEqual(live[7], "<LIVE_CONTEXT>L</LIVE_CONTEXT>")
         self.assertEqual(live[8:], plain[7:])  # the channel block
 
+    def test_the_team_block_is_static_and_follows_the_subgraphs(self):
+        """It changes only when the agents do: with the deploy-time blocks, ahead
+        of the daily knowledge block."""
+        plain = self._system_blocks()
+        with patch("core.runtime.graph_builder.get_team_prompt", return_value="<team>T</team>") as team:
+            with_team = self._system_blocks()
+        team.assert_called_with("test-agent")
+        self.assertEqual(with_team[:5], plain[:5])  # formatting .. subgraphs
+        self.assertEqual(with_team[5], "<team>T</team>")
+        self.assertEqual(with_team[6:], plain[5:])  # knowledge onwards
+
 
 if __name__ == "__main__":
     unittest.main()

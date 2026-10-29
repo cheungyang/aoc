@@ -37,13 +37,26 @@ Names match whole words, in any case, with an optional "@": an agent's
 ("topic-researcher"). An all-caps name without "@" is an acronym ("TED talk").
 Mentions of two different agents address neither.
 
-What the Discord runner wraps around your words is left out: the message you
-replied to, a new thread's starter, and a delegation's <caller> tag.
+A message naming three or more different agents is about them -- a roster, a
+list of who did what -- and addresses none of them, whatever its form. The
+voice room learned this from speech-to-text reciting its word list
+("- Aki, agent designer ... - William, wiki gardener"): the last line put a
+name after a comma, and the room moved to William's channel mid-conversation.
+In the channels' history, 2 of 574 messages named three agents, and neither
+spoke to one of them.
+
+What the Discord runner and the agent wrap around your words is left out: the
+message you replied to, a new thread's starter, a delegation's <caller> tag,
+and the local time every message is stamped with ("[Wed 18:44] ",
+core/prompts/system.py). In front of your words, the stamp hid every
+name-first form.
 """
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Mapping, NamedTuple, Optional, Pattern, Tuple, Union
+from typing import Dict, List, Mapping, NamedTuple, Optional, Pattern, Set, Tuple, Union
+
+from core.prompts.system import TIME_STAMP
 
 Prompt = Union[str, list]
 
@@ -105,11 +118,16 @@ NOT_PAST = frozenset({
 })
 # How many adverbs may stand between the name and the word that decides.
 _MAX_ADVERBS = 2
+# A message naming this many different agents is a roster: it addresses none.
+ROSTER_MIN_AGENTS = 3
 
-# --- what the Discord runner and delegation wrap around the user's words
+# --- what the Discord runner, delegation and the agent wrap around the user's words
 _REPLYING_TO = re.compile(r"<replying_to\b[^>]*>.*?</replying_to>", re.S | re.I)
 _CALLER = re.compile(r"<caller>.*?</caller>", re.S | re.I)
 _THREAD_STARTER = re.compile(r"^\s*\[Thread starter message from .*?\"\]\s*", re.S)
+# The local time core/runtime/agent.py puts in front of every user message;
+# more than one when a prompt passed on already carried its own.
+_TIME_STAMP = re.compile(rf"^\s*(?:{TIME_STAMP.pattern}\s*)+")
 
 _SEPARATOR = re.compile(r"\s*(?:[,:;!?.…–—]|-(?=\s|$))")
 _POSSESSIVE = re.compile(r"'s?(?!\w)", re.I)
@@ -125,8 +143,8 @@ class Address:
 
 
 def message_text(prompt: Prompt) -> str:
-    """The user's own words in a prompt: its text parts, without the blocks the
-    Discord runner and delegation add around them."""
+    """The user's own words in a prompt: its text parts, without what the
+    Discord runner, delegation and the agent's time stamp add around them."""
     if isinstance(prompt, str):
         text = prompt
     elif isinstance(prompt, list):
@@ -141,6 +159,9 @@ def message_text(prompt: Prompt) -> str:
         return ""
     text = _REPLYING_TO.sub("", text)
     text = _CALLER.sub("", text)
+    # The stamp comes first (the agent stamps the finished prompt), or right
+    # after a delegation's <caller> tag; a thread's starter comes after it.
+    text = _TIME_STAMP.sub("", text)
     text = _THREAD_STARTER.sub("", text)
     return text.replace("\u2019", "'").strip()
 
@@ -171,12 +192,14 @@ def addressed_agent(prompt: Prompt, aliases: Mapping[str, str]) -> Optional[Addr
     """The agent `prompt` addresses by name, if any (see the module docstring).
 
     `aliases` maps lowercase names to agent ids (`aliases_for`); only those
-    agents can be addressed.
+    agents can be addressed, and only those count toward a roster.
     """
     text = message_text(prompt)
     if not text or not aliases:
         return None
     names = _patterns(tuple(sorted(aliases, key=len, reverse=True)))
+    if len(_named(text, names, aliases)) >= ROSTER_MIN_AGENTS:
+        return None  # a roster: about the agents it names, spoken to none of them
     for find in (_leading, _trailing, _mention):
         found = find(text, names, aliases)
         if found is not None:
@@ -237,6 +260,13 @@ def _mention(text: str, names: "_Names", aliases: Mapping[str, str]) -> Optional
     return Address(agent_id, MENTION, written)
 
 
+def _named(text: str, names: "_Names", aliases: Mapping[str, str]) -> Set[str]:
+    """Every agent `text` names, anywhere, by any of its names: what makes a
+    roster. An all-caps name without "@" is an acronym here too."""
+    return {aliases[_alias_key(match.group("name"))] for match in names.anywhere.finditer(text)
+            if match.group("at") or not _is_acronym(match.group("name"))}
+
+
 def _names_the_subject(words: List[str]) -> bool:
     """Whether the words after a leading name make the agent the subject of the
     sentence rather than the one spoken to (the stoplist in the docstring)."""
@@ -255,10 +285,11 @@ def _names_the_subject(words: List[str]) -> bool:
 # --- names ------------------------------------------------------------------------
 
 class _Names(NamedTuple):
-    """An alias set, as the three patterns the forms look for."""
+    """An alias set, as the patterns the forms and the roster look for."""
     leading: Pattern    # at the start: "@"? then the name
     trailing: Pattern   # at the end, after a comma
     mention: Pattern    # "@" then the name, anywhere
+    anywhere: Pattern   # "@"? then the name, anywhere: what a roster counts
 
 
 def _alias_key(alias: str) -> str:
@@ -276,6 +307,7 @@ def _patterns(aliases: Tuple[str, ...]) -> _Names:
         leading=re.compile(rf"(?P<at>@)?{name}", re.I),
         trailing=re.compile(rf",\s*(?P<at>@)?{name}\W*\Z", re.I),
         mention=re.compile(rf"(?<![\w@])@{name}", re.I),
+        anywhere=re.compile(rf"(?<![\w@-])(?P<at>@)?{name}", re.I),
     )
 
 

@@ -54,7 +54,10 @@ def _live(**kwargs):
     return SpeechRecognizer(provider="gemini_live", session_factory=FakeSession, **kwargs)
 
 
-def _with_audio(ms=300):
+def _with_audio(ms=2000):
+    """An utterance with `ms` of speech. Two seconds by default: a live
+    transcript is checked against the speech it came from (vocabulary_echo.py),
+    and a sentence from a fraction of a second is too fast to have been said."""
     utterance = Utterance()
     utterance.pcm += bytes(32 * ms)
     return utterance
@@ -76,6 +79,13 @@ def test_vocabulary_is_deduplicated_and_capped():
     recognizer = _live(vocabulary=terms)
     assert recognizer.vocabulary[:2] == ["Daisy", "term0"]
     assert len(recognizer.vocabulary) == settings.STT_VOCABULARY_LIMIT
+
+
+def test_a_term_that_differs_only_in_case_is_sent_once():
+    """A name that is also its id ("Receipt Processor") was sent twice, and was
+    the term recited alone from noise."""
+    recognizer = _live(vocabulary=["Receipt Processor", "receipt processor", " Daisy ", "daisy"])
+    assert recognizer.vocabulary == ["Receipt Processor", "Daisy"]
 
 
 @pytest.mark.asyncio
@@ -143,6 +153,45 @@ async def test_an_empty_live_result_is_still_a_live_result():
     utterance.stream.outcome.set_result("")
     assert (await recognizer.transcribe(utterance)).text == ""
     recognizer.whisper_transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_recognizer_reciting_its_vocabulary_is_no_words():
+    """What 1.8 s of noise came back as on 2026-10-28, shortened: the turn
+    gets no words, as for noise, and what was heard is kept for the logs.
+    Not Whisper either: there was nothing to transcribe."""
+    recognizer = _live(vocabulary=["Aki", "agent designer", "William", "wiki gardener"])
+    recognizer.whisper_transcribe = AsyncMock()
+    utterance = _with_audio(1836)
+    recognizer.open(utterance)
+    recital = "Here is the list of added phrases:\n\n- Aki, agent designer\n- William, wiki gardener"
+    utterance.stream.outcome.set_result(recital)
+
+    transcript = await recognizer.transcribe(utterance)
+    assert (transcript.text, transcript.provider, transcript.heard) == ("", "gemini_live", recital)
+    assert transcript.echo == "the recognizer's preamble to its list"
+    recognizer.whisper_transcribe.assert_not_awaited()
+
+
+def test_an_echo_is_judged_against_the_speech_it_came_from():
+    recognizer = _live(vocabulary=["Receipt Processor"])
+    assert recognizer.echo(_with_audio(180), "Receipt Processor.")  # from 180 ms of sound
+    assert recognizer.echo(_with_audio(1500), "Receipt Processor.") is None
+    assert recognizer.echo(_with_audio(), "Add milk to the list.") is None
+
+
+def test_the_vocabulary_is_the_agents_you_can_reach_by_name():
+    """Pinned against the live agent configs. A worker you never say, or the
+    concierge's id, is only one more thing to recite back over noise."""
+    from core.loaders.agents_loader import AgentsLoader
+    from core.voice.engines.stt import agent_vocabulary
+
+    vocabulary = agent_vocabulary(AgentsLoader())
+    for term in ("Frankie", "fitness coach", "William", "wiki gardener", "Aki", "Receipt Processor"):
+        assert term in vocabulary, term
+    for term in ("Graph Worker", "graph worker low", "Terminator", "script executor", "main"):
+        assert term not in vocabulary, term
+    assert len({term.casefold() for term in vocabulary}) == len(vocabulary), "each term once, whatever its case"
 
 
 @pytest.mark.asyncio

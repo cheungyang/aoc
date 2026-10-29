@@ -283,8 +283,11 @@ The hand-off rule runs before the channel rules
 2. **Whether the message names one:** the addressed-agent rule in
    [addressing.py](../../core/runtime/foundation/addressing.py) — the vocative
    forms ("Ted, …", "Ted create …", "ask Ted to …", "…, Ted?", "@Ted") and the
-   reporting-verb stoplist ("William said …" is about William). Words only;
-   no model.
+   reporting-verb stoplist ("William said …" is about William). A message
+   naming three or more different agents is a roster and addresses none of
+   them. It reads your words without the `[Wed 18:44]` stamp the agent puts in
+   front of every message, which would otherwise hide a name-first form.
+   Words only; no model.
 3. **Where it continues:**
    [home_channel](../../core/runtime/foundation/routing.py#L173-L184) — the
    first of the agent's `channels` in which it answers untagged messages, the

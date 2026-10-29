@@ -7,11 +7,16 @@ the doubles they share are in voice_room.py.
 import asyncio
 import time
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
 import pytest
 
+from core.runtime.observability.turn_trace import Outcome
 from core.voice.foundation import settings as voice_settings
+from core.voice.foundation.utterance import Utterance
+from core.voice.listening.speaker_gate import Assessment, Verdict
 from core.voice.voice_manager import VoiceManager
 from tests.core.voice.voice_room import (
     TEXT_OUTPUT, _capture_sessions, _focused, _room_fixture, _say, _spoken, _turn,
@@ -29,17 +34,26 @@ def test_voice_manager_init(mock_bot_runner):
         assert vm.config.get("audio_blurp") == "assets/sounds/blurps/concierge_ping.wav"
 
 
-def test_stt_vocabulary_is_every_agent_name_and_spoken_id(mock_bot_runner):
-    """Names like Frankie or Daisy are what a generic recognizer gets wrong."""
+def test_stt_vocabulary_is_the_agents_you_can_reach_by_name(mock_bot_runner):
+    """Names like Frankie or Daisy are what a generic recognizer gets wrong. The
+    concierge's id ("main") and a worker are only more for it to recite back
+    over noise: neither has a channel a name leads to."""
+    configs = {
+        "day-planner": {"name": "Daisy", "channels": ["day-planning", "general"]},
+        "main": {"name": "Concierge", "channels": ["*"], "channel_hosts": ["general", "day-planning"]},
+        "graph-worker": {"name": "Graph Worker", "channels": ["*"]},
+    }
     with patch("core.voice.voice_manager.AgentsLoader") as mock_loader:
         loader = mock_loader.return_value
         loader.get_agent.return_value = None
-        loader.list_agent_ids.return_value = ["day-planner", "main"]
-        loader.get_agent_config.side_effect = lambda agent_id: {
-            "day-planner": {"name": "Daisy"}, "main": {"name": "Concierge"},
-        }[agent_id]
+        loader.list_agent_ids.return_value = list(configs)
+        loader.get_agent_config.side_effect = configs.get
+        loader.hosts_channel.side_effect = lambda agent_id, channel: channel in configs[agent_id].get(
+            "channel_hosts", [])
+        loader.eligible_agents_for_channel.side_effect = lambda channel, exclude_agent_id=None: sorted(
+            a for a, c in configs.items() if a != exclude_agent_id and channel in c["channels"] and "*" not in c["channels"])
         vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
-    assert vm.stt.vocabulary == ["Daisy", "day planner", "Concierge", "main"]
+    assert vm.stt.vocabulary == ["Daisy", "day planner"]
 
 
 @contextmanager
@@ -215,6 +229,43 @@ async def test_a_backchannel_over_the_reply_lets_it_continue(mock_bot_runner):
     vm.floor.utterance_finished(utterance)
     await asyncio.gather(*list(vm.floor._overlap_tasks))
 
+    mock_vc.stop_playing.assert_not_called()
+    vm._process_speech_turn.assert_not_called()
+    assert vm.audio_queue._volume == 1.0
+
+
+class _Recited:
+    """A live session that came back with `text`, whatever was said."""
+
+    def __init__(self, text):
+        self.text = text
+
+    def finish(self):
+        pass
+
+    async def result(self):
+        return self.text
+
+
+@pytest.mark.asyncio
+async def test_the_recognizer_reciting_its_vocabulary_over_the_reply_lets_it_continue(mock_bot_runner):
+    """2026-10-28, 18:46: "Receipt Processor." came back from 180 ms of sound
+    over William's reply, cut it off, and rode into the next turn as your
+    words. A recital isn't words: no barge-in, no turn (stt.py `echo`)."""
+    vm, mock_vc = _playing_vm(mock_bot_runner)
+    vm._process_speech_turn = AsyncMock()
+    vm.stt.vocabulary = ["Receipt Processor"]
+    utterance = Utterance(user=MagicMock(display_name="Sam", bot=False))
+    utterance.pcm += bytes(32 * 180)  # 180 ms of sound
+    vm.floor.utterance_opened(utterance)
+    utterance.stream = _Recited("Receipt Processor.")
+
+    utterance.interim = "Receipt Processor."  # two words: enough to confirm a barge-in
+    vm.floor._on_text(utterance)
+    vm.floor.utterance_finished(utterance)
+    await asyncio.gather(*list(vm.floor._overlap_tasks))
+
+    assert not utterance.confirmed
     mock_vc.stop_playing.assert_not_called()
     vm._process_speech_turn.assert_not_called()
     assert vm.audio_queue._volume == 1.0
@@ -607,6 +658,226 @@ async def test_join_typed_in_a_text_channel_starts_there(mock_bot_runner, tmp_pa
 
     vm.connection.join.assert_awaited_once_with("aoc-voice")
     assert vm.focus().key == "day-planning"
+
+
+# ---------------------------------------------------------------------------
+# A name on its own, and "go back"
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_name_on_its_own_switches_without_a_model_call(mock_bot_runner, tmp_path):
+    """The prod misses: "Grace." in the lobby got "Who's it for?", and "Daisy."
+    said to Marvin was answered by Marvin."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Daisy.")
+        await _turn(vm, "Let's start with Marvin.")
+
+    main_agent.execute_stream.assert_not_called()
+    vm.switcher._resolve.assert_not_awaited()
+    assert vm.focus().key == "market-scout"
+    assert vm.reply.tts.said() == ["Daisy here.", "Marvin here."]
+
+
+def _recording_traces(traces):
+    return patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
+                 side_effect=lambda self, session_id=None, surface="voice": traces.append(self))
+
+
+@pytest.mark.asyncio
+async def test_a_bare_name_made_of_noise_moves_nothing_and_reaches_no_agent(mock_bot_runner, tmp_path):
+    """"Receipt Processor." at 17:44 was 0.21 voiced: noise the recognizer gave
+    an agent's name. It's dropped, and the trace says it had no words."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    noise = _spoken("Frankie.")
+    noise.gate = Assessment(Verdict.UNDECIDED, None, None, voiced_share=0.21)
+    traces = []
+    with _focused(loader, _recording_traces(traces)):
+        vm.floor.utterance_opened(noise)
+        vm.floor.utterance_finished(noise)
+        await vm._current_task
+
+    assert vm.focus().is_lobby
+    main_agent.execute_stream.assert_not_called()
+    assert vm.reply.tts.said() == []
+    assert traces[0].meta["outcome"] == Outcome.NO_TRANSCRIPT
+    assert vm.floor.unanswered() == []
+
+
+@pytest.mark.asyncio
+async def test_leaving_a_conversation_on_a_bare_name_says_how_to_go_back(mock_bot_runner, tmp_path):
+    """"Frankie." at 23:33 was a mishearing in the middle of talking to Grace:
+    the switch costs one phrase to undo, and no model call either way."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar?")
+        await _turn(vm, "Frankie.")
+        assert vm.focus().key == "fitness-coach"
+        await _turn(vm, "Go back.")
+
+    assert vm.focus().key == "day-planning"
+    assert vm.reply.tts.said() == ["Daisy here.", "Done.", "Frankie here. Say 'go back' for Daisy.", "Daisy here."]
+    assert [prompt for prompt, _session in calls] == ["What's on my calendar?"]
+
+
+@pytest.mark.asyncio
+async def test_the_trace_tells_a_switch_from_the_go_back_that_undoes_it(mock_bot_runner, tmp_path):
+    """Both end as FOCUS_SWITCH; the command named in the trace is what lets
+    the rate of switches undone be counted."""
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    traces = []
+    with _focused(loader, _recording_traces(traces)):
+        await _turn(vm, "Frankie.")
+        await _turn(vm, "Go back.")
+
+    assert [(trace.meta["outcome"], trace.meta["command"]) for trace in traces] == [
+        (Outcome.FOCUS_SWITCH, "switch"), (Outcome.FOCUS_SWITCH, "go back")]
+
+
+@pytest.mark.asyncio
+async def test_go_back_still_works_soon_after_talking_in_the_new_place(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar?")
+        await _turn(vm, "Go back.")
+
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["What's on my calendar?"]
+
+
+@pytest.mark.asyncio
+async def test_go_back_is_a_request_once_you_have_been_talking_there_a_while(mock_bot_runner, tmp_path):
+    """By then "go back" is more likely about what you're discussing."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "What's on my calendar?")
+        vm._moved_at -= voice_settings.GO_BACK_WINDOW_S + 1
+        await _turn(vm, "Go back.")
+
+    assert vm.focus().key == "day-planning"
+    assert [prompt for prompt, _session in calls] == ["What's on my calendar?", "Go back."]
+
+
+@pytest.mark.asyncio
+async def test_go_back_undoes_a_hand_off(mock_bot_runner, tmp_path):
+    """A hand-off's own reply is the named agent's, not you talking there."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _handing_off(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Daisy, we're in Tahoe this weekend")
+        assert vm.focus().key == "day-planning"
+        assert vm.reply.tts.said() == ["Got it, I'll plan around Tahoe."], "out of the lobby: no hint"
+        await _turn(vm, "Go back.")
+
+    assert vm.focus().is_lobby
+    assert vm.reply.tts.said()[-1] == "Concierge here."
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_hand_off_out_of_a_conversation_says_how_to_go_back(mock_bot_runner, tmp_path):
+    """Like any move: after the named agent's reply, in its voice, so the
+    answer isn't kept waiting."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    _handing_off(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Frankie.")
+        await _turn(vm, "Daisy, we're in Tahoe this weekend")
+        assert vm.focus().key == "day-planning"
+        await _turn(vm, "Go back.")
+
+    assert vm.reply.tts.said() == ["Frankie here.", "Got it, I'll plan around Tahoe.", "Say 'go back' for Frankie.",
+                                   "Frankie here."]
+    assert _voices(vm)[1:3] == [DAISY_VOICE, DAISY_VOICE]
+    assert vm.focus().key == "fitness-coach"
+
+
+@pytest.mark.asyncio
+async def test_a_new_voice_session_has_nowhere_to_go_back_to(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        vm._on_joined(channels["room"])
+        await _turn(vm, "Go back.")
+
+    assert vm.focus().is_lobby
+    assert [prompt for prompt, _session in calls] == ["Go back."]
+
+
+def _replying(agent, raw):
+    """The agent answers `raw`, as written, every time."""
+    from tests.core.voice.voice_room import _final
+
+    async def stream(prompt, session=None):
+        yield {"type": "token", "content": raw}
+        yield _final(raw)
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+
+
+@pytest.mark.asyncio
+async def test_an_agent_can_hand_you_to_a_teammate(mock_bot_runner, tmp_path):
+    """Asked to switch, Ted said he had no permission to move you. Now an agent
+    ends its reply with <switch to="..."/>, and once the reply is said, the
+    room follows and the teammate greets you, saying how to come back."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    _replying(main_agent, "<speech>Frankie runs your workouts. Passing you over.</speech>"
+                          'Frankie runs your workouts. <switch to="fitness-coach"/>')
+    pointer = patch("core.channel.discord.stream_buffer.switch_pointer", return_value="→ Over to Frankie")
+    with _focused(loader, pointer):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Who handles my workouts?")
+        assert vm.focus().key == "fitness-coach"
+        await _turn(vm, "Go back.")
+
+    assert vm.reply.tts.said() == ["Daisy here.", "Frankie runs your workouts. Passing you over.",
+                                   "Frankie here. Say 'go back' for Daisy.", "Daisy here."]
+    shown = _shown(channels["day-planning"])
+    assert not any("<switch" in line for line in shown), shown
+    assert "→ Over to Frankie" in shown
+    assert vm.focus().key == "day-planning", "and \"go back\" undoes it"
+
+
+@pytest.mark.asyncio
+async def test_a_reply_handing_you_to_no_one_moves_nothing(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    _replying(main_agent, '<speech>Let me get the right person.</speech>One moment. <switch to="nobody"/>')
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Who handles my taxes?")
+
+    assert vm.focus().key == "day-planning"
+    assert vm.reply.tts.said() == ["Daisy here.", "Let me get the right person."]
+
+
+def _turn_with(samples):
+    utterance = Utterance()
+    utterance.pcm += np.asarray(samples, dtype=np.int16).tobytes()
+    return SimpleNamespace(utterances=[utterance])
+
+
+def test_a_voice_is_told_from_noise_by_its_pitch():
+    t = np.arange(8000) / 16000  # half a second
+    voice = 8000 * np.sin(2 * np.pi * 150 * t)
+    noise = np.random.default_rng(7).normal(0, 4000, len(t))
+    assert VoiceManager._not_a_voice(_turn_with(voice)) is None
+    assert VoiceManager._not_a_voice(_turn_with(noise)).endswith(" voiced")
+
+
+def test_the_gates_figure_is_used_and_no_audio_tells_nothing():
+    scored = _spoken("Frankie.")
+    scored.gate = Assessment(Verdict.UNDECIDED, None, None, voiced_share=0.21)
+    assert VoiceManager._not_a_voice(SimpleNamespace(utterances=[scored])) == "0.21 voiced"
+    assert VoiceManager._not_a_voice(SimpleNamespace(utterances=[_spoken("Frankie.")])) is None
+    assert VoiceManager._not_a_voice(_turn_with(np.zeros(100))) is None, "too little audio to tell"
+    assert VoiceManager._not_a_voice(None) is None
 
 
 # ---------------------------------------------------------------------------

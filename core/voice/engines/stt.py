@@ -6,26 +6,55 @@ configured), forwards the VAD's audio and segment boundaries to it, and turns
 the result into a `Transcript`. If the live session fails or misses its
 deadline, the utterance's buffered audio goes to Whisper instead, with greedy
 decoding: it is the slow path, so it should at least not be slower than needed.
+
+A live transcript that is the recognizer reciting its vocabulary instead of
+what was said (vocabulary_echo.py) counts as no words, as noise does. Whisper
+is given no vocabulary, so its fallback has nothing to recite.
 """
 import asyncio
 from typing import Callable, Iterable, List, Optional
 
 from core.config.settings import Config
 from core.config.models import TRANSCRIBE_LIVE
+from core.runtime.foundation.routing import home_channel
 from core.voice.foundation import settings
 from core.voice.engines.live_stt import LiveSTTSession
+from core.voice.engines.vocabulary_echo import vocabulary_echo
 from core.voice.foundation.utterance import Transcript, Utterance
 
 
 def agent_vocabulary(loader) -> List[str]:
-    """Words to bias recognition toward: every agent's name, and its id as
-    spoken ("day planner"). Names like Frankie or Aki are exactly what a
-    generic recognizer gets wrong."""
+    """Words to bias recognition toward: the name of every agent you can reach
+    by name, and its id as spoken ("day planner"). Names like Frankie or Aki
+    are exactly what a generic recognizer gets wrong.
+
+    Only the agents with a home channel, where "switch to …" and a hand-off
+    lead (core/runtime/foundation/routing.py `home_channel`). Every term is
+    also something the recognizer can recite back over noise (a vocabulary
+    echo), so the workers you never say (Graph Worker, Terminator) and the
+    concierge's id ("main") stay out.
+    """
     terms: List[str] = []
     for agent_id in loader.list_agent_ids():
+        if not home_channel(agent_id, loader):
+            continue
         config = loader.get_agent_config(agent_id) or {}
         terms += [config.get("name"), str(agent_id).replace("-", " ")]
-    return [term for term in terms if isinstance(term, str) and term]
+    return _unique_terms(terms)
+
+
+def _unique_terms(terms: Iterable) -> List[str]:
+    """Each term once, whatever its case, as first written; blanks dropped.
+    "Receipt Processor" is both a name and an id: sent twice, it was the term
+    recited on its own, from fractions of a second of noise."""
+    seen, unique = set(), []
+    for term in terms:
+        if not isinstance(term, str) or not term.strip():
+            continue
+        if term.strip().casefold() not in seen:
+            seen.add(term.strip().casefold())
+            unique.append(term.strip())
+    return unique
 
 
 class SpeechRecognizer:
@@ -38,7 +67,7 @@ class SpeechRecognizer:
         session_factory: Callable = LiveSTTSession,
     ):
         self.provider = provider or settings.STT_PROVIDER
-        self.vocabulary = list(dict.fromkeys(v for v in vocabulary if v))[: settings.STT_VOCABULARY_LIMIT]
+        self.vocabulary = _unique_terms(vocabulary)[: settings.STT_VOCABULARY_LIMIT]
         if api_key is None:
             api_key = Config().gemini_api_key or ""
         self._api_key = api_key
@@ -110,10 +139,25 @@ class SpeechRecognizer:
         if utterance.stream is not None:
             text = await utterance.stream.result()
             if text is not None:
-                return Transcript(text, "gemini_live")
+                return self._live(utterance, text)
             print(f"[SpeechRecognizer] Live transcription failed for {utterance!r}; falling back to Whisper.")
         text = await self.whisper_transcribe(utterance.wav())
         return Transcript(text, "whisper_fallback" if self.streaming else "whisper")
+
+    def echo(self, utterance: Utterance, text: str) -> Optional[str]:
+        """Why live `text` is the recognizer reciting its vocabulary rather than
+        what was said (vocabulary_echo.py), or None. The floor asks too, before
+        words heard over the agent stop its reply."""
+        return vocabulary_echo(text, self.vocabulary, utterance.speech_ms())
+
+    def _live(self, utterance: Utterance, text: str) -> Transcript:
+        """The live transcript; for a vocabulary echo, no words, as for noise,
+        with what was heard kept for the logs."""
+        echo = self.echo(utterance, text)
+        if echo is None:
+            return Transcript(text, "gemini_live")
+        print(f"[SpeechRecognizer] 🦜 Dropped a vocabulary echo from utterance #{utterance.id} ({echo}): {text!r}")
+        return Transcript("", "gemini_live", heard=text, echo=echo)
 
     async def whisper_transcribe(self, wav: bytes) -> str:
         """Local Whisper, loaded on first use: with streaming on, it's only the fallback."""

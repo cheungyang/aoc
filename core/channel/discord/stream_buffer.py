@@ -7,6 +7,7 @@ from typing import Optional, List
 from core.channel.response_parser import AgentResponse
 from core.channel.discord.ui import PollButtonView, PollSelectView
 from core.channel.chunks import safe_chunks
+from core.channel.handoff import switch_pointer
 
 
 class DiscordStreamBuffer:
@@ -35,8 +36,10 @@ class DiscordStreamBuffer:
 
     # Hidden from the channel while streaming. `speech` is what a voice turn
     # says aloud: the voice pipeline routes it away before this buffer, so it
-    # is listed as the backstop for any path that doesn't.
-    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech")
+    # is listed as the backstop for any path that doesn't. `switch` is a
+    # directive with no contents (<switch to="goal-setter"/>): the pointer
+    # `finalize` posts says where it leads.
+    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech", "switch")
 
     @classmethod
     def _strip_partial_trailing_tag(cls, text: str) -> str:
@@ -67,18 +70,21 @@ class DiscordStreamBuffer:
     def filter_xml_for_stream(cls, text: str) -> str:
         """
         Suppresses completed and in-flight XML blocks (<poll>, <images>,
-        <videos>, <system_memory_log>, <speech>) during live streaming so
-        Discord users only see natural text deltas.
+        <videos>, <system_memory_log>, <speech>) and <switch .../> directives
+        during live streaming so Discord users only see natural text deltas.
         """
         if not text:
             return ""
 
         tags = "|".join(cls._STREAM_TAGS)
 
+        # Remove self-closing tags first: they have no closing tag to wait for.
+        filtered = re.sub(rf'<(?:{tags})\b[^>]*/>', '', text, flags=re.IGNORECASE)
+
         # Remove completed XML blocks (attributes allowed, e.g.
         # <poll allow_multiple="false">) and their contents
         filtered = re.sub(
-            rf'<({tags})\b[^>]*>.*?</\1\s*>', '', text,
+            rf'<({tags})\b[^>]*>.*?</\1\s*>', '', filtered,
             flags=re.DOTALL | re.IGNORECASE
         )
 
@@ -269,3 +275,13 @@ class DiscordStreamBuffer:
                             )
                         except Exception:
                             pass
+
+                # The reply handed you to a teammate (<switch to="..."/>):
+                # where to find them, under the reply.
+                switch_to = getattr(response, "switch_to", None)
+                pointer = switch_pointer(switch_to, self.channel) if isinstance(switch_to, str) else None
+                if pointer:
+                    try:
+                        await self.channel.send(pointer)
+                    except Exception as e:
+                        print(f"[DiscordStreamBuffer] Error posting the switch pointer: {e}")

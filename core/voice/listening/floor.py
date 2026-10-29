@@ -166,11 +166,13 @@ class Floor:
         self.turns.begin_turn()
 
     def _on_text(self, utterance: Utterance):
-        """Stage two of barge-in: once the words confirm an interruption, stop the agent."""
+        """Stage two of barge-in: once the words confirm an interruption, stop
+        the agent. The recognizer reciting its vocabulary isn't words (stt.py
+        `echo`), and leaves the reply playing."""
         if utterance.confirmed or utterance.id not in self._speaking or not self.turns.busy():
             return
         text = utterance.text_so_far()
-        if confirms_barge_in(text):
+        if confirms_barge_in(text) and not self.stt.echo(utterance, text):
             utterance.confirmed = True
             self.turns.interrupt(f"heard {text!r}")
 
