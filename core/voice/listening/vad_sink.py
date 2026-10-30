@@ -92,6 +92,8 @@ class VADSink(voice_recv.AudioSink):
 
         voice_config = config if isinstance(config, dict) else {}
 
+        # Voiced speech an utterance needs to be handed on, pre-roll and
+        # end-of-turn silence not counted (`_finalize_speech_segment`).
         self.min_speech_ms = int(voice_config.get("vad_min_speech_ms", min_speech_ms))
         self.onset_ms = int(voice_config.get("vad_onset_ms", 180)) # ~5 chunks of 36ms
         self.onset_speech_prob = float(voice_config.get("vad_speech_prob", 0.65))
@@ -180,15 +182,26 @@ class VADSink(voice_recv.AudioSink):
             self._finalize_speech_segment(state, user_name, silence_ms)
 
     def _finalize_speech_segment(self, state: UserVADState, user_name: str, silence_ms: float = 0):
-        """Ends the turn: hands the utterance on if it's long enough to be speech."""
+        """Ends the turn: hands the utterance on if it has enough speech in it.
+
+        Judged by its voiced span (`Utterance.speech_ms`), the onset run to the
+        last voiced window. The buffer also holds up to 900 ms of pre-roll and
+        the end-of-turn silence, and judged by the buffer, every blip was long
+        enough: 180 ms of sound -- the onset run and nothing after it -- went to
+        the recognizer, which made "Receipt Processor." and "Tell your agent."
+        of it (2026-10-28).
+        """
         utterance = state.utterance
         if utterance is not None:
-            if utterance.duration_ms() >= self.min_speech_ms:
+            speech_ms = utterance.speech_ms()
+            if speech_ms >= self.min_speech_ms:
                 utterance.speech_end_at = state.last_voiced_at
                 print(f"[VADSink] 🔇 Turn ended after {int(silence_ms)}ms of silence "
-                      f"({int(utterance.duration_ms())}ms of audio) from {user_name}.")
+                      f"({int(speech_ms)}ms of speech, {int(utterance.duration_ms())}ms of audio) from {user_name}.")
                 self._post(self.floor.utterance_finished, utterance)
             else:
+                print(f"[VADSink] Dropped {int(speech_ms)}ms of speech from {user_name}: "
+                      f"under {self.min_speech_ms}ms, too short to be words.")
                 self._post(self.floor.utterance_discarded, utterance)
         state.reset_speech()
 

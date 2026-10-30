@@ -347,6 +347,29 @@ async def test_a_blip_too_short_to_be_speech_is_discarded(make_sink, vad):
 
 
 @pytest.mark.asyncio
+async def test_a_blip_is_judged_by_its_speech_not_its_pre_roll_and_silence(make_sink, vad):
+    """As blips came in production (2026-10-28): quiet frames before, the 180 ms
+    onset run, then the silence that ends the turn. Measured with all that
+    around it, every blip was long enough, and reached the recognizer:
+    "Receipt Processor.", "Tell your agent."."""
+    sink, floor = make_sink()
+    feed(sink, vad, silence=8)  # packets flowing: this is pre-roll
+    feed(sink, vad, speech=5, silence=windows(settings.END_OF_TURN_DEFAULT_MS))
+    await drain()
+    assert floor.kinds() == ["opened", "discarded"]
+    assert floor.utterances()[0].duration_ms() > sink.min_speech_ms, "the buffer alone would have passed it"
+
+
+@pytest.mark.asyncio
+async def test_a_short_word_is_long_enough(make_sink, vad):
+    sink, floor = make_sink()
+    feed(sink, vad, silence=8)
+    feed(sink, vad, speech=windows(sink.min_speech_ms), silence=windows(settings.END_OF_TURN_DEFAULT_MS))
+    await drain()
+    assert floor.kinds() == ["opened", "finished"]
+
+
+@pytest.mark.asyncio
 async def test_cleanup_discards_the_open_utterance(make_sink, vad):
     sink, floor = make_sink()
     feed(sink, vad, speech=10)
