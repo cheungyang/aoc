@@ -76,9 +76,11 @@ else
     GITCONFIG_OPT=""
 fi
 
-# Run the container
+# Run the container. SYS_PTRACE lets py-spy (scripts/profile_bot.py) attach
+# to the bot, as in docker-compose.yml.
 echo "Starting Docker container $IMAGE_NAME..."
 docker run -it \
+  --cap-add SYS_PTRACE \
   -v "$(pwd)":$CONTAINER_WORKDIR \
   $ENV_OPT \
   $SSH_OPT \

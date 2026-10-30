@@ -110,6 +110,24 @@ ARG AOC_PROVISION_STRICT=0
 RUN AOC_PROVISION_STRICT=${AOC_PROVISION_STRICT} \
     python3 scripts/provision_assets.py --stage build
 
+# py-spy samples the running bot's Python stacks from outside the process
+# (scripts/profile_bot.py, run from Discord as `!python profile_bot.py`).
+# The bot runs as appuser, and the profiler attaches to it from a child
+# process, which takes SYS_PTRACE wherever the kernel limits attaching to
+# descendants (Yama): the file capability gives it to this one binary. It
+# can only be granted in a container docker-compose.yml gives SYS_PTRACE
+# (`cap_add`); elsewhere the kernel refuses to start py-spy at all. A failed
+# setcap doesn't fail the build: profile_bot.py reports it when it matters.
+# A tool, not a dependency, so not in requirements.txt, and installed after
+# the slow layers above so that changing it doesn't rebuild them. Bumping it:
+# profile_bot.py passes --hideprogress, a flag py-spy keeps out of its help.
+ARG PY_SPY_VERSION=0.4.2
+RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir "py-spy==${PY_SPY_VERSION}" \
+    && { setcap cap_sys_ptrace+ep "$(command -v py-spy)" \
+         || echo "Warning: setcap failed; py-spy can attach only where kernel.yama.ptrace_scope is 0."; }
+
 # Copy application source code
 COPY . .
 

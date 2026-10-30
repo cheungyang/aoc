@@ -12,6 +12,14 @@ services:
     stdin_open: true # Equivalent to -i
     tty: true        # Equivalent to -t
     init: true       # Proper signal forwarding and zombie reaping
+    # py-spy (scripts/profile_bot.py, `!python profile_bot.py`) reads the
+    # bot's memory from another process, which Docker forbids by default:
+    # its seccomp profile allows ptrace and process_vm_readv only to a
+    # container with SYS_PTRACE. The bot runs as appuser and holds no
+    # capabilities; the Dockerfile hands this one to the py-spy binary alone.
+    # A change here takes a recreate: `docker compose up -d`.
+    cap_add:
+      - SYS_PTRACE
     env_file:
       - .env
     environment:

@@ -470,6 +470,42 @@ python main.py --dev --agents day-planner   # dev takes day-planner; prod keeps 
 - While dev holds an agent it also runs that agent's schedules and voice.
 - All agent bots need permission to read and post in the control thread.
 
+### 6. Profiling the Running Bot
+
+`scripts/profile_bot.py` samples the bot's Python stacks with
+[py-spy](https://github.com/benfred/py-spy), from Discord:
+
+```text
+!python profile_bot.py                 # what every thread is doing right now
+!python profile_bot.py record          # 60 s of samples: start it, then talk to the bot
+!python profile_bot.py record --duration 120 --format flamegraph
+```
+
+A recording goes to `sessions/profiles/` (the newest 20 are kept) and is
+attached to the reply. The default speedscope file opens at
+<https://www.speedscope.app>, where "Time Order" replays the recording; a
+flamegraph is an SVG for any browser. Recordings are wall-clock: every
+thread, waiting ones included, sampled without pausing the bot.
+
+py-spy reads another process's memory, which a container can't do by
+default. `docker-compose.yml` grants the container `SYS_PTRACE`, and the
+Dockerfile gives that capability to the py-spy binary, because the bot runs
+as `appuser` and the profiler attaches to it from a child process. Both take
+a rebuild and a recreate, once:
+
+```bash
+docker compose up -d --build
+```
+
+Until then, the script says what's missing instead of profiling.
+
+`scripts/host_health.py` (`!python host_health.py`) reports how the box is
+doing: CPU and disk load over two seconds, memory and swap, cgroup limits,
+the bot's own CPU and threads. It also reports how fast the disk is for
+`memory.db`: its size, filesystem, page-cache share and extents, the time to
+open it, a write timed the way the bot writes, an fsync, and a full read.
+`--cold` makes that read come from the disk. It needs no rebuild.
+
 ---
 
 ## Alternative: Running with Helper Script (`install.sh`)
