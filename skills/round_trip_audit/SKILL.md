@@ -8,7 +8,7 @@ The user asks to audit an agent, or why one is slow, loops, or fails a read or a
 ## Workflow
 1. In one step, run `agent_lint` on the agent and read its `AGENTS.md`, `INSTRUCTIONS.md`, its `WORKFLOW.md`, and the SKILL.md of the skills it runs most (one `filesystem` call holds up to 10 reads).
 2. Check each finding against the cited line. Drop false leads, such as a path the agent only passes to another agent or graph, or an example path; keep the rest.
-3. Call `set_thinking("high", ...)` in the same step as any reads still needed: the analysis below is the heavy step. List the agent's workflows, user-facing first; for a voice-room agent, the hot flow is the one a spoken request starts. For each, write out its sequential model calls: every step that waits on tool results is one call however many tools it runs, a `load_skill` is a step, and the reply is one more.
+3. Read anything still needed in one step. List the agent's workflows, user-facing first; for a voice-room agent, the hot flow is the one a spoken request starts. For each, write out its sequential model calls: every step that waits on tool results is one call however many tools it runs, a `load_skill` is a step, and the reply is one more.
 4. Walk the Round-trip Budget checklist (`agent_creation`) over each workflow, noting which item removes which call. Voice-hot agents target ≤ 2–3 calls per user turn.
 5. Check how the work is split (the table in AGENTS.md):
    - Every tool in `agents/<agent_id>/tools/` is an `@agent_tool` with `Reads:`, `Computes:` and `Leaves out:` lines, and WORKFLOW.md covers it. `agent_lint` reports gaps as `workflow_missing` and `contract_gap`.
@@ -36,4 +36,3 @@ The user asks to audit an agent, or why one is slow, loops, or fails a read or a
 ## Required Tools
 - `agent_lint`: the agent's findings, budgets, tools, skills and schedules.
 - `filesystem`: to read the agent's files, its code and WORKFLOW.md, its RULES.md and its skills.
-- `set_thinking`: high for the analysis.

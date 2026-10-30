@@ -17,7 +17,6 @@
     "name": "Daisy",
     "tools": {
         "day_briefing": {},
-        "set_thinking": {},
         "task_query": {}
     },
     "schedules": [

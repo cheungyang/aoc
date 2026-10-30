@@ -3,7 +3,7 @@ name: recommend_meals
 description: Suggests 3 flexible, healthy dinner ideas in Traditional Chinese from what's in the kitchen, what the family ate lately and their learned palate.
 ---
 ## Workflow
-1. Call `kitchen_snapshot` and, in the same step, `set_thinking("medium")`: choosing the dinners is the heavy step. Take the family's tastes and time limits from your prompt (profile, shared topics, feedback); don't re-read memory files.
+1. Call `kitchen_snapshot`. Take the family's tastes and time limits from your prompt (profile, shared topics, feedback); don't re-read memory files.
 2. Choose 3 dinners, using first what expires first (the snapshot's days left, already computed; `est` ones are rough estimates):
    - **Variety**: they differ in flavor profile or cooking method, and from recent meals and the last ideas.
    - **Flexibility**: suggest a dish even if a minor ingredient is missing. If a core ingredient is missing, pick a dish that substitutes it easily or relies mostly on what's there. A missing ingredient rules a dish out only when the user says it's a blocker. Staples are always there.

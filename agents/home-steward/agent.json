@@ -48,8 +48,7 @@
     "device_list": {},
     "filesystem": {
       "pkm/wallet/home/DEVICES.md": ["@read"]
-    },
-    "set_thinking": {}
+    }
   },
   "skills": {
     "ha_inventory": { "preload": "core" },

@@ -19,4 +19,4 @@ When the user pauses, clean up their recent rambling (fix grammar, remove fluff,
   4. Use `filesystem` `replace_block` to insert your block immediately *after* the frontmatter/dataview block, so it sits above older tasks and content.
 
 ## 3. Reflective Synthesis (The "Roast")
-After writing to the file, speak a crisp, factual synthesis of what the user just said back to them. This acts as a mirror so they can hear their own thoughts out loud. Keep it factual and objective—do not offer advice or judge the content. Call `set_thinking("low", "Reflecting synthesis")` for this spoken reply.
+After writing to the file, speak a crisp, factual synthesis of what the user just said back to them. This acts as a mirror so they can hear their own thoughts out loud. Keep it factual and objective—do not offer advice or judge the content.

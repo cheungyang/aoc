@@ -7,7 +7,7 @@ The user doubts a number one of your own tools gave, asks how it was reached, or
 
 ## Workflow
 1. Call the tool again with the same arguments plus `explain=true`. Note its status and issues, the files it read (modified time, records, lines skipped), and the inputs it lists behind each number.
-2. In one step, read the tool's section of `agents/<agent_id>/WORKFLOW.md`, your `pkm/agents/<agent_id>/RULES.md`, and the raw files the explain block lists (one `filesystem` call holds up to 10 reads), and call `set_thinking("high", ...)`: recomputing by hand is the heavy step.
+2. In one step, read the tool's section of `agents/<agent_id>/WORKFLOW.md`, your `pkm/agents/<agent_id>/RULES.md`, and the raw files the explain block lists (one `filesystem` call holds up to 10 reads).
 3. Pick a sample: the number in question plus two or three others, covering each rule the tool applied. Recompute each from the raw lines, following WORKFLOW.md's rule with RULES.md's value (a key RULES.md doesn't set uses the default WORKFLOW.md gives).
 4. Check coverage too: the records and skipped lines match the file, and every line the tool called unreadable really is.
 5. Report:
@@ -18,4 +18,3 @@ The user doubts a number one of your own tools gave, asks how it was reached, or
 ## Required Tools
 - Your own tool, with `explain=true`.
 - `filesystem`: to read WORKFLOW.md, RULES.md and the sources your tool reads (your own read grants cover them).
-- `set_thinking`: high for the recomputation.

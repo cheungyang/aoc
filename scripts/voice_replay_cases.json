@@ -95,8 +95,7 @@
       ],
       "max_model_calls": 3,
       "tools_all": [
-        "kitchen_snapshot",
-        "set_thinking"
+        "kitchen_snapshot"
       ]
     }
   },
@@ -128,8 +127,7 @@
       ],
       "max_model_calls": 2,
       "tools_all": [
-        "workout_setup",
-        "set_thinking"
+        "workout_setup"
       ]
     }
   },

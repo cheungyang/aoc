@@ -6,7 +6,7 @@ description: Asks the coding graph for a change to an agent's code. Writes a spe
 A change to what an agent's code reads or computes: a new field, a file format a tool must learn, a new tool or scan, a new RULES.md key. Only when the code rule in AGENTS.md holds. Not for a threshold that already exists (the agent edits its RULES.md) or for steps and decisions (edit the skill). You never write agent code, its tests or WORKFLOW.md yourself: the coding graph builds them and the user reviews the PR.
 
 ## Workflow
-1. In one step, read what the change touches, and call `set_thinking("high", ...)` with it: the spec is the heavy step.
+1. In one step, read what the change touches:
    - the tool's module and its helpers: `agents/<agent_id>/tools/`, `agents/<agent_id>/lib/`;
    - its section of `agents/<agent_id>/WORKFLOW.md`, and `lib/rules.py` if any;
    - its tests, in `tests/agents/`;
@@ -32,7 +32,6 @@ meal-planner's memory says "Tool gap: kitchen_snapshot, INVENTORY.md: rows under
 
 ## Required Tools
 - `filesystem`: to read the agent's code, tests and WORKFLOW.md and the user's files, and to write the spec and the manifest entry in `pkm/wiki/software/`.
-- `set_thinking`: high for the spec.
 - `graph_call`: to start the coding graph's tick.
 - `graph_status`: to follow the task to its PR.
 - `agent_lint`: to check the agent.

@@ -3,6 +3,7 @@
   "name": "Home Assistant Automation Authoring",
   "description": "Designs, modifies, and validates Home Assistant automations, scripts, and scenes using the propose-confirm-verify protocol.",
   "emoji": "⚡",
+  "thinking": "high",
   "tools": {
     "home_assistant": {
       "*": ["@observe"],

@@ -22,8 +22,7 @@
       ]
     },
     "workout_setup": {},
-    "log_workout_session": {},
-    "set_thinking": {}
+    "log_workout_session": {}
   },
   "skills": {
     "coach_home_workout": { "preload": "full" },

@@ -13,7 +13,7 @@ Use this skill when the user asks for a new agent. Plan first; write nothing unt
 
 ### Design worksheet
 1. List the workflow's steps: what starts each one (a message, voice, a schedule), what it reads, what it decides, what it writes.
-2. Classify each step by the homes in your AGENTS.md; the table is for the plan and report, never a file. Call `set_thinking("high", ...)` in the same step as the reads it needs; this is the heavy step.
+2. Classify each step by the homes in your AGENTS.md; the table is for the plan and report, never a file. This is the heavy step: call `load_skill("agent_creation")` in the same step as its reads.
    - agent config: `agent.json` and the persona;
    - skill: steps and decision logic;
    - RULES.md: a number that expresses the user's preference;
@@ -83,7 +83,7 @@ A voice agent gets each turn as text: the transcript of what you said, once a pa
 - `model`: a tier, never a version string: `FLASH_LITE` for narrow, high-volume work, `FLASH` for everyday reasoning, `PRO` only when the agent needs the strongest model.
 - `skills`: an object; the list form is rejected. `{"preload": "full"}` for a small skill used on nearly every run, `{"preload": "core"}` for a larger one used often, `{}` for rare ones.
 - `thinking`: usually omitted (defaults: voice `low`, text `medium`, scheduled `high`). Override a surface whose work needs another depth, e.g. `{"text": "high"}` for a PRO agent doing deep synthesis in chat, or `{"text": "low"}` when most turns are quick and one skill step raises it.
-- `set_thinking` (tool): only for a mixed workload, quick turns plus one heavy step (a plan, a many-constraint choice); that skill names the step and level.
+- A skill's `thinking` (in its skill.json, never agent.json): for a mixed workload, quick turns plus one heavy skill (a plan, a many-constraint choice). The turn that starts the skill runs at its level from then on (`skill_creation`).
 - `voice`: every user-facing agent gets a Chirp 3 HD voice matching its personality (and gender, where the name suggests one), different from every other agent's: there is one voice room, and the voice is how the user hears who is answering. Only internal workers omit it.
 
 ### agent.json Template
@@ -182,5 +182,4 @@ Once the files are written, reply in plain Markdown, never XML (your reply is sh
 
 ### Required Tools
 - `filesystem`: to read reference files (the tiers in `core/config/models.py`, the voice catalog in `core/voice/foundation/settings.py`) and write the files in `agents/<agent_id>/` and `pkm/agents/<agent_id>/`.
-- `set_thinking`: high for the classification step.
 - `agent_lint`: to check the new agent's files, grants and budgets before the final report.

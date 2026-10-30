@@ -3,8 +3,8 @@
   "name": "Tooling Review",
   "description": "The Monday tool-gap review. Groups the week's tooling memory entries and proposes, for each group, a RULES.md change, a skill change, or a workflow_change spec.",
   "emoji": "🔧",
+  "thinking": "high",
   "tools": {
-    "set_thinking": {},
     "agent_lint": {},
     "filesystem": {
       "pkm/wiki/memory/topics": ["@read"],

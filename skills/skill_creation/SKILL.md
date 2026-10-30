@@ -52,7 +52,7 @@ description: <one-line description>
 - Core holds what the agent needs every time it runs the workflow (guardrails, steps, output contract). Reference holds schemas, lookup tables, examples and rarely needed detail.
 - End Core with one line saying when to call `load_skill("<skill_name>")` for the Reference.
 
-**Heavy step:** when the workflow has one step that needs more depth than the agent's quick turns (a plan, a choice under several constraints, checking numbers by hand), Core names that step and its level, e.g. "call set_thinking("high") in the same step as the reads it needs". The agent needs the `set_thinking` grant (see `agent_creation`). A skill without a Core section says it in that step.
+**Heavy skill:** when the workflow needs more depth than the agent's quick turns (a plan, a choice under several constraints, checking numbers by hand), give `skill.json` a `thinking` level, e.g. `"thinking": "high"`. Once a turn loads the skill, the rest of the turn runs at that level (voice turns cap at medium), with no step asking for it. A preloaded skill isn't loaded, so also name the tool that starts its workflow, one the skill grants: `"thinking": {"level": "medium", "after": ["workout_setup"]}`. Or, for a Core preload, have the heavy step call `load_skill` along with its reads, as `agent_creation` does.
 
 **Required Tools Section:**
 At the very end of the `SKILL.md` file, you MUST include a `## Required Tools` heading (`### Required Tools`, as the last part of Reference, in a Core/Reference skill). List out each tool the skill requires and a brief explanation of why it is needed to perform the skill.

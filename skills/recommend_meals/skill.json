@@ -3,9 +3,9 @@
   "name": "Recommend Meals",
   "description": "Suggests 3 flexible, healthy dinner ideas in Traditional Chinese from what's in the kitchen, what the family ate lately and their learned palate.",
   "emoji": "🍱",
+  "thinking": {"level": "medium", "after": ["kitchen_snapshot"]},
   "tools": {
     "kitchen_snapshot": {},
-    "kitchen_inventory": {},
-    "set_thinking": {}
+    "kitchen_inventory": {}
   }
 }

@@ -3,9 +3,9 @@
   "name": "Coach Home Workout",
   "description": "Plans, serves and logs ~30-minute home workouts with workout_setup and log_workout_session, which compute recovery, loads and progression from pkm/wallet/exercise.",
   "emoji": "🏋️",
+  "thinking": {"level": "medium", "after": ["workout_setup"]},
   "tools": {
     "workout_setup": {},
-    "log_workout_session": {},
-    "set_thinking": {}
+    "log_workout_session": {}
   }
 }
