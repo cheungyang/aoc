@@ -28,6 +28,10 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         self.install_proactive = proactive.start()
         self.install_proactive.return_value.start = AsyncMock()
         self.addCleanup(proactive.stop)
+        # Holding memory.db open lasts the whole process (core/storage/base.py). Stood in for.
+        store = patch('main.SessionStore')
+        self.session_store = store.start()
+        self.addCleanup(store.stop)
 
     def tearDown(self):
         self.config.reset()
@@ -75,6 +79,8 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
                          [call(proactive.due_work), call(proactive.follow_ups)])
         mock_schedule_runner.add_briefing.assert_called_once_with(proactive.briefing)
         proactive.start.assert_awaited_once()
+        # memory.db is held open while the bots run, so the stores' closes don't sync it.
+        self.session_store.return_value.hold_open.assert_called_once_with()
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

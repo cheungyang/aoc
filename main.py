@@ -11,6 +11,7 @@ from core.scheduler.schedule_runner import ScheduleRunner
 from core.channel.discord.ownership import DEV, PROD, Ownership
 from core.proactive.service import install as install_proactive
 from core.runtime import bootstrap
+from core.storage.sessions import SessionStore
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
 faulthandler.enable()
@@ -69,6 +70,10 @@ async def run_bots(dev: bool = False, agents: list = None):
         print(f"Host '{ownership.host}' claims: {', '.join(agents) or 'nothing yet'}")
         print("Other agents stay on prod. Use !claim <agent> / !release / !status in the control thread.")
         print("====================")
+
+    # memory.db, which most stores share (sessions, jobs, the inbox...), held open while
+    # the bots run, so a store closing its connection doesn't sync the file (core/storage/base.py).
+    SessionStore().hold_open()
 
     tasks = []
     for agent_id in agent_ids:

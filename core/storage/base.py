@@ -21,19 +21,27 @@ the schema (every schema file is idempotent) and commits when its body
 succeeds; `read_only()` never creates anything. The CRUD helpers take `conn=`
 to run inside a caller's `connect()` block, as one transaction, and a store's
 own methods join it the same way, with `connect(conn)`.
+
+In WAL mode, though, the last connection to close folds the WAL into the file
+and syncs it, so where every connection closes, nearly every write pays that.
+`hold_open()` keeps one idle connection to a file for the process's life, which
+no call uses; main.py holds memory.db's.
 """
 import os
 import sqlite3
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, ClassVar, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 
 from core.storage.util import bind, ident, is_identifier, placeholders, where_clause
 
 SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas"
 
 Row = sqlite3.Row
+
+# The idle connections hold_open() keeps, one per file, for the process's life.
+_HELD: Dict[str, sqlite3.Connection] = {}
 
 
 class StoreMissing(FileNotFoundError):
@@ -118,6 +126,39 @@ class Store:
             conn.row_factory = sqlite3.Row
             yield conn
         finally:
+            conn.close()
+
+    def hold_open(self) -> bool:
+        """Keeps an idle connection to the file open for the rest of the process; False if one already is.
+
+        In WAL mode, the last connection to close folds the WAL into the file,
+        syncs both and deletes the WAL; the next write then syncs a fresh WAL's
+        header. Every call above closes its connection, so with none held,
+        nearly every close is the last, and on a slow disk those syncs are most
+        of a write's time (65 ms each on the NAS). With one held, no other close
+        is the last, in this process or another, and SQLite checkpoints on its
+        own each time the WAL reaches ~1,000 pages.
+
+        The connection runs the store's pragmas and one read, each to its end,
+        and nothing after, so it never keeps a read open: one would stop every
+        checkpoint at its snapshot and let the WAL grow without bound.
+        """
+        path = os.path.abspath(self.path)
+        if path in _HELD:
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False)  # never used again, so any thread may close it
+        for statement in (*(f"PRAGMA {pragma}" for pragma in self.pragmas), "SELECT count(*) FROM sqlite_master"):
+            conn.execute(statement).fetchall()
+        mode = conn.execute("PRAGMA journal_mode").fetchall()[0][0]
+        _HELD[path] = conn
+        print(f"[storage] Holding {path} open (journal_mode={mode}), so closing other connections won't checkpoint it")
+        return True
+
+    def release_hold(self) -> None:
+        """Closes the connection hold_open() keeps to the file, if any. As the last one, it folds the WAL in."""
+        conn = _HELD.pop(os.path.abspath(self.path), None)
+        if conn is not None:
             conn.close()
 
     def init(self, conn: Optional[sqlite3.Connection] = None, **identifiers: str) -> None:

@@ -119,6 +119,59 @@ class TestConnections(SchemaDir):
         self.assertEqual(Notes("~/x.db").path, os.path.expanduser("~/x.db"))
 
 
+class TestHoldOpen(SchemaDir):
+    """hold_open(): one idle connection, so the stores' own closes don't fold a WAL file's log in."""
+
+    class Wal(Notes):
+        pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+
+    def wal_store(self, hold=True):
+        store = self.store(self.Wal)
+        self.addCleanup(store.release_hold)
+        if hold:
+            self.assertTrue(store.hold_open())
+        return store
+
+    def wal_bytes(self, store):
+        wal = store.path + "-wal"
+        return os.path.getsize(wal) if os.path.exists(wal) else None
+
+    def test_with_none_held_the_last_close_folds_the_wal_in_and_deletes_it(self):
+        store = self.wal_store(hold=False)
+        store.insert("notes", {"topic": "t"})
+        self.assertIsNone(self.wal_bytes(store))
+
+    def test_held_the_wal_outlives_the_stores_closes(self):
+        store = self.wal_store()
+        store.insert("notes", {"topic": "t"})
+        self.assertGreater(self.wal_bytes(store), 0)
+        self.assertEqual([r["topic"] for r in self.store(self.Wal).select("notes")], ["t"])
+
+    def test_it_keeps_no_read_open_so_a_full_checkpoint_completes(self):
+        store = self.wal_store(hold=False)
+        store.insert("notes", {"topic": "before"})  # held like memory.db: a file with data
+        self.assertTrue(store.hold_open())
+        for i in range(5):
+            store.insert("notes", {"topic": f"t{i}"})
+        with store.connect() as conn:
+            busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        self.assertEqual(busy, 0, "a read left open on the held connection would make it busy")
+        self.assertEqual(self.wal_bytes(store), 0)
+
+    def test_a_file_is_held_once(self):
+        self.wal_store()
+        self.assertFalse(self.store(self.Wal).hold_open(), "another store on the same file shares the hold")
+
+    def test_released_the_last_close_folds_the_wal_in_again(self):
+        store = self.wal_store()
+        store.insert("notes", {"topic": "t"})
+        store.release_hold()
+        self.assertIsNone(self.wal_bytes(store))
+        store.insert("notes", {"topic": "u"})
+        self.assertIsNone(self.wal_bytes(store))
+        self.assertTrue(store.hold_open(), "and it can be held again")
+
+
 class TestSchema(SchemaDir):
 
     def test_a_store_that_doesnt_init_on_connect_opens_whatever_is_there(self):
