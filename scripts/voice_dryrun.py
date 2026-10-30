@@ -70,6 +70,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CASES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_replay_cases.json")
 REPLAY_SOURCE = "voice_replay"
+# `!python` runs this without `--yes` (core/runtime/commands/typed/python.py):
+# a replay is read-only, except with --allow-mutations, which needs the confirmation.
+READ_ONLY = True
+WRITES_WITH = ("--allow-mutations",)
 
 # Stages a replay can measure, in pipeline order. There is no playback
 # (audio_start); vad_final and stt_done appear only with --stt live, when the

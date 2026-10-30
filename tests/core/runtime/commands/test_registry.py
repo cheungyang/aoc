@@ -64,8 +64,8 @@ class TestTheRegistries(unittest.TestCase):
 
     def test_typed(self):
         self.assertEqual([c.name for c in TYPED], ["new", "newall", "compact", "restart", "jobs", "job", "kill",
-                                                   "signals", "followups", "join", "leave", "inbox", "enroll",
-                                                   "voiceprint", "gate", "help"])
+                                                   "python", "signals", "followups", "join", "leave", "inbox",
+                                                   "enroll", "voiceprint", "gate", "help"])
         self.assertIs(TYPED.find("summarize"), TYPED.find("compact"))
 
     def test_spoken_in_the_order_they_are_tried(self):

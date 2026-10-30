@@ -11,6 +11,7 @@ answers messages there:
     jobs.py        !jobs           background jobs that are queued, running or failed
     job.py         !job <id>       one job, and how it went
     kill.py        !kill <id>      stops a job
+    python.py      !python <file>  runs a script from scripts/ here and posts its output (owner only)
     signals.py     !signals        what the proactive team decided, and your labels
     followups.py   !followups      the agents' follow-ups, and your cancel or extend
     help.py        !help           every command, typed or spoken

@@ -14,6 +14,12 @@ Two jobs live here:
 The subprocess contract is the one the script-executor always had: the script's
 stdout *is* the channel message, empty stdout posts nothing, and a non-zero exit
 reports stderr.
+
+A script run on request (`!python`, core/runtime/commands/typed/python.py)
+goes through `run_script` instead, which keeps everything the run produced:
+its exit status, both streams and how long it took. Whether such a run may go
+ahead without a confirmation is `write_reason`, read from the file the same
+way as the checks above, without importing it.
 """
 import ast
 import asyncio
@@ -23,8 +29,9 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from core.scheduler.spec import ScheduleContext, ScriptStep, WorkDecision
 
@@ -173,6 +180,65 @@ def check_script(name: str, scripts_dir: Optional[str] = None) -> List[str]:
     return [f"scripts/{name}: {problem}" for problem in check_script_source(source, path)]
 
 
+_UNREADABLE = object()  # a declaration whose value isn't a literal
+
+
+def _module_constants(path: str, names: Sequence[str]) -> Dict[str, Any]:
+    """The values of the script's module-level assignments to `names`, the last
+    one winning; _UNREADABLE for one that isn't a literal. Parsed, never
+    imported, like the checks above; a file that can't be read or parsed
+    declares nothing."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+    except (OSError, SyntaxError, ValueError):
+        return {}
+    found: Dict[str, Any] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in names:
+                try:
+                    found[target.id] = ast.literal_eval(value)
+                except (ValueError, TypeError, SyntaxError, RecursionError):
+                    found[target.id] = _UNREADABLE
+    return found
+
+
+def declares_read_only(path: str) -> bool:
+    """Whether the script says it changes nothing: a module-level `READ_ONLY = True`."""
+    return _module_constants(path, ("READ_ONLY",)).get("READ_ONLY") is True
+
+
+def write_reason(path: str, args: Sequence[str]) -> str:
+    """Why running the script with `args` may change something, or "" when it can't.
+
+    A script that changes nothing declares `READ_ONLY = True`, and lists the
+    flags that make it write after all in `WRITES_WITH`, such as
+    compare_token_stats.py's `WRITES_WITH = ("--archive-all",)`. A flag counts
+    as given alone or as `--flag=value`. Whatever can't be read counts as
+    writing.
+    """
+    declared = _module_constants(path, ("READ_ONLY", "WRITES_WITH"))
+    if declared.get("READ_ONLY") is not True:
+        return "it doesn't declare READ_ONLY = True"
+    flags = declared.get("WRITES_WITH", ())
+    if isinstance(flags, str):
+        flags = (flags,)
+    if not isinstance(flags, (tuple, list)) or not all(isinstance(flag, str) for flag in flags):
+        return "its WRITES_WITH isn't a list of flags"
+    for arg in args:
+        for flag in flags:
+            if arg == flag or arg.startswith(flag + "="):
+                return f"{flag} makes it write"
+    return ""
+
+
 # --------------------------------------------------------------------------
 # Fire time: in-process has_work()
 # --------------------------------------------------------------------------
@@ -271,3 +337,81 @@ async def run_step(
 
     cmd = [sys.executable, path] + [os.path.expanduser(a) for a in step.args]
     return await execute_command(cmd, label, cwd=PROJECT_ROOT, timeout=timeout)
+
+
+@dataclass
+class ScriptRun:
+    """Everything a run on request produced (`run_script`)."""
+    label: str
+    returncode: Optional[int]  # None: it was stopped at the timeout
+    stdout: str
+    stderr: str
+    seconds: float
+    timeout: int
+
+    @property
+    def timed_out(self) -> bool:
+        return self.returncode is None
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+def _decoded(output) -> str:
+    """A stream as text. TimeoutExpired carries bytes even when the run asked for text."""
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
+async def run_script(
+    step: ScriptStep,
+    scripts_dir: Optional[str] = None,
+    timeout: Optional[int] = None,
+) -> ScriptRun:
+    """Runs a script as `run_step` does -- the project interpreter, from the
+    repo root, stdin closed, in a thread -- and keeps what the run produced,
+    whatever its outcome: exit status, stdout, stderr and duration. A run
+    stopped at the timeout keeps what it had printed by then.
+
+    Raises ValueError for a name `resolve_script_path` refuses.
+    """
+    path = resolve_script_path(step.script, scripts_dir)
+    timeout_sec = timeout if timeout is not None else default_timeout()
+    cmd = [sys.executable, path] + [os.path.expanduser(a) for a in step.args]
+    started = time.monotonic()
+    try:
+        res = await asyncio.to_thread(
+            subprocess.run, cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", cwd=PROJECT_ROOT, timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as e:
+        return ScriptRun(step.label(), None, _decoded(e.stdout), _decoded(e.stderr),
+                         time.monotonic() - started, timeout_sec)
+    return ScriptRun(step.label(), res.returncode, res.stdout or "", res.stderr or "",
+                     time.monotonic() - started, timeout_sec)
+
+
+class ProjectScripts:
+    """The project's `scripts/` as `!python` runs them: the Scripts port
+    (core/runtime/commands/ports.py), which the Discord runner passes in, so
+    the command never imports this adapter."""
+
+    def __init__(self, scripts_dir: Optional[str] = None):
+        self._scripts_dir = scripts_dir  # None: SCRIPTS_DIR, read when used
+
+    @property
+    def root(self) -> str:
+        return PROJECT_ROOT
+
+    def path(self, script: str) -> str:
+        return resolve_script_path(script, self._scripts_dir)
+
+    def writes(self, path: str, args) -> str:
+        return write_reason(path, args)
+
+    async def run(self, script: str, args, timeout: Optional[int] = None) -> ScriptRun:
+        return await run_script(ScriptStep(script, tuple(args)), self._scripts_dir, timeout)

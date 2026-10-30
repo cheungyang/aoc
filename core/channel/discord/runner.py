@@ -13,6 +13,7 @@ from core.runtime.commands.base import ControlContext, TypedContext
 from core.runtime.commands.registry import CONTROL, TYPED
 from core.runtime.foundation import events
 from core.runtime.foundation.sessions import SessionManager
+from core.scheduler.script_runner import ProjectScripts
 from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
 from core.channel.discord.ownership import Ownership
@@ -288,6 +289,8 @@ class BotRunner:
                                                  output=DiscordOutput(message.channel)),
             answers_here=self._answers(message, self._hosts(message.channel)),
             voice=self.voice_manager,
+            is_owner=self.bot.is_owner,
+            scripts=ProjectScripts(),
         )
         try:
             await TYPED.answer(content, ctx)

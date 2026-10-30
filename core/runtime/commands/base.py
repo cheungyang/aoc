@@ -8,11 +8,12 @@
     ControlCommand  `!name args` too, typed in the ownership control thread
 """
 import asyncio
+import io
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Awaitable, Callable, Optional, Tuple
 
-from core.runtime.commands.ports import ControlThread, Say, SpokenTurn, VoiceControls
+from core.runtime.commands.ports import ControlThread, Say, Scripts, SpokenTurn, VoiceControls
 from core.runtime.foundation.context import ExecutionContext
 from core.channel.chunks import safe_chunks
 
@@ -32,10 +33,11 @@ class CommandContext:
     def _sendable(self) -> bool:
         return self.channel is not None and hasattr(self.channel, "send")
 
-    async def send(self, text: str) -> None:
-        """Posts `text` as one message."""
+    async def send(self, text: str) -> Any:
+        """Posts `text` as one message; returns the message posted, or None."""
         if self._sendable():
-            await self.channel.send(text)
+            return await self.channel.send(text)
+        return None
 
     async def reply(self, text: str, pause_s: float = 0.0) -> None:
         """Posts `text` in Discord-sized chunks (safe_chunks), `pause_s` apart."""
@@ -46,6 +48,14 @@ class CommandContext:
                 await asyncio.sleep(pause_s)
             await self.channel.send(chunk)
 
+    async def send_file(self, data: bytes, filename: str, text: str = "") -> Any:
+        """Posts `data` as an attached file called `filename`, under `text` if any."""
+        if not self._sendable():
+            return None
+        import discord
+
+        return await self.channel.send(text or None, file=discord.File(io.BytesIO(data), filename=filename))
+
 
 @dataclass
 class TypedContext(CommandContext):
@@ -55,6 +65,10 @@ class TypedContext(CommandContext):
     session: Optional[ExecutionContext] = None   # the session a message typed there runs on
     answers_here: bool = False                  # this bot answers messages in that channel
     voice: Optional[VoiceControls] = None       # the bot's voice room
+    # Whether a user owns the bot: discord.py's Bot.is_owner, the Discord
+    # application's owner or team. None: nobody is known to own it.
+    is_owner: Optional[Callable[[Any], Awaitable[bool]]] = None
+    scripts: Optional[Scripts] = None            # the project's scripts/, for !python
 
 
 @dataclass

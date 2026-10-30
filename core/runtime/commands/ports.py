@@ -1,9 +1,9 @@
 """Ports: what commands act on, declared here so that a command never imports
 the adapter providing it (runtime rule 1). Whoever runs a command passes the
-real thing in its context: the Discord runner its voice room and the control
-thread, the voice turn itself.
+real thing in its context: the Discord runner its voice room, the control
+thread and the project's scripts, the voice turn itself.
 """
-from typing import Any, Awaitable, Callable, List, Optional, Protocol, Tuple
+from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence, Tuple
 
 # say(text, agent_id): a line said in that agent's voice.
 Say = Callable[..., Awaitable[None]]
@@ -83,3 +83,41 @@ class ControlThread(Protocol):
 
     async def react(self, emoji: str) -> None:
         """Reacts to the command with `emoji`."""
+
+
+class ScriptRun(Protocol):
+    """Everything one run of a script produced."""
+
+    label: str                 # the script and its arguments
+    returncode: Optional[int]  # None: it was stopped at its timeout
+    stdout: str
+    stderr: str
+    seconds: float
+    timeout: int               # the timeout it ran under, in seconds
+
+    @property
+    def timed_out(self) -> bool:
+        """It was stopped at its timeout."""
+
+    @property
+    def ok(self) -> bool:
+        """It exited with 0."""
+
+
+class Scripts(Protocol):
+    """The project's `scripts/`, as `!python` runs them (core/scheduler/script_runner.py)."""
+
+    @property
+    def root(self) -> str:
+        """The repo root: scripts run from it, and paths they print are from it."""
+
+    def path(self, script: str) -> str:
+        """The script's file. ValueError, saying why, for anything but a bare `*.py` name."""
+
+    def writes(self, path: str, args: Sequence[str]) -> str:
+        """Why running the script with `args` may change something, or "" when
+        it can't: it declares `READ_ONLY = True`, and no argument is a flag it
+        lists in `WRITES_WITH`."""
+
+    async def run(self, script: str, args: Sequence[str], timeout: Optional[int] = None) -> ScriptRun:
+        """Runs the script and returns what it produced; `timeout` None is the default one."""

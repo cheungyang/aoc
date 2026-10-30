@@ -179,5 +179,110 @@ class TestExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.output, "False ''")
 
 
+class TestReadOnly(unittest.TestCase):
+    def check(self, source):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(textwrap.dedent(source))
+            return sr.declares_read_only(path)
+
+    def test_a_module_level_true_declares_it(self):
+        self.assertTrue(self.check("READ_ONLY = True\n"))
+        self.assertTrue(self.check("READ_ONLY: bool = True\n"))
+
+    def test_anything_else_does_not(self):
+        for source in ("", "READ_ONLY = False\n", "READ_ONLY = 1\n", "READ_ONLY = 'yes'\n",
+                       "def f():\n    READ_ONLY = True\n", "if x:\n    READ_ONLY = True\n", "READ_ONLY = (\n"):
+            with self.subTest(source=source):
+                self.assertFalse(self.check(source))
+
+    def test_the_last_assignment_wins(self):
+        self.assertFalse(self.check("READ_ONLY = True\nREAD_ONLY = False\n"))
+
+    def test_it_is_parsed_not_imported(self):
+        self.assertTrue(self.check("READ_ONLY = True\nraise SystemExit('imported')\n"))
+
+    def test_a_missing_file_declares_nothing(self):
+        self.assertFalse(sr.declares_read_only("/nonexistent/x.py"))
+
+
+class TestWriteReason(unittest.TestCase):
+    def reason(self, source, *args):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(textwrap.dedent(source))
+            return sr.write_reason(path, args)
+
+    def test_a_script_must_declare_read_only(self):
+        self.assertEqual(self.reason("print(1)\n"), "it doesn't declare READ_ONLY = True")
+        self.assertEqual(self.reason("READ_ONLY = True\n", "--anything"), "")
+
+    def test_flags_that_make_it_write(self):
+        src = "READ_ONLY = True\nWRITES_WITH = ('--archive-all', '--fix')\n"
+        self.assertEqual(self.reason(src, "--voice", "--days", "7"), "")
+        self.assertEqual(self.reason(src, "--voice", "--archive-all"), "--archive-all makes it write")
+        self.assertEqual(self.reason(src, "--fix=all"), "--fix makes it write")
+        self.assertEqual(self.reason(src, "--fixture"), "")
+        self.assertEqual(self.reason("READ_ONLY = True\nWRITES_WITH = '--x'\n", "--x"), "--x makes it write")
+
+    def test_what_cant_be_read_counts_as_writing(self):
+        for writes_with in ("FLAGS", "('--a', 1)", "{'--a': 1}"):
+            with self.subTest(writes_with=writes_with):
+                self.assertEqual(self.reason(f"READ_ONLY = True\nWRITES_WITH = {writes_with}\n"),
+                                 "its WRITES_WITH isn't a list of flags")
+        self.assertEqual(self.reason("READ_ONLY = SOMETHING\n"), "it doesn't declare READ_ONLY = True")
+
+
+class TestRunScript(unittest.IsolatedAsyncioTestCase):
+    async def run_source(self, source, *args, timeout=None):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "x.py"), "w", encoding="utf-8") as f:
+                f.write(textwrap.dedent(source))
+            return await sr.run_script(ScriptStep("x.py", tuple(args)), scripts_dir=d, timeout=timeout)
+
+    async def test_keeps_both_streams_and_the_exit_status(self):
+        run = await self.run_source("import sys\nprint('out', *sys.argv[1:])\nprint('err', file=sys.stderr)\n", "a")
+        self.assertEqual((run.returncode, run.ok, run.timed_out), (0, True, False))
+        self.assertEqual((run.stdout, run.stderr, run.label), ("out a\n", "err\n", "x.py a"))
+        self.assertGreater(run.seconds, 0)
+
+    async def test_a_failure_keeps_its_output(self):
+        run = await self.run_source("import sys\nprint('partial')\nsys.exit(4)\n")
+        self.assertEqual((run.returncode, run.ok, run.stdout), (4, False, "partial\n"))
+
+    async def test_a_timeout_keeps_what_was_printed(self):
+        run = await self.run_source("import time\nprint('started', flush=True)\ntime.sleep(30)\n", timeout=1)
+        self.assertTrue(run.timed_out)
+        self.assertEqual((run.stdout, run.timeout), ("started\n", 1))
+
+    async def test_runs_from_the_repo_root_with_stdin_closed(self):
+        run = await self.run_source("import os, sys\nprint(os.getcwd())\nprint(repr(sys.stdin.read()))\n")
+        cwd, stdin = run.stdout.splitlines()
+        self.assertEqual(os.path.realpath(cwd), os.path.realpath(sr.PROJECT_ROOT))
+        self.assertEqual(stdin, "''")
+
+    async def test_a_bad_name_raises(self):
+        with self.assertRaises(ValueError):
+            await sr.run_script(ScriptStep("../x.py"))
+
+
+class TestProjectScripts(unittest.IsolatedAsyncioTestCase):
+    async def test_it_is_the_script_runner_behind_the_scripts_port(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "x.py"), "w", encoding="utf-8") as f:
+                f.write("READ_ONLY = True\nWRITES_WITH = ('--w',)\nimport sys\nprint(*sys.argv[1:])\n")
+            scripts = sr.ProjectScripts(d)
+            self.assertEqual(scripts.root, sr.PROJECT_ROOT)
+            self.assertEqual(scripts.path("x.py"), os.path.join(d, "x.py"))
+            self.assertEqual(scripts.writes(scripts.path("x.py"), ["a"]), "")
+            self.assertEqual(scripts.writes(scripts.path("x.py"), ["--w"]), "--w makes it write")
+            run = await scripts.run("x.py", ["a", "b"], timeout=10)
+        self.assertEqual((run.ok, run.stdout, run.label, run.timeout), (True, "a b\n", "x.py a b", 10))
+        with self.assertRaises(ValueError):
+            scripts.path("../x.py")
+
+
 if __name__ == "__main__":
     unittest.main()

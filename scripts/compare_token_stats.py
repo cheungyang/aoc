@@ -16,6 +16,10 @@ from core.storage.sessions import SessionStore  # noqa: E402
 
 # Default cutoff timestamp: Optimization point (2026-08-24T08:40:00-07:00)
 DEFAULT_CUTOFF_TS = 1787585994
+# `!python` runs this without `--yes`: it only reads memory.db, except with
+# --archive-all, which archives every session and so needs the confirmation.
+READ_ONLY = True
+WRITES_WITH = ("--archive-all",)
 
 def get_stats(db_path=None, cutoff_ts=DEFAULT_CUTOFF_TS):
     store = SessionStore(db_path)
