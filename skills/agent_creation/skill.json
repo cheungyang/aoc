@@ -3,7 +3,6 @@
   "name": "Agent Creation",
   "description": "Designs and creates a new agent from a worksheet that classifies each step of its workflow (config, skill, RULES.md, tool or scan, memory, schedule), ending with the classification table for the user to confirm.",
   "emoji": "🤖",
-  "thinking": "high",
   "tools": {
     "filesystem": {
       "agents": ["@manage"],

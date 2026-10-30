@@ -8,6 +8,7 @@ This skill handles the authoring, modification, and auditing of Home Assistant a
 Every change goes through the `home_assistant` tool's confirmation protocol (see its description): propose, get the user's approval, apply, then verify.
 
 ### 1. Research & Design
+- Designing the change is the heavy step: ask for `high` thinking in the same response as the research calls below (voice turns cap it at medium).
 - Inspect existing automations with `{"action": "list_automations"}` and `{"action": "get_automation", "id": "<id>"}`.
 - Design the automation structure:
   - `alias`: Clear, human-readable title.

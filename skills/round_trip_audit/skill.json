@@ -3,7 +3,6 @@
   "name": "Round-trip Audit",
   "description": "Audits an agent for model round trips, phantom references, prompt budget and how its work is split (tools on @agent_tool, decisions in skills) with agent_lint, and proposes the fixes as a plan.",
   "emoji": "⏱️",
-  "thinking": "high",
   "tools": {
     "agent_lint": {},
     "filesystem": {

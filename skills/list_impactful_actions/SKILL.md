@@ -11,6 +11,6 @@ Find the most impactful things to do for the day, week, or quarter from this wee
 - Priority icons: 🔺 Highest, ⏫ High, 🔼 Medium, 🔽 Low, ⏬ Lowest. Categories come with each project (the briefing and `project_query` return them); a project with none is work. Tags: `#a/` actions; `#p/` projects (the alias in a project note's frontmatter); `#c/` a year's prioritized commitment (e.g. `#c/⏫2026`).
 
 ## Workflow
-1. If today's briefing is not in this conversation, call `day_briefing()`. Optionally, in the same step, run `git` `log-p` on a project's file to gauge recent momentum.
+1. If today's briefing is not in this conversation, call `day_briefing()`, asking for `medium` thinking: choosing from the briefing is the heavy step. Optionally, in the same step, run `git` `log-p` on a project's file to gauge recent momentum.
 2. Pick the top 3 tasks that most need attention to move active projects forward, judged by their due or scheduled dates, priority icons and this week's focus. If a pick lacks the context to act on, do not guess: read its project file.
 3. Return the picks grouped by Work, Personal, Family, Others, each with why it was chosen (priority, momentum, this week's focus), and the sources you read. Note workload balance, stalled projects, or new PKM patterns in your `<system_memory_log>`.

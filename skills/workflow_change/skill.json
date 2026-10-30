@@ -3,7 +3,6 @@
   "name": "Workflow Change",
   "description": "Asks the coding graph for a change to an agent's code. Writes a spec with made-up test cases in the shape of the user's real files, queues it, follows it with graph_status to the PR link, and grants a new tool once the PR merges.",
   "emoji": "🧩",
-  "thinking": "high",
   "tools": {
     "graph_call": {},
     "graph_status": {},

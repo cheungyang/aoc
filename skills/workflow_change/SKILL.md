@@ -6,7 +6,7 @@ description: Asks the coding graph for a change to an agent's code. Writes a spe
 A change to what an agent's code reads or computes: a new field, a file format a tool must learn, a new tool or scan, a new RULES.md key. Only when the code rule in AGENTS.md holds. Not for a threshold that already exists (the agent edits its RULES.md) or for steps and decisions (edit the skill). You never write agent code, its tests or WORKFLOW.md yourself: the coding graph builds them and the user reviews the PR.
 
 ## Workflow
-1. In one step, read what the change touches:
+1. In one step, read what the change touches, asking for `high` thinking (the spec is the heavy step):
    - the tool's module and its helpers: `agents/<agent_id>/tools/`, `agents/<agent_id>/lib/`;
    - its section of `agents/<agent_id>/WORKFLOW.md`, and `lib/rules.py` if any;
    - its tests, in `tests/agents/`;
