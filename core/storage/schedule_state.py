@@ -22,6 +22,7 @@ from core.config.settings import Config
 
 class ScheduleState(Store):
     schema = ("schedule_state",)
+    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
 
     def default_path(self) -> str:
         return Config().memory_db_path

@@ -87,6 +87,7 @@ def _values(record: GateRecord) -> Dict[str, Any]:
 
 class GateLog(Store):
     schema = ("speaker_gate_log",)
+    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
 
     def default_path(self) -> str:
         return Config().memory_db_path

@@ -1,4 +1,5 @@
-"""The core/storage layout: every schema file belongs to one store, and SQLite is opened only there."""
+"""The core/storage layout: every schema file belongs to one store, SQLite is opened only there, and
+the stores that share memory.db write it the same way."""
 import importlib
 import inspect
 import pkgutil
@@ -9,6 +10,7 @@ import unittest
 from pathlib import Path
 
 import core.storage
+from core.config.settings import Config
 from core.storage import Store, apply_schema
 from core.storage.base import SCHEMAS_DIR, load_schema
 
@@ -89,6 +91,27 @@ class TestStorageBoundary(unittest.TestCase):
             if re.search(r"\bsqlite3\.connect\(", text):
                 offenders.append(rel)
         self.assertEqual(offenders, [], "open the file through a core/storage store instead")
+
+
+class TestMemoryDb(unittest.TestCase):
+    """The stores that share memory.db write it the same way."""
+
+    def test_every_store_in_memory_db_runs_wal_without_a_sync_per_commit(self):
+        """SQLite's default, synchronous = FULL, syncs the WAL on every commit: ~65 ms a write on the NAS.
+        NORMAL syncs only when SQLite checkpoints; a power cut may lose the last commits, never the file."""
+        shared = []
+        for cls in stores():
+            try:
+                path = cls().path
+            except NotImplementedError:
+                continue
+            if path != Config().memory_db_path:
+                continue
+            shared.append(cls.__name__)
+            with self.subTest(store=cls.__name__):
+                self.assertIn("journal_mode = WAL", cls.pragmas)
+                self.assertIn("synchronous = NORMAL", cls.pragmas)
+        self.assertGreaterEqual(len(shared), 7, f"found only {shared}: are the stores still in memory.db?")
 
 
 if __name__ == "__main__":

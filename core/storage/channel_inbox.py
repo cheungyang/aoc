@@ -148,6 +148,7 @@ def _values(row: InboxRow) -> Dict[str, Any]:
 
 class InboxStore(Store):
     schema = ("channel_inbox",)
+    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
 
     def default_path(self) -> str:
         return Config().memory_db_path
