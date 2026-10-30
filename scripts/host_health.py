@@ -33,14 +33,12 @@ come from the disk too, until the cache fills again.
 import argparse
 import json
 import os
-import sqlite3
 import statistics
 import struct
 import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -310,15 +308,12 @@ def extent_count(path: str) -> Optional[int]:
 def open_times(db: str, n: Optional[int] = None) -> Tuple[List[float], int]:
     """Seconds to open the database read-only and load its schema, each of
     `n` (OPENS) times, and how many objects the schema has."""
-    uri = f"{Path(db).resolve().as_uri()}?mode=ro"
+    store = SessionStore(db)
     took, objects = [], 0
     for _ in range(n or OPENS):
         started = time.perf_counter()
-        conn = sqlite3.connect(uri, uri=True)
-        try:
+        with store.read_only() as conn:
             objects = conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]
-        finally:
-            conn.close()
         took.append(time.perf_counter() - started)
     return took, objects
 
@@ -328,8 +323,7 @@ def write_cycles(directory: str, n: Optional[int] = None) -> Tuple[List[float], 
     `n` (WRITES) of each: as the only connection, whose close checkpoints the
     WAL and syncs, then with another connection open, whose close doesn't."""
     n = n or WRITES
-    path = os.path.join(directory, "scratch.db")
-    store = SessionStore(path)
+    store = SessionStore(os.path.join(directory, "scratch.db"))
     store.append_message("host_health", "user", "warm-up")  # makes the file and its table
 
     def timed() -> List[float]:
@@ -341,12 +335,9 @@ def write_cycles(directory: str, n: Optional[int] = None) -> Tuple[List[float], 
         return took
 
     alone = timed()
-    holder = sqlite3.connect(path)
-    try:
+    with store.connect() as holder:
         holder.execute("SELECT count(*) FROM sqlite_master").fetchall()  # now it holds the WAL open
         shared = timed()
-    finally:
-        holder.close()
     return alone, shared
 
 
@@ -462,7 +453,8 @@ def file_lines(db: str, proc: str = PROC) -> List[str]:
     lines = ["Size: " + ", ".join(sizes)]
     free = os.statvfs(directory)
     kind = filesystem(directory, _read(os.path.join(proc, "mounts")) or "")
-    lines.append((f"Filesystem: {kind}, " if kind else "Free space: ") + f"{_size(free.f_bavail * free.f_frsize)} free")
+    lines.append(f"Filesystem: {kind}, {_size(free.f_bavail * free.f_frsize)} free" if kind
+                 else f"Free space: {_size(free.f_bavail * free.f_frsize)}")
     others = sorted(name for name in os.listdir(directory) if name.endswith(".db") and name != os.path.basename(db))
     if others:
         lines.append("Other databases beside it: " + ", ".join(
@@ -493,7 +485,10 @@ def timing_lines(db: str, cold: bool) -> List[str]:
     if exists:
         first_s, first_rate = read_speed(db, cold)
         again_s, again_rate = read_speed(db)
-        how = "from the disk (--cold)" if cold else "as cached now"
+        if cold and hasattr(os, "posix_fadvise"):
+            how = "from the disk (--cold)"
+        else:
+            how = "as cached now" + (" (--cold needs Linux)" if cold else "")
         lines.append(f"Read memory.db end to end, {how}: {_ms(first_s)} ({first_rate:,.0f} MB/s); "
                      f"again: {_ms(again_s)} ({again_rate:,.0f} MB/s)")
     return lines
