@@ -251,5 +251,21 @@ class TestAgentPrompts(unittest.TestCase):
         self.assertIn("pkm/agents/test-agent/RULES.md", prompt)
         self.assertNotIn("move_pct", prompt)  # the PKM is never read: the block stays static
 
+    def test_an_agent_on_gemini_is_offered_the_next_thinking_marker(self):
+        from core.runtime.model.thinking import MARKER_CLOSE, MARKER_OPEN
+
+        prompt = get_tool_rules_prompt("test-agent")  # no agent.json: Gemini, the default
+        self.assertIn(f"`{MARKER_OPEN}LEVEL{MARKER_CLOSE}`", prompt, "the tags the model wrapper takes out")
+        self.assertIn("minimal, low, medium or high", prompt)
+        self.assertIn("covers your next model call only (voice turns cap it at medium)", prompt)
+        self.write("agent.json", '{"model": "PRO", "thinking": {"text": "low"}}')
+        self.assertIn(MARKER_OPEN, get_tool_rules_prompt("test-agent"))
+
+    def test_stateless_workers_and_other_providers_are_not(self):
+        for config in ('{"stateless": true}', '{"provider": "local"}', '{"provider": "ollama"}'):
+            with self.subTest(config=config):
+                self.write("agent.json", config)
+                self.assertNotIn("next_thinking", get_tool_rules_prompt("test-agent"))
+
 if __name__ == "__main__":
     unittest.main()

@@ -131,7 +131,6 @@ class TestKitchenInventory(KitchenFilesCase):
             loader = ToolsLoader()
             self.assertTrue(loader.check_permission(ctx, "kitchen_inventory", "use", self.path("INVENTORY.md")))
             self.assertTrue(loader.check_permission(ctx, "kitchen_snapshot"))
-            self.assertTrue(loader.check_permission(ctx, "set_thinking"))
             # Grants are repo-relative paths; only the path is resolved, nothing is opened.
             for action in ("read", "ls", "grep"):
                 self.assertTrue(loader.check_permission(ctx, "filesystem", action, "pkm/wallet/kitchen/INVENTORY.md"))

@@ -107,13 +107,13 @@ class TestReport:
         results.append(CaseResult(case_id="b", run=1, marks={}, errored=True, failures=["agent error: 503"]))
         assert "Speech: 1/2 runs came with a <speech> block. (1 failed runs aren't counted.)" in render_report(results)
 
-    def test_thinking_picks_are_reported_with_their_reasons(self):
+    def test_thinking_picks_are_reported_with_their_caps(self):
         result = CaseResult(case_id="a", run=1, marks={}, thinking_picks=[
-            {"kind": "thinking_pick", "level": "high", "applied": "medium", "reason": "choosing 4 of 12"},
-            {"kind": "thinking_pick", "level": "minimal", "applied": "minimal", "reason": "relaying"},
+            {"kind": "thinking_pick", "level": "high", "applied": "medium"},
+            {"kind": "thinking_pick", "level": "minimal", "applied": "minimal"},
         ])
         report = render_report([result])
-        assert "picked medium (asked high): choosing 4 of 12; picked minimal: relaying" in report
+        assert "picked medium (asked high); picked minimal" in report
 
 
 GOLDEN_SPEECH = (

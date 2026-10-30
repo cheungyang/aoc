@@ -70,7 +70,8 @@ class Agent(BaseAgent):
         channel_name = session.channel_name
         job_id = session.job_id
 
-        # Turn hints (a set_thinking pick) are scratch state for one turn.
+        # Turn hints (the model's next-call thinking pick, the calls the proactive
+        # team notes) are scratch state for one turn.
         session.turn_hints.clear()
 
         # Lazy load langgraph graph object via GraphBuilder

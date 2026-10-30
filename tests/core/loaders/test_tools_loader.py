@@ -347,16 +347,16 @@ class TestFollowUpTool(unittest.TestCase):
     def test_the_roster_has_it_only_where_the_predicate_says(self, get_config, _needs_load_skill):
         get_config.return_value = self.CONFIG
         loader = ToolsLoader()
-        granted = {"set_thinking": {}, FOLLOW_UP: {}}  # a grant naming it adds it nowhere else
+        granted = {"hello_world": {}, FOLLOW_UP: {}}  # a grant naming it adds it nowhere else
 
         def roster(ctx):
             with patch.object(ToolsLoader, "_merge_tool_permissions", return_value=dict(granted)):
                 return [t.name for t in loader.get_tools(ctx)]
 
-        self.assertEqual(roster(self._ctx()), ["set_thinking"])  # the switch is off
+        self.assertEqual(roster(self._ctx()), ["hello_world"])  # the switch is off
         with Config().overriding(proactive_delivery=True):
-            self.assertEqual(roster(self._ctx()), [FOLLOW_UP, "set_thinking"])
-            self.assertEqual(roster(self._ctx(record_memory=False)), ["set_thinking"])
+            self.assertEqual(roster(self._ctx()), [FOLLOW_UP, "hello_world"])
+            self.assertEqual(roster(self._ctx(record_memory=False)), ["hello_world"])
 
 
 if __name__ == "__main__":

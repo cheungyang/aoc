@@ -137,11 +137,12 @@ class ExecutionContext:
       the adapter that starts the turn, kept by derived contexts, and handed on
       by delegation. None for a turn nobody sees (a job, a script).
     - `turn_hints` is the one mutable field: scratch state for the turn in
-      flight, shared by the turn's tools and the model wrapper (the agent's own
-      `set_thinking` pick lives here). The runtime clears it when a turn starts.
-      A context for another agent (`with_agent`) gets its own, so a pick never
-      crosses agents; the other derivations share it, since they are the same
-      agent's turn.
+      flight, shared by the turn's tools, the tool hooks and the model wrapper
+      (the model's pick for its next call, from its `<next_thinking>` marker,
+      lives here). The runtime clears it when a turn starts. A context for
+      another agent (`with_agent`) gets its own, so a pick never crosses
+      agents; the other derivations share it, since they are the same agent's
+      turn.
     """
     agent_id: str
     source: str

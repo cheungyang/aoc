@@ -19,8 +19,9 @@ class TestGrants(unittest.TestCase):
         return ToolsLoader().check_permission(self.ctx, tool, action, target)
 
     def test_its_own_tools(self):
-        for tool in ("workout_setup", "log_workout_session", "set_thinking"):
+        for tool in ("workout_setup", "log_workout_session"):
             self.assertTrue(self.allowed(tool), tool)
+        self.assertFalse(self.allowed("set_thinking"), "retired: coach_home_workout asks for its level with <next_thinking>")
 
     def test_google_health_reads_sleep_and_exercise_only(self):
         self.assertTrue(self.allowed("google_health", "sleep", "sleep"))

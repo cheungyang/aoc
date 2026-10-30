@@ -173,5 +173,78 @@ class TestRetryReactionEvent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [{"type": REACTION, "agent_id": "main", "emoji": "🔁"}])
 
 
+class TestNextThinkingMarker(unittest.IsolatedAsyncioTestCase):
+    """The model's <next_thinking> pick is taken out of every response, streamed or not, and recorded."""
+
+    def setUp(self):
+        self.llm = RetryingChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake", max_retries=6)
+        self.pick = patch.object(llm_retry, "pick_thinking").start()
+        patch.object(llm_retry, "_async_sleep", new=AsyncMock()).start()
+        patch.object(llm_retry, "_announce_retry", new=AsyncMock()).start()
+        self.addCleanup(patch.stopall)
+
+    async def stream(self, *attempts):
+        calls = []
+        patch.object(ChatGoogleGenerativeAI, "_astream", _scripted_stream(list(attempts), calls)).start()
+        return [gen async for gen in self.llm._astream([HumanMessage(content="hi")])], calls
+
+    async def test_a_streamed_marker_split_across_chunks_is_taken_out_and_picked(self):
+        out, _ = await self.stream([_text("<next_thin"), _text("king>high</next_thinking>\n"), _tool_chunk()])
+        self.assertEqual("".join(g.text for g in out), "")
+        self.assertTrue(any(g.message.tool_call_chunks for g in out), "the tool call still goes out")
+        self.pick.assert_called_once_with("high")
+
+    async def test_the_text_around_it_streams_on(self):
+        out, _ = await self.stream([_text("Let me check.\n<next_thinking>medium</next_thinking>\n"),
+                                    _text("One moment."), _tool_chunk()])
+        self.assertEqual("".join(g.text for g in out), "Let me check.\nOne moment.")
+        self.pick.assert_called_once_with("medium")
+
+    async def test_text_blocks_too(self):
+        block = ChatGenerationChunk(message=AIMessageChunk(content=[{"type": "text", "text": "<next_thinking>low</next_thinking>"}]))
+        out, _ = await self.stream([block, _tool_chunk()])
+        self.assertEqual("".join(g.text for g in out), "")
+        self.pick.assert_called_once_with("low")
+
+    async def test_without_a_marker_nothing_changes(self):
+        chunks = [_text("Hello"), _text(" world")]
+        out, _ = await self.stream(chunks)
+        self.assertEqual(out, chunks)
+        self.pick.assert_not_called()
+
+    async def test_a_look_alike_held_at_the_end_still_goes_out(self):
+        out, _ = await self.stream([_text("See <next_")])
+        self.assertEqual("".join(g.text for g in out), "See <next_")
+        self.pick.assert_not_called()
+
+    async def test_a_resumed_stream_never_prefills_the_marker(self):
+        out, calls = await self.stream([_text("<next_thinking>high</next_thinking>Half, "), _503()],
+                                       [_text("and the rest.")])
+        self.assertEqual("".join(g.text for g in out), "Half, and the rest.")
+        self.assertEqual(calls[1]["messages"][-1].content, "Half, ")
+        self.pick.assert_called_once_with("high")
+
+    async def test_a_whole_response_is_cleaned_and_picked(self):
+        result = ChatResult(generations=[ChatGeneration(message=AIMessage(
+            content="<next_thinking>low</next_thinking>\nOk", tool_calls=[{"name": "x", "args": {}, "id": "1"}]))])
+        with patch.object(ChatGoogleGenerativeAI, "_agenerate", AsyncMock(return_value=result)):
+            got = await self.llm._agenerate([HumanMessage(content="hi")])
+        self.assertEqual(got.generations[0].message.content, "Ok")
+        self.assertEqual(got.generations[0].message.tool_calls[0]["name"], "x")
+        self.pick.assert_called_once_with("low")
+
+    async def test_a_whole_response_without_one_is_the_same_object(self):
+        result = ChatResult(generations=[ChatGeneration(message=AIMessage(content="Ok"))])
+        with patch.object(ChatGoogleGenerativeAI, "_agenerate", AsyncMock(return_value=result)):
+            self.assertIs(await self.llm._agenerate([HumanMessage(content="hi")]), result)
+        self.pick.assert_not_called()
+
+    def test_the_sync_path_too(self):
+        result = ChatResult(generations=[ChatGeneration(message=AIMessage(content="<next_thinking>high</next_thinking>"))])
+        with patch.object(ChatGoogleGenerativeAI, "_generate", MagicMock(return_value=result)):
+            self.assertEqual(self.llm._generate([HumanMessage(content="hi")]).generations[0].message.content, "")
+        self.pick.assert_called_once_with("high")
+
+
 if __name__ == "__main__":
     unittest.main()

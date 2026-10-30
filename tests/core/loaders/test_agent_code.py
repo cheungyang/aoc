@@ -59,13 +59,13 @@ class TestAgentTools(unittest.TestCase):
         self.assertTrue(agent_tools, "no agent tools found")
         tool, (agent_id, module_path) = sorted(agent_tools.items())[0]
         self.assertEqual(loader.module_path(tool), module_path)
-        grants = {tool: {}, "set_thinking": {}}
+        grants = {tool: {}, "hello_world": {}}
         with patch.object(ToolsLoader, "_merge_tool_permissions", return_value=grants), \
                 patch("core.loaders.skills_loader.SkillsLoader.needs_load_skill", return_value=False):
             own = [t.name for t in loader.get_tools(make_context(agent_id=agent_id))]
             other = [t.name for t in loader.get_tools(make_context(agent_id="some-other-agent"))]
-        self.assertEqual(sorted(own), sorted([tool, "set_thinking"]))
-        self.assertEqual(other, ["set_thinking"], "another agent's grant can't load it")
+        self.assertEqual(sorted(own), sorted([tool, "hello_world"]))
+        self.assertEqual(other, ["hello_world"], "another agent's grant can't load it")
 
 
 if __name__ == "__main__":

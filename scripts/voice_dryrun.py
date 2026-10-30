@@ -182,7 +182,7 @@ class CaseResult:
     tools: List[str] = field(default_factory=list)
     agents: List[str] = field(default_factory=list)
     model_calls: List[dict] = field(default_factory=list)
-    thinking_picks: List[dict] = field(default_factory=list)  # set_thinking: level, applied, reason
+    thinking_picks: List[dict] = field(default_factory=list)  # the model's <next_thinking> picks: level, applied
     tokens: Dict[str, int] = field(default_factory=dict)
     blocked_writes: List[str] = field(default_factory=list)
     speech: str = ""            # the <speech> text the router heard
@@ -551,9 +551,9 @@ def render_report(results: List[CaseResult]) -> str:
 
 
 def _picks(r: CaseResult) -> List[str]:
-    """The agent's set_thinking picks, with the reason it gave."""
+    """The model's <next_thinking> picks: the level applied, and what it asked for when capped."""
     return [f"picked {p['applied']}" + (f" (asked {p['level']})" if p["level"] != p["applied"] else "")
-            + f": {p['reason']}" for p in r.thinking_picks]
+            for p in r.thinking_picks]
 
 
 def _ms(value) -> str:

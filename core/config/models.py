@@ -113,10 +113,11 @@ THINKING_LEVELS = ("minimal", "low", "medium", "high")
 # model's own default, as do stateless internal workers.
 THINKING_BY_SURFACE = {"voice": "low", "text": "medium", "scheduled": "high"}
 
-# The deepest level an agent may pick for itself (`set_thinking`) on a voice
-# turn. Models tend to ask for more depth "to be safe", and on voice every level
-# above this is seconds of silence, so one constant keeps a pick from undoing
-# the latency work. Schedules and agent.json overrides are not capped by it.
+# The deepest level the model may pick for its next call (its `<next_thinking>`
+# marker) on a voice turn. Models tend to ask for more depth "to be safe", and
+# on voice every level above this is seconds of silence, so one constant keeps a
+# pick from undoing the latency work. Schedules and agent.json overrides are not
+# capped by it.
 VOICE_THINKING_CAP = "medium"
 
 # Levels each tier accepts. PRO has no `minimal`; a request for it is raised

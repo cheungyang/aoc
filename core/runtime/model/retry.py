@@ -26,6 +26,10 @@ use `max_retries` as the attempt count and the SDK's backoff curve.
 
 Every 503 is logged, and each retry dispatches an `llm_retry` custom event
 that the stream handler turns into a reaction on the triggering Discord message.
+
+Every response also passes through here on its way out, so this is where the
+model's `<next_thinking>` pick is read and taken out of the text, streamed or
+not (core/runtime/model/thinking.py).
 """
 
 import asyncio
@@ -34,13 +38,13 @@ import time
 from typing import Any, AsyncIterator, List, Optional
 
 from google.genai.types import HttpOptions, HttpRetryOptions
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from core.runtime.foundation import events
 from core.runtime.foundation.context import try_context
-from core.runtime.model.thinking import resolve_thinking_level
+from core.runtime.model.thinking import MarkerFilter, pick_thinking, resolve_thinking_level, take_marker
 from core.runtime.observability.turn_trace import current_turn_trace
 
 RETRY_EMOJI = "🔁"
@@ -157,6 +161,55 @@ def _trim_seam(gen: ChatGenerationChunk, partial: str) -> ChatGenerationChunk:
     )
 
 
+def _map_text(content: Any, transform) -> Any:
+    """`content` with each text part passed through `transform`; the same object if none changed."""
+    if isinstance(content, str):
+        return transform(content)
+    changed, mapped = False, []
+    for block in content:
+        if isinstance(block, str):
+            text = transform(block)
+            changed |= text != block
+            mapped.append(text)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            text = transform(block.get("text", ""))
+            changed |= text != block.get("text", "")
+            mapped.append({**block, "text": text})
+        else:
+            mapped.append(block)
+    return mapped if changed else content
+
+
+def _without_marker(gen: ChatGenerationChunk, marker: MarkerFilter) -> ChatGenerationChunk:
+    """A streamed chunk with the marker, and whatever may start one, held out of its text."""
+    content = _map_text(gen.message.content, marker.feed)
+    if content is gen.message.content or content == gen.message.content:
+        return gen
+    return ChatGenerationChunk(message=gen.message.model_copy(update={"content": content}),
+                               generation_info=gen.generation_info)
+
+
+def _picked(result: ChatResult) -> ChatResult:
+    """A whole response without its marker, its pick recorded; the same result if it has none."""
+    levels = []
+
+    def take(text: str) -> str:
+        text, level = take_marker(text)
+        if level:
+            levels.append(level)
+        return text
+
+    generations = []
+    for gen in result.generations:
+        content = _map_text(gen.message.content, take)
+        generations.append(gen if content is gen.message.content else ChatGeneration(
+            message=gen.message.model_copy(update={"content": content}), generation_info=gen.generation_info))
+    if not levels:
+        return result
+    pick_thinking(levels[-1])
+    return ChatResult(generations=generations, llm_output=result.llm_output)
+
+
 class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI that hides 503s from callers. See module docstring."""
 
@@ -228,7 +281,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 attempt += 1
                 continue
             self._log_recovered(attempt, waited)
-            return result
+            return _picked(result)
 
     async def _agenerate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
         kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
@@ -246,7 +299,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 attempt += 1
                 continue
             self._log_recovered(attempt, waited)
-            return result
+            return _picked(result)
 
     async def _astream(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
@@ -254,6 +307,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         partial = ""        # text already yielded, across attempts
         resumable = True    # False once a non-text chunk has been yielded
         trim_pending = False
+        marker = MarkerFilter()  # the model's <next_thinking> pick, taken out as it streams
         while True:
             request = [*messages, AIMessage(content=partial)] if partial else messages
             try:
@@ -261,11 +315,18 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                     if trim_pending and gen.text:
                         gen = _trim_seam(gen, partial)
                         trim_pending = False
+                    gen = _without_marker(gen, marker)
                     if _is_text_only(gen):
                         partial += gen.text
                     else:
                         resumable = False
                     yield gen
+                held = marker.flush()
+                if held:
+                    partial += held
+                    yield ChatGenerationChunk(message=AIMessageChunk(content=held))
+                if marker.level:
+                    pick_thinking(marker.level)
                 self._log_recovered(attempt, waited)
                 return
             except Exception as e:
@@ -280,3 +341,4 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 waited += delay
                 attempt += 1
                 trim_pending = bool(partial)
+                marker.flush()  # the continuation regenerates from what was yielded

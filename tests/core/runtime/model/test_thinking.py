@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
-from core.runtime.model.thinking import resolve_thinking_level
+from core.runtime.model.thinking import PICK_KEY, MarkerFilter, pick_thinking, resolve_thinking_level, take_marker
+from core.runtime.observability.turn_trace import detach_turn_trace, start_turn_trace
 from core.config.models import FLASH, FLASH_LITE, PRO, THINKING_BY_SURFACE, clamp_thinking_level
 
 
@@ -72,6 +73,118 @@ class TestOverrides(ResolverCase):
 
     def test_result_is_clamped_to_the_model(self):
         self.assertEqual(self.resolve(_ctx(source="scheduled", thinking_level="minimal"), PRO), "low")
+
+
+class TestPick(ResolverCase):
+    """The model's pick, from its <next_thinking> marker: its next call only, capped on voice."""
+
+    def setUp(self):
+        super().setUp()
+        self.printed = patch("builtins.print").start()
+
+    def bind(self, ctx):
+        token = current_execution_context.set(ctx)
+        self.addCleanup(current_execution_context.reset, token)
+        return ctx
+
+    def test_a_pick_covers_the_next_call_only(self):
+        self.bind(_ctx())
+        self.assertEqual(pick_thinking("high"), "high")
+        self.assertEqual(resolve_thinking_level(FLASH), "high")
+        self.assertEqual(resolve_thinking_level(FLASH), "medium", "back to the text default")
+
+    def test_voice_picks_are_capped(self):
+        self.bind(_ctx(surface="voice"))
+        self.assertEqual(pick_thinking("high"), "medium")
+        self.assertEqual(resolve_thinking_level(FLASH), "medium")
+        self.assertEqual(resolve_thinking_level(FLASH), "low")
+
+    def test_a_pick_below_the_cap_is_kept_on_voice(self):
+        self.bind(_ctx(surface="voice"))
+        self.assertEqual(pick_thinking("minimal"), "minimal")
+        self.assertEqual(resolve_thinking_level(FLASH), "minimal")
+
+    def test_a_pick_beats_the_schedule_level_and_is_still_clamped(self):
+        self.bind(_ctx(thinking_level="high"))
+        pick_thinking("minimal")
+        self.assertEqual(resolve_thinking_level(PRO), "low", "PRO has no minimal")
+        self.assertEqual(resolve_thinking_level(PRO), "high", "then the schedule's level again")
+
+    def test_an_unknown_level_records_nothing(self):
+        ctx = self.bind(_ctx())
+        self.assertIsNone(pick_thinking("max"))
+        self.assertNotIn(PICK_KEY, ctx.turn_hints)
+        self.assertEqual(resolve_thinking_level(FLASH), "medium")
+
+    def test_outside_an_agent_run_nothing_is_recorded(self):
+        self.assertIsNone(pick_thinking("high"))
+
+    def test_a_stateless_worker_keeps_the_model_default(self):
+        self.bind(_ctx("graph-worker-low", stateless=True))
+        pick_thinking("high")
+        self.assertIsNone(resolve_thinking_level(FLASH_LITE))
+
+    def test_the_pick_goes_in_the_log_and_the_voice_trace(self):
+        trace = start_turn_trace("day-planner", 1)
+        self.addCleanup(detach_turn_trace)
+        self.bind(_ctx(surface="voice"))
+        pick_thinking("high")
+        self.printed.assert_called_once_with("[Thinking] agent=day-planner surface=voice picked=high applied=medium")
+        events = [{k: v for k, v in e.items() if k != "t"} for e in trace.events if e["kind"] == "thinking_pick"]
+        self.assertEqual(events, [{"kind": "thinking_pick", "agent": "day-planner", "level": "high", "applied": "medium"}])
+
+    def test_another_agents_context_starts_without_the_pick(self):
+        ctx = self.bind(_ctx())
+        pick_thinking("high")
+        self.assertNotIn(PICK_KEY, ctx.with_agent("helper").turn_hints)
+        self.assertIn(PICK_KEY, ctx.with_surface("voice").turn_hints, "same agent, same turn")
+
+
+class TestMarker(unittest.TestCase):
+    """`<next_thinking>LEVEL</next_thinking>`, taken out of a response's text."""
+
+    def test_a_whole_response(self):
+        self.assertEqual(take_marker("<next_thinking>high</next_thinking>\nChecking the files."),
+                         ("Checking the files.", "high"))
+        self.assertEqual(take_marker("<Next_Thinking> Medium </Next_Thinking>"), ("", "medium"))
+        self.assertEqual(take_marker("No marker here."), ("No marker here.", None))
+
+    def test_a_marker_split_across_chunks(self):
+        marker = MarkerFilter()
+        out = [marker.feed(t) for t in ("<next_th", "inking>hi", "gh</next_thinking>\n", "Reading them now.")]
+        self.assertEqual(out, ["", "", "", "Reading them now."])
+        self.assertEqual(marker.level, "high")
+
+    def test_other_text_goes_straight_out(self):
+        marker = MarkerFilter()
+        self.assertEqual(marker.feed("Here they are. <speech>Three picks.</speech>"),
+                         "Here they are. <speech>Three picks.</speech>")
+        self.assertEqual(marker.feed(" 2 < 3"), " 2 < 3")
+        self.assertIsNone(marker.level)
+
+    def test_a_look_alike_is_released_once_it_differs(self):
+        marker = MarkerFilter()
+        self.assertEqual(marker.feed("Use <next"), "Use ")
+        self.assertEqual(marker.feed(" time"), "<next time")
+
+    def test_a_start_still_held_at_the_end_is_flushed(self):
+        marker = MarkerFilter()
+        self.assertEqual(marker.feed("Done <next_"), "Done ")
+        self.assertEqual(marker.flush(), "<next_")
+        self.assertEqual(marker.flush(), "")
+
+    def test_an_overlong_body_is_not_a_marker(self):
+        text = "<next_thinking>" + "x" * 40 + "</next_thinking>"
+        marker = MarkerFilter()
+        self.assertEqual(marker.feed(text), text)
+        self.assertIsNone(marker.level)
+        self.assertEqual(take_marker(text), (text, None))
+
+    def test_an_unknown_level_is_still_taken_out(self):
+        """pick_thinking refuses it; the user never sees it either way."""
+        marker = MarkerFilter()
+        self.assertEqual(marker.feed("<next_thinking>max</next_thinking>ok"), "ok")
+        self.assertEqual(marker.level, "max")
 
 
 class TestClamp(unittest.TestCase):

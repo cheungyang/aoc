@@ -5,6 +5,7 @@ prompt caching. Their instruction text is in templates/system/; the agent's
 own text comes from agents/<id>/, and its memory from the PKM. The voice block
 is in core/prompts/voice.py, and Live Context's in core/prompts/live_context.py.
 """
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ class ToolRulesPrompt(Prompt):
     agent_id: str
     workflow: bool = False    # agents/<id>/WORKFLOW.md exists
     thresholds: bool = False  # agents/<id>/lib/rules.py exists, so pkm/agents/<id>/RULES.md holds its thresholds
+    thinking: bool = False    # its model calls take a thinking level, so it may pick its next one
 
 
 @dataclass
@@ -196,16 +198,29 @@ def get_tool_rules_prompt(agent_id: str) -> str:
     """How to treat what tools return, for every agent; static.
 
     An agent with tools of its own also gets pointers to its WORKFLOW.md and
-    RULES.md, once it has them. Only `agents/<agent_id>/` is read, so the block
-    changes on deploy, never mid-day.
+    RULES.md, once it has them, and one whose calls take a thinking level is
+    offered the `<next_thinking>` marker (core/runtime/model/thinking.py). Only
+    `agents/<agent_id>/` is read, so the block changes on deploy, never mid-day.
     """
     agent_dir = os.path.dirname(_agent_prompt_files(agent_id)["AGENT"][0])
     rules = ToolRulesPrompt(
         agent_id=agent_id,
         workflow=os.path.isfile(os.path.join(agent_dir, "WORKFLOW.md")),
         thresholds=os.path.isfile(os.path.join(agent_dir, "lib", "rules.py")),
+        thinking=_takes_thinking_level(agent_dir),
     )
     return _block("TOOL_RULES", rules.render(), "How to treat what tools return")
+
+
+def _takes_thinking_level(agent_dir: str) -> bool:
+    """Whether the agent's model calls take a thinking level: it runs on Gemini (the
+    default provider) and isn't a stateless worker, whose calls keep the model's default."""
+    try:
+        with open(os.path.join(agent_dir, "agent.json"), encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        config = {}
+    return config.get("provider", "google") == "google" and not config.get("stateless")
 
 
 def user_path(agent_id: str) -> str:

@@ -54,12 +54,26 @@ class TestSkillFiles(unittest.TestCase):
                 self.assertRegex(skill_text(skill_id), r"Run `agent_lint`[^\n]* and fix what it finds before reporting done")
                 self.assertIn("agent_lint", skill_json(skill_id)["tools"])
 
-    def test_heavy_steps_raise_thinking(self):
+    def test_heavy_steps_ask_for_high_thinking(self):
+        """Its text turns think low; a heavy step asks for high with its reads (the model's
+        <next_thinking> marker), at no extra step. No skill.json field and no set_thinking."""
         for skill_id in SKILLS:
             with self.subTest(skill=skill_id):
-                says = '`set_thinking("high"' in skill_text(skill_id)  # skill_creation only shows how to write one
-                self.assertEqual(says, skill_id in HIGH_THINKING)
-                self.assertEqual("set_thinking" in skill_json(skill_id)["tools"], skill_id in HIGH_THINKING)
+                if skill_id != "skill_creation":  # it only shows how to write one
+                    asks = re.search(r"ask(?:ing)? for `high` thinking", skill_text(skill_id)) is not None
+                    self.assertEqual(asks, skill_id in HIGH_THINKING)
+                self.assertNotIn("thinking", skill_json(skill_id))
+                self.assertNotIn("set_thinking", skill_text(skill_id))
+                self.assertNotIn("set_thinking", skill_json(skill_id)["tools"])
+
+    def test_agent_creation_asks_in_its_preloaded_core(self):
+        """The plan's classification is the heavy step, and it happens before the Reference is
+        loaded, so the ask has to be in the Core agent-designer preloads."""
+        self.assertEqual(agent_json()["skills"]["agent_creation"], {"preload": "core"})
+        core = skill_text("agent_creation").split("## Reference")[0]
+        step = re.search(r"^2\. (.+)$", core, re.MULTILINE).group(1)
+        self.assertIn("This is the heavy step: ask for `high` thinking in the same response as the reads it needs.",
+                      step)
 
     def test_workflow_change_goes_through_the_coding_graph(self):
         text, tools = skill_text("workflow_change"), skill_json("workflow_change")["tools"]

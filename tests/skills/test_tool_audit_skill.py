@@ -35,7 +35,7 @@ class TestToolAuditSkill(unittest.TestCase):
             self.assertFalse(loader.check_permission(ctx, "filesystem", "write", own_workflow))
             self.assertFalse(loader.check_permission(
                 ctx, "filesystem", "read", os.path.join(REPO, "agents", "fitness-coach", "WORKFLOW.md")))
-            self.assertTrue(loader.check_permission(ctx, "set_thinking"))
+            self.assertFalse(loader.check_permission(ctx, "set_thinking"), "retired: the skill asks for its level with <next_thinking>")
 
     def test_the_text_matches_the_grants(self):
         with open(os.path.join(SKILL_DIR, "SKILL.md"), encoding="utf-8") as f:
@@ -43,9 +43,10 @@ class TestToolAuditSkill(unittest.TestCase):
         config = skill_json()
         self.assertEqual(re.search(r"^name: (\S+)$", text, re.MULTILINE).group(1), config["skill_id"])
         self.assertIn(re.search(r"^description: (.+)$", text, re.MULTILINE).group(1), config["description"])
-        for needle in ("explain=true", 'set_thinking("high"', "WORKFLOW.md", "RULES.md"):
+        for needle in ("explain=true", "WORKFLOW.md", "RULES.md", "asking for `high` thinking: recomputing by hand"):
             self.assertIn(needle, text)
-        self.assertIn("set_thinking", config["tools"])
+        self.assertNotIn("set_thinking", text)
+        self.assertNotIn("thinking", config, "the step asks for its level; skill.json has none")
 
 
 if __name__ == "__main__":
