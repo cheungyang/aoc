@@ -34,7 +34,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from core.config.settings import Config
-from core.storage.base import Row, Store
+from core.storage.base import WAL_PRAGMAS, Row, Store
 from core.storage.util import placeholders
 
 _JSON = {
@@ -216,7 +216,7 @@ def _decision_row(record: Row) -> Dict[str, Any]:
 
 class SignalStore(Store):
     schema = ("signals",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

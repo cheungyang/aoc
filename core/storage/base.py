@@ -25,10 +25,13 @@ own methods join it the same way, with `connect(conn)`.
 In WAL mode, though, the last connection to close folds the WAL into the file
 and syncs it, so where every connection closes, nearly every write pays that.
 `hold_open()` keeps one idle connection to a file for the process's life, which
-no call uses; main.py holds memory.db's.
+no call uses; main.py holds memory.db's, and has it fold the WAL in on a
+background thread, so that no commit has to (WAL_PRAGMAS).
 """
 import os
 import sqlite3
+import threading
+import time
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -40,8 +43,50 @@ SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas"
 
 Row = sqlite3.Row
 
-# The idle connections hold_open() keeps, one per file, for the process's life.
-_HELD: Dict[str, sqlite3.Connection] = {}
+# The pragmas of a WAL file that many short connections share, with one held open
+# (hold_open): no sync on commit, and SQLite folds the WAL into the file itself
+# only past 10,000 pages (~40 MB), a safety net. Its default, 1,000 pages, makes
+# whichever commit crosses it do the fold, ~0.7 s on the NAS; the held
+# connection's thread folds long before.
+WAL_PRAGMAS = ("journal_mode = WAL", "synchronous = NORMAL", "wal_autocheckpoint = 10000")
+
+
+class _Hold:
+    """A connection hold_open() keeps, and the thread folding the WAL in with it, if asked for."""
+
+    def __init__(self, conn: sqlite3.Connection, fold_every: Optional[float]):
+        self.conn = conn
+        self.stop = threading.Event()
+        self.folder = None
+        if fold_every:
+            self.folder = threading.Thread(target=self._fold, args=(fold_every,), name="wal-fold", daemon=True)
+            self.folder.start()
+
+    def _fold(self, every: float) -> None:
+        """Every `every` seconds, folds what the WAL holds into the file. PASSIVE: it waits
+        for no reader or writer, and with nothing new, it does nothing."""
+        while not self.stop.wait(every):
+            started = time.monotonic()
+            try:
+                _, pages, folded = self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()[0]
+            except sqlite3.Error as e:
+                print(f"[storage] Background WAL fold failed: {type(e).__name__}: {e}")
+                continue
+            took = time.monotonic() - started
+            if took >= 1.0:
+                print(f"[storage] Folded {folded} of {pages} WAL pages in {took:.1f} s, in the background")
+
+    def close(self) -> None:
+        self.stop.set()
+        if self.folder is not None:
+            self.folder.join(timeout=10)
+            if self.folder.is_alive():
+                return  # a fold still running: closing under it would break it
+        self.conn.close()
+
+
+# The connections hold_open() keeps, one per file, for the process's life.
+_HELD: Dict[str, _Hold] = {}
 
 
 class StoreMissing(FileNotFoundError):
@@ -128,7 +173,7 @@ class Store:
         finally:
             conn.close()
 
-    def hold_open(self) -> bool:
+    def hold_open(self, fold_every: Optional[float] = None) -> bool:
         """Keeps an idle connection to the file open for the rest of the process; False if one already is.
 
         In WAL mode, the last connection to close folds the WAL into the file,
@@ -136,30 +181,36 @@ class Store:
         header. Every call above closes its connection, so with none held,
         nearly every close is the last, and on a slow disk those syncs are most
         of a write's time (65 ms each on the NAS). With one held, no other close
-        is the last, in this process or another, and SQLite checkpoints on its
-        own each time the WAL reaches ~1,000 pages.
+        is the last, in this process or another.
+
+        `fold_every` (seconds) also starts a thread that folds the WAL in with
+        this connection, at that interval. Otherwise the commit that takes the
+        WAL past SQLite's threshold does it, on whatever thread made the commit;
+        WAL_PRAGMAS raise that threshold to a safety net the thread stays under.
 
         The connection runs the store's pragmas and one read, each to its end,
-        and nothing after, so it never keeps a read open: one would stop every
-        checkpoint at its snapshot and let the WAL grow without bound.
+        and then only the folds, so it never keeps a read open: one would stop
+        every checkpoint at its snapshot and let the WAL grow without bound.
         """
         path = os.path.abspath(self.path)
         if path in _HELD:
             return False
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path, check_same_thread=False)  # never used again, so any thread may close it
+        conn = sqlite3.connect(path, check_same_thread=False)  # the fold thread uses it, and any thread may close it
         for statement in (*(f"PRAGMA {pragma}" for pragma in self.pragmas), "SELECT count(*) FROM sqlite_master"):
             conn.execute(statement).fetchall()
         mode = conn.execute("PRAGMA journal_mode").fetchall()[0][0]
-        _HELD[path] = conn
-        print(f"[storage] Holding {path} open (journal_mode={mode}), so closing other connections won't checkpoint it")
+        _HELD[path] = _Hold(conn, fold_every)
+        folds = f", folding its WAL in every {fold_every:g} s" if fold_every else ""
+        print(f"[storage] Holding {path} open (journal_mode={mode}){folds}, so closing other connections won't checkpoint it")
         return True
 
     def release_hold(self) -> None:
-        """Closes the connection hold_open() keeps to the file, if any. As the last one, it folds the WAL in."""
-        conn = _HELD.pop(os.path.abspath(self.path), None)
-        if conn is not None:
-            conn.close()
+        """Closes the connection hold_open() keeps to the file, if any, and stops its fold thread.
+        As the last connection, it folds the WAL in."""
+        hold = _HELD.pop(os.path.abspath(self.path), None)
+        if hold is not None:
+            hold.close()
 
     def init(self, conn: Optional[sqlite3.Connection] = None, **identifiers: str) -> None:
         """Creates whatever of the schema doesn't exist yet.

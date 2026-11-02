@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.storage.base import Store
+from core.storage.base import WAL_PRAGMAS, Store
 from core.config.settings import Config
 
 
@@ -87,7 +87,7 @@ def _values(record: GateRecord) -> Dict[str, Any]:
 
 class GateLog(Store):
     schema = ("speaker_gate_log",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

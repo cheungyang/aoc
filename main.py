@@ -72,8 +72,9 @@ async def run_bots(dev: bool = False, agents: list = None):
         print("====================")
 
     # memory.db, which most stores share (sessions, jobs, the inbox...), held open while
-    # the bots run, so a store closing its connection doesn't sync the file (core/storage/base.py).
-    SessionStore().hold_open()
+    # the bots run, so a store closing its connection doesn't sync the file, and its WAL
+    # folded in every 30 s on a thread of its own, so no commit has to (core/storage/base.py).
+    SessionStore().hold_open(fold_every=30)
 
     tasks = []
     for agent_id in agent_ids:

@@ -12,7 +12,7 @@ from pathlib import Path
 import core.storage
 from core.config.settings import Config
 from core.storage import Store, apply_schema
-from core.storage.base import SCHEMAS_DIR, load_schema
+from core.storage.base import SCHEMAS_DIR, WAL_PRAGMAS, load_schema
 
 REPO = Path(__file__).resolve().parents[3]
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
@@ -96,9 +96,11 @@ class TestStorageBoundary(unittest.TestCase):
 class TestMemoryDb(unittest.TestCase):
     """The stores that share memory.db write it the same way."""
 
-    def test_every_store_in_memory_db_runs_wal_without_a_sync_per_commit(self):
-        """SQLite's default, synchronous = FULL, syncs the WAL on every commit: ~65 ms a write on the NAS.
-        NORMAL syncs only when SQLite checkpoints; a power cut may lose the last commits, never the file."""
+    def test_every_store_in_memory_db_uses_the_wal_pragmas(self):
+        """SQLite's defaults, on a file the bot holds open (Store.hold_open): synchronous = FULL syncs
+        the WAL on every commit (~65 ms a write on the NAS), and the commit that takes the WAL past
+        1,000 pages folds it into the file (~0.7 s). WAL_PRAGMAS set NORMAL, which may lose the last
+        commits in a power cut but never the file, and leave the folds to the held connection's thread."""
         shared = []
         for cls in stores():
             try:
@@ -109,8 +111,7 @@ class TestMemoryDb(unittest.TestCase):
                 continue
             shared.append(cls.__name__)
             with self.subTest(store=cls.__name__):
-                self.assertIn("journal_mode = WAL", cls.pragmas)
-                self.assertIn("synchronous = NORMAL", cls.pragmas)
+                self.assertEqual(cls.pragmas, WAL_PRAGMAS)
         self.assertGreaterEqual(len(shared), 7, f"found only {shared}: are the stores still in memory.db?")
 
 

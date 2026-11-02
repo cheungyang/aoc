@@ -9,7 +9,7 @@ import time
 from unittest.mock import patch
 
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.storage.sessions import ARCHIVED, CHECKPOINT_ENTRIES, SessionStore, sanitize_table_name
+from core.storage.sessions import ARCHIVED, CHECKPOINT_ENTRIES, ORPHAN_WRITE_GRACE_S, SessionStore, sanitize_table_name
 
 
 def _open_fd_count():
@@ -45,6 +45,22 @@ class TestSessionStore(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
+
+    def test_a_write_saved_before_its_checkpoint_survives_an_older_save(self):
+        """The saver's writer thread can save a write just before its checkpoint, with an older
+        checkpoint's save in between; that save must not prune it. A real orphan goes, past the grace."""
+        table = "ctx_grace"
+        self.store.add_write(table, "cp2", b"early")
+        self.store.add_checkpoint(table, "cp1", 1, b"one", "{}", "{}")
+        self.store.add_checkpoint(table, "cp2", 2, b"two", "{}", "{}")
+        row, writes = self.store.checkpoint(table)
+        self.assertEqual((row["checkpoint_id"], [w["data"] for w in writes]), ("cp2", [b"early"]))
+
+        self.store.add_write(table, "never-saved", b"orphan")
+        with patch("core.storage.sessions.time.time", return_value=time.time() + ORPHAN_WRITE_GRACE_S + 1):
+            self.store.add_checkpoint(table, "cp3", 3, b"three", "{}", "{}")
+        left = self.store.query(f"SELECT data FROM {table} WHERE entry_type = 'write'")
+        self.assertEqual([r["data"] for r in left], [b"early"], "cp2 is still kept, so its write stays")
 
     def test_append_and_load_history(self):
         session_id = "session1"

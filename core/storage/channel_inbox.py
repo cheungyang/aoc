@@ -17,7 +17,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.storage.base import Store
+from core.storage.base import WAL_PRAGMAS, Store
 from core.storage.util import placeholders
 from core.config.settings import Config
 
@@ -148,7 +148,7 @@ def _values(row: InboxRow) -> Dict[str, Any]:
 
 class InboxStore(Store):
     schema = ("channel_inbox",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

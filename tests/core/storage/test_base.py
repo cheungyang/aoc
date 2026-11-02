@@ -2,13 +2,15 @@
 import os
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from enum import Enum
 from pathlib import Path
 from unittest.mock import patch
 
 from core.storage import base
-from core.storage.base import Store, StoreMissing, apply_schema, load_schema
+from core.storage.base import WAL_PRAGMAS, Store, StoreMissing, apply_schema, load_schema
 from core.storage.util import decode_json, ident, table_names, where_clause
 
 NOTES = """CREATE TABLE IF NOT EXISTS notes (
@@ -120,10 +122,11 @@ class TestConnections(SchemaDir):
 
 
 class TestHoldOpen(SchemaDir):
-    """hold_open(): one idle connection, so the stores' own closes don't fold a WAL file's log in."""
+    """hold_open(): one idle connection, so the stores' own closes don't fold a WAL file's log in,
+    and, with fold_every, a thread that folds it in so that no commit has to."""
 
     class Wal(Notes):
-        pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+        pragmas = WAL_PRAGMAS
 
     def wal_store(self, hold=True):
         store = self.store(self.Wal)
@@ -170,6 +173,30 @@ class TestHoldOpen(SchemaDir):
         store.insert("notes", {"topic": "u"})
         self.assertIsNone(self.wal_bytes(store))
         self.assertTrue(store.hold_open(), "and it can be held again")
+
+    def test_a_commit_past_sqlites_default_threshold_leaves_the_fold_alone(self):
+        """At SQLite's default, the commit past 1,000 pages folds the WAL in, and the next one starts
+        it over. WAL_PRAGMAS leave the fold to the thread, so the next commit grows the WAL."""
+        store = self.wal_store()
+        store.insert("notes", {"topic": "big", "body": "x" * 5_000_000})  # ~1,200 pages
+        first = self.wal_bytes(store)
+        store.insert("notes", {"topic": "more", "body": "x" * 1_000_000})
+        self.assertGreater(self.wal_bytes(store), first)
+
+    def test_fold_every_folds_the_wal_in_on_a_thread(self):
+        store = self.wal_store(hold=False)
+        self.assertTrue(store.hold_open(fold_every=0.02))
+        store.insert("notes", {"topic": "a", "body": "x" * 2_000_000})
+        first = self.wal_bytes(store)
+        time.sleep(0.3)  # the thread folds meanwhile
+        store.insert("notes", {"topic": "b", "body": "x" * 2_000_000})
+        self.assertLess(self.wal_bytes(store), first * 1.5, "folded: the next commit starts the WAL over")
+
+    def test_releasing_stops_the_fold_thread(self):
+        store = self.wal_store(hold=False)
+        store.hold_open(fold_every=0.02)
+        store.release_hold()
+        self.assertEqual([t for t in threading.enumerate() if t.name == "wal-fold"], [])
 
 
 class TestSchema(SchemaDir):

@@ -49,7 +49,7 @@ from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional
 
 from core.config.settings import Config
-from core.storage.base import Row, Store
+from core.storage.base import WAL_PRAGMAS, Row, Store
 from core.util.local_time import get_local_timezone
 
 UNTIL_PASSED = "until passed"
@@ -281,7 +281,7 @@ class DuplicateFollowUp(Exception):
 
 class FollowUpStore(Store):
     schema = ("follow_ups",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

@@ -79,8 +79,9 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
                          [call(proactive.due_work), call(proactive.follow_ups)])
         mock_schedule_runner.add_briefing.assert_called_once_with(proactive.briefing)
         proactive.start.assert_awaited_once()
-        # memory.db is held open while the bots run, so the stores' closes don't sync it.
-        self.session_store.return_value.hold_open.assert_called_once_with()
+        # memory.db is held open while the bots run, so the stores' closes don't sync it,
+        # and its WAL is folded in on the held connection's thread, not by a commit.
+        self.session_store.return_value.hold_open.assert_called_once_with(fold_every=30)
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

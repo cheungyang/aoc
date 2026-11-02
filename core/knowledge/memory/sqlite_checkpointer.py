@@ -5,11 +5,21 @@ the session's transcript; all of the SQL is SessionStore's
 (core/storage/sessions.py). This module keeps the LangGraph side: the saver
 contract, the blobs (pickled, then zlib-compressed) and the history cleanup
 done on read.
+
+LangGraph's async runs call the async methods on the event loop. They hand
+the work to one thread, the writer, so pickling and SQLite never stall the
+loop, and it runs in the order the calls were made. Every turn saves several
+checkpoints, so on the NAS that was a large share of the loop's busy time.
+The sync methods run in their caller's thread, as before.
 """
+import asyncio
+import contextvars
+import functools
 import pickle
 import json
 import zlib
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Iterator, Sequence, Any, Dict
 from collections import defaultdict
 from langchain_core.runnables import RunnableConfig
@@ -24,6 +34,19 @@ from langgraph.checkpoint.base import (
 
 from core.storage.sessions import SessionStore, sanitize_table_name
 from core.config.settings import Config
+
+# The writer: one thread for every saver's async calls, so they run in the order made.
+_WRITER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="checkpoint-writer")
+
+
+async def _on_writer(fn, *args):
+    """`fn(*args)` on the writer thread, with the caller's context variables.
+
+    Shielded: a caller that is cancelled stops waiting, but the work it handed
+    over still runs, so a checkpoint LangGraph handed over is still saved.
+    """
+    call = functools.partial(contextvars.copy_context().run, fn, *args)
+    return await asyncio.shield(asyncio.get_running_loop().run_in_executor(_WRITER, call))
 
 
 class UnreconstructableError(RuntimeError):
@@ -391,14 +414,15 @@ class SqliteCheckpointer(BaseCheckpointSaver):
         self.store.vacuum()
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
-        return self.get_tuple(config)
+        return await _on_writer(self.get_tuple, config)
 
     async def aput(self, config: RunnableConfig, checkpoint: Checkpoint, metadata: CheckpointMetadata, new_versions: ChannelVersions) -> RunnableConfig:
-        return self.put(config, checkpoint, metadata, new_versions)
+        return await _on_writer(self.put, config, checkpoint, metadata, new_versions)
 
     async def aput_writes(self, config: RunnableConfig, writes: Sequence[tuple[str, Any]], task_id: str, task_path: str = "") -> None:
-        return self.put_writes(config, writes, task_id, task_path)
+        return await _on_writer(self.put_writes, config, writes, task_id, task_path)
 
     async def alist(self, config: RunnableConfig | None, *, filter: dict[str, Any] | None = None, before: RunnableConfig | None = None, limit: int | None = None):
-        for item in self.list(config, filter=filter, before=before, limit=limit):
+        items = await _on_writer(lambda: list(self.list(config, filter=filter, before=before, limit=limit)))
+        for item in items:
             yield item

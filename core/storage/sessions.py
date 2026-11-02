@@ -19,7 +19,7 @@ import sqlite3
 import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from core.storage.base import Row, Store, load_schema
+from core.storage.base import WAL_PRAGMAS, Row, Store, load_schema
 from core.storage.util import ident, placeholders, table_exists, table_names, where_clause
 from core.config.settings import Config
 
@@ -30,6 +30,9 @@ ARCHIVED = "_archived_"
 CHECKPOINT_ENTRIES = ("checkpoint", "write")
 # Checkpoints a table keeps: saving one prunes the older ones and their writes.
 KEEP_CHECKPOINTS = 10
+# How old a write with no checkpoint must be before a save prunes it: the saver's
+# writer thread can save a write just before its checkpoint (core/knowledge/memory/sqlite_checkpointer.py).
+ORPHAN_WRITE_GRACE_S = 600
 # Columns added after the first tables were made, and their definitions.
 # Rows written before the column existed stay NULL: their surface is unknown, not "text".
 _ADDED_COLUMNS = (("execution_time", "REAL DEFAULT 0.0"), ("surface", "TEXT"))
@@ -58,7 +61,7 @@ class SessionStore(Store):
     """
 
     schema = ("sessions",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
     init_on_connect = False
 
     def default_path(self) -> str:
@@ -254,7 +257,9 @@ class SessionStore(Store):
         checkpoints and their writes, all in one transaction.
 
         An id already saved is saved again (ContextPruner re-saves a pruned
-        checkpoint under its own id): see `checkpoint`.
+        checkpoint under its own id): see `checkpoint`. A write whose checkpoint
+        isn't saved is pruned only once it's ORPHAN_WRITE_GRACE_S old, as its
+        checkpoint may still be on its way.
         """
         now = time.time()
         with self.connect() as conn:
@@ -275,16 +280,18 @@ class SessionStore(Store):
                 """,
                 (keep,),
             )
-            # Prune orphaned writes
+            # Prune orphaned writes, past the grace period
             conn.execute(
                 f"""
                 DELETE FROM {name}
                 WHERE entry_type = 'write'
+                AND created_at < ?
                 AND checkpoint_id NOT IN (
                     SELECT checkpoint_id FROM {name}
                     WHERE entry_type = 'checkpoint'
                 )
-                """
+                """,
+                (now - ORPHAN_WRITE_GRACE_S,),
             )
 
     def add_write(self, table: str, checkpoint_id: Optional[str], data: bytes) -> None:

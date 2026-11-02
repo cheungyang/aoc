@@ -6,7 +6,7 @@ core/storage/schemas/jobs.sql.
 """
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from core.storage.base import Row, Store
+from core.storage.base import WAL_PRAGMAS, Row, Store
 from core.storage.util import placeholders
 from core.config.settings import Config
 
@@ -20,7 +20,7 @@ def _updated_before(statuses: Sequence[str], before: float) -> Tuple[str, List[A
 
 class JobsStore(Store):
     schema = ("jobs",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

@@ -16,13 +16,13 @@ core/storage/schemas/schedule_state.sql.
 import time
 from typing import Any, Dict, Optional
 
-from core.storage.base import Store
+from core.storage.base import WAL_PRAGMAS, Store
 from core.config.settings import Config
 
 
 class ScheduleState(Store):
     schema = ("schedule_state",)
-    pragmas = ("journal_mode = WAL", "synchronous = NORMAL")
+    pragmas = WAL_PRAGMAS
 
     def default_path(self) -> str:
         return Config().memory_db_path

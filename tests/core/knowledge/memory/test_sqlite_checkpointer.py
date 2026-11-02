@@ -4,7 +4,10 @@ import shutil
 import tempfile
 import sys
 import asyncio
+import contextvars
 import sqlite3
+import threading
+import time
 from unittest.mock import patch
 
 # Inject root
@@ -169,7 +172,7 @@ class TestSqliteCheckpointer(unittest.TestCase):
         writes = [("channel1", "value1")]
 
         async def run_test():
-            # A checkpoint must exist first: put() prunes 'write' rows with no matching checkpoint.
+            # A checkpoint first, as in a run: get_tuple returns a saved checkpoint and its writes.
             await self.checkpointer.aput(config, {"id": "cp3"}, {"step": 1}, {})
             await self.checkpointer.aput_writes(config, writes, "task1")
 
@@ -609,6 +612,111 @@ class TestUnpicklableExceptionWrites(unittest.TestCase):
         )
         # Sanity: a good blob still round trips.
         self.assertEqual(self.checkpointer._deserialize_blob(blob), {"k": "v"})
+
+
+class TestWriterThread(unittest.TestCase):
+    """The async methods run on one writer thread: off the event loop, in the order they were called."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.checkpointer = SqliteCheckpointer(os.path.join(self.test_dir, "memory.db"))
+        self.config = {"configurable": {"thread_id": "writer", "checkpoint_id": "cp1"}}
+
+    def wrap(self, name, before):
+        """Runs `before(*args)` ahead of each call to the saver's sync method `name`."""
+        real = getattr(self.checkpointer, name)
+
+        def wrapper(*args, **kwargs):
+            before(*args)
+            return real(*args, **kwargs)
+        setattr(self.checkpointer, name, wrapper)
+
+    def aput(self, checkpoint_id, step):
+        return self.checkpointer.aput(self.config, {"id": checkpoint_id}, {"step": step}, {})
+
+    def test_each_async_method_runs_on_the_writer_thread(self):
+        calls = []
+        for name in ("put", "put_writes", "get_tuple", "list"):
+            self.wrap(name, lambda *_, name=name: calls.append((name, threading.current_thread().name)))
+
+        async def run():
+            await self.aput("cp1", 1)
+            await self.checkpointer.aput_writes(self.config, [("messages", "m")], "task1")
+            await self.checkpointer.aget_tuple(self.config)
+            return [cp async for cp in self.checkpointer.alist(self.config)]
+
+        self.assertEqual([cp.checkpoint["id"] for cp in asyncio.run(run())], ["cp1"])
+        self.assertEqual([name for name, _ in calls], ["put", "put_writes", "get_tuple", "list"])
+        self.assertTrue(all(thread.startswith("checkpoint-writer") for _, thread in calls), calls)
+
+    def test_the_loop_keeps_running_while_a_save_does(self):
+        self.wrap("put", lambda *_: time.sleep(0.3))
+
+        async def run():
+            ticks = 0
+
+            async def tick():
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.01)
+                    ticks += 1
+            ticker = asyncio.create_task(tick())
+            await self.aput("cp1", 1)
+            ticker.cancel()
+            return ticks
+
+        self.assertGreater(asyncio.run(run()), 10, "the event loop stalled for the whole save")
+
+    def test_calls_run_in_the_order_they_were_made(self):
+        order = []
+        self.wrap("put", lambda config, checkpoint, *_: (time.sleep(0.02), order.append(checkpoint["id"])))
+        self.wrap("put_writes", lambda config, writes, task_id, *_: order.append(task_id))
+
+        async def run():
+            await asyncio.gather(
+                self.aput("cp1", 1),
+                self.checkpointer.aput_writes(self.config, [("messages", "m")], "task1"),
+                self.aput("cp2", 2),
+                self.checkpointer.aput_writes(self.config, [("messages", "n")], "task2"),
+            )
+
+        asyncio.run(run())
+        self.assertEqual(order, ["cp1", "task1", "cp2", "task2"])
+
+    def test_a_save_queued_when_its_caller_is_cancelled_still_lands(self):
+        self.wrap("get_tuple", lambda *_: time.sleep(0.2))
+
+        async def run():
+            busy = asyncio.create_task(self.checkpointer.aget_tuple(self.config))  # holds the writer
+            save = asyncio.create_task(self.aput("cp1", 1))
+            await asyncio.sleep(0.05)  # the save now waits behind the read
+            save.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await save
+            await busy
+            return await self.checkpointer.aget_tuple(self.config)  # runs after the save
+
+        self.assertEqual(asyncio.run(run()).checkpoint["id"], "cp1")
+
+    def test_the_callers_context_variables_reach_the_writer(self):
+        turn = contextvars.ContextVar("turn")
+        seen = []
+        self.wrap("put", lambda *_: seen.append(turn.get(None)))
+
+        async def run():
+            turn.set("turn-1")
+            await self.aput("cp1", 1)
+
+        asyncio.run(run())
+        self.assertEqual(seen, ["turn-1"])
+
+    def test_an_error_on_the_writer_reaches_the_caller(self):
+        def fail(*_):
+            raise sqlite3.OperationalError("disk I/O error")
+        self.wrap("put", fail)
+        with self.assertRaises(sqlite3.OperationalError):
+            asyncio.run(self.aput("cp1", 1))
 
 
 if __name__ == "__main__":
