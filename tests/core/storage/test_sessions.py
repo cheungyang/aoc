@@ -484,5 +484,124 @@ class TestSessionTables(unittest.TestCase):
         self.assertEqual(self.store.token_sums(time.time() + 60), (0, 0))
 
 
+class TestArchiveFile(unittest.TestCase):
+    """archive.db beside memory.db, where startup moves the tables nothing running reads."""
+
+    AGENTS = ["topic-researcher", "main"]
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.test_dir)
+        self.store = SessionStore(os.path.join(self.test_dir, "memory.db"))
+        self.archive = self.store.archive_store()
+
+    def rows(self, store, table):
+        with store.connect() as conn:
+            return [tuple(r) for r in conn.execute(f'SELECT * FROM "{table}" ORDER BY id')]
+
+    def stopping_after(self, copies):
+        """A move that stops, as a crash would, once it has copied `copies` tables."""
+        real, done = SessionStore._copy_to_archive, []
+
+        def copy(store, conn, table):
+            if len(done) == copies:
+                raise sqlite3.OperationalError("disk I/O error")
+            done.append(table)
+            return real(store, conn, table)
+
+        return patch.object(SessionStore, "_copy_to_archive", copy)
+
+    def test_archived_tables_and_finished_jobs_move_under_their_names_with_every_row(self):
+        live, job = "main:discord:general", "topic-researcher:job:abc12345"
+        self.store.append_message(live, "user", "old")
+        self.store.archive_session(live)
+        archived = next(t for t in self.store.tables(include_archived=True) if ARCHIVED in t)
+        self.store.append_message(live, "user", "now")
+        self.store.append_message(job, "ai", "Found 4 sources.")
+        self.store.append_token_usage(job, "m", 10, 2, 0.0)
+        # Another agent's job, and ids no job gets: they stay.
+        staying = ["ghost:job:abc12345", "main:job:abc", "main:job:abc12345x"]
+        for session in staying:
+            self.store.append_message(session, "user", "stays")
+        before = {table: self.rows(self.store, table) for table in (archived, sanitize_table_name(job))}
+
+        self.assertEqual(self.store.archive_inactive(self.AGENTS), (2, 3))
+
+        self.assertEqual(self.store.tables(include_archived=True),
+                         [sanitize_table_name(s) for s in [live, *staying]])
+        self.assertEqual(self.archive.tables(include_archived=True), list(before))
+        for table, rows in before.items():
+            self.assertEqual(self.rows(self.archive, table), rows)
+        self.assertEqual(self.store.load_history(live)[0]["message"], "now")
+        self.assertEqual(self.archive.load_history(job)[0]["message"], "Found 4 sources.")
+
+    def test_with_nothing_to_move_there_is_no_archive(self):
+        self.store.append_message("main:discord:general", "user", "live")
+        self.assertEqual(self.store.archive_inactive(self.AGENTS), (0, 0))
+        self.assertFalse(self.archive.exists())
+        self.assertEqual(self.store.load_history("main:discord:general")[0]["message"], "live")
+
+    def test_a_move_that_stopped_halfway_is_finished_by_the_next(self):
+        """Every table is copied before any leaves memory.db: a stop loses nothing, and the next
+        move keeps the copies it finds rather than copying them twice."""
+        jobs = [f"topic-researcher:job:0000000{n}" for n in range(3)]
+        for n, job in enumerate(jobs):
+            self.store.append_message(job, "ai", f"job {n}")
+
+        with self.stopping_after(2), self.assertRaises(sqlite3.OperationalError):
+            self.store.archive_inactive(self.AGENTS)
+        self.assertEqual(len(self.store.tables()), 3, "nothing left memory.db")
+        self.assertEqual(len(self.archive.tables()), 2)
+
+        self.assertEqual(self.store.archive_inactive(self.AGENTS), (3, 3))
+        self.assertEqual(self.store.tables(), [])
+        self.assertEqual(self.archive.tables(), [sanitize_table_name(job) for job in jobs])
+        for n, job in enumerate(jobs):
+            self.assertEqual([r["message"] for r in self.archive.load_history(job)], [f"job {n}"])
+
+    def test_another_table_by_the_same_name_in_the_archive_steps_aside(self):
+        """A job id drawn twice: nothing in the archive is dropped, and the newest keeps the name `!job` reads."""
+        job = "topic-researcher:job:abc12345"
+        table = sanitize_table_name(job)
+        self.store.append_message(job, "ai", "the first run")
+        self.store.archive_inactive(self.AGENTS)
+        self.store.append_message(job, "ai", "the second run")
+
+        self.assertEqual(self.store.archive_inactive(self.AGENTS), (1, 1))
+
+        self.assertEqual(self.archive.tables(), [f"{table}_2", table])
+        self.assertEqual(self.archive.load_history(job)[0]["message"], "the second run")
+        self.assertEqual(self.archive.query(f'SELECT message FROM "{table}_2"')[0]["message"], "the first run")
+
+    def test_memory_db_is_compacted_once_the_move_leaves_it_mostly_empty(self):
+        for n in range(20):
+            self.store.append_message(f"main:discord:c{n}", "user", "x" * 20_000)
+        self.store.archive_all_sessions()
+        self.store.append_message("main:discord:general", "user", "live")
+        size = os.path.getsize(self.store.path)
+
+        self.assertEqual(self.store.archive_inactive(self.AGENTS), (20, 20))
+
+        self.assertLess(os.path.getsize(self.store.path), size / 4)
+        self.assertFalse(self.store.vacuum_if_sparse(), "nothing left to reclaim")
+        self.assertEqual(self.store.load_history("main:discord:general")[0]["message"], "live")
+
+    def test_a_reader_sees_both_files_and_a_table_in_both_once(self):
+        """The token reports read through tables_with_archive, on a read-only connection."""
+        for session, tokens in (("main:discord:a", 100), ("main:discord:b", 20)):
+            self.store.append_token_usage(session, "m", tokens, 1, 0.0)
+            self.store.archive_session(session)
+        with self.stopping_after(1), self.assertRaises(sqlite3.OperationalError):
+            self.store.archive_inactive(self.AGENTS)  # a's archived table is in both files now
+        self.store.append_token_usage("main:discord:a", "m", 3, 1, 0.0)
+
+        with self.store.read_only() as conn:
+            tables = self.store.tables_with_archive(conn)
+            self.assertEqual(self.store.tables_with_archive(conn), tables, "attached once")
+            tokens = sum(conn.execute(f'SELECT sum(input_tokens) FROM "{t}"').fetchone()[0] for t in tables)
+        self.assertEqual(len(tables), 3)
+        self.assertEqual(tokens, 123)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,27 @@ class TestVoiceStats(unittest.TestCase):
         self.assertEqual((current["exec_time"], current["exec_calls"]), (2.0, 1))
         self.assertEqual(dict(current["agents"]), {"day-planner": [110, 1, 100, 50.0], "main": [330, 1, 300, 0.0]})
 
+    def test_the_reports_read_the_tables_moved_to_archive_db(self):
+        """Startup moves archived sessions to archive.db beside memory.db (SessionStore.archive_inactive)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "memory.db")
+            store = SessionStore(db)
+            session = "home-steward:discord:home-automation"
+            store.append_message(session, "user", "lights off")
+            store.append_token_usage(session, "m", 100, 10, 0.0, surface="voice")
+            store.append_turn_trace(session, {"ttfa_ms": 1200, "deltas": {}, "events": []})
+            store.archive_session(session)
+            self.assertEqual(store.archive_inactive([]), (1, 3))
+            store.append_token_usage("main:discord:general", "m", 300, 30, 0.0, surface="voice")
+
+            _, current = get_stats(db_path=db, cutoff_ts=0)
+            voice = get_voice_stats(db_path=db)
+            health = get_health_stats(db_path=db)
+
+        self.assertEqual((current["calls"], current["in_tokens"]), (2, 400))
+        self.assertEqual((voice["calls"], voice["turns"], voice["ttfa"]), (2, 1, [1200]))
+        self.assertEqual(health["calls"][("home-steward", "voice")], [1])
+
     def test_a_missing_db_is_reported_not_created(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = os.path.join(tmp, "memory.db")

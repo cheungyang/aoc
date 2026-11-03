@@ -2,6 +2,9 @@
 """
 Compares token usage, cache hit rate, and execution latency in sessions/memory.db 
 between Historical Baseline vs Post-Optimization period.
+
+Every report reads archive.db beside memory.db too: startup moves the archived
+sessions and finished jobs there (SessionStore.archive_inactive).
 """
 import os
 import sys
@@ -29,7 +32,7 @@ def get_stats(db_path=None, cutoff_ts=DEFAULT_CUTOFF_TS):
 
     with store.read_only() as conn:
         cursor = conn.cursor()
-        tables = store.tables(include_archived=True, conn=conn)
+        tables = store.tables_with_archive(conn)
 
         periods = {
             'historical': {'calls': 0, 'in_tokens': 0, 'out_tokens': 0, 'cached_weighted': 0.0, 'exec_time': 0.0, 'exec_calls': 0, 'agents': defaultdict(lambda: [0, 0, 0, 0])},
@@ -180,7 +183,7 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
         window += " AND created_at < ?"
         params.append(until_ts)
     with store.read_only() as conn:
-        for t in store.tables(include_archived=True, conn=conn):
+        for t in store.tables_with_archive(conn):
             if "surface" not in store.columns(t, conn=conn):
                 continue
             agent = _agent_for_table(t, agent_ids)
@@ -270,7 +273,7 @@ def get_health_stats(db_path=None, since_ts=0):
     agents_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "agents")
     agent_ids = os.listdir(agents_dir) if os.path.isdir(agents_dir) else []
     with store.read_only() as conn:
-        for t in store.tables(include_archived=True, conn=conn):
+        for t in store.tables_with_archive(conn):
             if "surface" not in store.columns(t, conn=conn):
                 continue
             agent = _agent_for_table(t, agent_ids)

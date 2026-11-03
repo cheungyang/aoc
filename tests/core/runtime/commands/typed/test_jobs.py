@@ -3,6 +3,8 @@
 They answer from JobManager and the session log, with no model, and only
 where the bot answers the channel.
 """
+import os
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +15,7 @@ from core.runtime.commands.typed.job import job_text
 from core.runtime.commands.typed.jobs import MAX_JOBS, jobs_text, last_reply
 from core.runtime.commands.typed.kill import kill_text
 from core.runtime.foundation.jobs import Job
+from core.storage.sessions import SessionStore, sanitize_table_name
 
 NOW = 1_800_000_000.0
 
@@ -53,11 +56,23 @@ class FakeJobs:
 
 
 class FakeStore:
-    def __init__(self, entries=()):
+    """The session log: `entries` in memory.db, and `archive` the store archive_store()
+    gives, the archive.db beside it; with none, there is no archive.db."""
+
+    def __init__(self, entries=(), archive=None, exists=True):
         self.entries = list(entries)
+        self.archive = archive
+        self._exists = exists
+
+    def exists(self):
+        return self._exists
 
     def load_history(self, session_id, limit=50):
+        assert self._exists, "read a store whose file isn't there"
         return self.entries[-limit:]
+
+    def archive_store(self):
+        return self.archive or FakeStore(exists=False)
 
 
 class TestJobs(unittest.TestCase):
@@ -115,6 +130,24 @@ class TestLastReply(unittest.TestCase):
 
     def test_none_logged(self):
         self.assertEqual(last_reply("s", FakeStore([{"from": "user", "message": "go"}])), "")
+
+    def test_a_job_finished_before_the_last_start_is_read_in_the_archive(self):
+        """Startup moves finished jobs' sessions to archive.db (SessionStore.archive_inactive)."""
+        archive = FakeStore([{"from": "ai", "message": "Found 4 sources."}])
+        self.assertEqual(last_reply("s", FakeStore(archive=archive)), "Found 4 sources.")
+        self.assertEqual(last_reply("s", FakeStore([{"from": "ai", "message": "Still on it."}], archive=archive)),
+                         "Still on it.", "memory.db first")
+        self.assertEqual(last_reply("s", FakeStore()), "", "with no archive.db, none is read")
+
+    def test_through_a_real_move(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SessionStore(os.path.join(tmp, "memory.db"))
+            session = "topic-researcher:job:abc12345"
+            store.append_message(session, "ai", "Found 4 sources so far.")
+            self.assertEqual(store.archive_inactive(["topic-researcher"]), (1, 1))
+
+            self.assertFalse(store.has_table(sanitize_table_name(session)))
+            self.assertEqual(last_reply(session, store), "Found 4 sources so far.")
 
 
 class TestJob(unittest.TestCase):

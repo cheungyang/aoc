@@ -12,8 +12,14 @@ A table is made by its first write. One made by older code keeps its column
 order and gets the columns it lacks, so rows are read by column name. `!new`
 archives a session by renaming its tables to `<table>_archived_<epoch>`; they
 are kept for the token reports, and no session reads them again.
+
+At startup, the tables nothing running reads (the archived ones, and finished
+jobs' sessions) move to archive.db beside memory.db, under the same names
+(`archive_inactive`). memory.db keeps only what's live: every connection loads
+its whole schema, and the archived tables were 92% of the file.
 """
 import json
+import os
 import re
 import sqlite3
 import time
@@ -26,6 +32,12 @@ from core.config.settings import Config
 PREFIX = "ctx_"
 # What archiving puts in a table's name: `<table>_archived_<epoch>`.
 ARCHIVED = "_archived_"
+# The file beside memory.db that archive_inactive() moves tables into.
+ARCHIVE_FILE = "archive.db"
+# A job's id (ExecutionContext.new_job_id): its session is `<agent>:job:<id>`, one table per job.
+_JOB_ID = re.compile(r"[0-9a-f]{8}")
+# A CREATE TABLE statement's head, up to the table's name, as sqlite_master keeps it.
+_CREATE_TABLE = re.compile(r'^\s*CREATE\s+TABLE\s+(?:"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|[^\s(]+)', re.IGNORECASE)
 # The rows LangGraph replays as a session's history. Message and token rows are the rest.
 CHECKPOINT_ENTRIES = ("checkpoint", "write")
 # Checkpoints a table keeps: saving one prunes the older ones and their writes.
@@ -48,6 +60,34 @@ def sanitize_table_name(session_id: str) -> str:
     """
     clean = "".join(c if c.isalnum() or c == "_" else "_" for c in session_id)
     return f"ctx_{clean}"
+
+
+def _table_named(conn: sqlite3.Connection, schema: str, table: str) -> Optional[str]:
+    """The name `schema` (main or archive) keeps `table` under, if it has it: SQLite matches
+    table names case-insensitively."""
+    row = conn.execute(f"SELECT name FROM {schema}.sqlite_master WHERE type = 'table' AND name = ? COLLATE NOCASE",
+                       (table,)).fetchone()
+    return row[0] if row else None
+
+
+def _same_rows(conn: sqlite3.Connection, table: str, there: str, rows: int) -> bool:
+    """Whether the archive's `there` holds just what main's `table` does: its `rows` rows, no other."""
+    mine, theirs = f"main.{ident(table)}", f"archive.{ident(there)}"
+    if conn.execute(f"SELECT count(*) FROM {theirs}").fetchone()[0] != rows:
+        return False
+    try:
+        return not any(conn.execute(f"SELECT EXISTS (SELECT * FROM {a} EXCEPT SELECT * FROM {b})").fetchone()[0]
+                       for a, b in ((mine, theirs), (theirs, mine)))
+    except sqlite3.OperationalError:  # not even the same columns
+        return False
+
+
+def _free_name(conn: sqlite3.Connection, table: str) -> str:
+    """`table` with the first of `_2`, `_3`... that names no table in main or the archive."""
+    n = 2
+    while _table_named(conn, "main", f"{table}_{n}") or _table_named(conn, "archive", f"{table}_{n}"):
+        n += 1
+    return f"{table}_{n}"
 
 
 class SessionStore(Store):
@@ -362,6 +402,30 @@ class SessionStore(Store):
             names = table_names(c, PREFIX)
         return names if include_archived else [name for name in names if ARCHIVED not in name]
 
+    def job_tables(self, agent_ids: Iterable[str], *, conn: Optional[sqlite3.Connection] = None) -> List[str]:
+        """The active tables of these agents' job sessions (`<agent>:job:<8 hex>`), one per job.
+
+        Matched by that exact shape: no other session id makes such a name.
+        """
+        heads = {sanitize_table_name(f"{agent_id}:job:") for agent_id in agent_ids}
+        return [name for name in self.tables(conn=conn) if name[:-8] in heads and _JOB_ID.fullmatch(name[-8:])]
+
+    def tables_with_archive(self, conn: sqlite3.Connection) -> List[str]:
+        """Every ctx_ table `conn` can read, archived ones included, and archive_store()'s too.
+
+        Attaches archive.db to `conn` (as `archive`) unless it is already, so a
+        query naming a table unqualified finds it in either file. A table in
+        both, as an interrupted move leaves it, is listed once.
+        """
+        names = self.tables(include_archived=True, conn=conn)
+        archive = self.archive_store()
+        if not archive.exists():
+            return names
+        if "archive" not in {row[1] for row in conn.execute("PRAGMA database_list")}:
+            conn.execute("ATTACH DATABASE ? AS archive", (archive.path,))
+        seen = set(names)
+        return names + [name for name in table_names(conn, PREFIX, schema="archive") if name not in seen]
+
     def columns(self, table: str, *, conn: Optional[sqlite3.Connection] = None) -> List[str]:
         """`table`'s column names, in order; none if there is no such table."""
         with self.connect(conn) as c:
@@ -410,6 +474,112 @@ class SessionStore(Store):
         with self.connect() as conn:
             if table_exists(conn, table):
                 conn.execute(f"DROP TABLE IF EXISTS {ident(table)}")
+
+    # -- the archive file (archive.db, beside this one) ------------------------
+
+    def archive_store(self) -> "SessionStore":
+        """The archive beside this file (ARCHIVE_FILE), where archive_inactive() moves tables, under their names."""
+        return SessionStore(os.path.join(os.path.dirname(self.path), ARCHIVE_FILE))
+
+    def archive_inactive(self, agent_ids: Iterable[str]) -> Tuple[int, int]:
+        """Moves the tables nothing running reads into archive_store(): every archived one (`!new`)
+        and these agents' job sessions. Then VACUUMs this file if over a quarter of it is free,
+        as the first move leaves it. Returns the (tables, rows) moved.
+
+        For startup, before anything holds this file or runs a job: no job
+        outlives its process, so every job session is finished by then. `!job`
+        finds a moved one's log in the archive.
+        """
+        started = time.monotonic()
+        with self.connect() as conn:
+            tables = [t for t in self.tables(include_archived=True, conn=conn) if ARCHIVED in t]
+            tables += self.job_tables(agent_ids, conn=conn)
+        moved, rows = self.move_to_archive(tables)
+        if moved:
+            print(f"[storage] Moved {moved} tables ({rows:,} rows) to {self.archive_store().path} "
+                  f"in {time.monotonic() - started:.1f} s")
+        started, size = time.monotonic(), os.path.getsize(self.path)
+        if self.vacuum_if_sparse():
+            print(f"[storage] Compacted {self.path} from {size / 1e6:.1f} to {os.path.getsize(self.path) / 1e6:.1f} MB "
+                  f"in {time.monotonic() - started:.1f} s")
+        return moved, rows
+
+    def move_to_archive(self, tables: Sequence[str]) -> Tuple[int, int]:
+        """Moves `tables` into archive_store(), each under its own name; returns the (tables, rows) moved.
+
+        Stopping at any point loses nothing: every table is copied, its rows
+        counted, and the archive synced to disk before any table leaves this
+        file, and nothing in the archive is dropped. A crash leaves at worst a
+        table in both, which the next call finishes moving.
+        """
+        if not tables:
+            return 0, 0
+        copied: List[Tuple[str, int]] = []
+        with self._open(init=False) as conn:
+            conn.isolation_level = None  # explicit transactions: ATTACH can't run inside one
+            conn.execute("ATTACH DATABASE ? AS archive", (self.archive_store().path,))
+            try:
+                # NORMAL: a commit doesn't sync (65 ms on the NAS, per table); the checkpoint below does.
+                for pragma in ("journal_mode = WAL", "synchronous = NORMAL"):
+                    conn.execute(f"PRAGMA archive.{pragma}").fetchall()
+                for table in tables:
+                    rows = self._copy_to_archive(conn, table)
+                    if rows is not None:
+                        copied.append((table, rows))
+                # Syncs the archive's WAL, folds it all in, then syncs the archive: every copy on disk.
+                busy, frames, folded = conn.execute("PRAGMA archive.wal_checkpoint(FULL)").fetchone()
+                if busy or frames != folded:
+                    raise sqlite3.OperationalError(f"the archive's WAL wasn't folded in: {folded} of {frames} frames")
+                conn.execute("BEGIN")
+                for table, _ in copied:
+                    conn.execute(f"DROP TABLE main.{ident(table)}")
+                conn.execute("COMMIT")
+            finally:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                conn.execute("DETACH DATABASE archive")
+        return len(copied), sum(rows for _, rows in copied)
+
+    def _copy_to_archive(self, conn: sqlite3.Connection, table: str) -> Optional[int]:
+        """Copies `table` into the attached archive, with its own CREATE statement; its row
+        count, or None if the table is gone.
+
+        A table the archive already has under that name is either this one,
+        copied by a move that stopped before dropping it here, and kept as it
+        is, or another that got the same name (a job id drawn twice), which is
+        renamed out of the way.
+        """
+        found = conn.execute("SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?",
+                             (table,)).fetchone()
+        if found is None:
+            return None
+        head = _CREATE_TABLE.match(found[0])
+        if head is None:
+            raise sqlite3.DatabaseError(f"{table}: its CREATE statement isn't one this can copy: {found[0][:80]!r}")
+        name = ident(table)
+        rows = conn.execute(f"SELECT count(*) FROM main.{name}").fetchone()[0]
+        there = _table_named(conn, "archive", table)
+        if there is not None and _same_rows(conn, table, there, rows):
+            return rows  # copied by a move that stopped before dropping it here
+        conn.execute("BEGIN")
+        if there is not None:
+            conn.execute(f"ALTER TABLE archive.{ident(there)} RENAME TO {ident(_free_name(conn, there))}")
+        conn.execute(f"CREATE TABLE archive.{name}{found[0][head.end():]}")
+        conn.execute(f"INSERT INTO archive.{name} SELECT * FROM main.{name}")
+        if conn.execute(f"SELECT count(*) FROM archive.{name}").fetchone()[0] != rows:
+            raise sqlite3.DatabaseError(f"{table}: the archive's copy doesn't have all {rows} rows")
+        conn.execute("COMMIT")
+        return rows
+
+    def vacuum_if_sparse(self, share: float = 0.25) -> bool:
+        """VACUUMs the file when more than `share` of its pages are free; True if it did."""
+        with self.connect() as conn:
+            free = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            pages = conn.execute("PRAGMA page_count").fetchone()[0]
+        if not pages or free <= pages * share:
+            return False
+        self.vacuum()
+        return True
 
     def delete_entries(self, tables: Iterable[str], entry_types: Sequence[str], *,
                        conn: Optional[sqlite3.Connection] = None) -> int:

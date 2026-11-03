@@ -55,9 +55,19 @@ def format_job(job, now: float) -> str:
 
 
 def last_reply(session_id: str, store: Optional[SessionStore] = None) -> str:
-    """The latest model reply in the job's session log, shortened; "" if none."""
+    """The latest model reply in the job's session log, shortened; "" if none.
+
+    A finished job's log stays in memory.db until the next start moves it to
+    the archive beside it (SessionStore.archive_inactive), so it's read there
+    when memory.db has none.
+    """
     store = store or SessionStore()
-    for entry in reversed(store.load_history(session_id, limit=50)):
+    entries = store.load_history(session_id, limit=50)
+    if not entries:
+        archive = store.archive_store()
+        if archive.exists():
+            entries = archive.load_history(session_id, limit=50)
+    for entry in reversed(entries):
         message = str(entry.get("message") or "").strip()
         if entry.get("from") == "ai" and message:
             return truncate(message, REPLY_MAX_CHARS)

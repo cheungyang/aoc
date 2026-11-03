@@ -74,10 +74,10 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
 
 
-def table_names(conn: sqlite3.Connection, prefix: str = "") -> List[str]:
-    """Tables whose name starts with `prefix`, in creation order.
+def table_names(conn: sqlite3.Connection, prefix: str = "", schema: str = "main") -> List[str]:
+    """Tables of `schema` (main, or a database attached under that name) whose name starts with `prefix`, in creation order.
 
     The prefix is matched literally: in LIKE, `_` would match any character.
     """
-    rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    rows = conn.execute(f"SELECT name FROM {ident(schema)}.sqlite_master WHERE type = 'table'").fetchall()
     return [row[0] for row in rows if row[0].startswith(prefix)]

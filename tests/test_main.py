@@ -79,9 +79,27 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
                          [call(proactive.due_work), call(proactive.follow_ups)])
         mock_schedule_runner.add_briefing.assert_called_once_with(proactive.briefing)
         proactive.start.assert_awaited_once()
-        # memory.db is held open while the bots run, so the stores' closes don't sync it,
+        # Before the bots run, the tables nothing live reads leave memory.db for archive.db.
+        # Then memory.db is held open while they run, so the stores' closes don't sync it,
         # and its WAL is folded in on the held connection's thread, not by a commit.
-        self.session_store.return_value.hold_open.assert_called_once_with(fold_every=30)
+        sessions = self.session_store.return_value
+        self.assertEqual([c for c in sessions.mock_calls if c[0] in ("archive_inactive", "hold_open")],
+                         [call.archive_inactive(["agent1", "agent2", "agent3"]), call.hold_open(fold_every=30)])
+
+    @patch('main.ScheduleRunner')
+    @patch('main.AgentsLoader')
+    @patch('main.BotsLoader')
+    async def test_a_failed_move_to_the_archive_does_not_keep_the_bots_from_starting(
+            self, mock_bots_loader, mock_agents_loader, mock_schedule_runner_class):
+        mock_schedule_runner_class.return_value.start = AsyncMock()
+        mock_agents_loader.return_value.list_agent_ids.return_value = []
+        sessions = self.session_store.return_value
+        sessions.archive_inactive.side_effect = OSError("disk I/O error")
+
+        await main.run_bots()
+
+        sessions.hold_open.assert_called_once_with(fold_every=30)
+        mock_schedule_runner_class.return_value.start.assert_awaited_once()
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

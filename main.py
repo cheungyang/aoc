@@ -71,10 +71,20 @@ async def run_bots(dev: bool = False, agents: list = None):
         print("Other agents stay on prod. Use !claim <agent> / !release / !status in the control thread.")
         print("====================")
 
+    # memory.db keeps only what's live: before the bots run, the archived sessions (`!new`)
+    # and finished jobs' sessions move to archive.db beside it, and it's compacted if that
+    # left it mostly empty. Every connection loads its whole schema, and those tables were
+    # 92% of it. A failed move keeps them where they are, and the next start tries again.
+    sessions = SessionStore()
+    try:
+        sessions.archive_inactive(agent_ids)
+    except Exception as e:  # never keeps the bots from starting
+        print(f"[storage] Moving tables to archive.db failed: {type(e).__name__}: {e}")
+
     # memory.db, which most stores share (sessions, jobs, the inbox...), held open while
     # the bots run, so a store closing its connection doesn't sync the file, and its WAL
     # folded in every 30 s on a thread of its own, so no commit has to (core/storage/base.py).
-    SessionStore().hold_open(fold_every=30)
+    sessions.hold_open(fold_every=30)
 
     tasks = []
     for agent_id in agent_ids:
