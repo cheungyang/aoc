@@ -840,10 +840,11 @@ class TestServiceCheck:
         assert replay.tiers_to_check(combos(combos=["PRO:low,FLASH_LITE:minimal"])) == ["FLASH_LITE", "PRO"]
         assert replay.tiers_to_check(combos(thinking="low")) == list(replay.TIER_ORDER), "prod's agents use any"
 
-    def test_a_tier_is_slow_only_when_every_call_is(self):
+    def test_a_tier_is_slow_when_every_call_is_or_any_one_hangs(self):
         times = {"FLASH_LITE": [8.5, 11.5], "FLASH": [9.0, 1.0], "PRO": [5.0, 5.5]}
-        assert replay.slow_tiers(times) == ["FLASH_LITE"]
-        assert replay.slow_tiers({"PRO": [float("inf"), float("inf")]}) == ["PRO"], "calls that failed"
+        assert replay.slow_tiers(times) == ["FLASH_LITE"], "one slow call alone is noise"
+        assert replay.slow_tiers({"PRO": [float("inf"), 3.19]}) == ["PRO"], "the NAS's PRO at 11:03 on Nov 3"
+        assert replay.slow_tiers({"PRO": [float("inf"), float("inf")]}) == ["PRO"]
 
     @pytest.mark.asyncio
     async def test_a_slow_service_runs_nothing_and_says_why(self, tmp_path, service, capsys):
@@ -853,7 +854,7 @@ class TestServiceCheck:
         run.assert_not_awaited()
         assert service.asked == ["FLASH_LITE", "FLASH_LITE", "PRO", "PRO"]
         err = capsys.readouterr().err
-        assert "[check] FLASH_LITE: first chunk in 8.50 s, 8.50 s (slow when all are over 2 s)" in err
+        assert "[check] FLASH_LITE: first chunk in 8.50 s, 8.50 s (slow when all are over 2 s, or any hangs)" in err
         assert "[check] PRO: first chunk in 0.10 s, 0.10 s" in err
         assert "slow right now (FLASH_LITE)" in err and "add --anyway" in err
         assert not (tmp_path / "results.json").exists()

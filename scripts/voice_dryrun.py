@@ -65,8 +65,9 @@ is read first and rewritten after every run, so rerunning the same command
 resumes where it stopped.
 Before it times any combo, it checks the service: two one-word calls on each
 tier the combos run on. When every call of a tier comes slower than
-SLOW_FIRST_CHUNK_S, it runs nothing and exits 4, since the latency would
-measure the service's bad day instead of the combos; --anyway runs regardless.
+SLOW_FIRST_CHUNK_S, or any one hangs or fails, it runs nothing and exits 4,
+since the latency would measure the service's bad day instead of the combos;
+--anyway runs regardless.
 
 Usage:
     python scripts/voice_dryrun.py                        # every read-only case, once
@@ -1064,8 +1065,11 @@ CHECK_CALLS = 2
 # well inside it: the NAS's short FLASH_LITE replies took 0.8 s p50 on Nov 2,
 # and 10-13 s in the slow spell of Nov 3 that this check is for.
 SLOW_FIRST_CHUNK_S = {"FLASH_LITE": 2.0, "FLASH": 3.0, "PRO": 6.0}
-# A check call still waiting after this long is given up on, as slow: model
-# calls have no timeout of their own, so a stalled one would hang the check.
+# A check call still waiting after this long is given up on. One such call, or
+# one that fails, makes its tier slow by itself: on Nov 3 PRO hung on one of
+# its two calls, answered the other in 3.2 s, and then hung for 109 s and 71 s
+# in the run. (Model calls have no timeout of their own, so a stalled check
+# call would otherwise hang the check too.)
 CHECK_GIVE_UP_S = 15.0
 # The exit code when it finds the service slow.
 SLOW_SERVICE = 4
@@ -1120,14 +1124,17 @@ async def check_service(tiers: List[str]) -> Dict[str, List[float]]:
 
 
 def slow_tiers(times: Dict[str, List[float]]) -> List[str]:
-    """The tiers whose check calls all took longer than their limit."""
-    return [tier for tier, seconds in times.items() if seconds and min(seconds) > SLOW_FIRST_CHUNK_S[tier]]
+    """The tiers whose check calls all took longer than their limit, or of which
+    any one hung or failed (infinity)."""
+    return [tier for tier, seconds in times.items()
+            if seconds and (min(seconds) > SLOW_FIRST_CHUNK_S[tier] or float("inf") in seconds)]
 
 
 def check_lines(times: Dict[str, List[float]]) -> List[str]:
     return [f"[check] {tier}: first chunk in "
             + ", ".join("none" if s == float("inf") else f"{s:.2f} s" for s in seconds)
-            + f" (slow when all are over {SLOW_FIRST_CHUNK_S[tier]:g} s)" for tier, seconds in times.items()]
+            + f" (slow when all are over {SLOW_FIRST_CHUNK_S[tier]:g} s, or any hangs)"
+            for tier, seconds in times.items()]
 
 
 def load_results(path: Optional[str]) -> List[dict]:
