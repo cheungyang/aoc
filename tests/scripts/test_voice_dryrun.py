@@ -1,4 +1,5 @@
 """The voice replay benchmark (scripts/voice_dryrun.py)."""
+import asyncio
 import json
 import os
 from contextlib import contextmanager
@@ -41,6 +42,29 @@ CASES = [
     {"id": "read", "room": "home-automation", "utterance": "Lights?", "expect": {"agent": "home-steward"}},
     {"id": "write", "room": "home-automation", "utterance": "Lights off.", "mutates": True, "expect": {}},
 ]
+
+
+@pytest.fixture(autouse=True)
+def service(monkeypatch):
+    """The service check's calls, answered at once and fast: no test reaches the
+    model through it. A test sets `service.seconds` (per tier, as a dict) to a
+    slow time, to an exception for a failing call, or to "stall"."""
+    class Service:
+        seconds = 0.1
+        asked = []
+
+    async def first_chunk(tier):
+        Service.asked.append(tier)
+        answer = Service.seconds.get(tier, 0.1) if isinstance(Service.seconds, dict) else Service.seconds
+        if isinstance(answer, Exception):
+            raise answer
+        if answer == "stall":
+            await asyncio.sleep(3600)
+        return answer
+
+    Service.asked = []
+    monkeypatch.setattr(replay, "_first_chunk", first_chunk)
+    return Service
 
 
 class TestLoadCases:
@@ -793,3 +817,94 @@ class TestRateLimits:
 
         assert await self._main(tmp_path, fake_run_case, "--runs", "2", "--rpm", "6") == 0
         assert waits == [18.0], "2 calls at 6 a minute take 20 s; the first run used 2"
+
+
+class TestServiceCheck:
+    """Before it times combos, two one-word calls per tier: a slow service stops
+    the replay, since the combos' latency would measure it, not them."""
+
+    async def _main(self, tmp_path, run_case, *args):
+        with patch.object(replay, "run_case", run_case), patch.object(replay, "guard_writes"), \
+             patch("core.channel.voice.engines.tts.TTSEngine"):
+            return await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
+                                      "--out", str(tmp_path / "results.json"), *args])
+
+    @staticmethod
+    def runs():
+        return AsyncMock(side_effect=lambda case, run, db_path, **kwargs: CaseResult(case_id=case["id"], run=run,
+                                                                                      marks={}))
+
+    def test_it_checks_the_tiers_the_combos_run_on(self):
+        combos = replay.combos_from
+        assert replay.tiers_to_check(combos()) == [], "a plain replay times no combo"
+        assert replay.tiers_to_check(combos(combos=["PRO:low,FLASH_LITE:minimal"])) == ["FLASH_LITE", "PRO"]
+        assert replay.tiers_to_check(combos(thinking="low")) == list(replay.TIER_ORDER), "prod's agents use any"
+
+    def test_a_tier_is_slow_only_when_every_call_is(self):
+        times = {"FLASH_LITE": [8.5, 11.5], "FLASH": [9.0, 1.0], "PRO": [5.0, 5.5]}
+        assert replay.slow_tiers(times) == ["FLASH_LITE"]
+        assert replay.slow_tiers({"PRO": [float("inf"), float("inf")]}) == ["PRO"], "calls that failed"
+
+    @pytest.mark.asyncio
+    async def test_a_slow_service_runs_nothing_and_says_why(self, tmp_path, service, capsys):
+        service.seconds = {"FLASH_LITE": 8.5}
+        run = self.runs()
+        assert await self._main(tmp_path, run, "--combo", "FLASH_LITE:minimal,PRO:low") == replay.SLOW_SERVICE
+        run.assert_not_awaited()
+        assert service.asked == ["FLASH_LITE", "FLASH_LITE", "PRO", "PRO"]
+        err = capsys.readouterr().err
+        assert "[check] FLASH_LITE: first chunk in 8.50 s, 8.50 s (slow when all are over 2 s)" in err
+        assert "[check] PRO: first chunk in 0.10 s, 0.10 s" in err
+        assert "slow right now (FLASH_LITE)" in err and "add --anyway" in err
+        assert not (tmp_path / "results.json").exists()
+
+    @pytest.mark.asyncio
+    async def test_anyway_runs_regardless(self, tmp_path, service, capsys):
+        service.seconds = 9.0
+        run = self.runs()
+        assert await self._main(tmp_path, run, "--combo", "FLASH_LITE:minimal", "--anyway") == 0
+        run.assert_awaited_once()
+        assert "running anyway" in capsys.readouterr().err
+
+    @pytest.mark.asyncio
+    async def test_a_failing_call_counts_as_slow(self, tmp_path, service, capsys):
+        service.seconds = RuntimeError("429 RESOURCE_EXHAUSTED")
+        assert await self._main(tmp_path, self.runs(), "--combo", "PRO:low") == replay.SLOW_SERVICE
+        err = capsys.readouterr().err
+        assert "[check] PRO: a call failed: RuntimeError: 429 RESOURCE_EXHAUSTED" in err
+        assert "[check] PRO: first chunk in none, none" in err
+
+    @pytest.mark.asyncio
+    async def test_a_stalled_call_is_given_up_on_so_the_check_cant_hang(self, service, monkeypatch, capsys):
+        monkeypatch.setattr(replay, "CHECK_GIVE_UP_S", 0.01)
+        service.seconds = {"PRO": "stall"}
+        times = await replay.check_service(["FLASH", "PRO"])
+        assert times == {"FLASH": [0.1, 0.1], "PRO": [float("inf"), float("inf")]}
+        assert replay.slow_tiers(times) == ["PRO"]
+        assert "[check] PRO: no first chunk after 0.01 s, so given up on" in capsys.readouterr().err
+
+    @pytest.mark.asyncio
+    async def test_a_plain_replay_is_not_checked(self, tmp_path, service):
+        run = self.runs()
+        assert await self._main(tmp_path, run) == 0
+        assert service.asked == []
+        run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_check_call_is_the_tiers_model_at_its_lowest_thinking(self, monkeypatch):
+        """first_chunk_s itself, through the real model wrapper, with no request sent."""
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.outputs import ChatGenerationChunk
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        sent = []
+
+        async def fake_astream(self, messages, stop=None, run_manager=None, **kwargs):
+            sent.append((self.model.removeprefix("models/"), kwargs.get("thinking_level")))
+            yield ChatGenerationChunk(message=AIMessageChunk(content="ready"))
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "fake")
+        monkeypatch.setattr(ChatGoogleGenerativeAI, "_astream", fake_astream)
+        assert await replay.first_chunk_s("PRO") >= 0
+        assert await replay.first_chunk_s("FLASH_LITE") >= 0
+        assert sent == [(PRO, "low"), (FLASH_LITE, "minimal")]

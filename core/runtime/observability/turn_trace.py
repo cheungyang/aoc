@@ -30,6 +30,10 @@ Repeated events are kept in order as `events`:
   `model_reply` events, with the same number: `first_chunk` when it began to
   stream, `done` when it ended. So each round trip's own latency is there,
   not only the turn's first token;
+- `model_retry`: the latest call was tried again, `by` the SDK itself (a
+  `status` of 408, 429, 500, 502 or 504, or none for a dropped connection)
+  or by the model wrapper (503), with the wait before it (`wait_s`) when known
+  (core/runtime/model/retry.py);
 - `prune_wait`: the milliseconds a turn waited for the previous turn's
   history prune, only when there was one to wait for.
 

@@ -27,13 +27,20 @@ use `max_retries` as the attempt count and the SDK's backoff curve.
 Every 503 is logged, and each retry dispatches an `llm_retry` custom event
 that the stream handler turns into a reaction on the triggering Discord message.
 
+The SDK's own retries -- those statuses, and a dropped connection -- it logs
+only at INFO, which nothing shows, so they used to pass as plain latency.
+`_SdkRetries` prints each one too. Every retry, the SDK's and ours, is also a
+`model_retry` event on the voice turn's trace.
+
 Every response also passes through here on its way out, so this is where the
 model's `<next_thinking>` pick is read and taken out of the text, streamed or
 not (core/runtime/model/thinking.py).
 """
 
 import asyncio
+import logging
 import random
+import re
 import time
 from typing import Any, AsyncIterator, List, Optional, Tuple
 
@@ -107,6 +114,46 @@ def _agent_id() -> Optional[str]:
         return getattr(ctx, "agent_id", None) if ctx else None
     except Exception:
         return None
+
+
+# Where the SDK logs its retries, at INFO.
+SDK_LOGGER = "google_genai._api_client"
+# tenacity's line: "Retrying <fn> in 1.42 seconds as it raised ClientError: 429 RESOURCE_EXHAUSTED. {...}."
+_SDK_RETRY = re.compile(r" in (?P<wait>[\d.]+) seconds as it raised \w+: (?P<status>\d{3})\b")
+
+
+class _SdkRetries(logging.Filter):
+    """Prints each retry the SDK makes by itself, and records it on the voice
+    turn's trace as a `model_retry` of the latest call. Two kinds: a retriable
+    status, with the wait it chose; and a dropped connection ("Retrying due to
+    aiohttp error: ..."), logged after the 1-10 s it sleeps first, so with no
+    wait to report. Other records pass untouched."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not message.startswith("Retrying"):
+            return True
+        match = _SDK_RETRY.search(message)
+        status = int(match["status"]) if match else None
+        wait = float(match["wait"]) if match else None
+        reason = message[match.start("status"):] if match else message.removeprefix("Retrying due to ")
+        trace = current_turn_trace()
+        if trace is not None:
+            trace.event("model_retry", call=trace.calls, by="sdk", status=status, wait_s=wait)
+        waiting = f" retry_in={wait:.1f}s" if wait is not None else ""
+        print(f"[LLMRetry] SDK retry agent={_agent_id()}{waiting}: {reason[:300]}")
+        return False  # printed above; at INFO, nothing else would show it
+
+
+def _watch_sdk_retries() -> None:
+    """Puts _SdkRetries on the SDK's logger, once per process, and has that
+    logger make its INFO records, which is where the retries are."""
+    log = logging.getLogger(SDK_LOGGER)
+    if any(type(f).__name__ == _SdkRetries.__name__ for f in log.filters):
+        return
+    log.addFilter(_SdkRetries())
+    if log.getEffectiveLevel() > logging.INFO:
+        log.setLevel(logging.INFO)
 
 
 async def _announce_retry() -> None:
@@ -225,6 +272,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         return self.max_retries if self.max_retries and self.max_retries > 0 else _SDK_DEFAULT_ATTEMPTS
 
     def _without_sdk_503_retry(self, kwargs: dict) -> dict:
+        _watch_sdk_retries()  # whichever retries the SDK keeps, they show
         if "http_options" in kwargs:
             return kwargs  # caller is managing transport options explicitly
         return {
@@ -267,6 +315,9 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             return None
         delay = backoff_delay(attempt - 1)
         print(f"[LLMRetry] 503 agent={agent} model={self.model} attempt={attempt}/{total} phase={phase} chars_so_far={chars} retry_in={delay:.1f}s")
+        trace = current_turn_trace()
+        if trace is not None:
+            trace.event("model_retry", call=trace.calls, by="wrapper", status=503, wait_s=round(delay, 2), phase=phase)
         return delay
 
     def _log_recovered(self, attempt: int, waited: float) -> None:

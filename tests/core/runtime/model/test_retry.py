@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import unittest
@@ -5,7 +6,10 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
+import httpx
+from google import genai
 from google.genai.errors import ServerError, ClientError
+from google.genai.types import HttpOptions, HttpRetryOptions
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatGeneration, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -268,7 +272,9 @@ class TestTurnTraceSpans(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("".join(g.text for g in out), "The first half, and the second.")
         self.assertEqual(self.spans(trace), [("model_call", 1, None), ("model_reply", 1, "first_chunk"),
-                                             ("model_reply", 1, "done")])
+                                             ("model_retry", 1, "mid-stream"), ("model_reply", 1, "done")])
+        [retry] = [e for e in trace.events if e["kind"] == "model_retry"]
+        self.assertEqual((retry["by"], retry["status"]), ("wrapper", 503))
 
     async def test_a_whole_call_records_its_end(self):
         trace = start_turn_trace("day-planner", 1)
@@ -276,6 +282,82 @@ class TestTurnTraceSpans(unittest.IsolatedAsyncioTestCase):
         with patch.object(ChatGoogleGenerativeAI, "_agenerate", AsyncMock(return_value=result)):
             await self.llm._agenerate([HumanMessage(content="hi")])
         self.assertEqual(self.spans(trace), [("model_call", 1, None), ("model_reply", 1, "done")])
+
+
+class TestTheSdksOwnRetriesShow(unittest.IsolatedAsyncioTestCase):
+    """The SDK retries 408/429/500/502/504 and dropped connections by itself, and logs
+    them only at INFO: each one is printed, like a 503, and goes on the voice trace."""
+
+    def setUp(self):
+        self.watch = llm_retry._SdkRetries()
+        self.printed = patch("builtins.print").start()
+        self.addCleanup(patch.stopall)
+
+    @staticmethod
+    def record(message):
+        return logging.LogRecord(llm_retry.SDK_LOGGER, logging.INFO, __file__, 1, message, None, None)
+
+    async def test_a_retried_status_is_printed_and_traced(self):
+        trace = start_turn_trace("home-steward", 1)
+        trace.model_call("home-steward", "gemini-x", "low")
+        shown = self.watch.filter(self.record(
+            "Retrying google.genai._api_client.BaseApiClient._async_request_once in 1.42 seconds as it raised "
+            "ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'message': 'Quota exceeded'}}."))
+
+        self.assertFalse(shown, "printed instead")
+        line = self.printed.call_args.args[0]
+        self.assertTrue(line.startswith("[LLMRetry] SDK retry agent="), line)
+        self.assertIn("retry_in=1.4s: 429 RESOURCE_EXHAUSTED. {'error'", line)
+        [event] = [e for e in trace.events if e["kind"] == "model_retry"]
+        self.assertEqual({key: event[key] for key in ("call", "by", "status", "wait_s")},
+                         {"call": 1, "by": "sdk", "status": 429, "wait_s": 1.42})
+
+    async def test_a_dropped_connection_has_no_status_and_no_known_wait(self):
+        trace = start_turn_trace("home-steward", 1)
+        self.watch.filter(self.record("Retrying due to aiohttp error: Server disconnected"))
+
+        self.assertTrue(self.printed.call_args.args[0].endswith(": aiohttp error: Server disconnected"))
+        [event] = [e for e in trace.events if e["kind"] == "model_retry"]
+        self.assertEqual((event["status"], event["wait_s"]), (None, None))
+
+    async def test_outside_a_voice_turn_it_is_printed_all_the_same(self):
+        self.watch.filter(self.record("Retrying due to aiohttp error: Server disconnected"))
+        self.printed.assert_called_once()
+
+    async def test_anything_else_the_sdk_logs_passes_untouched(self):
+        self.assertTrue(self.watch.filter(self.record("The user provided project/location will take precedence")))
+        self.printed.assert_not_called()
+
+    def test_the_first_call_turns_it_on_once(self):
+        log = logging.getLogger(llm_retry.SDK_LOGGER)
+        filters, level = log.filters[:], log.level
+        self.addCleanup(setattr, log, "filters", filters)
+        self.addCleanup(log.setLevel, level)
+        log.filters = [f for f in filters if not isinstance(f, llm_retry._SdkRetries)]
+        log.setLevel(logging.WARNING)
+
+        llm = RetryingChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake")
+        llm._without_sdk_503_retry({})
+        llm._without_sdk_503_retry({"http_options": "the caller's own"})
+
+        self.assertEqual(sum(isinstance(f, llm_retry._SdkRetries) for f in log.filters), 1)
+        self.assertTrue(log.isEnabledFor(logging.INFO), "the SDK logs its retries at INFO")
+
+    def test_the_sdks_own_words_are_read_from_a_real_retry(self):
+        """Through the SDK's real retry, so a change in how it words one fails here."""
+        llm_retry._watch_sdk_retries()
+        replies = [httpx.Response(429, json={"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                                                       "message": "Quota exceeded"}}),
+                   httpx.Response(200, json={"candidates": [{"content": {"role": "model",
+                                                                         "parts": [{"text": "ready"}]}}]})]
+        client = genai.Client(api_key="fake", http_options=HttpOptions(
+            client_args={"transport": httpx.MockTransport(lambda request: replies.pop(0))},
+            retry_options=HttpRetryOptions(attempts=2, initial_delay=0.01, max_delay=0.01)))
+
+        self.assertEqual(client.models.generate_content(model="gemini-x", contents="hi").text, "ready")
+        line = self.printed.call_args.args[0]
+        self.assertTrue(line.startswith("[LLMRetry] SDK retry agent="), line)
+        self.assertIn("retry_in=0.0s: 429 RESOURCE_EXHAUSTED", line)
 
 
 if __name__ == "__main__":

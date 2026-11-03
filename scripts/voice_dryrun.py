@@ -63,6 +63,10 @@ caps the model calls a minute (counted from each run's trace), a run the
 API refuses with 429 / RESOURCE_EXHAUSTED waits and runs again, and --out
 is read first and rewritten after every run, so rerunning the same command
 resumes where it stopped.
+Before it times any combo, it checks the service: two one-word calls on each
+tier the combos run on. When every call of a tier comes slower than
+SLOW_FIRST_CHUNK_S, it runs nothing and exits 4, since the latency would
+measure the service's bad day instead of the combos; --anyway runs regardless.
 
 Usage:
     python scripts/voice_dryrun.py                        # every read-only case, once
@@ -1051,6 +1055,81 @@ async def run_paced(case: dict, run: int, combo: Combo, db_path: str, pacer: Pac
     return None
 
 
+# --- the service check: is now a fair time to time the models? ------------------
+
+CHECK_PROMPT = "Reply with the single word: ready."
+CHECK_CALLS = 2
+# A tier is slow when every check call takes longer than this to its first
+# chunk. A one-word reply at the tier's lowest thinking level normally comes
+# well inside it: the NAS's short FLASH_LITE replies took 0.8 s p50 on Nov 2,
+# and 10-13 s in the slow spell of Nov 3 that this check is for.
+SLOW_FIRST_CHUNK_S = {"FLASH_LITE": 2.0, "FLASH": 3.0, "PRO": 6.0}
+# A check call still waiting after this long is given up on, as slow: model
+# calls have no timeout of their own, so a stalled one would hang the check.
+CHECK_GIVE_UP_S = 15.0
+# The exit code when it finds the service slow.
+SLOW_SERVICE = 4
+
+
+def tiers_to_check(combos: List[Combo]) -> List[str]:
+    """The tiers a benchmark's combos run on: each one a combo forces, and every
+    agent tier when a combo keeps prod's models. None for a plain replay."""
+    if combos == [Combo()]:
+        return []
+    tiers = {combo.model for combo in combos if combo.model}
+    if any(combo.model is None for combo in combos):
+        tiers |= set(TIER_ORDER)
+    return [tier for tier in TIER_ORDER if tier in tiers]
+
+
+async def first_chunk_s(tier: str) -> float:
+    """Seconds to the first streamed chunk of a one-word reply from `tier`, at
+    its lowest thinking level, so the time is the service's, not thinking's."""
+    from core.config.models import resolve_model
+    from core.config.settings import Config
+    from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
+
+    llm = RetryingChatGoogleGenerativeAI(model=resolve_model(tier), max_retries=Config().llm_max_retries)
+    started, first = _clock(), None
+    async for _ in llm.astream(CHECK_PROMPT, thinking_level=TIER_THINKING_LEVELS[tier][0]):
+        if first is None:
+            first = _clock()
+    return (first if first is not None else _clock()) - started
+
+
+# Indirection so tests can answer the check's calls.
+_first_chunk = first_chunk_s
+
+
+async def check_service(tiers: List[str]) -> Dict[str, List[float]]:
+    """Each tier's check calls, one at a time: seconds to the first chunk, or
+    infinity for a call that failed or was given up on."""
+    times: Dict[str, List[float]] = {}
+    for tier in tiers:
+        times[tier] = []
+        for _ in range(CHECK_CALLS):
+            try:
+                times[tier].append(await asyncio.wait_for(_first_chunk(tier), CHECK_GIVE_UP_S))
+            except asyncio.TimeoutError:
+                print(f"[check] {tier}: no first chunk after {CHECK_GIVE_UP_S:g} s, so given up on", file=sys.stderr)
+                times[tier].append(float("inf"))
+            except Exception as e:
+                print(f"[check] {tier}: a call failed: {type(e).__name__}: {str(e)[:200]}", file=sys.stderr)
+                times[tier].append(float("inf"))
+    return times
+
+
+def slow_tiers(times: Dict[str, List[float]]) -> List[str]:
+    """The tiers whose check calls all took longer than their limit."""
+    return [tier for tier, seconds in times.items() if seconds and min(seconds) > SLOW_FIRST_CHUNK_S[tier]]
+
+
+def check_lines(times: Dict[str, List[float]]) -> List[str]:
+    return [f"[check] {tier}: first chunk in "
+            + ", ".join("none" if s == float("inf") else f"{s:.2f} s" for s in seconds)
+            + f" (slow when all are over {SLOW_FIRST_CHUNK_S[tier]:g} s)" for tier, seconds in times.items()]
+
+
 def load_results(path: Optional[str]) -> List[dict]:
     """The runs a results file holds, as --out writes them; none without the file."""
     if not path or not os.path.exists(path):
@@ -1112,6 +1191,8 @@ async def main(argv: Optional[List[str]] = None) -> int:
                         help="Keep model calls under this many a minute, counted from each run's trace (0: no cap).")
     parser.add_argument("--out", help="Results JSON: read first, so the same command resumes, "
                                       "and rewritten after every run.")
+    parser.add_argument("--anyway", action="store_true",
+                        help="Run the combos even when the service check finds the models slow.")
     args = parser.parse_args(argv)
     try:
         combos = combos_from(args.model, args.thinking, args.combo, args.matrix)
@@ -1148,6 +1229,20 @@ async def main(argv: Optional[List[str]] = None) -> int:
 
         if not args.allow_mutations:
             guard_writes()
+
+        tiers = tiers_to_check(combos)
+        if tiers:
+            times = await check_service(tiers)
+            for line in check_lines(times):
+                print(line, file=sys.stderr)
+            slow = slow_tiers(times)
+            if slow and not args.anyway:
+                print(f"[check] The model service is slow right now ({', '.join(slow)}), so the combos' latency "
+                      f"would measure that, not them. Nothing was run: try again later, or add --anyway.",
+                      file=sys.stderr)
+                return SLOW_SERVICE
+            if slow:
+                print(f"[check] Slow ({', '.join(slow)}), but running anyway, as asked.", file=sys.stderr)
 
         pacer = Pacer(args.rpm)
         with surface_scope("voice"):
