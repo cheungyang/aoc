@@ -119,12 +119,12 @@ def _no_tts_network(monkeypatch):
     unavailable without running its gRPC check, and a real Chirp or edge-tts
     request fails; tests that speak use `FakeTTS` (tests/helpers.py).
 
-    Suite-wide, not just under tests/core/voice/: building a Discord runner
+    Suite-wide, not just under tests/core/channel/voice/: building a Discord runner
     builds the voice stack, and its TTS engine starts Chirp's live check -- a
     gRPC probe and a Cloud TTS call with the .env key. The gRPC channel that
     leaves behind also writes a log line into the next child process's stderr.
     """
-    from core.voice.engines import chirp_tts, edge_tts_stream, tts
+    from core.channel.voice.engines import chirp_tts, edge_tts_stream, tts
 
     def refuse(*_args, **_kwargs):
         raise RuntimeError("tests must not reach a TTS service")

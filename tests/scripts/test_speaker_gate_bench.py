@@ -7,14 +7,14 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 
 import speaker_gate_bench as bench  # noqa: E402
-from core.voice.foundation.utterance import BYTES_PER_MS  # noqa: E402
+from core.channel.voice.foundation.utterance import BYTES_PER_MS  # noqa: E402
 from tests.helpers import FakeSpeakerModel  # noqa: E402
 
 
 def test_speechlike_audio_is_16khz_16bit_and_voiced():
     pcm = bench.speechlike(1.5)
     assert len(pcm) == 1500 * BYTES_PER_MS
-    from core.voice.listening.speaker_gate import voiced_share
+    from core.channel.voice.listening.speaker_gate import voiced_share
     assert voiced_share(np.frombuffer(pcm, dtype=np.int16)) > 0.9
 
 

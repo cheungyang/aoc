@@ -1,6 +1,6 @@
 """How spoken words are compared: the forms an utterance is reduced to before a
 spoken command matches its phrases, and before the voice room's alias table
-(core/voice/room/aliases.py) looks a name up."""
+(core/channel/voice/room/aliases.py) looks a name up."""
 import re
 from typing import List
 

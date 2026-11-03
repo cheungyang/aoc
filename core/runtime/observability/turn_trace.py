@@ -33,7 +33,7 @@ Repeated events are kept in order as `events`:
 - `prune_wait`: the milliseconds a turn waited for the previous turn's
   history prune, only when there was one to wait for.
 
-How the words were heard is in `meta` (core/voice/turn.py `record_stt`): the
+How the words were heard is in `meta` (core/channel/voice/turn.py `record_stt`): the
 recognizer (`stt`), the live session's own timings (`stt_live_ms`, from speech
 onset; `stt_final_after_end_ms`), why it failed (`stt_error`), how long batch
 transcription took (`stt_transcribe_ms`), and why nothing could transcribe the

@@ -73,7 +73,7 @@ class TypedContext(CommandContext):
 
 @dataclass
 class SpokenContext(CommandContext):
-    """A command said in the voice room (core/voice/turn.py)."""
+    """A command said in the voice room (core/channel/voice/turn.py)."""
 
     voice: Optional[VoiceControls] = None
     heard: str = ""                     # what was said

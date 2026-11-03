@@ -10,7 +10,7 @@ Say = Callable[..., Awaitable[None]]
 
 
 class VoiceControls(Protocol):
-    """The voice room, as commands use it (VoiceManager, core/voice/voice_manager.py)."""
+    """The voice room, as commands use it (VoiceManager, core/channel/voice/voice_manager.py)."""
 
     def hosts_voice(self) -> bool:
         """This bot speaks in the voice room, so it answers the voice host's commands."""
@@ -66,7 +66,7 @@ class VoiceControls(Protocol):
 
 
 class SpokenTurn(Protocol):
-    """The voice turn a spoken command was said in (core/voice/turn.py)."""
+    """The voice turn a spoken command was said in (core/channel/voice/turn.py)."""
 
     def hold(self) -> None:
         """Drops this utterance, but keeps the words said before it for what's said next."""

@@ -205,7 +205,7 @@ class ScheduleSpec(ABC):
         self.thread = thread
         self.enabled = enabled
         self.precondition = precondition
-        # How its posts reach you in voice briefings (core/voice/briefing).
+        # How its posts reach you in voice briefings (core/channel/voice/briefing).
         self.priority = Priority.parse(priority)
         self.label = label
         self.entry = dict(entry or {})

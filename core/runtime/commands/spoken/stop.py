@@ -4,7 +4,7 @@ a request for the agent, and speech that goes on past the phrase ("wait, make
 it Friday") is one.
 
 These phrases are also the ones that interrupt the agent at once, however
-short (core/voice/listening/turn_taking.py's barge-in and end of turn).
+short (core/channel/voice/listening/turn_taking.py's barge-in and end of turn).
 """
 from typing import Iterable, List, Optional
 

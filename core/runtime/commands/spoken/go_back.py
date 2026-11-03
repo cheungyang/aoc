@@ -4,7 +4,7 @@ to where it was before its last move, at once and with no model call.
 It undoes a move you didn't mean: a bare name the room took for a switch
 ("Frankie here. Say 'go back' for Grace."), or a hand-off to the wrong agent.
 It answers until you've talked in the new place, and in any case for
-GO_BACK_WINDOW_S after the move (core/voice/voice_manager.py `go_back`). After
+GO_BACK_WINDOW_S after the move (core/channel/voice/voice_manager.py `go_back`). After
 that, a bare "go back" is more likely meant for the agent (back to its last
 options, say), so the room leaves it to the agent; "back to Grace" (switch.py)
 still works.

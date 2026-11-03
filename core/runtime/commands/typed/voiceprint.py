@@ -1,5 +1,5 @@
 """`!voiceprint [reset]`: the voiceprint gate's state and your voiceprint
-(the reports are core/voice/listening/gate_commands.py's)."""
+(the reports are core/channel/voice/listening/gate_commands.py's)."""
 from core.runtime.commands.base import TypedContext, VoiceRoomCommand
 
 

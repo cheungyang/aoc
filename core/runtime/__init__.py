@@ -27,7 +27,7 @@ it, never above (checked by tests/test_layers.py):
   bootstrap    bootstrap
 
 Rules:
-  1. The runtime never imports an adapter (core.channel.discord, core.voice,
+  1. The runtime never imports an adapter (core.channel.discord, core.channel.voice,
      core.scheduler, core.proactive, graphs, tools, scripts). Adapters import
      the runtime.
   2. Inside the runtime, imports point down the layers above.

@@ -1,5 +1,5 @@
 """`!enroll [cancel]`: takes your voiceprint, typed while you're in the voice
-channel (the flow is core/voice/listening/enrollment.py's EnrollmentFlow)."""
+channel (the flow is core/channel/voice/listening/enrollment.py's EnrollmentFlow)."""
 from core.runtime.commands.base import TypedContext, VoiceRoomCommand
 
 

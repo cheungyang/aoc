@@ -61,7 +61,7 @@ at its `due_at`, and claimed and run like any check, with these differences:
     the question its post waits on. It replies <silent/> only when its notes
     made bringing it up conditional;
   - its post is HIGHEST priority, labelled ONCE_LABEL, so a voice briefing
-    announces it live while you're in voice (core/voice/briefing);
+    announces it live while you're in voice (core/channel/voice/briefing);
   - a post or a silent reply closes it; a failed turn is tried again RETRY_S
     later, and the ONCE_ATTEMPTS-th failure closes it (`finish_check`).
 

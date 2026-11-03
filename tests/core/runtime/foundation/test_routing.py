@@ -417,7 +417,7 @@ class TestHomeChannels(unittest.TestCase):
 
     def test_text_and_voice_agree_on_every_agents_home(self):
         """\"Ted, ...\" typed continues where \"switch to Ted\" spoken goes."""
-        from core.voice.room.focus import FocusDirectory
+        from core.channel.voice.room.focus import FocusDirectory
 
         voice_homes = FocusDirectory.build(self.loader, voice_host="main").homes
         for agent_id in sorted(set(addressable_agents(self.loader).values())):

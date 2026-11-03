@@ -18,7 +18,7 @@ command.
 
 Who runs them: the Discord runner asks TYPED about every message starting with
 "!", and CONTROL about the control thread (core/channel/discord/runner.py); the
-voice turn asks SPOKEN about every finished utterance (core/voice/turn.py).
+voice turn asks SPOKEN about every finished utterance (core/channel/voice/turn.py).
 `!help` lists them all.
 
 The pattern, as for prompts and storage: one file per command. A subclass of a

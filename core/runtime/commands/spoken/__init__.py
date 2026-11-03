@@ -1,5 +1,5 @@
 """Spoken commands: said in the voice room, recognized by their phrases. The
-voice turn (core/voice/turn.py) asks SPOKEN (../registry.py) about each
+voice turn (core/channel/voice/turn.py) asks SPOKEN (../registry.py) about each
 finished utterance, in order, before the agent hears it.
 
     words.py       how spoken words are compared: the forms an utterance is

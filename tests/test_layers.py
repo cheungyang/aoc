@@ -1,6 +1,6 @@
-"""The dependency rules in core/runtime/__init__.py, core/voice/__init__.py and
-the __init__.py of core/config, core/util and core/git, checked against every
-import in core/.
+"""The dependency rules in core/runtime/__init__.py,
+core/channel/voice/__init__.py and the __init__.py of core/config, core/util
+and core/git, checked against every import in core/.
 
   R1  The runtime never imports an adapter.
   R2  Inside the runtime, imports point down the layers.
@@ -34,8 +34,8 @@ from typing import Dict, Iterator, Optional, Set, Tuple
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PROJECT = ("core", "graphs", "tools", "scripts", "agents", "main")
 
-ADAPTERS = ("core.channel.discord", "core.voice", "core.scheduler", "core.proactive", "graphs", "tools", "scripts",
-            "agents", "main")
+ADAPTERS = ("core.channel.discord", "core.channel.voice", "core.scheduler", "core.proactive", "graphs", "tools",
+            "scripts", "agents", "main")
 BELOW_RUNTIME = ("core.prompts", "core.loaders", "core.storage", "core.knowledge", "core.util",
                  "core.tooling", "core.permissions", "core.channel", "core.config", "core.git")
 FOUNDATION = ("core.runtime.foundation",)
@@ -53,13 +53,13 @@ LAYERS = (
 
 # Voice's layers, lowest first. The parts share a layer and never import each
 # other: they meet in VoiceManager, through the Protocols each declares.
-VOICE_PARTS = ("core.voice.listening", "core.voice.speech", "core.voice.room")
+VOICE_PARTS = ("core.channel.voice.listening", "core.channel.voice.speech", "core.channel.voice.room")
 VOICE_LAYERS = (
-    ("core.voice.foundation",),
-    ("core.voice.engines",),
+    ("core.channel.voice.foundation",),
+    ("core.channel.voice.engines",),
     VOICE_PARTS,
-    ("core.voice.voice_manager", "core.voice.turn", "core.voice.hooks"),
-    ("core.voice.briefing",),
+    ("core.channel.voice.voice_manager", "core.channel.voice.turn", "core.channel.voice.hooks"),
+    ("core.channel.voice.briefing",),
 )
 # The adapters that may import voice.
 VOICE_HOSTS = ("core.channel.discord.runner",)
@@ -128,7 +128,10 @@ def part(module: str) -> Optional[str]:
 
 
 def area(module: str) -> str:
-    """The package a module belongs to, for R6: core.<package>, else its top level."""
+    """The package a module belongs to, for R6: core.<package>, else its top level.
+    Voice is a package of its own, though it sits inside core.channel."""
+    if within(module, ("core.channel.voice",)):
+        return "core.channel.voice"
     parts = module.split(".")
     return ".".join(parts[:2]) if parts[0] == "core" else parts[0]
 
@@ -194,7 +197,7 @@ def violations() -> Dict[str, Set[str]]:
     for path in sorted((REPO / "core").rglob("*.py")):
         importer = module_name(path)
         in_runtime = within(importer, ("core.runtime",))
-        in_voice = within(importer, ("core.voice",))
+        in_voice = within(importer, ("core.channel.voice",))
         in_config = within(importer, ("core.config",))
         in_util = within(importer, ("core.util",))
         in_git = within(importer, ("core.git",))
@@ -216,14 +219,14 @@ def violations() -> Dict[str, Set[str]]:
                 found["R4"].add(importer)
             if in_runtime and in_function:
                 found["R5"].add(edge)
-            if in_voice and within(imported, ADAPTERS) and not within(imported, ("core.voice",)):
+            if in_voice and within(imported, ADAPTERS) and not within(imported, ("core.channel.voice",)):
                 found["V1"].add(edge)
-            if in_voice and importer != "core.voice" and within(imported, ("core.voice",)):
+            if in_voice and importer != "core.channel.voice" and within(imported, ("core.channel.voice",)):
                 upward = (layer(imported, VOICE_LAYERS) or 0) > (layer(importer, VOICE_LAYERS) or 0)
                 across = part(importer) and part(imported) and part(importer) != part(imported)
                 if upward or across:
                     found["V2"].add(edge)
-            if (not in_voice and within(imported, ("core.voice",)) and within(importer, ADAPTERS)
+            if (not in_voice and within(imported, ("core.channel.voice",)) and within(importer, ADAPTERS)
                     and not within(importer, VOICE_HOSTS)):
                 found["V3"].add(edge)
             if in_voice and in_function and not within(imported, HEAVY):
@@ -241,7 +244,7 @@ def violations() -> Dict[str, Set[str]]:
 
 
 class TestLayers(unittest.TestCase):
-    """See core/runtime/__init__.py and core/voice/__init__.py for the rules and the layers."""
+    """See core/runtime/__init__.py and core/channel/voice/__init__.py for the rules and the layers."""
 
     @classmethod
     def setUpClass(cls):
@@ -304,7 +307,7 @@ class TestLayers(unittest.TestCase):
                     self.assertIsNotNone(layer(module_name(path)), "add it to LAYERS")
 
     def test_every_voice_module_has_a_layer(self):
-        for path in sorted((REPO / "core" / "voice").rglob("*.py")):
+        for path in sorted((REPO / "core" / "channel" / "voice").rglob("*.py")):
             if path.name != "__init__.py":
                 with self.subTest(module=module_name(path)):
                     self.assertIsNotNone(layer(module_name(path), VOICE_LAYERS), "add it to VOICE_LAYERS")

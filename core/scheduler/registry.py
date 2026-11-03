@@ -20,7 +20,7 @@ for that run's model calls; without it the agent's scheduled level applies
 
 Any schedule may set `priority` (IGNORE | LOW | DEFAULT | HIGHEST, default
 DEFAULT) and `label` ("your morning check-in"): how its posts reach you in
-voice briefings (core/voice/briefing). IGNORE posts never enter the channel inbox.
+voice briefings (core/channel/voice/briefing). IGNORE posts never enter the channel inbox.
 
 The same validator backs the `schedule_validate` tool, so an agent editing
 `agent.json` can check an entry before it saves it.

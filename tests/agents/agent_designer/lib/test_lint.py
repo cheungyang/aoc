@@ -391,7 +391,8 @@ class TestChannelsAndVoices(LintRepo):
         self.agent({"voice": {"name": "en-US-Chirp3-HD-Duck"}})
         [message] = self.messages("unknown_voice")
         self.assertTrue(message.startswith("`en-US-Chirp3-HD-Duck` is not a Chirp 3 HD voice (CHIRP3_HD_VOICES in "
-                                           "core/voice/foundation/settings.py); free: Achernar (female, soft), "), message)
+                                           "core/channel/voice/foundation/settings.py); free: "
+                                           "Achernar (female, soft), "), message)
 
     def test_no_routing_table_or_no_concierge_checks_nothing_of_channels(self):
         os.remove(os.path.join(self.root, lint.ROUTING_TABLE_TEST))

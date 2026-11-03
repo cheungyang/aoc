@@ -4,7 +4,7 @@
 Measures today's engine against the candidates that could replace it, on the
 kind of replies this system actually speaks (scripts/tts_benchmark_utterances.json):
 
-    edge          edge-tts, the voice's fallback (core/voice/engines/edge_tts_stream.py)
+    edge          edge-tts, the voice's fallback (core/channel/voice/engines/edge_tts_stream.py)
     chirp-unary   Chirp 3: HD on Cloud Text-to-Speech, one SynthesizeSpeech call per sentence
     chirp-stream  Chirp 3: HD, one bidirectional StreamingSynthesize call fed clause by clause
     gemini        Gemini 3.8 Flash-Lite TTS over the Interactions API, audio streamed back
@@ -114,7 +114,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from core.voice.foundation.settings import CHIRP3_HD_VOICES, DEFAULT_VOICE, chirp3_voice  # noqa: E402
+from core.channel.voice.foundation.settings import CHIRP3_HD_VOICES, DEFAULT_VOICE, chirp3_voice  # noqa: E402
 
 UTTERANCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_benchmark_utterances.json")
 AGENTS_DIR = os.path.join(PROJECT_ROOT, "agents")

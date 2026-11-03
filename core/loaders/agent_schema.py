@@ -63,7 +63,7 @@ PROACTIVITY_LISTS = ("interests", "offers")
 PROACTIVITY_KEYS = frozenset(PROACTIVITY_LISTS)
 
 # The voice name's shape. Whether the voice exists is checked against
-# core/voice/foundation/settings.py by the config tests rather than here, because
+# core/channel/voice/foundation/settings.py by the config tests rather than here, because
 # importing the voice package pulls in the whole audio stack.
 VOICE_NAME = re.compile(r"^[a-z]{2,3}-[A-Z]{2}-Chirp3-HD-[A-Za-z]+$")
 MIN_SPEAKING_RATE = 0.25

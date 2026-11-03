@@ -801,8 +801,8 @@ def live_hearing(voice: str = LIVE_STT_VOICE):
     import stt_benchmark as bench
     from core.loaders.agents_loader import AgentsLoader
     from core.config.settings import Config
-    from core.voice.engines.stt import SpeechRecognizer, agent_vocabulary
-    from core.voice.listening.turn_taking import merge_transcripts
+    from core.channel.voice.engines.stt import SpeechRecognizer, agent_vocabulary
+    from core.channel.voice.listening.turn_taking import merge_transcripts
     from tts_benchmark import API_KEY_ENV_VAR, Options, make_chirp_client
 
     client, tts_module = make_chirp_client(Options(tts_api_key=(Config().get(API_KEY_ENV_VAR) or "").strip()))
@@ -833,12 +833,12 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     from core.runtime.foundation import events
     from core.runtime.foundation.sessions import SessionManager
     from core.runtime.observability.turn_trace import Stage, start_turn_trace
-    from core.voice.speech.missing_speech import fallback_speech
-    from core.voice.speech.reply import ERROR_LINE, speech_of
-    from core.voice.engines.tts import agent_voice
-    from core.voice.speech.pcm_speaker import PCMSpeaker
-    from core.voice.speech.speech_router import SpeechTextRouter
-    from core.voice.speech.voice_stream import VoiceStream
+    from core.channel.voice.speech.missing_speech import fallback_speech
+    from core.channel.voice.speech.reply import ERROR_LINE, speech_of
+    from core.channel.voice.engines.tts import agent_voice
+    from core.channel.voice.speech.pcm_speaker import PCMSpeaker
+    from core.channel.voice.speech.speech_router import SpeechTextRouter
+    from core.channel.voice.speech.voice_stream import VoiceStream
 
     reset_history(db_path)
     BLOCKED_WRITES.clear()
@@ -1140,7 +1140,7 @@ async def main(argv: Optional[List[str]] = None) -> int:
 
         from core.runtime import bootstrap
         from core.runtime.foundation.context import surface_scope
-        from core.voice.engines.tts import TTSEngine
+        from core.channel.voice.engines.tts import TTSEngine
 
         bootstrap.wire()
         tts = TTSEngine() if not args.no_tts else None

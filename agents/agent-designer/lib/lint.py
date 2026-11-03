@@ -71,7 +71,7 @@ from core.permissions.denies import DENY_PREFIX, deny_covers, is_deny
 from core.tooling import AgentTool, Report, Rule
 from core.tooling.rules import RULES_FILE, read_rules_text, rule_keys, rules_path
 from core.tooling.workflow import DOCSTRING_LINES, WORKFLOW_FILE, contract_problems, parse_workflow
-from core.voice.foundation.settings import CHIRP3_HD_VOICES, chirp3_voice
+from core.channel.voice.foundation.settings import CHIRP3_HD_VOICES, chirp3_voice
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 CHARS_PER_TOKEN = 4  # the estimate PRELOAD_TOKEN_BUDGET and the context pruner use
@@ -754,7 +754,7 @@ def _channels(agent_id: str, root: str, config: Dict[str, Any],
 
 
 def free_voices(taken: Iterable[str]) -> List[str]:
-    """The Chirp 3 HD voices (CHIRP3_HD_VOICES, core/voice/foundation/settings.py) not
+    """The Chirp 3 HD voices (CHIRP3_HD_VOICES, core/channel/voice/foundation/settings.py) not
     in `taken`, as `Name (gender, style)`: what to match a persona against."""
     taken = set(taken)
     return [f"{name} ({gender}, {style})" for name, (gender, style) in sorted(CHIRP3_HD_VOICES.items())
@@ -790,7 +790,7 @@ def _voices(agent_id: str, root: str, config: Dict[str, Any],
     key = _voice_key(config)
     if key is None:
         return [Finding("unknown_voice", f"`{name}` is not a Chirp 3 HD voice (CHIRP3_HD_VOICES in "
-                        f"core/voice/foundation/settings.py); free: {free}", where)]
+                        f"core/channel/voice/foundation/settings.py); free: {free}", where)]
     if key in taken:
         return [Finding("voice_taken", f"`{name}` is already {' and '.join(taken[key])}'s, and every agent needs "
                         f"its own voice; free: {free}", where)]

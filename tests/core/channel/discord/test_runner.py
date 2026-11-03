@@ -718,7 +718,7 @@ class TestTypedCommands(unittest.IsolatedAsyncioTestCase):
 @patch('core.channel.discord.runner.AgentsLoader')
 @patch('core.channel.discord.runner.commands.Bot')
 class TestInboxSignals(unittest.IsolatedAsyncioTestCase):
-    """The runner's part of the channel inbox (core/voice/briefing): posting in a
+    """The runner's part of the channel inbox (core/channel/voice/briefing): posting in a
     channel or ✅ on a post finishes its row; a reply is a candidate."""
 
     def _runner(self, mock_bot_class, mock_loader_class, voice=True, hosts=("day-planning",), reply="Good, noted."):

@@ -6,7 +6,7 @@ know the teammate existed ("I'm ready to design Frankie"). This block lists
 every agent with a channel of its own -- name, id, channel, a line on what it
 does -- and the one directive that moves the user: a reply ending with
 <switch to="goal-setter"/> (core/channel/response_parser.py). The voice room
-follows it (core/voice/speech/reply.py), and a typed channel shows where to
+follows it (core/channel/voice/speech/reply.py), and a typed channel shows where to
 find the teammate (core/channel/handoff.py).
 
 Handed over cold, a teammate made the user repeat everything. So when the

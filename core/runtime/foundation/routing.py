@@ -173,7 +173,7 @@ def addressable_agents(loader: Any, exclude: Iterable[Optional[str]] = ()) -> Di
 def home_channel(agent_id: str, loader: Any) -> Optional[str]:
     """Where `agent_id` keeps its conversation: the first of its `channels` in
     which it answers untagged messages. The voice focus sends its name to the
-    same channel (core/voice/room/focus.py). None for an agent that answers no
+    same channel (core/channel/voice/room/focus.py). None for an agent that answers no
     channel on its own."""
     config = loader.get_agent_config(agent_id) or {}
     for channel in [str(c).lstrip("#").lower() for c in (config.get("channels") or [])]:

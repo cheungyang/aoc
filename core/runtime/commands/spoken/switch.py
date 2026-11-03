@@ -1,6 +1,6 @@
 """Switch: "switch me to Daisy", "let's start with Grace", or just "Grace." --
 moves the voice room's focus (which text channel the next turn belongs to) and
-moves nobody. The room does the moving (core/voice/room/room_switch.py).
+moves nobody. The room does the moving (core/channel/voice/room/room_switch.py).
 
 A switch is said one of three ways, told apart by two facts: whether a switch
 phrase leads it (only then is a near miss worth a model call), and whether it

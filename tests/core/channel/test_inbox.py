@@ -9,7 +9,7 @@ from core.storage.channel_inbox import InboxStore
 from core.channel import inbox
 from core.channel.inbox import LATE_REPLY_S
 from core.storage.channel_inbox import InboxRow, Priority, Source, Status, Via
-from tests.core.voice.briefing import loader
+from tests.core.channel.voice.briefing import loader
 
 
 def push(channel="day-planning", text="Good morning! How's your energy, one to ten?", **kw):

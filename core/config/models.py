@@ -43,7 +43,7 @@ IMAGE = "gemini-3.1-flash-image-preview"
 # Speech. Not agent tiers: text-to-speech candidates for the voice pipeline
 # (benchmarked against Chirp 3: HD and edge-tts in scripts/tts_benchmark.py),
 # the transcription model the benchmark's pronunciation check listens with, and
-# the streaming one that hears voice turns (core/voice/engines/live_stt.py).
+# the streaming one that hears voice turns (core/channel/voice/engines/live_stt.py).
 TTS_FLASH_LITE = "gemini-3.8-flash-lite-tts"
 TRANSCRIBE = "gemini-3.5-transcribe"
 TRANSCRIBE_LIVE = "gemini-3.5-transcribe-live"

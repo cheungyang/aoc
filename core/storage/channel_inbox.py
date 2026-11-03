@@ -3,7 +3,7 @@
 A row is the newest agent post in its channel that you may not have finished
 with: a scheduled push, or a reply that needs you. Every category of a row
 is an enum. Posts and read signals write the inbox (core/channel/inbox.py);
-voice briefings read it (core/voice/briefing/hook.py).
+voice briefings read it (core/channel/voice/briefing/hook.py).
 
 Lives in `memory.db` beside the schedule state (core/storage/schedule_state.py).
 The schema is core/storage/schemas/channel_inbox.sql: every category

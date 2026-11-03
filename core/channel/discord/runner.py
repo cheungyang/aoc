@@ -22,10 +22,10 @@ from core.channel.discord.radio import reaction_added as radio_reaction_added
 from core.channel.handoff import channel_named, pointer_line, request_line
 from core.channel.inbox import mark_read, record_reply
 from core.util.errors import format_error_message
-from core.voice.briefing.hook import VoiceBriefing
-from core.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS
-from core.voice.room.connection import normalize_channel_name
-from core.voice.voice_manager import VoiceManager
+from core.channel.voice.briefing.hook import VoiceBriefing
+from core.channel.voice.listening.gate_commands import REACTIONS as GATE_REACTIONS
+from core.channel.voice.room.connection import normalize_channel_name
+from core.channel.voice.voice_manager import VoiceManager
 
 # How much of a replied-to message is quoted back to the agent. Enough to know
 # which post is meant; the full text is usually already in some session.
@@ -138,8 +138,8 @@ class BotRunner:
         """✅ or ❌ on a team radio line labels that route, and on a proactive post
         it is that post's outcome (the listeners in core/channel/discord/radio.py).
         On a `!gate review` post it marks that utterance as yours or not
-        (core/voice/listening/gate_commands.py). ✅ on any other post, a proactive
-        one too, finishes its channel's inbox row (core/voice/briefing)."""
+        (core/channel/voice/listening/gate_commands.py). ✅ on any other post, a proactive
+        one too, finishes its channel's inbox row (core/channel/voice/briefing)."""
         emoji = str(getattr(payload, "emoji", ""))
         if emoji not in GATE_REACTIONS:
             return
@@ -347,7 +347,7 @@ class BotRunner:
         is_host = self._hosts(message.channel)
 
         # You posted here, typed or by voting in a poll: whatever its agent
-        # left you in this channel is finished (core/voice/briefing).
+        # left you in this channel is finished (core/channel/voice/briefing).
         if is_host and mine:
             mark_read(message.channel, Via.TYPED)
 

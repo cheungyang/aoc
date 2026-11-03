@@ -2,7 +2,7 @@
 
 Every channel writes it: the Discord runner (replies, read signals), the
 scheduler (pushes) and voice (heard, speech versions). Voice briefings read
-it (core/voice/briefing/). The rows and the table are
+it (core/channel/voice/briefing/). The rows and the table are
 core/storage/channel_inbox.py.
 
 Nothing here raises. As with `record_channel_post`, losing an inbox write is

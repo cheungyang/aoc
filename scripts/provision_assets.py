@@ -52,8 +52,8 @@ ASSET_ROOT = os.environ.get("AOC_ASSET_ROOT", "/opt/aoc")
 # later build could correct it.
 SEED_DIR = os.environ.get("AOC_SEED_DIR", "/opt/aoc-seed")
 
-# The voiceprint gate's speaker-embedding model (core/voice/listening/speaker_gate.py).
-# Mirrors SPEAKER_MODEL_FILE / SPEAKER_MODEL_URL in core/voice/foundation/settings.py, which
+# The voiceprint gate's speaker-embedding model (core/channel/voice/listening/speaker_gate.py).
+# Mirrors SPEAKER_MODEL_FILE / SPEAKER_MODEL_URL in core/channel/voice/foundation/settings.py, which
 # this standalone script doesn't import.
 SPEAKER_MODEL = os.environ.get("AOC_SPEAKER_MODEL", "wespeaker_en_voxceleb_CAM++.onnx")
 SPEAKER_MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"

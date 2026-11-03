@@ -1,5 +1,5 @@
 """`!gate review [all]`: the last day's utterances worth a check, posted for
-your ✅ or ❌ (the review is core/voice/listening/gate_commands.py's)."""
+your ✅ or ❌ (the review is core/channel/voice/listening/gate_commands.py's)."""
 from core.runtime.commands.base import TypedContext, VoiceRoomCommand
 
 

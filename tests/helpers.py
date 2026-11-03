@@ -110,7 +110,7 @@ GOLDEN_INPUT = """## Weekend options
 
 
 class FakeTTS:
-    """Stands in for TTSEngine (core/voice/engines/tts.py): each stream records
+    """Stands in for TTSEngine (core/channel/voice/engines/tts.py): each stream records
     its voice and the chunks it was sent, and gives its speaker 20 ms of audio
     per chunk, so a queued speaker is ready at once."""
 
@@ -172,8 +172,8 @@ class FakeSpeakerModel:
 
     def embed(self, pcm):
         import numpy as np
-        from core.voice.listening.speaker_gate import MIN_EMBED_MS
-        from core.voice.foundation.utterance import BYTES_PER_MS
+        from core.channel.voice.listening.speaker_gate import MIN_EMBED_MS
+        from core.channel.voice.foundation.utterance import BYTES_PER_MS
 
         ms = len(pcm) // BYTES_PER_MS
         self.embedded.append(ms)

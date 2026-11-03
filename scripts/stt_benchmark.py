@@ -46,7 +46,7 @@ for path in (PROJECT_ROOT, SCRIPTS_DIR):
 
 import numpy as np  # noqa: E402
 
-from core.voice.foundation import settings as voice_settings  # noqa: E402
+from core.channel.voice.foundation import settings as voice_settings  # noqa: E402
 
 DEFAULT_OUT_ROOT = os.path.join(PROJECT_ROOT, "scratch", "stt_benchmark")
 STT_TARGET_P50_MS = 300
@@ -87,7 +87,7 @@ CASES = (
     # only the adaptive rule keeps it one turn.
     Case("continuation", ("Remind me to call the", "dentist tomorrow morning."), gap_ms=900),
     # A finished sentence, then more: two turns (VoiceManager merges them if the
-    # first wasn't answered yet; tests/core/voice/test_turn.py checks that).
+    # first wasn't answered yet; tests/core/channel/voice/test_turn.py checks that).
     Case("split", ("Add milk to the shopping list.", "And eggs."), gap_ms=1000, turns=2),
 )
 
@@ -224,7 +224,7 @@ class BenchFloor:
 
 async def listen(case_audio: Sequence[bytes], gap_ms: int, recognizer) -> List[Heard]:
     """Plays one case into a fresh VADSink in real time; returns what it heard."""
-    from core.voice.listening.vad_sink import VADSink
+    from core.channel.voice.listening.vad_sink import VADSink
 
     floor = BenchFloor(recognizer)
     sink = VADSink(floor, loop=asyncio.get_running_loop())
@@ -386,7 +386,7 @@ def render(runs: List[CaseRun], meta: Dict) -> str:
 
 async def run(args) -> int:
     from core.config.settings import Config
-    from core.voice.engines.stt import SpeechRecognizer
+    from core.channel.voice.engines.stt import SpeechRecognizer
     from tts_benchmark import API_KEY_ENV_VAR, Options, make_chirp_client
 
     config = Config()
@@ -406,7 +406,7 @@ async def run(args) -> int:
         for voice in voices:
             parts = [await asyncio.to_thread(synthesize, client, tts, text, voice) for text in case.parts]
             audio[(case.id, voice)] = parts
-            from core.voice.foundation.utterance import pcm_to_wav
+            from core.channel.voice.foundation.utterance import pcm_to_wav
             with open(os.path.join(out_dir, "audio", f"{case.id}-{voice.rsplit('-', 1)[-1]}.wav"), "wb") as f:
                 silence = bytes(SAMPLE_RATE * 2 * case.gap_ms // 1000)
                 f.write(pcm_to_wav(silence.join(parts)))
@@ -452,7 +452,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sys.stdout.reconfigure(line_buffering=True)
     args = build_parser().parse_args(argv)
     from core.loaders.agents_loader import AgentsLoader
-    from core.voice.engines.stt import agent_vocabulary
+    from core.channel.voice.engines.stt import agent_vocabulary
 
     args.vocabulary = agent_vocabulary(AgentsLoader())  # what production biases toward
     return asyncio.run(run(args))

@@ -83,7 +83,7 @@ TYPED = CommandRegistry([
     EnrollCommand(), VoiceprintCommand(), GateCommand(),
 ])
 
-# Said in the voice room (core/voice/turn.py), tried in this order: a stop
+# Said in the voice room (core/channel/voice/turn.py), tried in this order: a stop
 # first, then a hang-up; then "next agent", "where am I" and "go back" before
 # the switch, which would otherwise take them for a name ("back", "next agent").
 SPOKEN = CommandRegistry([StopCommand(), WaitCommand(), HangUpCommand(), NextAgentCommand(), WhereAmICommand(),

@@ -310,7 +310,7 @@ async def test_run_case_fails_a_reply_without_speech_and_speaks_the_fallback(tmp
 
 @pytest.mark.asyncio
 async def test_run_case_shows_a_delegates_error_and_speaks_the_error_line(tmp_path):
-    from core.voice.speech.reply import ERROR_LINE
+    from core.channel.voice.speech.reply import ERROR_LINE
 
     case = {"id": "thermostat", "room": "home-automation", "utterance": "Thermostat?", "expect": {}}
 
@@ -389,7 +389,7 @@ async def test_main_exit_code_and_json(tmp_path):
     failing = CaseResult(case_id="read", run=1, marks={}, failures=["answered by nobody"])
     with patch.object(replay, "run_case", AsyncMock(return_value=failing)), \
          patch.object(replay, "guard_writes") as guard, \
-         patch("core.voice.engines.tts.TTSEngine"):
+         patch("core.channel.voice.engines.tts.TTSEngine"):
         code = await replay.main(["--cases", path, "--state-dir", str(tmp_path / "s"), "--out", str(out)])
     assert code == 2
     guard.assert_called_once()
@@ -686,7 +686,7 @@ class TestResuming:
             return CaseResult(case_id=case["id"], run=run, marks={})
 
         with patch.object(replay, "run_case", fake_run_case), patch.object(replay, "guard_writes"), \
-             patch("core.voice.engines.tts.TTSEngine"):
+             patch("core.channel.voice.engines.tts.TTSEngine"):
             code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
                                       "--out", str(out), "--combo", "FLASH:low,PRO:low", "--runs", "2"])
 
@@ -731,7 +731,7 @@ class TestRateLimits:
 
     async def _main(self, tmp_path, run_case, *args):
         with patch.object(replay, "run_case", run_case), patch.object(replay, "guard_writes"), \
-             patch("core.voice.engines.tts.TTSEngine"):
+             patch("core.channel.voice.engines.tts.TTSEngine"):
             return await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
                                       "--out", str(tmp_path / "results.json"), *args])
 

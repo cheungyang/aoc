@@ -1,7 +1,7 @@
 """Hang up: "hanging up", "I'm hanging up now" -- ends the voice session the way
 a phone call ends. The agent you're with says goodbye, you're disconnected from
 the voice channel, and the bot leaves (VoiceManager `hang_up`,
-core/voice/voice_manager.py). Joining the channel again starts a new session,
+core/channel/voice/voice_manager.py). Joining the channel again starts a new session,
 as it always does.
 
 Only the phrase on its own is the command, with the words people wrap it in

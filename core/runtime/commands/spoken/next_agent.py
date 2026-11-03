@@ -1,5 +1,5 @@
 """Next agent: "next agent" walks the channels with something waiting for you.
-Voice briefings know where that is (core/voice/briefing/hook.py); the room
+Voice briefings know where that is (core/channel/voice/briefing/hook.py); the room
 asks them (VoiceManager.next_agent)."""
 import re
 from typing import Optional

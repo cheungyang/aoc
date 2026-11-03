@@ -41,7 +41,7 @@ class TestCheckedInConfigs(unittest.TestCase):
                 self.assertEqual(validate_agent_config(config, known), [])
 
     def test_every_voice_is_a_real_chirp3_hd_voice(self):
-        from core.voice.foundation.settings import DEFAULT_VOICE, chirp3_voice
+        from core.channel.voice.foundation.settings import DEFAULT_VOICE, chirp3_voice
 
         self.assertIsNotNone(chirp3_voice(DEFAULT_VOICE))
         for name, config in agent_configs():
@@ -72,7 +72,7 @@ class TestCheckedInConfigs(unittest.TestCase):
     def test_every_agent_you_can_switch_to_has_its_own_voice(self):
         """In the one voice room, the voice is how you hear who is answering."""
         from core.loaders.agents_loader import AgentsLoader
-        from core.voice.room.focus import FocusDirectory
+        from core.channel.voice.room.focus import FocusDirectory
 
         configs = dict(agent_configs())
         directory = FocusDirectory.build(AgentsLoader(), voice_host="main")

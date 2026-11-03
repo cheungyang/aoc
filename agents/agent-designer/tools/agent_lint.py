@@ -14,7 +14,7 @@ def agent_lint(report: Report, agent_id: str = "") -> str:
     Call it at the start of a round-trip audit and after writing or changing an agent's files.
 
     Reads: agents/, skills/, tools/ and graphs/, each audited agent's RULES.md in pkm/agents/,
-        the voice catalog in core/voice/foundation/settings.py and the routing table in
+        the voice catalog in core/channel/voice/foundation/settings.py and the routing table in
         tests/core/runtime/foundation/test_routing.py.
     Computes: findings by kind, each citing a file and line: skills, tools, actions and paths
         its text names that are missing or not granted; grants that resolve to nothing, repeat

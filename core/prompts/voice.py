@@ -20,7 +20,7 @@ from core.prompts.base import Prompt, WorkerPrompt
 class VoiceModePrompt(Prompt):
     """On a turn the user will hear, appended after the channel block (see
     `get_voice_mode_prompt`). The voice pipeline speaks the <speech> block and
-    posts everything after it to the text channel (core/voice/speech/reply.py)."""
+    posts everything after it to the text channel (core/channel/voice/speech/reply.py)."""
 
     template = "voice/voice_mode"
 
@@ -28,7 +28,7 @@ class VoiceModePrompt(Prompt):
 class ScheduledVoiceModePrompt(Prompt):
     """On a scheduled run whose post may be heard later (see
     `scheduled_speech_scope`). The <speech> block is stored with the post's
-    channel inbox row (core/voice/briefing) and never posted; the channel gets the rest."""
+    channel inbox row (core/channel/voice/briefing) and never posted; the channel gets the rest."""
 
     template = "voice/scheduled_voice_mode"
 
@@ -83,7 +83,7 @@ _PAYLOAD_TAG = re.compile(r"</?payload\s*>", re.IGNORECASE)
 @dataclass
 class SpeechWriterPrompt(WorkerPrompt):
     """A Discord post, rewritten as what its author says aloud, under the same
-    rules as <voice_mode>, <question> included (core/voice/briefing/speech_writer.py).
+    rules as <voice_mode>, <question> included (core/channel/voice/briefing/speech_writer.py).
     The answer is the speech version and its marked question."""
 
     template = "voice/speech_writer"
@@ -121,7 +121,7 @@ def parse_speech(reply: Any) -> Speech:
 @dataclass
 class NearMissPrompt(WorkerPrompt):
     """Which switch target a voice phrase most likely means, when it names none
-    exactly (core/voice/room/near_miss.py). The answer is the worker's reply,
+    exactly (core/channel/voice/room/near_miss.py). The answer is the worker's reply,
     for the caller to check against its targets.
 
     A near miss waits on this call before anything is said, so it's kept short;

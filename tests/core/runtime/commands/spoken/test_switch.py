@@ -1,6 +1,6 @@
 """Switch: which utterances ask to move the voice room, to what, and how they
 asked -- a switch phrase, switch words, or a bare name. Whether the target is
-a name the room knows is the room's (tests/core/voice/room/test_room_switch.py).
+a name the room knows is the room's (tests/core/channel/voice/room/test_room_switch.py).
 """
 from unittest.mock import AsyncMock, MagicMock
 

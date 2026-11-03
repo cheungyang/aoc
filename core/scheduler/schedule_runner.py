@@ -30,7 +30,7 @@ findings for that agent, core/proactive/delivery.py), and then hears how the
 run went: posted, silent or failed. Only source "scheduled" is briefed: never a
 proactive delivery or a follow-up's check.
 
-Every post it makes also puts its channel in the channel inbox (core/voice/briefing),
+Every post it makes also puts its channel in the channel inbox (core/channel/voice/briefing),
 unless the schedule's priority is IGNORE, so a voice briefing can tell you
 about it. A prompt run that isn't IGNORE also writes the speech version of
 its post (the scheduled <voice_mode> block), stored with that row.
