@@ -50,6 +50,21 @@ something new; otherwise it's EMPTY, or PROBLEM for a scan that couldn't read,
 and what it posted isn't kept as the last report: a model check's last post may
 be only the offer.
 
+A one-off is a topic you asked the agent to bring back at a set time. It's due
+at its `due_at`, and claimed and run like any check, with these differences:
+  - its turn always runs: no scan, no fingerprint, and never a last check, so
+    it never offers to keep watching;
+  - the turn (FollowUpOncePrompt) knows when you asked, for when, what to bring
+    up and the agent's notes, and says it's late when it runs more than LATE_S
+    after `due_at` (a host that was down). It brings the topic up in one short
+    message and ends with one question, whether to get into it now, marked as
+    the question its post waits on. It replies <silent/> only when its notes
+    made bringing it up conditional;
+  - its post is HIGHEST priority, labelled ONCE_LABEL, so a voice briefing
+    announces it live while you're in voice (core/voice/briefing);
+  - a post or a silent reply closes it; a failed turn is tried again RETRY_S
+    later, and the ONCE_ATTEMPTS-th failure closes it (`finish_check`).
+
 FollowUpSweep is one of the proactive service's sweeps, every minute, with the
 switch on or off:
   1. it ends the follow-ups whose `until` has passed: ending isn't a check;
@@ -57,6 +72,8 @@ switch on or off:
 
        📻 🔁 ✈️ Miles opened follow-up #12 · <goal> · every 2d until 2026-12-15 · check: award_watch
        📻 🔁 ✈️ Miles' follow-up #12 closed · <goal> · <why> · 6 checks, 1 find
+       📻 ⏰ 🎨 Aki will bring up "<goal>" at Tue 09:00 · follow-up #7
+       📻 ⏰ 🎨 Aki's follow-up #7 closed · <goal> · brought up
 
      An event older than ANNOUNCE_S is marked without a line, so a host that
      was down doesn't flood the thread. Each line gets one attempt, posted here
@@ -69,7 +86,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from core.channel.discord.ownership import Ownership
 from core.config.settings import Config
 from core.loaders.agents_loader import AgentsLoader
-from core.prompts.proactive import FollowUpPrompt
+from core.prompts.proactive import FollowUpOncePrompt, FollowUpPrompt
 from core.proactive.board import on_board
 from core.proactive.cards import PeerCard, cards
 from core.proactive.delivery import DeliveryOutput, held_here, is_silent
@@ -79,7 +96,8 @@ from core.proactive.taps import FOLLOWUP_SOURCE, clip
 from core.runtime.foundation.routing import home_channel
 from core.scheduler.preconditions import build_precondition
 from core.scheduler.spec import Findings, Problems, PromptSchedule, ScheduleContext, SessionPolicy, WorkDecision
-from core.storage.follow_ups import Check, FollowUp, FollowUpStore, Result, Status, cadence_text, end_of
+from core.storage.channel_inbox import Priority
+from core.storage.follow_ups import Check, FollowUp, FollowUpStore, Result, Status, cadence_text, end_of, when_text
 from core.storage.signals import POSTED, SILENT
 
 # A check still claimed after this long never finished: its claim is freed, and it's due again.
@@ -88,6 +106,11 @@ CLAIM_S = 3600
 MAX_PER_TICK = 5
 # How a voice briefing names a follow-up's post: "Miles has a follow-up".
 LABEL = "a follow-up"
+# How it names a one-off's: "Aki has a reminder". You asked for it at this time, so it's
+# also announced live (Priority.HIGHEST).
+ONCE_LABEL = "a reminder"
+# A one-off that runs later than this after its time says so: a host that was down.
+LATE_S = 30 * 60
 # How much of a post the next check sees, as what the agent last told you.
 REPORT_CHARS = 600
 # Opened and closed lines older than this are marked, never posted.
@@ -117,7 +140,11 @@ def is_last_check(follow_up: FollowUp, now: float) -> bool:
     ends. That's when `every` from now reaches the end, whatever the interval now: as the
     end nears, `finish_check` puts the interval back to `every`, so the next check comes
     `every` from now whenever that's before the end. Counting a stretched interval would
-    call a late check the last too soon, and the real last one would offer again."""
+    call a late check the last too soon, and the real last one would offer again.
+
+    A one-off has no last check: it's brought up once, and that closes it."""
+    if follow_up.is_once:
+        return False
     return now + follow_up.every_s >= end_of(follow_up.until)
 
 
@@ -159,17 +186,52 @@ def render_prompt(follow_up: FollowUp, now: float, check: str, last: bool = Fals
     ).render()
 
 
+def late_text(seconds: float) -> str:
+    """How late a one-off runs, as its prompt says it: "45 minutes", "about 3 hours"."""
+    minutes = round(seconds / 60)
+    return f"{minutes} minutes" if minutes < 90 else f"about {round(seconds / 3600)} hours"
+
+
+def render_once_prompt(follow_up: FollowUp, now: float) -> str:
+    """A one-off's prompt (module docstring): when you asked, for when, what to bring up and
+    the agent's notes, and how late it runs when that's more than LATE_S."""
+    due, late = follow_up.due_at, now - follow_up.due_at
+    return FollowUpOncePrompt(
+        id=follow_up.id,
+        now=f"{local(now):%A %Y-%m-%d %H:%M}",
+        opened=f"{local(follow_up.opened_at):%A %Y-%m-%d}",
+        due=f"{local(due):%A %Y-%m-%d} at {local(due):%H:%M}",
+        goal=follow_up.goal,
+        notes=follow_up.notes,
+        late=late_text(late) if late > LATE_S else "",
+    ).render()
+
+
 def radio_line(follow_up: FollowUp, team: Dict[str, PeerCard]) -> str:
     """A follow-up's team radio line: opened, or closed and why (module docstring). The opened
     line names the agent that opened it. The closed line only says whose it was: its why says
     who closed it (FollowUp.closed_why), and that may be you, your words, or `until`."""
     card = team.get(follow_up.agent_id)
     emoji, name = (card.emoji, card.name) if card else ("🤖", follow_up.agent_id)
+    if follow_up.is_once:
+        return once_radio_line(follow_up, emoji, name)
     if follow_up.is_open:
         return (f"📻 🔁 {emoji} {name} opened follow-up #{follow_up.id} · {follow_up.goal} · "
                 f"every {cadence_text(follow_up.every_s)} until {follow_up.until} · check: {follow_up.check.text()}")
     return (f"📻 🔁 {emoji} {possessive(name)} follow-up #{follow_up.id} closed · {follow_up.goal} · "
             f"{follow_up.closed_why(name)} · {follow_up.tally()}")
+
+
+def once_radio_line(follow_up: FollowUp, emoji: str, name: str) -> str:
+    """A one-off's team radio line: what its agent will bring up and when, its time said as
+    seen from when it opened (the line goes out within a minute); or closed and why, with
+    its attempts when it took more than one, and no cadence: it has none."""
+    if follow_up.is_open:
+        when = when_text(follow_up.due_at, follow_up.opened_at)
+        return f"📻 ⏰ {emoji} {name} will bring up \"{follow_up.goal}\" at {when} · follow-up #{follow_up.id}"
+    parts = (f"📻 ⏰ {emoji} {possessive(name)} follow-up #{follow_up.id} closed", follow_up.goal,
+             follow_up.closed_why(name), follow_up.tally())
+    return " · ".join(part for part in parts if part)
 
 
 def possessive(name: str) -> str:
@@ -183,9 +245,12 @@ class FollowUpSchedule(PromptSchedule):
 
     It never goes through the registry: it has no cron, and is made from a
     claimed FollowUp (DueFollowUps). Its schedule id is `followup:<id>`, so the
-    schedule state keeps one row per follow-up. Its priority is the default, so
-    its post enters the channel inbox with a speech version, as a delivery's does.
-    A scan check is built here, so a check that can't be built fails at once.
+    schedule state keeps one row per follow-up. A watch's priority is the
+    default, so its post enters the channel inbox with a speech version, as a
+    delivery's does. A one-off's is HIGHEST, labelled ONCE_LABEL: you asked for
+    it at this time, so a voice briefing announces it live. A scan check is
+    built here, so a check that can't be built fails at once; a one-off has
+    none to build.
     """
 
     source = FOLLOWUP_SOURCE
@@ -197,9 +262,9 @@ class FollowUpSchedule(PromptSchedule):
         self.found: Optional[str] = None  # a scan check's fingerprint of what it found (has_work)
         self.new = False                  # whether a scan check found something new (has_work)
         self.skipped = Result.EMPTY       # how a check with nothing new ends: EMPTY, or PROBLEM
-        check = follow_up.check
+        check, once = follow_up.check, follow_up.is_once
         precondition = None
-        if not check.is_model:
+        if not (check.is_model or once):
             precondition = build_precondition({"type": check.type, "args": dict(check.args)}, follow_up.agent_id)
         super().__init__(
             prompt="",  # made per run: build_prompt
@@ -210,7 +275,8 @@ class FollowUpSchedule(PromptSchedule):
             cron="",
             channel=home_channel(follow_up.agent_id, loader or AgentsLoader()) or follow_up.channel or None,
             precondition=precondition,
-            label=LABEL,
+            priority=Priority.HIGHEST if once else None,
+            label=ONCE_LABEL if once else LABEL,
             # How the runner names it when it posts what a scan couldn't read.
             entry={"id": f"follow-up #{follow_up.id} ({check.type})"},
         )
@@ -220,8 +286,9 @@ class FollowUpSchedule(PromptSchedule):
         return self.follow_up.id
 
     def has_work(self, ctx: ScheduleContext) -> WorkDecision:
-        """Off the loop. A model check always runs; a scan check only on findings new since
-        the last check, but on the last check whatever it found (module docstring)."""
+        """Off the loop. A model check and a one-off always run; a scan check only on
+        findings new since the last check, but on the last check whatever it found (module
+        docstring)."""
         if self.precondition is None:
             return WorkDecision(True, f"follow-up #{self.follow_up_id} is due")
         decision = self._check_precondition(ctx)
@@ -241,7 +308,9 @@ class FollowUpSchedule(PromptSchedule):
 
     def build_prompt(self, ctx: ScheduleContext, decision: Optional[WorkDecision] = None) -> str:
         """The FollowUpPrompt, and after it a scan check's findings block: new ones, or on the
-        last check what the scan sees now."""
+        last check what the scan sees now. A one-off's is the FollowUpOncePrompt alone."""
+        if self.follow_up.is_once:
+            return render_once_prompt(self.follow_up, ctx.now)
         last = is_last_check(self.follow_up, ctx.now)
         # Before the last check a scan's turn runs only on something new, as has_work decided.
         line = check_line(self.follow_up.check, decision, new=self.new or not last)
@@ -265,7 +334,11 @@ class FollowUpSchedule(PromptSchedule):
         to offer to keep watching, so there only a scan's new findings make its post a find;
         otherwise it counts as the check went (EMPTY, or PROBLEM), and isn't kept. A silent
         reply is an empty check, but keeps a scan's new fingerprint: the agent judged those
-        findings not worth a post, so they don't come back as new."""
+        findings not worth a post, so they don't come back as new.
+
+        A one-off has no last check, so its post is a find and its silent reply an empty
+        check, and either closes it; a post that reached no channel is a failure, tried
+        again (`finish_check`)."""
         outcome = self.output.outcome if self.output is not None else None
         if outcome == POSTED and (self.new or not is_last_check(self.follow_up, ctx.now)):
             self._finish(Result.FOUND, fingerprint=self.found, report=clip(self.output.text, REPORT_CHARS))
@@ -324,7 +397,8 @@ class DueFollowUps:
             try:
                 specs.append(FollowUpSchedule(follow_up, store=self.store))
             except Exception as e:
-                # Claimed but unrunnable: finished at once, so it's due again an interval from now.
+                # Claimed but unrunnable: finished at once, so it's due again an interval from now
+                # (a one-off: a failed attempt, tried again RETRY_S on).
                 await on_board(self.store.finish_check, follow_up.id, Result.FAILED, now)
                 print(f"[follow-ups] Could not make the check of follow-up #{follow_up.id}: "
                       f"{type(e).__name__}: {e}")

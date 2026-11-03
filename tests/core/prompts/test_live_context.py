@@ -160,8 +160,8 @@ def test_it_shows_the_agents_own_open_follow_ups_soonest_until_first(store, live
         f"- #{sooner.id} Tahoe cabin under $400 for MLK weekend · every 2d until 2026-11-30",
         f"- #{later.id} Ski rental deal · every 2d until 2026-12-20",
     ]
-    assert "<description>What you said you'd keep working on; close one with follow_up when the user says " \
-           "it's done or no longer wanted.</description>" in block
+    assert "<description>What you said you'd keep working on, or bring up at a set time; close one with follow_up " \
+           "when the user says it's done or no longer wanted, or brings it up first.</description>" in block
 
 
 def test_at_most_5_follow_ups(store, live):
@@ -204,3 +204,34 @@ def test_with_the_switch_off_there_are_no_follow_ups_either(store):
     _follow_up()
     with _run():
         assert get_live_context_prompt("excursion-planner", ERIC, now=NOW) == ""
+
+
+def _one_off(goal, due, agent_id="excursion-planner"):
+    """A one-off of `agent_id`'s, opened at NOW to be brought up at `due`, a time on your wall clock."""
+    return FollowUpStore().open_once(agent_id=agent_id, goal=goal, due_at=due.timestamp(), channel="weekend-planning",
+                                     at=NOW)
+
+
+def test_a_one_off_shows_when_it_is_brought_up_and_what_among_the_watches(store, live):
+    tz = get_local_timezone()
+    watch = _follow_up()  # until 2026-11-30
+    soon = _one_off("The Tahoe packing list", datetime(2026, 10, 25, 18, 0, tzinfo=tz))       # tomorrow, a Sunday
+    later = _one_off("Ski passes for MLK weekend", datetime(2026, 11, 13, 9, 30, tzinfo=tz))  # weeks out
+    _one_off("Award seats to MAD", datetime(2026, 10, 25, 9, 0, tzinfo=tz), agent_id="reward-travel")  # not its own
+    with _run():
+        lines = _follow_up_lines(get_live_context_prompt("excursion-planner", ERIC, now=NOW))
+    assert lines == [
+        f"- #{soon.id} · once at Sun 18:00 · bring up: The Tahoe packing list",           # until 2026-10-26
+        f"- #{later.id} · once at Nov 13 09:30 · bring up: Ski passes for MLK weekend",   # until 2026-11-14
+        f"- #{watch.id} Tahoe cabin under $400 for MLK weekend · every 2d until 2026-11-30",
+    ]
+
+
+def test_a_follow_up_it_cant_word_leaves_out_the_part_not_the_turn(store, live, capsys):
+    _situation(store, "In Tahoe")
+    broken = _one_off("The Tahoe packing list", datetime(2026, 10, 25, 18, 0, tzinfo=get_local_timezone()))
+    FollowUpStore().update("follow_ups", {"due_at": None}, {"id": broken.id})  # a one-off with no time
+    with _run():
+        block = get_live_context_prompt("excursion-planner", ERIC, now=NOW)
+    assert _lines(block) == ["In Tahoe"] and "<your_follow_ups>" not in block
+    assert "No follow-ups in excursion-planner's Live Context: TypeError" in capsys.readouterr().out

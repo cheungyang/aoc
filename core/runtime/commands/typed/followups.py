@@ -1,18 +1,21 @@
 """`!followups`: the agents' follow-ups (core/storage/follow_ups.py), and your cancel or extend.
 
     !followups                           the open ones, soonest check first: agent, goal,
-                                         cadence, next check, until, checks and finds
+                                         cadence, next check, until, checks and finds; a
+                                         one-off's agent, goal and when it's brought up
     !followups closed                    the last 10 closed, newest first, with why
     !followups cancel <id> [why]         closes one, any agent's, as yours
-    !followups extend <id> <YYYY-MM-DD>  moves one's until later, any agent's, to at most
-                                         90 days out; its checks and finds stay
+    !followups extend <id> <YYYY-MM-DD>  moves a watch's until later, any agent's, to at
+                                         most 90 days out; its checks and finds stay
 
 Read from memory.db, with no model. A cancel closes the follow-up as you
 (`closed_by` "you"): team radio says so (core/proactive/follow_ups.py), and it
 leaves its agent's Live Context. An extend takes the same dates as the tool's
 (`parse_until`) and posts no radio line: `!followups` and the agent's Live
-Context show the new end. With the switch off and follow-ups still open, a
-banner says nothing checks them. Agents are named by id, as in `!signals`.
+Context show the new end. A one-off isn't extended: its time is what you asked
+for, so you cancel it and ask its agent for another. With the switch off and
+follow-ups still open, a banner says nothing checks them. Agents are named by
+id, as in `!signals`.
 """
 import asyncio
 import time
@@ -21,13 +24,11 @@ from typing import Optional
 
 from core.config.settings import Config
 from core.runtime.commands.base import ChannelCommand, TypedContext
-from core.storage.follow_ups import Closer, FollowUp, FollowUpStore, Status, cadence_text, parse_until
+from core.storage.follow_ups import Closer, FollowUp, FollowUpStore, Status, cadence_text, parse_until, when_text
 from core.util.local_time import get_local_timezone
 
 RECENT = 10
 BANNER = "⏸ PROACTIVE_DELIVERY is off: nothing is checked."
-# A next check closer than this is named by its weekday; one further out, by its date.
-WEEKDAY_S = 6 * 86400
 
 
 def local(at: float) -> datetime:
@@ -43,13 +44,13 @@ def next_text(follow_up: FollowUp, now: float) -> str:
     at = follow_up.next_check_at
     if at <= now:
         return "due now"
-    moment = local(at)
-    day = f"{moment:%a}" if at - now < WEEKDAY_S else f"{moment:%b} {moment.day}"
-    return f"next {day} {moment:%H:%M}"
+    return f"next {when_text(at, now)}"
 
 
 def open_line(follow_up: FollowUp, now: float) -> str:
     """`#12 reward-travel · "goal" · every 4d (asked 2d) · next Thu 09:00 · until ... · checks · check: ...`"""
+    if follow_up.is_once:
+        return once_line(follow_up, now)
     every = cadence_text(follow_up.interval_s)
     if follow_up.interval_s != follow_up.every_s:
         every += f" (asked {cadence_text(follow_up.every_s)})"
@@ -58,12 +59,31 @@ def open_line(follow_up: FollowUp, now: float) -> str:
             f"check: {follow_up.check.text()}")
 
 
+def once_line(follow_up: FollowUp, now: float) -> str:
+    """`#7 agent-designer · "goal" · once at Tue 09:00`, then "bringing it up now" while its run
+    holds it, "due now" once its time has come, or after a failed attempt when it's tried again."""
+    line = f"#{follow_up.id} {follow_up.agent_id} · \"{follow_up.goal}\" · once at {when_text(follow_up.due_at, now)}"
+    if follow_up.claimed_at:
+        return f"{line} · bringing it up now"
+    if follow_up.next_check_at <= now:
+        return f"{line} · due now"
+    if follow_up.checks:
+        failed = f"{follow_up.checks} failed attempt{'' if follow_up.checks == 1 else 's'}"
+        return f"{line} · {failed}, again {when_text(follow_up.next_check_at, now)}"
+    return line
+
+
 def closed_line(follow_up: FollowUp) -> str:
-    """`#12 reward-travel · "goal" · closed Nov 3 · you cancelled it · 6 checks, 1 find`"""
+    """`#12 reward-travel · "goal" · closed Nov 3 · you cancelled it · 6 checks, 1 find`; a
+    one-off's says when it was for, and its attempts only when it took more than one."""
     moment = local(follow_up.closed_at) if follow_up.closed_at else None
     day = f"{moment:%b} {moment.day}" if moment else "?"
-    return (f"#{follow_up.id} {follow_up.agent_id} · \"{follow_up.goal}\" · closed {day} · "
-            f"{follow_up.closed_why(follow_up.agent_id)} · {follow_up.tally()}")
+    parts = [f"#{follow_up.id} {follow_up.agent_id}", f"\"{follow_up.goal}\""]
+    if follow_up.is_once:
+        due = local(follow_up.due_at)
+        parts.append(f"once at {due:%b} {due.day} {due:%H:%M}")
+    parts += [f"closed {day}", follow_up.closed_why(follow_up.agent_id), follow_up.tally()]
+    return " · ".join(part for part in parts if part)
 
 
 def open_text(store: FollowUpStore, now: float) -> str:
@@ -110,6 +130,9 @@ def extend_text(store: FollowUpStore, args: str, now: float) -> str:
     current = store.get(int(head))
     if current is None or not current.is_open:
         return f"No open follow-up #{head}. `!followups` lists the open ones."
+    if current.is_once:
+        return (f"Can't extend #{head}: it's a one-off, brought up once, at the time you asked for. Cancel it "
+                f"(`!followups cancel {head}`) and ask {current.agent_id} for another.")
     return f"Can't extend #{head}: it already runs until {current.until}. Give a later date."
 
 

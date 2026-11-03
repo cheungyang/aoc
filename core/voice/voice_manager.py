@@ -63,6 +63,15 @@ IDLE_POLL_S = 0.5
 IDLE_MAX_WAIT_S = 300.0
 # Auto-join waits this long after Discord is ready, for the guild cache to fill.
 AUTO_JOIN_DELAY_S = 1.5
+# "Hanging up": the goodbye, said in the voice of the agent you're with. The
+# bot waits for it to finish playing -- checked this often, for at most this
+# long -- before it disconnects you and leaves.
+HANG_UP_LINE = "Talk soon. Bye!"
+HANG_UP_POLL_S = 0.1
+HANG_UP_WAIT_S = 6.0
+# Said in the voice channel's chat when Discord won't let the bot disconnect you.
+NO_MOVE_MEMBERS = ("📴 Hung up, but I couldn't disconnect you: I need the **Move Members** permission "
+                   "in this voice channel.")
 
 
 class VoiceManager:
@@ -117,6 +126,8 @@ class VoiceManager:
         # Features built on the room (see hooks.py), called in this order.
         self.hooks: List[VoiceHook] = list(hooks)
         self._idle_line: Optional[asyncio.Lock] = None
+        # "Hanging up" is under way: speech starts no turn until the next join.
+        self._hanging_up = False
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -157,10 +168,81 @@ class VoiceManager:
         return pick_voice_channel(self.connection.bot.guilds, voice_rooms(agent.config if agent else None))
 
     async def leave(self) -> None:
+        """Leaves the voice room (`!leave`, or hanging up): nothing of this
+        voice session carries over."""
         await self.connection.leave()
         self._reset_focus()
         self.enrollment.reset()
+        self._hanging_up = False
         self._call_hooks("left")
+
+    async def hang_up(self, say: Say, member=None) -> bool:
+        """"Hanging up" (core/runtime/commands/spoken/hang_up.py): ends the
+        voice session as a phone call ends. The agent you're with says
+        goodbye; once that has played, `member` -- who said it -- is
+        disconnected from the voice channel, and the bot leaves. From the
+        words on, speech starts no turn. It runs alongside the turn that heard
+        it, so a barge-in, which cancels that turn, can't stop it halfway."""
+        if not self._hanging_up:
+            self._hanging_up = True
+            self._spawn(self._hang_up(say, member))
+        return True
+
+    async def _hang_up(self, say: Say, member) -> None:
+        try:
+            try:
+                await say(HANG_UP_LINE, self.focus().agent_id)
+                await self._until_said(HANG_UP_WAIT_S)
+            except Exception as e:
+                self._log(f"📴 The goodbye failed ({type(e).__name__}: {e}); hanging up all the same.")
+            await self._disconnect_member(member)
+        finally:
+            await self.leave()
+
+    async def _until_said(self, timeout: float) -> None:
+        """Until nothing is playing or queued, for at most `timeout` seconds:
+        `say` returns once its line is queued, not heard. It takes two quiet
+        checks in a row, since the queue is empty for a moment as the cue
+        gives way to the line (speech/audio_queue.py `_play`)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        quiet = 0
+        while loop.time() < deadline:
+            quiet = 0 if self.audio_queue.is_playing() else quiet + 1
+            if quiet >= 2:
+                return
+            await asyncio.sleep(HANG_UP_POLL_S)
+
+    async def _disconnect_member(self, member) -> None:
+        """Takes `member` out of the voice channel, as a call ends on both
+        sides: only a person, and only from this room. Discord allows it with
+        the Move Members permission; without it, the voice channel's chat says
+        so, and the bot leaves all the same."""
+        room = self.room()
+        where = getattr(getattr(member, "voice", None), "channel", None)
+        if member is None or getattr(member, "bot", False) or room is None or where != room:
+            return
+        who = getattr(member, "display_name", member)
+        try:
+            await member.move_to(None)
+        except discord.Forbidden:
+            self._log(f"📴 Could not disconnect {who}: the bot lacks the Move Members permission.")
+            await self._note_in_room(NO_MOVE_MEMBERS)
+            return
+        except Exception as e:
+            self._log(f"📴 Could not disconnect {who}: {type(e).__name__}: {e}")
+            return
+        self._log(f"📴 Disconnected {who} from '{getattr(room, 'name', room)}'.")
+        await self._note_in_room("📴 Hung up.")
+
+    async def _note_in_room(self, line: str) -> None:
+        """A line in the voice channel's own chat, the room's log (see `_announce_focus`)."""
+        try:
+            room = self.connection.channel
+            if room is not None:
+                await room.send(line)
+        except Exception as e:
+            self._log(f"Could not post in the voice channel's chat: {e}")
 
     async def welcome(self) -> None:
         """You joined the voice channel: a new voice session, with the concierge.
@@ -179,6 +261,7 @@ class VoiceManager:
         self._reset_focus()
         self._configure_gate()
         self.enrollment.reset()
+        self._hanging_up = False
 
     def _configure_gate(self) -> None:
         """The voiceprint gate's settings, read afresh from voice_config on every
@@ -446,7 +529,7 @@ class VoiceManager:
         self._spawn(self._say_when_idle(line))
 
     async def _say_when_idle(self, line: str) -> None:
-        """One line at a time; dropped if you've left, or after a long wait."""
+        """One line at a time; dropped if you've left or are hanging up, or after a long wait."""
         if self._idle_line is None:
             self._idle_line = asyncio.Lock()
         async with self._idle_line:
@@ -457,7 +540,7 @@ class VoiceManager:
                     self._log(f"📣 Dropped a line after waiting {IDLE_MAX_WAIT_S:.0f}s: {line!r}")
                     return
                 await asyncio.sleep(IDLE_POLL_S)
-            if not self.someone_listening():
+            if self._hanging_up or not self.someone_listening():
                 return
             self._log(f"📣 {line}")
             await self.reply.say(line, self.agent_id)
@@ -553,7 +636,10 @@ class VoiceManager:
         return turn_id == self._active_turn
 
     def begin_turn(self):
-        """Starts a turn that answers everything still unanswered."""
+        """Starts a turn that answers everything still unanswered; none once
+        you're hanging up (`hang_up`): a "bye!" after it is for no one."""
+        if self._hanging_up:
+            return
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
         self._active_turn += 1

@@ -7,8 +7,9 @@ a `VoiceTurn` answers it:
     2. the transcripts, merged: they were streamed while you spoke (noise,
        with no words, is dropped)
     3. a spoken command (core/runtime/commands/spoken/): "stop" or "wait" on
-       its own, for the pipeline rather than the agent; "next agent", "where
-       am I", or a switch ("switch me to Daisy")
+       its own, for the pipeline rather than the agent; "hanging up", which
+       ends the session; "next agent", "where am I", or a switch ("switch me
+       to Daisy")
     4. the agent's reply, run exactly as an untagged message typed in the
        focus's text channel would be: on that channel's session, so voice and
        text share each agent's history
@@ -99,6 +100,11 @@ class VoiceTurn:
         but keeps the words said before it for what's said next."""
         self._held = True
         self.room.floor.forget(self.utterances[-1:])
+
+    def speaker(self) -> Any:
+        """Who said the newest words (a Discord member): the one "hanging up"
+        disconnects (core/runtime/commands/spoken/hang_up.py)."""
+        return self.utterances[-1].user if self.utterances else None
 
     async def run(self) -> None:
         """Answers the turn; its trace is recorded once the answer is first heard."""

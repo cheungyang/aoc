@@ -3,7 +3,7 @@ agent's <switch to="..."/> leaves under its reply."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from core.channel.handoff import switch_pointer
+from core.channel.handoff import agent_named, switch_pointer
 
 
 class _Loader:
@@ -46,3 +46,10 @@ def test_the_channel_is_a_link_where_the_guild_has_it():
 def test_no_pointer_for_no_one_to_go_to():
     for agent in ("nobody", "main", "graph-worker", ""):
         assert switch_pointer(agent, None, loader=_Loader()) is None, agent
+
+
+def test_a_teammate_is_named_by_id_or_by_name_in_any_case():
+    assert agent_named("goal-setter", _Loader()) == "goal-setter"
+    assert agent_named(" GRACE ", _Loader()) == "goal-setter"
+    assert agent_named("Frankie", _Loader()) is None
+    assert agent_named("", _Loader()) is None

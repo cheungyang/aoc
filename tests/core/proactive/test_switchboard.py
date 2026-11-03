@@ -22,6 +22,7 @@ from core.proactive.switchboard import (
 )
 from core.proactive.taps import CALLED
 from core.runtime.foundation import events
+from core.storage.follow_ups import Kind
 from core.storage.sessions import SessionStore, sanitize_table_name
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
@@ -113,6 +114,19 @@ class TestThePrompt:
         lines = render_follow_ups(follow_ups, TEAM).splitlines()
         assert len(lines) == MAX_FOLLOW_UPS_SHOWN == 20
         assert lines[0] == '#1 reward-travel: "watch 1"' and lines[-1].startswith("#20 ")
+
+    def test_a_one_off_shows_when_its_agent_brings_it_up(self):
+        once = make_follow_up(id=7, agent_id="day-planner", goal="Talk about the weekend plan", kind=Kind.ONCE,
+                              due_at=AT + 86400, every_s=0, interval_s=0, until="2026-10-26")
+        weeks_out = datetime(2026, 11, 13, 9, 31, tzinfo=get_local_timezone()).timestamp()
+        far = make_follow_up(id=8, agent_id="stranger", goal="Renew the passports", kind=Kind.ONCE,
+                             due_at=weeks_out, every_s=0, interval_s=0, until="2026-11-14")
+        assert render_follow_ups([once, far], TEAM, AT).splitlines() == [
+            '#7 🙂 Daisy: "Talk about the weekend plan" · to bring up at Sun 09:31',
+            '#8 stranger: "Renew the passports" · to bring up at Nov 13 09:31',  # a weekday would mislead
+        ]
+        prompt, _ = build_prompt([_turn()], TEAM, [], now=AT, tags="", follow_ups=[once])
+        assert '#7 🙂 Daisy: "Talk about the weekend plan" · to bring up at Sun 09:31\n' in prompt
 
 
 REPLY = """Here you go:

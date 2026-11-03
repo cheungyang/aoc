@@ -47,6 +47,13 @@ class TestEndOfTurn:
     def test_a_short_stop_ends_quickly(self):
         assert end_of_turn_ms("Stop.") == settings.END_OF_TURN_COMPLETE_MS
 
+    def test_a_short_hang_up_ends_quickly(self):
+        assert end_of_turn_ms("Hanging up.") == settings.END_OF_TURN_COMPLETE_MS
+        assert end_of_turn_ms("Hanging up") == settings.END_OF_TURN_DEFAULT_MS, "no full stop yet: still the default"
+
+    def test_hanging_up_over_a_reply_interrupts_it(self):
+        assert confirms_barge_in("hanging up")
+
     def test_the_waits_are_ordered(self):
         assert (settings.END_OF_TURN_COMPLETE_MS < settings.END_OF_TURN_DEFAULT_MS
                 < settings.END_OF_TURN_CONTINUING_MS)

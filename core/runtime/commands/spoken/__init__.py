@@ -7,6 +7,8 @@ finished utterance, in order, before the agent hears it.
     stop.py        "stop", "never mind": stops the reply and drops the request;
                    its phrases also interrupt the agent at once (barge-in)
     wait.py        "wait", "hold on": stops the reply and keeps the request
+    hang_up.py     "hanging up": ends the voice session as a call ends -- a
+                   goodbye, you're disconnected, and the bot leaves
     next_agent.py  "next agent": the next channel with something for you
     where_am_i.py  "where am I": which agent and channel the room is with
     switch.py      "switch me to Daisy": moves the room's focus

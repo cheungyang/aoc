@@ -230,6 +230,27 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream('A <switch to="x"/> B'), "A  B",
                          "a self-closing tag hides nothing after it")
 
+    def test_a_switchs_brief_never_shows_whole_or_half_streamed(self):
+        for text in ('Over to Grace. <switch to="goal-setter">Plan the trip; dates fixed.</switch>',
+                     'Over to Grace. <switch to="goal-setter">Plan the tr'):
+            with self.subTest(text=text):
+                self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(text), "Over to Grace.")
+
+    def test_tags_quoted_in_code_show_as_written(self):
+        """The reply that explained the syntax lost everything after its quoted
+        <system_memory_log>, up to the real log's closing tag."""
+        text = ('The syntax is `<switch to="ID"/>`.\nI added a `<system_memory_log>` about it.\n'
+                "```xml\n<speech>Hi.</speech>\n```\nThe end.\n"
+                "<system_memory_log>\n- [17:10:00] [FEEDBACK] private\n</system_memory_log>")
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(text),
+                         'The syntax is `<switch to="ID"/>`.\nI added a `<system_memory_log>` about it.\n'
+                         "```xml\n<speech>Hi.</speech>\n```\nThe end.")
+
+    def test_a_tag_in_a_code_span_still_streaming_stays_hidden_until_it_closes(self):
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream("The syntax is `<swi"), "The syntax is `")
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream('The syntax is `<switch to="ID"/>`'),
+                         'The syntax is `<switch to="ID"/>`')
+
     async def test_a_reply_handing_you_to_a_teammate_says_where_to_find_them(self):
         from unittest.mock import patch
         from core.channel.response_parser import AgentResponse

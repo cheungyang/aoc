@@ -77,6 +77,7 @@ class Outcome:
     STOP_CANCEL = "stop_cancel"      # "stop": the reply stopped, the words dropped
     HOOK = "hook"                    # a voice hook answered it ("next agent")
     FOCUS_SWITCH = "focus_switch"    # the switcher answered it: a switch, "where am I?"
+    HANG_UP = "hang_up"              # "hanging up": the voice session ended
 
 _current_trace: contextvars.ContextVar[Optional["TurnTrace"]] = contextvars.ContextVar(
     "current_turn_trace", default=None

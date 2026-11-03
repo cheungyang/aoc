@@ -8,7 +8,7 @@ from core.config.settings import Config
 from core.runtime.commands.base import TypedContext
 from core.runtime.commands.registry import TYPED
 from core.runtime.commands.typed.followups import BANNER, followups_text, next_text
-from core.storage.follow_ups import Check, Closer, FollowUpStore, Status
+from core.storage.follow_ups import RETRY_S, Check, Closer, FollowUpStore, Result, Status
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
 
@@ -131,3 +131,61 @@ async def test_it_is_typed_in_a_channel_the_bot_answers():
     assert channel.send.await_args.args[0].startswith("No open follow-ups.")
     assert await TYPED.answer("!followups", TypedContext(channel=AsyncMock(), agent_id="main",
                                                          answers_here=False)) is None
+
+
+# -- one-offs ---------------------------------------------------------------------------
+
+def _once(store, goal, due_at, agent_id="agent-designer", **values):
+    opened = store.open_once(agent_id=agent_id, goal=goal, due_at=due_at, channel="agent-management", at=NOW - DAY)
+    if values:
+        store.update("follow_ups", values, {"id": opened.id})
+    return store.get(opened.id)
+
+
+def test_a_one_off_is_listed_by_its_time_among_the_watches(store, live):
+    logo = _once(store, "The logo redesign", NOW + 2 * DAY)                           # Tuesday 09:00
+    agenda = _once(store, "The offsite agenda", NOW - 60, claimed_at=NOW - 30)        # its run holds it
+    font = _once(store, "Pick a font", NOW - 60, agent_id="content-creator")          # its time has come
+    budget = _once(store, "Q4 budget", NOW - 600, checks=1, next_check_at=NOW + 300)  # failed once
+    award = _open(store, "Business award seats SFO→MAD", check=AWARD)                 # a watch, next check Monday
+    assert followups_text("", store, NOW).splitlines() == [
+        "**5 open follow-up(s)**, soonest check first",
+        f'#{agenda.id} agent-designer · "The offsite agenda" · once at Sun 08:59 · bringing it up now',
+        f'#{font.id} content-creator · "Pick a font" · once at Sun 08:59 · due now',
+        f'#{budget.id} agent-designer · "Q4 budget" · once at Sun 08:50 · 1 failed attempt, again Sun 09:05',
+        f'#{award.id} reward-travel · "Business award seats SFO→MAD" · every 2d · next Mon 09:00 · until 2026-12-15 · '
+        f"0 checks, 0 finds · check: award_watch",
+        f'#{logo.id} agent-designer · "The logo redesign" · once at Tue 09:00',
+    ]
+
+
+def test_closed_one_offs_say_when_they_were_for_and_how_they_ended(store):
+    logo = _once(store, "The logo redesign", NOW + 2 * DAY)
+    store.claim(logo.id, NOW + 2 * DAY)
+    store.finish_check(logo.id, Result.FOUND, NOW + 2 * DAY + 60)
+    font = _once(store, "Pick a font", NOW + DAY)
+    for attempt in range(3):
+        store.claim(font.id, NOW + DAY + attempt * RETRY_S)
+        store.finish_check(font.id, Result.FAILED, NOW + DAY + attempt * RETRY_S)
+    budget = _once(store, "Q4 budget", NOW + 3 * DAY)
+    store.close(budget.id, reason="we talked already", by=Closer.YOU, at=NOW + 3 * DAY + 120)
+    assert followups_text("closed", store, NOW).splitlines() == [
+        "**Last 3 closed**, newest first",
+        f'#{budget.id} agent-designer · "Q4 budget" · once at Nov 4 09:00 · closed Nov 4 · you cancelled it: we '
+        f"talked already",
+        f'#{logo.id} agent-designer · "The logo redesign" · once at Nov 3 09:00 · closed Nov 3 · brought up',
+        f'#{font.id} agent-designer · "Pick a font" · once at Nov 2 09:00 · closed Nov 2 · couldn\'t bring it up · '
+        f"3 attempts",
+    ]
+
+
+def test_extend_on_a_one_off_says_what_to_do_instead_and_cancel_works_as_for_any(store):
+    logo = _once(store, "The logo redesign", NOW + 2 * DAY)
+    assert followups_text(f"extend {logo.id} 2026-12-31", store, NOW) == (
+        f"Can't extend #{logo.id}: it's a one-off, brought up once, at the time you asked for. Cancel it "
+        f"(`!followups cancel {logo.id}`) and ask agent-designer for another.")
+    assert store.get(logo.id).until == "2026-11-04"
+    assert followups_text(f"cancel #{logo.id} not needed", store, NOW) == (
+        f'Cancelled follow-up #{logo.id} (agent-designer): "The logo redesign".')
+    cancelled = store.get(logo.id)
+    assert (cancelled.status, cancelled.closed_by, cancelled.close_reason) == (Status.CLOSED, Closer.YOU, "not needed")

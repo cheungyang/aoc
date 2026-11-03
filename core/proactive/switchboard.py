@@ -38,7 +38,7 @@ from core.proactive.cards import PeerCard
 from core.proactive.taps import TAP_SCHEDULED, asked_by_agent, clip
 from core.runtime.foundation import events
 from core.runtime.foundation.sessions import SessionManager
-from core.storage.follow_ups import FollowUp
+from core.storage.follow_ups import FollowUp, when_text
 from core.storage.sessions import SessionStore, sanitize_table_name
 from core.util.local_time import get_local_timezone
 
@@ -180,15 +180,19 @@ def render_tags(pkm_dir: Optional[str] = None) -> str:
         return ""
 
 
-def render_follow_ups(follow_ups: Sequence[FollowUp], cards: Dict[str, PeerCard]) -> str:
+def render_follow_ups(follow_ups: Sequence[FollowUp], cards: Dict[str, PeerCard], now: Optional[float] = None) -> str:
     """The open follow-ups the Switchboard may close, soonest `until` first, at most
-    MAX_FOLLOW_UPS_SHOWN, one line each: `#12 ✈️ Miles: "<goal>" · ends early when: <close_when>`.
+    MAX_FOLLOW_UPS_SHOWN, one line each: `#12 ✈️ Miles: "<goal>" · ends early when: <close_when>`,
+    or for a one-off `#7 🎨 Aki: "<goal>" · to bring up at Tue 09:00`, its time said from `now`.
     An agent with no card is named by its id."""
+    now = time.time() if now is None else now
     lines = []
     for follow_up in sorted(follow_ups, key=lambda f: (f.until, f.id))[:MAX_FOLLOW_UPS_SHOWN]:
         card = cards.get(follow_up.agent_id)
         who = " ".join(part for part in (card.emoji, card.name) if part) if card else follow_up.agent_id
         early = f" · ends early when: {follow_up.close_when}" if follow_up.close_when else ""
+        if follow_up.is_once:
+            early = f" · to bring up at {when_text(follow_up.due_at, now)}"
         lines.append(f"#{follow_up.id} {who}: \"{follow_up.goal}\"{early}")
     return "\n".join(lines)
 
@@ -203,7 +207,7 @@ def build_prompt(turns: List[Dict[str, Any]], cards: Dict[str, PeerCard], board:
         teammates="\n".join(card.text() for card in cards.values()),
         tags=render_tags() if tags is None else tags,
         board=render_board(board),
-        follow_ups=render_follow_ups(follow_ups, cards),
+        follow_ups=render_follow_ups(follow_ups, cards, now),
         exchange=exchange,
     ).render()
     return prompt, exchange

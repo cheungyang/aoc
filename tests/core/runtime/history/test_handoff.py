@@ -24,6 +24,7 @@ from core.runtime.history.handoff import (
     MAX_EXCHANGES,
     MAX_TOUCHED,
     SUMMARY_CHARS,
+    SWITCH_CAPSULE_TOKENS,
     build_capsule,
     capsule_for,
     with_capsule,
@@ -159,6 +160,35 @@ class TestRecent(unittest.TestCase):
         text = capsule([row("user", "yesterday's question", at(21, 30, days_ago=1))])
         self.assertIn("[2026-10-23 21:30] You: yesterday's question", text)
 
+    def test_words_cut_short_and_said_again_take_no_exchange(self):
+        """Voice, 17:07-17:09 on Nov 2: a turn cut off by more speech ran again
+        with all of it, and the first try used up one of the three exchanges."""
+        rows = [
+            row("user", "[Mon 17:05] How heavy is William?", at(8, 0)),
+            row("ai", "William burns the most tokens: the afternoon triage.", at(8, 0)),
+            row("user", "[Mon 17:07] Remove the triage. They should", at(8, 1)),
+            row("user", "[Mon 17:08] Remove the triage. They should use a script instead.", at(8, 2)),
+            row("ai", "Plan: a stateful scan script.", at(8, 2)),
+            row("user", "[Mon 17:09] Hand this over to Elephant.", at(8, 3)),
+            row("ai", "Transferring you now!", at(8, 3)),
+        ]
+        text = capsule(rows)
+        self.assertNotIn("They should\n", text)
+        self.assertIn("You: [Mon 17:08] Remove the triage. They should use a script instead.", text)
+        self.assertIn("William burns the most tokens", text, "the slot it freed holds the exchange before")
+
+    def test_different_or_answered_messages_are_all_kept(self):
+        rows = [
+            row("user", "Hi", at(8, 0)),
+            row("user", "Hello there", at(8, 1)),          # not a repeat of "Hi"
+            row("user", "Add milk", at(8, 2)),
+            row("ai", "Added.", at(8, 2)),
+            row("user", "Add milk and eggs", at(8, 3)),    # the first got its reply
+        ]
+        text = capsule(rows)
+        for words in ("You: Hello there", "You: Add milk\n", "You: Add milk and eggs"):
+            self.assertIn(words, text)
+
 
 class TestTouched(unittest.TestCase):
 
@@ -219,8 +249,16 @@ class TestSummary(unittest.TestCase):
 
 class TestCaps(unittest.TestCase):
 
-    def test_a_long_line_is_cut(self):
-        text = capsule([row("user", "x" * 2000, at(8, 0))])
+    def test_a_line_stays_whole_while_the_capsule_fits(self):
+        """A plan of 1,354 characters was cut at 600 in a capsule half its cap."""
+        plan = "step " * 400  # 2,000 characters
+        text = capsule([row("user", "the plan?", at(8, 0)), row("ai", plan, at(8, 1))])
+        self.assertLessEqual(estimate_message_tokens(text), CAPSULE_TOKENS)
+        self.assertIn(f"[08:01] William: {plan.strip()}\n", text)
+        self.assertNotIn("[...]", text)
+
+    def test_a_long_line_is_cut_once_the_capsule_is_over_its_cap(self):
+        text = capsule([row("user", "x" * 10_000, at(8, 0))])
         line = [l for l in text.splitlines() if l.startswith("[08:00] You:")][0]
         self.assertEqual(line, f"[08:00] You: {'x' * LINE_CHARS[0]} [...]")
 
@@ -258,6 +296,54 @@ class TestCaps(unittest.TestCase):
         self.assertLessEqual(estimate_message_tokens(text), 150)
         self.assertNotIn("q0", text)
         self.assertIn(f"q{MAX_EXCHANGES - 1}", text)  # the newest exchange stays
+
+    def test_a_caller_can_give_a_larger_cap(self):
+        """A switch's capsule is the teammate's only account of the work."""
+        rows = []
+        for i in range(MAX_EXCHANGES):
+            rows += [row("user", f"q{i} " + "u" * 1200, at(7, i)), row("ai", f"a{i} " + "a" * 1200, at(7, i))]
+        default = capsule(rows)
+        larger = capsule(rows, max_tokens=SWITCH_CAPSULE_TOKENS)
+        self.assertIn("[...]", default)  # 7,200 characters don't fit in 1,500 tokens whole
+        self.assertNotIn("[...]", larger)
+        self.assertLessEqual(estimate_message_tokens(larger), SWITCH_CAPSULE_TOKENS)
+        self.assertGreater(SWITCH_CAPSULE_TOKENS, CAPSULE_TOKENS)
+
+
+class TestBrief(unittest.TestCase):
+    """What an agent wrote inside its <switch> for the teammate."""
+
+    BRIEF = "Wants a deterministic inbox scanner; agreed: script schedule, state file, no daily repeats."
+
+    def test_it_comes_first_named_for_the_agent_and_the_tag_says_how(self):
+        text = capsule([row("user", "go", at(8, 0)), row("ai", "Over to Elephant.", at(8, 1))],
+                       brief=self.BRIEF, via="switch")
+        self.assertEqual(text.splitlines()[:4], [
+            '<handoff_context from="wiki-gardener" channel="pkm-wiki" captured="2026-10-24 08:12" via="switch">',
+            '<brief from="William">', self.BRIEF, "</brief>"])
+        self.assertIn("<recent>\n[08:00] You: go\n[08:01] William: Over to Elephant.\n</recent>", text)
+
+    def test_its_whitespace_is_collapsed(self):
+        text = capsule([row("user", "go", at(8, 0))], brief="  Wants\n  a scanner.  ")
+        self.assertIn('<brief from="William">\nWants a scanner.\n</brief>', text)
+
+    def test_it_stays_whole_through_every_cut(self):
+        rows, messages = TestCaps._long_exchanges(None)
+        brief = "b" * 900
+        for cap in (CAPSULE_TOKENS, 400, 150):
+            with self.subTest(cap=cap), patch.object(handoff, "CAPSULE_TOKENS", cap):
+                text = capsule(rows, messages=messages, brief=brief)
+                self.assertIn(f'<brief from="William">\n{brief}\n</brief>', text)
+                self.assertIn(f"q{MAX_EXCHANGES - 1}", text)
+
+    def test_a_brief_alone_is_a_capsule(self):
+        text = capsule([], brief=self.BRIEF)
+        self.assertIn(self.BRIEF, text)
+        self.assertNotIn("<recent>", text)
+
+    def test_no_via_no_attribute(self):
+        self.assertTrue(capsule([row("user", "go", at(8, 0))]).startswith(
+            '<handoff_context from="wiki-gardener" channel="pkm-wiki" captured="2026-10-24 08:12">'))
 
 
 class TestWithCapsule(unittest.TestCase):

@@ -290,6 +290,172 @@ class TestSwitchDirective(unittest.TestCase):
         self.assertIsNone(AgentResponse.from_string('<switch to=""/>Hm.').switch_to)
 
 
+class TestSwitchBrief(unittest.TestCase):
+    """<switch to="...">brief</switch>: what the agent tells the teammate it
+    hands the user to. It goes in the teammate's capsule, never to the user."""
+
+    def test_the_self_closing_and_empty_forms_have_no_brief(self):
+        for raw in ('Over to Elephant. <switch to="software-planner"/>',
+                    'Over to Elephant. <switch to="software-planner"></switch>',
+                    'Over to Elephant. <switch to="software-planner">  \n </switch>',
+                    'Over to Elephant. <switch to="software-planner"/></switch>'):
+            with self.subTest(raw=raw):
+                response = AgentResponse.from_string(raw)
+                self.assertEqual((response.switch_to, response.switch_brief, response.text),
+                                 ("software-planner", None, "Over to Elephant."))
+
+    def test_a_brief_is_kept_on_one_line_and_the_whole_element_leaves_the_text(self):
+        response = AgentResponse.from_string(
+            "Handing you to Elephant.\n\n"
+            '<switch to="software-planner">\n  The user wants an inbox scanner.\n'
+            "  Decided: a script schedule with a state file.\n</switch>\n\n"
+            "<system_memory_log>\n- [17:09:00] [MEMORY] Handed the scanner to Elephant.\n</system_memory_log>")
+        self.assertEqual(response.switch_to, "software-planner")
+        self.assertEqual(response.switch_brief,
+                         "The user wants an inbox scanner. Decided: a script schedule with a state file.")
+        self.assertEqual(response.text, "Handing you to Elephant.")
+        self.assertEqual(response.system_memory_log, "- [17:09:00] [MEMORY] Handed the scanner to Elephant.")
+
+    def test_a_long_brief_is_clipped(self):
+        from core.channel.response_parser import SWITCH_BRIEF_CHARS
+
+        response = AgentResponse.from_string(f'Over. <switch to="x">{"word " * 400}</switch>')
+        self.assertEqual(len(response.switch_brief), SWITCH_BRIEF_CHARS)
+        self.assertTrue(response.switch_brief.endswith("…"))
+        self.assertEqual(response.text, "Over.")
+
+    def test_inside_speech_neither_the_tag_nor_the_brief_is_read_out(self):
+        response = AgentResponse.from_string(
+            '<speech>Over to Elephant. <switch to="software-planner">Spec the scanner.</switch></speech>Done.')
+        self.assertEqual((response.speech, response.switch_to, response.switch_brief, response.text),
+                         ("Over to Elephant.", "software-planner", "Spec the scanner.", "Done."))
+
+    def test_a_bare_opener_never_takes_a_later_switch_in_as_its_brief(self):
+        response = AgentResponse.from_string('<switch to="ted"> no, Grace: <switch to="goal-setter">Plan it.</switch>')
+        self.assertEqual((response.switch_to, response.switch_brief), ("goal-setter", "Plan it."))
+        self.assertEqual(response.text, "no, Grace:")
+
+
+# The shape of a real reply (Aki, #agent-management) that explained the switch
+# syntax in backticks, then ended with a poll and its real memory log. The prose
+# is reworded here; the markup is as it came. Read as directives, the quoted
+# <switch to="ID"/> switched the user to "ID", and the quoted
+# <system_memory_log> opened a log that ran to the real one's closing tag: the
+# reply stopped mid-sentence, and its paragraphs became memory lines.
+EXPLAINED_SYNTAX = """<speech>
+Right, the switch moved you without any context. Want me to put our plan in a file Elephant can read?
+</speech>
+
+You're right that Elephant began with nothing. Why it happened:
+
+1. **The `<switch>` tag only redirects:** the instructions give me just `<switch to="ID"/>`. It moves your session to the teammate's channel and carries no payload.
+2. **Each channel keeps its own context:** what we say in `#agent-management` never shows up in `#software-dev`.
+3. **The memory log is slow:** I did add a `<system_memory_log>` about the inbox plan and `scan_wiki_inbox.py`, but that block feeds long-term memory later, not Elephant's prompt now.
+
+### Getting the plan across
+I can save the agreed spec as `pkm/inbox/william_script_spec.md`, and you can tell Elephant: *"Read `william_script_spec.md` and build it."*
+
+<poll>
+    <question>Save the spec for Elephant?</question>
+    <options>
+        <option>
+            <text>Yes, save it</text>
+            <emoji>📝</emoji>
+            <response>Yes, save the spec where Elephant can read it.</response>
+        </option>
+        <option>
+            <text>No, I'll explain</text>
+            <emoji>🗣️</emoji>
+            <response>No, I'll brief Elephant myself.</response>
+        </option>
+    </options>
+</poll>
+
+<system_memory_log>
+- [17:10:00] [FEEDBACK] The user found that `<switch to="ID"/>` hands over no context; noted as a framework gap.
+</system_memory_log>
+"""
+
+
+class TestCodeIsText(unittest.TestCase):
+    """A control tag inside code -- an inline span or a fenced block -- is text:
+    it stays in the reply as written, and directs nothing."""
+
+    def test_the_reply_that_explained_the_syntax(self):
+        response = AgentResponse.from_string(EXPLAINED_SYNTAX)
+        self.assertIsNone(response.switch_to)
+        self.assertEqual(response.system_memory_log, '- [17:10:00] [FEEDBACK] The user found that '
+                                                     '`<switch to="ID"/>` hands over no context; noted as a framework gap.')
+        self.assertEqual(response.speech, "Right, the switch moved you without any context. "
+                                          "Want me to put our plan in a file Elephant can read?")
+        self.assertEqual(response.poll_data["question"], "Save the spec for Elephant?")
+        self.assertEqual(len(response.poll_data["options"]), 2)
+        # The whole reply is there, its quoted tags as written.
+        self.assertTrue(response.text.startswith("You're right that Elephant began with nothing."))
+        for kept in ('the instructions give me just `<switch to="ID"/>`. It moves your session',
+                     "I did add a `<system_memory_log>` about the inbox plan and `scan_wiki_inbox.py`, but",
+                     "### Getting the plan across"):
+            self.assertIn(kept, response.text)
+        self.assertTrue(response.text.endswith('*"Read `william_script_spec.md` and build it."*'))
+        for gone in ("<poll>", "<speech>", "[FEEDBACK]", "</system_memory_log>"):
+            self.assertNotIn(gone, response.text)
+
+    def test_a_switch_in_inline_code_is_text(self):
+        for raw in ('The syntax is `<switch to="ID"/>`.', "The syntax is ``<switch to='ID'>brief</switch>``."):
+            with self.subTest(raw=raw):
+                response = AgentResponse.from_string(raw)
+                self.assertEqual((response.switch_to, response.switch_brief, response.text), (None, None, raw))
+
+    def test_tags_in_a_fenced_block_are_text(self):
+        raw = ("Like this:\n```xml\n<switch to=\"software-planner\">brief</switch>\n<speech>Hi.</speech>\n"
+               "<system_memory_log>- example</system_memory_log>\n```\nThat's all.")
+        response = AgentResponse.from_string(raw)
+        self.assertEqual((response.switch_to, response.speech, response.system_memory_log), (None, None, None))
+        self.assertEqual(response.text, raw)
+
+    def test_a_tag_after_the_code_still_counts(self):
+        response = AgentResponse.from_string('Quote: `<switch to="ID"/>`.\n<switch to="goal-setter"/>')
+        self.assertEqual((response.switch_to, response.text), ("goal-setter", 'Quote: `<switch to="ID"/>`.'))
+
+    def test_the_memory_log_is_the_last_block_outside_code(self):
+        response = AgentResponse.from_string(
+            "Done.\n<system_memory_log>- first</system_memory_log>\nMore.\n<system_memory_log>- last</system_memory_log>")
+        self.assertEqual(response.system_memory_log, "- last")
+        self.assertEqual(response.text, "Done.\n\nMore.")
+
+    def test_a_tag_named_in_passing_doesnt_swallow_the_reply(self):
+        """Unquoted, the opener has no closer of its own: the log is the block at the end."""
+        response = AgentResponse.from_string(
+            "I wrote a <system_memory_log> earlier.\nStill visible.\n<system_memory_log>- real</system_memory_log>")
+        self.assertEqual(response.system_memory_log, "- real")
+        self.assertEqual(response.text, "I wrote a <system_memory_log> earlier.\nStill visible.")
+
+    def test_speech_poll_images_and_videos_in_code_are_text(self):
+        raw = ("Use `<speech>` for the ear, `<poll><question>Q?</question></poll>` for a vote, "
+               "`<images><image path=\"a.png\"/></images>` and `<videos><video path=\"b.mp4\"/></videos>`.")
+        response = AgentResponse.from_string(raw)
+        self.assertEqual((response.speech, response.poll_data, response.image_paths, response.video_paths),
+                         (None, None, None, None))
+        self.assertEqual(response.text, raw)
+
+    def test_an_unclosed_fence_or_a_stray_backtick_hides_nothing(self):
+        for raw in ('```\nnever closed\n<switch to="goal-setter"/>', 'a ` b\n<switch to="goal-setter"/> ` c'):
+            with self.subTest(raw=raw):
+                self.assertEqual(AgentResponse.from_string(raw).switch_to, "goal-setter")
+
+    def test_code_spans(self):
+        from core.channel.response_parser import code_spans
+
+        def spans(text):
+            return [text[start:end] for start, end in code_spans(text)]
+
+        self.assertEqual(spans("a `x` b ``y ` z`` c"), ["`x`", "``y ` z``"])
+        self.assertEqual(spans("```one line``` and `two`"), ["```one line```", "`two`"])
+        self.assertEqual(spans("~~~\n<poll>\n~~~~\nout `x`"), ["~~~\n<poll>\n~~~~", "`x`"])
+        self.assertEqual(spans("````\n```\nstill code\n````\nout"), ["````\n```\nstill code\n````"])
+        self.assertEqual(spans("`across\nlines` and ``` unclosed"), [])
+
+
 if __name__ == '__main__':
     unittest.main()
 

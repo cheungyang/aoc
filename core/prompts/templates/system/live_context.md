@@ -5,7 +5,7 @@
 {{/lines}}
 {{#follow_ups}}
 <your_follow_ups>
-<description>What you said you'd keep working on; close one with follow_up when the user says it's done or no longer wanted.</description>
+<description>What you said you'd keep working on, or bring up at a set time; close one with follow_up when the user says it's done or no longer wanted, or brings it up first.</description>
 <content>{{follow_ups}}</content>
 </your_follow_ups>
 {{/follow_ups}}

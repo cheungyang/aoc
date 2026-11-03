@@ -84,3 +84,41 @@ def test_tags_are_matched_case_insensitively():
 
 def test_a_reply_without_speech_is_all_text():
     assert route(["Just text, ", "no tags < here."]) == ("", "Just text, no tags < here.")
+
+
+# A hand-over inside <speech> is never said: team.md asks for the tag outside,
+# but a model may put it in, and a brief spans sentences.
+HANDED_OVER = (
+    "<speech>Handing you to Elephant now. "
+    "<switch to=\"software-planner\">Spec the inbox scanner. Decisions: a script, not a prompt.</switch>"
+    "</speech>Over to Elephant."
+)
+
+
+def test_a_brief_inside_speech_is_never_said_however_tokens_fall():
+    rng = random.Random(7)
+    expected = ("Handing you to Elephant now. \n", "Over to Elephant.")
+    assert route([HANDED_OVER]) == expected
+    assert route(list(HANDED_OVER)) == expected
+    for _ in range(2000):
+        assert route(random_split(HANDED_OVER, rng)) == expected
+
+
+def test_a_self_closing_switch_inside_speech_is_dropped_too():
+    assert route(["<speech>Bye. <switch to=\"x\"/></speech>"]) == ("Bye. \n", "")
+    assert route(["<speech>Bye. <switch to=\"x\"/", "> See you.</speech>"]) == ("Bye.  See you.\n", "")
+
+
+def test_an_unfinished_brief_ends_with_its_block():
+    """An opening tag the model never closed hides the rest of its block, not the next one."""
+    assert route(["<speech>One. <switch to=\"x\">brief</speech><speech>Two.</speech>"]) == ("One. \nTwo.\n", "")
+
+
+def test_a_lookalike_switch_is_said():
+    assert route(["<speech>The <switchboard> ", "is fine. <swi", "tching> too.</speech>"]) == (
+        "The <switchboard> is fine. <switching> too.\n", "")
+
+
+def test_a_switch_in_the_text_is_left_to_the_text_lane():
+    assert route(["<speech>Hi.</speech><switch to=\"x\">brief</switch>"]) == (
+        "Hi.\n", "<switch to=\"x\">brief</switch>")

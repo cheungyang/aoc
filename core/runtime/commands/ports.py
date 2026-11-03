@@ -58,12 +58,21 @@ class VoiceControls(Protocol):
     async def next_agent(self, say: Say) -> bool:
         """Moves to the next channel with something for you. False: no feature offers that."""
 
+    async def hang_up(self, say: Say, member: Any = None) -> bool:
+        """"Hanging up": ends the voice session as a call ends. The agent
+        you're with says goodbye; once that has played, `member` (who said it)
+        is disconnected from the voice channel and the bot leaves. True: it
+        answered the words."""
+
 
 class SpokenTurn(Protocol):
     """The voice turn a spoken command was said in (core/voice/turn.py)."""
 
     def hold(self) -> None:
         """Drops this utterance, but keeps the words said before it for what's said next."""
+
+    def speaker(self) -> Any:
+        """Who said the words: the newest utterance's Discord member, or None."""
 
 
 class ControlThread(Protocol):

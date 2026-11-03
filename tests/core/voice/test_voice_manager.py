@@ -1184,3 +1184,145 @@ async def test_say_when_idle_waits_for_the_turn_and_needs_a_listener(mock_bot_ru
         vm.say_when_idle("Ted has a reply for you.")
         await asyncio.gather(*list(vm._side_tasks))
     assert len(vm.reply.tts.said()) == 1
+
+
+# ---------------------------------------------------------------------------
+# "Hanging up": a goodbye, then you're disconnected and the bot leaves
+# ---------------------------------------------------------------------------
+
+def _caller(vm, channels):
+    """You, in the voice room, as Discord gives a member: disconnecting you is
+    `move_to(None)`. The bot's own voice client can be disconnected too."""
+    member = MagicMock(bot=False, display_name="Sam")
+    member.voice.channel = channels["room"]
+    member.move_to = AsyncMock()
+    vm.connection.voice_client.disconnect = AsyncMock()
+    return member
+
+
+def _quick_hang_up():
+    return patch("core.voice.voice_manager.HANG_UP_POLL_S", 0.001)
+
+
+@pytest.mark.asyncio
+async def test_hanging_up_says_goodbye_then_disconnects_you_and_leaves(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    member = _caller(vm, channels)
+    voice_client = vm.connection.voice_client
+    order = []
+    member.move_to.side_effect = lambda _channel: order.append(("you", list(vm.reply.tts.said())))
+    voice_client.disconnect.side_effect = lambda **_kwargs: order.append(("bot", list(vm.reply.tts.said())))
+    traces = []
+    with _focused(loader, _recording_traces(traces)), _quick_hang_up():
+        await _turn(vm, "Okay, hanging up.", user=member)
+
+    main_agent.execute_stream.assert_not_called()
+    assert order == [("you", ["Talk soon. Bye!"]), ("bot", ["Talk soon. Bye!"])], "the goodbye first, then you, then the bot"
+    member.move_to.assert_awaited_once_with(None)
+    voice_client.disconnect.assert_awaited_once_with(force=True)
+    assert vm.connection.voice_client is None
+    channels["room"].send.assert_awaited_with("📴 Hung up.")
+    assert [(trace.meta["outcome"], trace.meta["command"]) for trace in traces] == [(Outcome.HANG_UP, "hang up")]
+
+
+@pytest.mark.asyncio
+async def test_the_goodbye_is_in_the_voice_of_the_agent_you_are_with(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    member = _caller(vm, channels)
+    with _focused(loader), _quick_hang_up():
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "I'm hanging up now.", user=member)
+
+    assert vm.reply.tts.said() == ["Daisy here.", "Talk soon. Bye!"]
+    assert _voices(vm) == [DAISY_VOICE, DAISY_VOICE]
+
+
+@pytest.mark.asyncio
+async def test_without_move_members_the_bot_still_leaves_and_says_why(mock_bot_runner, tmp_path):
+    import discord
+
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    member = _caller(vm, channels)
+    member.move_to.side_effect = discord.Forbidden(MagicMock(status=403, reason="Forbidden"), "Missing Permissions")
+    voice_client = vm.connection.voice_client
+    with _focused(loader), _quick_hang_up():
+        await _turn(vm, "hanging up", user=member)
+
+    voice_client.disconnect.assert_awaited_once()
+    assert vm.connection.voice_client is None
+    assert "Move Members" in channels["room"].send.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_goodbye_still_hangs_up(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    member = _caller(vm, channels)
+    vm.reply.say = AsyncMock(side_effect=RuntimeError("TTS is down"))
+    with _focused(loader), _quick_hang_up():
+        await _turn(vm, "hanging up", user=member)
+
+    member.move_to.assert_awaited_once_with(None)
+    assert vm.connection.voice_client is None
+
+
+@pytest.mark.asyncio
+async def test_only_the_person_in_this_room_is_disconnected(mock_bot_runner, tmp_path):
+    """A member somewhere else, or a bot, is never moved: the bot just leaves."""
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    elsewhere = _caller(vm, channels)
+    elsewhere.voice.channel = MagicMock(name="another-voice-channel")
+    with _focused(loader), _quick_hang_up():
+        await _turn(vm, "hanging up", user=elsewhere)
+
+    elsewhere.move_to.assert_not_awaited()
+    assert vm.connection.voice_client is None
+
+
+@pytest.mark.asyncio
+async def test_speech_while_hanging_up_reaches_no_agent_until_the_next_join(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    member = _caller(vm, channels)
+    voice_client = vm.connection.voice_client
+    calls = _capture_sessions(main_agent)
+    goodbye_over = asyncio.Event()
+
+    async def goodbye_playing(_timeout):
+        await goodbye_over.wait()
+
+    vm._until_said = goodbye_playing
+    with _focused(loader):
+        _say(vm, "Hanging up.", user=member)
+        await vm._current_task
+        turn = vm._active_turn
+        _say(vm, "Bye!", user=member)  # said over the goodbye
+        assert vm._active_turn == turn, "no turn for it"
+        goodbye_over.set()
+        await asyncio.gather(*list(vm._side_tasks))
+        assert vm.connection.voice_client is None and calls == []
+
+        vm.connection.voice_client = voice_client  # you join again: a new session
+        vm._on_joined(channels["room"])
+        await _turn(vm, "What's on my calendar?")
+
+    assert [prompt for prompt, _session in calls] == ["What's on my calendar?"]
+
+
+@pytest.mark.asyncio
+async def test_the_goodbye_is_waited_for_until_quiet_twice_in_a_row(mock_bot_runner):
+    """As the cue gives way to the line, the queue is empty for a moment: one
+    quiet check isn't the end of the goodbye."""
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
+    vm.audio_queue.is_playing = MagicMock(side_effect=[True, False, True, False, False, True])
+    with _quick_hang_up():
+        await vm._until_said(5.0)
+    assert vm.audio_queue.is_playing.call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_the_wait_for_the_goodbye_has_a_cap(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
+    vm.audio_queue.is_playing = MagicMock(return_value=True)
+    started = time.monotonic()
+    with _quick_hang_up():
+        await vm._until_said(0.05)
+    assert time.monotonic() - started < 1.0

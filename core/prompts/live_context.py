@@ -12,10 +12,12 @@ learned. SignalStore.live_situations picks the lines.
 
 Its second part is the agent's open follow-ups (core/storage/follow_ups.py),
 soonest `until` first, at most MAX_FOLLOW_UPS, so it knows what it said it would
-keep working on. It won't offer one it already has, it can answer "what are you
-watching?", and it closes one when you say it's done:
+keep working on, and what it said it would bring up when. It won't offer one it
+already has, it can answer "what are you watching?", and it closes one when you
+say it's done, or bring a one-off's topic up yourself first:
 
     - #12 Business award seats SFO→MAD · every 2d until 2026-12-15
+    - #7 · once at Tue 09:00 · bring up: the logo redesign
 
 That part tells the agent to close one with `follow_up`, so only a run with the
 tool sees it (core/loaders/tools_loader.gets_follow_up): not a run another agent
@@ -42,7 +44,7 @@ from core.knowledge.memory.inject import memory_topics
 from core.loaders.tools_loader import gets_follow_up
 from core.prompts.base import Prompt
 from core.runtime.foundation.context import try_context
-from core.storage.follow_ups import FollowUp, FollowUpStore, Status, cadence_text
+from core.storage.follow_ups import FollowUp, FollowUpStore, Status, cadence_text, when_text
 from core.storage.signals import SignalStore
 from core.util.local_time import get_local_timezone
 
@@ -73,9 +75,16 @@ def live_lines(situations: List[Dict[str, Any]]) -> str:
     return "\n".join(f"- {s['gist']} (until {s['until']})" for s in situations)
 
 
-def follow_up_lines(follow_ups: List[FollowUp]) -> str:
-    """The follow-ups' lines: each one's id, goal, cadence and `until`."""
-    return "\n".join(f"- #{f.id} {f.goal} · every {cadence_text(f.every_s)} until {f.until}" for f in follow_ups)
+def follow_up_lines(follow_ups: List[FollowUp], now: float) -> str:
+    """The follow-ups' lines: a watch's id, goal, cadence and `until`; a one-off's id, when it's
+    brought up, said from `now`, and what."""
+    return "\n".join(follow_up_line(follow_up, now) for follow_up in follow_ups)
+
+
+def follow_up_line(follow_up: FollowUp, now: float) -> str:
+    if follow_up.is_once:
+        return f"- #{follow_up.id} · once at {when_text(follow_up.due_at, now)} · bring up: {follow_up.goal}"
+    return f"- #{follow_up.id} {follow_up.goal} · every {cadence_text(follow_up.every_s)} until {follow_up.until}"
 
 
 def get_live_context_prompt(agent_id: str, config: Optional[dict] = None, *, now: Optional[float] = None) -> str:
@@ -106,7 +115,7 @@ def _render(agent_id: str, config: dict, now: float, with_follow_ups: bool) -> s
     """The block, or "" when neither part has a line. Never raises: a part that can't be
     read is left out, and the turn goes on."""
     situations = _situations(agent_id, config, now)
-    follow_ups = _follow_ups(agent_id) if with_follow_ups else ""
+    follow_ups = _follow_ups(agent_id, now) if with_follow_ups else ""
     if not situations and not follow_ups:
         return ""
     return LiveContextPrompt(lines=situations, follow_ups=follow_ups).render()
@@ -126,11 +135,11 @@ def _situations(agent_id: str, config: dict, now: float) -> str:
     return live_lines(situations)
 
 
-def _follow_ups(agent_id: str) -> str:
+def _follow_ups(agent_id: str, now: float) -> str:
     """The agent's own open follow-ups' lines, soonest `until` first, or ""."""
     try:
         follow_ups = FollowUpStore().list(agent_id=agent_id, status=Status.OPEN)
+        return follow_up_lines(sorted(follow_ups, key=lambda f: (f.until, f.id))[:MAX_FOLLOW_UPS], now)
     except Exception as e:
         print(f"[live_context] No follow-ups in {agent_id}'s Live Context: {type(e).__name__}: {e}")
         return ""
-    return follow_up_lines(sorted(follow_ups, key=lambda f: (f.until, f.id))[:MAX_FOLLOW_UPS])

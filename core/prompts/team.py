@@ -9,6 +9,13 @@ does -- and the one directive that moves the user: a reply ending with
 follows it (core/voice/speech/reply.py), and a typed channel shows where to
 find the teammate (core/channel/handoff.py).
 
+Handed over cold, a teammate made the user repeat everything. So when the
+teammate should pick up the work, the agent writes a brief inside the tag --
+<switch to="goal-setter">the request, the decisions, the constraints</switch>
+-- and graphs/main parks it, with a capsule of the conversation, for the
+teammate's first turn. The block also says what that <handoff_context> is:
+the agents that receive one are the ones with a channel of their own.
+
 Only an agent with a home channel gets the block, since only those talk with
 the user: not the concierge, which hosts every channel and answers none of
 them itself, nor the stateless workers. The block changes only when the agents

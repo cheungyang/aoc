@@ -1,19 +1,93 @@
+"""A reply, read: the text the channel shows, and the control tags around it.
+
+An agent's reply is markdown for the channel plus tags the runtime acts on:
+<switch> (hand the user to a teammate), <speech> (what a voice turn says
+aloud), <poll>, <images>, <videos> and <system_memory_log>.
+`AgentResponse.from_string` takes each out of the text, <switch> first, so one
+written inside <speech> is never read out.
+
+A tag inside code is text, not a directive. A reply that explains the syntax
+quotes it -- "the syntax is `<switch to="ID"/>`" -- and that must neither
+switch the user nor open a memory log that swallows the rest of the reply.
+Code is a fenced block that was closed, or an inline span closed on its own
+line (`code_spans`): an unclosed fence or a stray backtick doesn't turn the
+rest of the reply into code, so it can't hide a real tag after it. The tags
+are found on a copy of the reply with code masked (`mask_code`) and taken out
+of the reply itself, whose code stays as it was written. The Discord stream
+buffer hides tags by the same rule (core/channel/discord/stream_buffer.py).
+"""
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Iterable, Optional, Dict, List, Tuple
 import re
+
+# Code in a reply. A fenced block opens on a line of three or more backticks or
+# tildes and closes on a line of the same character, at least as long; a
+# backtick fence's info string has no backtick, so ```this``` on one line is
+# inline code. An inline span is a run of backticks closed by a run of the same
+# length on the same line.
+_FENCED_RE = re.compile(
+    r"^[ \t]{0,3}(?:(?P<ticks>`{3,})[^`\n]*|(?P<tildes>~{3,})[^\n]*)$"
+    r".*?"
+    r"^[ \t]{0,3}(?:(?P=ticks)`*|(?P=tildes)~*)[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+# What a "<" inside code becomes in the masked copy: no tag can start there.
+_MASK = "\x00"
+
+
+def code_spans(text: str) -> List[Tuple[int, int]]:
+    """Where `text` holds code, as sorted (start, end) offsets: each closed
+    fenced block, fences included, and each inline span outside them."""
+    fenced = [m.span() for m in _FENCED_RE.finditer(text)]
+    inline = [m.span() for m in _INLINE_CODE_RE.finditer(text)
+              if not any(start <= m.start() < end for start, end in fenced)]
+    return sorted(fenced + inline)
+
+
+def mask_code(text: str) -> str:
+    """`text` with every "<" inside code masked, so no tag pattern matches
+    there. As long as `text`: a match's offsets are `text`'s."""
+    spans = code_spans(text)
+    if not spans:
+        return text
+    parts, last = [], 0
+    for start, end in spans:
+        parts += [text[last:start], text[start:end].replace("<", _MASK)]
+        last = end
+    parts.append(text[last:])
+    return "".join(parts)
+
+
+def _cut(text: str, spans: Iterable[Tuple[int, int]]) -> str:
+    """`text` without the (start, end) spans, which are in order and don't overlap."""
+    kept, last = [], 0
+    for start, end in spans:
+        kept.append(text[last:start])
+        last = end
+    kept.append(text[last:])
+    return "".join(kept)
+
+
+def _group(text: str, match: "re.Match", group: int) -> Optional[str]:
+    """`match`'s group, read from `text`: the match was made on its masked copy."""
+    start, end = match.span(group)
+    return text[start:end] if start >= 0 else None
+
+
+_POLL_RE = re.compile(r'<poll(.*?)>(.*?)</poll>', re.DOTALL)
 
 
 def _extract_poll(text: str) -> tuple[str, Optional[Dict]]:
-    """Extracts and strips <poll> XML block from text."""
-    poll_match = re.search(r'<poll(.*?)>(.*?)</poll>', text, re.DOTALL)
+    """Extracts and strips the first <poll> XML block outside code."""
+    poll_match = _POLL_RE.search(mask_code(text))
     if not poll_match:
         return text, None
 
-    poll_xml = poll_match.group(0)
-    cleaned_text = text.replace(poll_xml, "").strip()
+    cleaned_text = _cut(text, [poll_match.span()]).strip()
 
-    poll_attrs = poll_match.group(1)
-    poll_content = poll_match.group(2)
+    poll_attrs = _group(text, poll_match, 1)
+    poll_content = _group(text, poll_match, 2)
     allow_multiple = 'allow_multiple="true"' in poll_attrs
 
     poll_data = {
@@ -48,17 +122,19 @@ def _extract_poll(text: str) -> tuple[str, Optional[Dict]]:
     return cleaned_text, poll_data
 
 
+_IMAGES_RE = re.compile(r'<images>(.*?)</images>', re.DOTALL)
+
+
 def _extract_images(text: str) -> tuple[str, Optional[List[str]]]:
-    """Extracts and strips <images> XML block from text."""
-    images_match = re.search(r'<images>(.*?)</images>', text, re.DOTALL)
+    """Extracts and strips the first <images> XML block outside code."""
+    images_match = _IMAGES_RE.search(mask_code(text))
     if not images_match:
         return text, None
 
-    images_xml = images_match.group(0)
-    cleaned_text = text.replace(images_xml, "").strip()
+    cleaned_text = _cut(text, [images_match.span()]).strip()
 
     image_paths = []
-    images_content = images_match.group(1)
+    images_content = _group(text, images_match, 1)
     for img_match in re.finditer(
         r'<image\s+path="(.*?)"\s*/>', images_content
     ):
@@ -67,17 +143,19 @@ def _extract_images(text: str) -> tuple[str, Optional[List[str]]]:
     return cleaned_text, image_paths
 
 
+_VIDEOS_RE = re.compile(r'<videos>(.*?)</videos>', re.DOTALL)
+
+
 def _extract_videos(text: str) -> tuple[str, Optional[List[str]]]:
-    """Extracts and strips <videos> XML block from text."""
-    videos_match = re.search(r'<videos>(.*?)</videos>', text, re.DOTALL)
+    """Extracts and strips the first <videos> XML block outside code."""
+    videos_match = _VIDEOS_RE.search(mask_code(text))
     if not videos_match:
         return text, None
 
-    videos_xml = videos_match.group(0)
-    cleaned_text = text.replace(videos_xml, "").strip()
+    cleaned_text = _cut(text, [videos_match.span()]).strip()
 
     video_paths = []
-    videos_content = videos_match.group(1)
+    videos_content = _group(text, videos_match, 1)
     for vid_match in re.finditer(
         r'<video\s+path="(.*?)"\s*/>', videos_content
     ):
@@ -86,17 +164,23 @@ def _extract_videos(text: str) -> tuple[str, Optional[List[str]]]:
     return cleaned_text, video_paths
 
 
+# A memory log runs from the nearest opener before its closer: an earlier
+# opener with no closer of its own -- the tag named in passing -- doesn't
+# swallow the text up to the real log.
+_MEMORY_LOG_RE = re.compile(
+    r'<system_memory_log>((?:(?!<system_memory_log>).)*?)</system_memory_log>', re.DOTALL
+)
+
+
 def _extract_system_memory_log(text: str) -> tuple[str, Optional[str]]:
-    """Extracts and strips <system_memory_log> XML block from text."""
-    memory_match = re.search(
-        r'<system_memory_log>(.*?)</system_memory_log>', text, re.DOTALL
-    )
-    if not memory_match:
+    """Extracts and strips the <system_memory_log> blocks outside code. The last
+    one is the log: it belongs at the end of the reply."""
+    blocks = list(_MEMORY_LOG_RE.finditer(mask_code(text)))
+    if not blocks:
         return text, None
 
-    memory_xml = memory_match.group(0)
-    cleaned_text = text.replace(memory_xml, "").strip()
-    system_memory_log = memory_match.group(1).strip()
+    cleaned_text = _cut(text, [block.span() for block in blocks]).strip()
+    system_memory_log = _group(text, blocks[-1], 1).strip()
 
     return cleaned_text, system_memory_log
 
@@ -112,17 +196,20 @@ def _extract_speech(text: str) -> tuple[str, Optional[str]]:
     A reply can hold several -- a sentence before a tool call, then the
     answer's -- and they are joined in order. A block the model never closed
     is speech too, but its words also stay in the text: the channel must not
-    lose the reply to a missing tag.
+    lose the reply to a missing tag. Tags inside code are text.
     """
-    if not _SPEECH_TAG_RE.search(text):
+    masked = mask_code(text)
+    if not _SPEECH_TAG_RE.search(masked):
         return text, None
 
-    blocks = [m.group(1).strip() for m in _SPEECH_BLOCK_RE.finditer(text)]
-    cleaned_text = _SPEECH_BLOCK_RE.sub("", text)
-    unclosed = _SPEECH_OPEN_RE.search(cleaned_text)
+    closed = list(_SPEECH_BLOCK_RE.finditer(masked))
+    blocks = [_group(text, m, 1).strip() for m in closed]
+    spans = [m.span() for m in closed]
+    cleaned_text, masked = _cut(text, spans), _cut(masked, spans)
+    unclosed = _SPEECH_OPEN_RE.search(masked)
     if unclosed:
         blocks.append(cleaned_text[unclosed.end():].strip())
-    cleaned_text = _SPEECH_TAG_RE.sub("", cleaned_text).strip()
+    cleaned_text = _cut(cleaned_text, [m.span() for m in _SPEECH_TAG_RE.finditer(masked)]).strip()
     speech = " ".join(block for block in blocks if block)
     return cleaned_text, speech or None
 
@@ -153,20 +240,38 @@ def split_question(speech: Optional[str]) -> tuple[Optional[str], Optional[str]]
 
 # A reply that hands the user to a teammate ends with <switch to="goal-setter"/>
 # (core/prompts/templates/system/team.md): the voice room moves there, and the
-# channel shows where to go.
+# channel shows where to go. When the teammate should pick up the work, the
+# agent writes a brief for it inside: <switch to="goal-setter">brief</switch>.
+# The brief never crosses another <switch>, so a bare opener can't take a
+# later directive in as its brief.
 _SWITCH_RE = re.compile(
-    r"<switch\b[^>]*?\bto\s*=\s*[\"']([^\"']*)[\"'][^>]*?/?>(?:\s*</switch\s*>)?", re.IGNORECASE
+    r"<switch\b[^>]*?\bto\s*=\s*[\"']([^\"']*)[\"'][^>]*?"
+    r"(?:/>(?:\s*</switch\s*>)?|>(?:((?:(?!<switch\b).)*?)</switch\s*>)?)",
+    re.IGNORECASE | re.DOTALL,
 )
+# The longest brief kept, in characters: it goes into the teammate's capsule
+# (core/runtime/history/handoff.py), which is never cut to fit around it.
+SWITCH_BRIEF_CHARS = 1000
 
 
-def _extract_switch(text: str) -> tuple[str, Optional[str]]:
-    """Extracts and strips <switch to="..."/> directives, wherever they are
-    (inside <speech> too, so the voice never reads one out). The last one
-    counts."""
-    targets = [m.group(1).strip() for m in _SWITCH_RE.finditer(text)]
-    if not targets:
-        return text, None
-    return _SWITCH_RE.sub("", text).strip(), targets[-1] or None
+def _extract_switch(text: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Extracts and strips <switch> directives outside code, wherever they are
+    (inside <speech> too, so the voice never reads one out), briefs and all.
+    The last one counts: its target, and its brief."""
+    found = list(_SWITCH_RE.finditer(mask_code(text)))
+    if not found:
+        return text, None, None
+    target = _group(text, found[-1], 1).strip()
+    brief = _brief(_group(text, found[-1], 2))
+    return _cut(text, [m.span() for m in found]).strip(), target or None, brief
+
+
+def _brief(raw: Optional[str]) -> Optional[str]:
+    """A switch's brief on one line, at most SWITCH_BRIEF_CHARS; None if empty."""
+    brief = " ".join((raw or "").split())
+    if len(brief) > SWITCH_BRIEF_CHARS:
+        brief = brief[:SWITCH_BRIEF_CHARS - 1].rstrip() + "…"
+    return brief or None
 
 
 @dataclass
@@ -183,11 +288,14 @@ class AgentResponse:
     question: Optional[str] = None
     # The teammate the reply hands the user to: the agent id in <switch to="..."/>.
     switch_to: Optional[str] = None
+    # What the agent wrote inside that tag for the teammate, on one line: it goes
+    # into the teammate's hand-off capsule (graphs/main), never to the user.
+    switch_brief: Optional[str] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text = reply_text
-        text, switch_to = _extract_switch(text)
+        text, switch_to, switch_brief = _extract_switch(text)
         text, speech = _extract_speech(text)
         speech, question = split_question(speech)
         text, poll_data = _extract_poll(text)
@@ -204,4 +312,5 @@ class AgentResponse:
             speech=speech,
             question=question,
             switch_to=switch_to,
+            switch_brief=switch_brief,
         )

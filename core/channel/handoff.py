@@ -8,7 +8,8 @@ voice room spoken ones, so both read the same.
 An agent can hand you over too, when you ask it for a teammate: its reply ends
 with <switch to="goal-setter"/> (core/prompts/templates/system/team.md). The
 channel then shows where to go -- "→ Over to 🚀 Grace in #project-planning" --
-and the voice room moves there.
+and the voice room moves there. The teammate's first turn there gets a capsule
+of the conversation you left (graphs/main parks it).
 """
 from typing import Any, Optional
 
@@ -35,7 +36,7 @@ def switch_pointer(agent: str, source: Any, loader: Any = None) -> Optional[str]
     `source`'s guild has it. `agent` is the teammate's id, or its name. None
     when no agent by that id or name has a channel to go to."""
     loader = loader if loader is not None else AgentsLoader()
-    agent_id = _agent_named(agent, loader)
+    agent_id = agent_named(agent, loader)
     home = home_channel(agent_id, loader) if agent_id else None
     if not home:
         return None
@@ -45,8 +46,9 @@ def switch_pointer(agent: str, source: Any, loader: Any = None) -> Optional[str]
     return f"→ Over to {config.get('emoji', '🤖')} {config.get('name', agent_id)} in {where}"
 
 
-def _agent_named(agent: str, loader: Any) -> Optional[str]:
-    """The id of the agent whose id or name `agent` is, or None."""
+def agent_named(agent: str, loader: Any) -> Optional[str]:
+    """The id of the agent whose id or name `agent` is, or None: how a
+    <switch to="..."> names its teammate."""
     wanted = str(agent or "").strip()
     if not wanted:
         return None

@@ -14,18 +14,22 @@ from core.proactive.cards import PeerCard
 from core.proactive.follow_ups import (
     CLAIM_S,
     LABEL,
+    LATE_S,
     MAX_PER_TICK,
+    ONCE_LABEL,
     REPORT_CHARS,
     DueFollowUps,
     FollowUpSchedule,
     FollowUpSweep,
     fingerprint,
     is_last_check,
+    late_text,
     radio_line,
 )
 from core.scheduler.preconditions import PreconditionError
 from core.scheduler.spec import Findings, Problems, ScheduleContext, SessionPolicy, WorkDecision
-from core.storage.follow_ups import Check, Closer, FollowUpStore, Result, Status
+from core.storage.channel_inbox import Priority
+from core.storage.follow_ups import RETRY_S, Check, Closer, FollowUpStore, Result, Status, end_of
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
 
@@ -34,9 +38,11 @@ HOUR, DAY = 3600, 86400
 MODEL = Check(type="model", what="new award space SFO to MAD in business")
 AWARD = Check(type="award_watch", args={"origin": "SFO", "destination": "MAD"})
 TURN = SimpleNamespace(source="followup")  # the check's context, as the output sees it
-HOMES = {"reward-travel": "lifestyle-perk"}
+HOMES = {"reward-travel": "lifestyle-perk", "agent-designer": "agent-management"}
 MILES = PeerCard(agent_id="reward-travel", name="Miles", emoji="✈️", home="lifestyle-perk", description="",
                  interests=(), offers=(), topics=(), derived=True)
+AKI = PeerCard(agent_id="agent-designer", name="Aki", emoji="🎨", home="agent-management", description="",
+               interests=(), offers=(), topics=(), derived=True)
 
 
 @pytest.fixture
@@ -415,7 +421,8 @@ class Radio:
 
 
 def _sweep(store, radio, now=NOW):
-    return FollowUpSweep(radio, store=store, team=lambda: {"reward-travel": MILES}, clock=lambda: now)
+    return FollowUpSweep(radio, store=store, team=lambda: {"reward-travel": MILES, "agent-designer": AKI},
+                         clock=lambda: now)
 
 
 class TestTheSweep:
@@ -476,3 +483,136 @@ class TestTheSweep:
         old = _open(store, at=NOW - 2 * DAY)
         await _sweep(store, radio)()
         assert radio.lines == [] and store.get(old.id).radio_state is Status.OPEN
+
+
+LOGO = "The logo redesign: pick between the two directions"
+NOTES = "We narrowed it to the serif and the geometric mark; Alva wanted to sleep on it."
+
+
+def _once(store, due_at=NOW, agent_id="agent-designer", at=NOW - DAY, **values):
+    """A one-off of Aki's, opened yesterday in #agent-management, due at NOW by default."""
+    fields = dict(goal=LOGO, notes=NOTES, channel="agent-management",
+                  session_id="agent-designer:discord:agent-management")
+    fields.update(values)
+    return store.open_once(agent_id=agent_id, due_at=due_at, at=at, **fields)
+
+
+class TestTheOneOff:
+    """A topic the user asked to come back to at a set time: its turn always runs, announced live,
+    and its own run closes it."""
+
+    def test_it_always_runs_announced_live_with_its_own_label(self, store):
+        spec = FollowUpSchedule(_once(store), store=store)
+        assert (spec.agent_id, spec.channel, spec.source, spec.schedule_id) == ("agent-designer", "agent-management",
+                                                                                "followup", "followup:1")
+        assert (spec.priority, spec.label, spec.precondition) == (Priority.HIGHEST, ONCE_LABEL, None)
+        assert ONCE_LABEL == "a reminder"  # a voice briefing: "Aki has a reminder."
+        assert spec.has_work(_ctx(spec))
+        watch = FollowUpSchedule(_open(store), store=store)
+        assert (watch.priority, watch.label) == (Priority.DEFAULT, LABEL)  # a watch's, as before
+
+    def test_it_never_has_a_last_check_nor_a_scan(self, store, scan):
+        opened = _once(store)
+        for now in (NOW, end_of(opened.until) - 1, end_of(opened.until) + DAY):
+            assert not is_last_check(opened, now)
+        # Its check is a model check by construction; read as anything else, it's still never scanned.
+        spec = FollowUpSchedule(replace(opened, check=AWARD), store=store)
+        assert (scan.built, spec.precondition) == ([], None) and spec.has_work(_ctx(spec))
+
+    def test_its_prompt_has_when_you_asked_the_goal_the_notes_and_the_marked_question(self, store):
+        spec = FollowUpSchedule(_once(store), store=store)
+        prompt = spec.build_prompt(_ctx(spec), spec.has_work(_ctx(spec)))
+        for part in ("This is your follow-up #1: on Saturday 2026-10-31, the user asked you to bring this back to them "
+                     "on Sunday 2026-11-01 at 09:00.",
+                     "It is Sunday 2026-11-01 09:00.",
+                     f"Bring up: {LOGO}",
+                     f'Your notes from then:\n"{NOTES}"',
+                     "End with one question, and no other: whether to get into it now.",
+                     "mark it in your <speech> with <question>...</question>, where it stands, without repeating it",
+                     "Only if your notes make bringing it up depend on something that doesn't hold now, reply with "
+                     "exactly <silent/> and nothing else.",
+                     "Don't close this follow-up yourself: your reply closes it."):
+            assert part in prompt, part
+        for absent in ("You're bringing it up", "keep watching", "Check now", "<findings"):
+            assert absent not in prompt, absent
+        bare = FollowUpSchedule(_once(store, due_at=NOW + 60, notes=""), store=store)
+        assert "Your notes from then" not in bare.build_prompt(_ctx(bare))
+
+    def test_its_prompt_says_so_when_it_runs_more_than_half_an_hour_late(self, store):
+        spec = FollowUpSchedule(_once(store), store=store)
+
+        def prompt_at(late):
+            return spec.build_prompt(ScheduleContext(schedule_id=spec.schedule_id, agent_id=spec.agent_id,
+                                                     now=NOW + late))
+
+        assert "You're bringing it up" not in prompt_at(LATE_S)  # half an hour is still on time
+        assert ("It is Sunday 2026-11-01 09:45.\nYou're bringing it up 45 minutes late: say so in a few words."
+                in prompt_at(45 * 60))
+        assert "You're bringing it up about 3 hours late: say so in a few words." in prompt_at(3 * HOUR)
+        assert (late_text(31 * 60), late_text(89 * 60), late_text(26 * HOUR)) == ("31 minutes", "89 minutes",
+                                                                                  "about 26 hours")
+
+    @pytest.mark.asyncio
+    async def test_a_post_or_a_silent_reply_closes_it_and_a_failure_is_tried_again(self, store):
+        posted, silent, failed, nowhere = (_once(store, due_at=NOW - i * 60) for i in range(4))
+        for follow_up, reply in ((posted, "Morning! Yesterday we got the logo down to two directions. Want to get "
+                                          "into it now?"),
+                                 (silent, "<silent/>")):
+            store.claim(follow_up.id, NOW)
+            spec = FollowUpSchedule(follow_up, store=store)
+            assert spec.has_work(_ctx(spec))
+            await spec.output_for(Channel()).deliver(TURN, AgentResponse.from_string(reply))
+            spec.on_success(_ctx(spec))
+        for follow_up in (failed, nowhere):
+            store.claim(follow_up.id, NOW)
+        FollowUpSchedule(failed, store=store).on_failure(_ctx(spec))
+        FollowUpSchedule(nowhere, store=store).on_success(_ctx(spec))  # its channel wasn't found: nothing posted
+
+        checked = {name: store.get(f.id) for name, f in
+                   (("posted", posted), ("silent", silent), ("failed", failed), ("nowhere", nowhere))}
+        assert {name: (f.status, f.closed_by, f.close_reason) for name, f in checked.items()} == {
+            "posted": (Status.CLOSED, Closer.FIRED, "brought up"),
+            "silent": (Status.CLOSED, Closer.FIRED, "nothing to bring up"),
+            "failed": (Status.OPEN, None, ""), "nowhere": (Status.OPEN, None, "")}
+        assert checked["posted"].last_report.startswith("Morning! Yesterday we got the logo down to two directions.")
+        for name in ("failed", "nowhere"):  # one failed attempt each: tried again a quarter of an hour on
+            retry = checked[name]
+            assert (retry.checks, retry.claimed_at, retry.next_check_at - retry.last_checked_at) == (1, None, RETRY_S)
+        assert all(f.claimed_at is None for f in checked.values())
+
+    @pytest.mark.asyncio
+    async def test_the_provider_claims_it_at_its_time(self, store, live):
+        opened = _once(store, due_at=NOW + 60)
+        provider = DueFollowUps(store, ownership=Holds(held=("agent-designer",)))
+        assert await provider(NOW) == []
+        (spec,) = await provider(NOW + 60)
+        assert (spec.follow_up_id, spec.priority, spec.label) == (opened.id, Priority.HIGHEST, ONCE_LABEL)
+        assert store.get(opened.id).claimed_at == NOW + 60
+
+    def test_its_radio_lines_say_what_and_when_and_how_it_ended(self, store):
+        opened = _once(store, due_at=NOW + 2 * DAY, at=NOW)  # Tuesday, 09:00
+        team = {"agent-designer": AKI}
+        assert radio_line(opened, team) == f'📻 ⏰ 🎨 Aki will bring up "{LOGO}" at Tue 09:00 · follow-up #1'
+        far = replace(opened, due_at=NOW + 20 * DAY)
+        assert radio_line(far, team).endswith(" at Nov 21 09:00 · follow-up #1")  # a weekday would mislead
+        closed = replace(opened, status=Status.CLOSED, closed_at=NOW + 2 * DAY, closed_by=Closer.FIRED,
+                         close_reason="brought up", checks=1, finds=1)
+        assert radio_line(closed, team) == f"📻 ⏰ 🎨 Aki's follow-up #1 closed · {LOGO} · brought up"
+        assert radio_line(replace(closed, close_reason="couldn't bring it up", checks=3, finds=0), team) == (
+            f"📻 ⏰ 🎨 Aki's follow-up #1 closed · {LOGO} · couldn't bring it up · 3 attempts")
+        assert radio_line(replace(closed, closed_by=Closer.UNTIL, close_reason="until passed", checks=0), {}) == (
+            f"📻 ⏰ 🤖 agent-designer's follow-up #1 closed · {LOGO} · never brought up")
+        assert radio_line(replace(closed, closed_by=Closer.YOU, close_reason=""), team).endswith(" · you cancelled it")
+        assert "every" not in radio_line(opened, team) + radio_line(closed, team)
+
+    @pytest.mark.asyncio
+    async def test_the_sweep_announces_it_and_then_its_end(self, store):
+        radio = Radio()
+        opened = _once(store, due_at=NOW + 2 * DAY, at=NOW - 60)
+        await _sweep(store, radio)()
+        await _sweep(store, radio)()  # once
+        assert radio.lines == [(f'📻 ⏰ 🎨 Aki will bring up "{LOGO}" at Tue 09:00 · follow-up #1', ())]
+        store.claim(opened.id, NOW + 2 * DAY)
+        store.finish_check(opened.id, Result.FOUND, NOW + 2 * DAY + 60)
+        await _sweep(store, radio, now=NOW + 2 * DAY + 120)()
+        assert radio.lines[-1] == (f"📻 ⏰ 🎨 Aki's follow-up #1 closed · {LOGO} · brought up", ())

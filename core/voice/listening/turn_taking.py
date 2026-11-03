@@ -12,10 +12,12 @@ The live transcriber supplies the text while the user is still talking:
 
 A stop phrase interrupts at once, however short. The phrases, and what "stop"
 or "wait" on its own then does, are the stop and wait commands
-(core/runtime/commands/spoken/stop.py and wait.py).
+(core/runtime/commands/spoken/stop.py and wait.py). "Hanging up." ends its
+turn as quickly as a stop does (hang_up.py).
 """
 from typing import Iterable
 
+from core.runtime.commands.spoken.hang_up import is_hang_up
 from core.runtime.commands.spoken.stop import is_stop_request
 from core.runtime.commands.spoken.words import words
 from core.voice.foundation.settings import (
@@ -75,7 +77,8 @@ def end_of_turn_ms(text: str) -> int:
         return END_OF_TURN_DEFAULT_MS
     if tokens[-1] in CONTINUATION_WORDS:
         return END_OF_TURN_CONTINUING_MS
-    if stripped[-1] in ".?!" and (len(tokens) >= _MIN_COMPLETE_WORDS or is_stop_request(stripped)):
+    if stripped[-1] in ".?!" and (len(tokens) >= _MIN_COMPLETE_WORDS or is_stop_request(stripped)
+                                  or is_hang_up(stripped)):
         return END_OF_TURN_COMPLETE_MS
     return END_OF_TURN_DEFAULT_MS
 

@@ -1,9 +1,11 @@
 import asyncio
+import io
 import os
 import sys
+import time
 import unittest
-from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -15,6 +17,7 @@ from core.runtime.delegation import DelegationResult
 from core.runtime.foundation import events
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
+from core.runtime.history.handoff import SWITCH_CAPSULE_TOKENS
 from graphs.main.graph import (
     UNADDRESSED_SPEECH,
     UNADDRESSED_TEXT,
@@ -273,19 +276,22 @@ TEAM = {
 
 
 class _TeamLoader:
-    """What the router and the capsule builder ask of AgentsLoader, from TEAM."""
+    """What the router and the capsule builder ask of AgentsLoader, from TEAM (or `team`)."""
+
+    def __init__(self, team=None):
+        self.team = team or TEAM
 
     def list_agent_ids(self):
-        return list(TEAM)
+        return list(self.team)
 
     def get_agent_config(self, agent_id):
-        return TEAM.get(agent_id)
+        return self.team.get(agent_id)
 
     def hosts_channel(self, agent_id, channel):
-        return channel in (TEAM.get(agent_id) or {}).get("channel_hosts", [])
+        return channel in (self.team.get(agent_id) or {}).get("channel_hosts", [])
 
     def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
-        return sorted(a for a, c in TEAM.items()
+        return sorted(a for a, c in self.team.items()
                       if a != exclude_agent_id and "*" not in c["channels"] and channel in c["channels"])
 
 
@@ -413,6 +419,236 @@ class TestHandoffLeavesTheSourceUntouched(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(r["from"], r["message"]) for r in host_log],
                          [("user", "Ted create a syllabus on THIS topic"),
                           ("ai", "→ 🔬 Ted has this in #topic-research")])
+
+
+# TEAM, and two agents that hand you to each other: Aki answers #agent-management,
+# Elephant #software-dev. The graph worker is reachable everywhere and owns no channel.
+SWITCH_TEAM = {
+    **TEAM,
+    "main": {**TEAM["main"], "channel_hosts": TEAM["main"]["channel_hosts"] + ["agent-management", "software-dev"]},
+    "agent-designer": {"name": "Aki", "emoji": "🧬", "channels": ["agent-management", "general"]},
+    "software-planner": {"name": "Elephant", "emoji": "🐘", "channels": ["software-dev", "general"]},
+    "graph-worker": {"name": "Graph Worker", "channels": ["*"], "stateless": True},
+}
+CAPSULE = '<handoff_context from="agent-designer" channel="agent-management" via="switch">plan</handoff_context>'
+SWITCHES = 'Handing you to Elephant. <switch to="software-planner">Spec the inbox scanner.</switch>'
+
+
+class _SwitchTurns(unittest.IsolatedAsyncioTestCase):
+    """Turns through the compiled graph with SWITCH_TEAM, the capsule store
+    real (on conftest's throwaway memory.db)."""
+
+    async def _turn(self, prompt, channel, reply="Noted.", capsule=CAPSULE, delegate=None):
+        """One turn in `channel`, whose agent replies `reply`. Returns the
+        stream_delegate and capsule_for doubles, and what the turn printed."""
+        response = AgentResponse.from_string(reply)
+        delegate = delegate or AsyncMock(return_value=DelegationResult(
+            agent_id="any", text=response.text, response=response))
+        patches = [
+            patch("graphs.main.graph.create_react_agent", return_value=TestMainGraphRouting._concierge(self)),
+            patch("graphs.main.graph.stream_delegate", delegate),
+            patch("graphs.main.graph.safe_dispatch_custom_event", new_callable=AsyncMock),
+            patch("core.loaders.agents_loader.AgentsLoader", return_value=_TeamLoader(SWITCH_TEAM)),
+            patch("graphs.main.graph._record_turn"),
+        ]
+        if capsule is not None:
+            patches.append(patch("graphs.main.graph.capsule_for", return_value=capsule))
+        started = [p.start() for p in patches]
+        printed = io.StringIO()
+        try:
+            graph = create_graph(llm=MagicMock(), tools=[], agent_id="main", config=SWITCH_TEAM["main"])
+            with _session(channel=channel), redirect_stdout(printed):
+                state = await graph.ainvoke({"messages": [HumanMessage(content=prompt)]})
+        finally:
+            for p in reversed(patches):
+                p.stop()
+        self.state = state
+        return delegate, (started[-1] if capsule is not None else None), printed.getvalue()
+
+    def _waiting(self):
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+
+        return HandoffCapsuleStore().query("SELECT * FROM handoff_capsules WHERE consumed_at IS NULL "
+                                           "AND superseded_at IS NULL")
+
+
+class TestSwitchCapsules(_SwitchTurns):
+    """A reply ending with <switch to="..."> parks a capsule of the conversation
+    for the teammate (core/storage/handoff_capsules.py), and the teammate's next
+    turn in its own channel gets it, once."""
+
+    async def test_a_reply_that_switches_you_parks_a_capsule_for_the_teammate(self):
+        _, capsule_for, printed = await self._turn("I think you can hand this over now.", "agent-management",
+                                                   reply=SWITCHES)
+
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief="Spec the inbox scanner.",
+                                            via="switch", max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual((row["from_agent"], row["from_channel"], row["to_agent"], row["to_channel"], row["via"],
+                          row["brief"], row["capsule"]),
+                         ("agent-designer", "agent-management", "software-planner", "software-dev", "switch",
+                          "Spec the inbox scanner.", CAPSULE))
+        self.assertIn(f"[graphs.main] Parked hand-off capsule #{row['id']} for 'software-planner' in "
+                      f"#software-dev: {len(CAPSULE)} chars, with a brief", printed)
+        # The reply itself is as it was: attributed, without the tag or the brief.
+        self.assertEqual(self.state["messages"][-1].content, "🧬 Aki: Handing you to Elephant.")
+
+    async def test_the_teammates_next_turn_in_its_channel_gets_it_once(self):
+        await self._turn("I think you can hand this over now.", "agent-management", reply=SWITCHES)
+        (row,) = self._waiting()
+
+        delegate, _, printed = await self._turn("What did Aki tell you?", "software-dev")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], f"What did Aki tell you?\n\n{CAPSULE}")
+        self.assertEqual(delegate.await_args.kwargs["agent_id"], "software-planner")
+        self.assertIn(f"[graphs.main] Attached parked capsule #{row['id']} from 'agent-designer' "
+                      f"({len(CAPSULE)} chars)", printed)
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+        self.assertEqual(HandoffCapsuleStore().get(row["id"]).consumed_session, "software-planner:tool:software-dev")
+
+        delegate, _, _ = await self._turn("And then?", "software-dev")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], "And then?")
+
+    async def test_end_to_end_the_teammate_gets_the_conversation_and_the_brief(self):
+        """Real capsule builder and session store. The switching reply is in
+        the transcript once the run returns, as LoggingHandler leaves it
+        (see TestTheReplyIsLoggedBeforeTheRunEnds)."""
+        from core.storage.sessions import SessionStore
+
+        aki = "agent-designer:tool:agent-management"
+        store = SessionStore()
+        store.append_message(aki, "user", "<caller>main</caller>\nLet's replace the inbox prompt with a script.")
+        store.append_message(aki, "ai", "<speech>Agreed.</speech>Plan: a script schedule with a state file.")
+
+        async def aki_answers(**kwargs):
+            store.append_message(aki, "user", f"<caller>main</caller>\n{kwargs['prompt']}")
+            store.append_message(aki, "ai", SWITCHES)
+            response = AgentResponse.from_string(SWITCHES)
+            return DelegationResult(agent_id=kwargs["agent_id"], text=response.text, response=response)
+
+        await self._turn("I think you can hand this over now.", "agent-management", capsule=None,
+                         delegate=AsyncMock(side_effect=aki_answers))
+        delegate, _, _ = await self._turn("What did Aki tell you?", "software-dev", capsule=None)
+
+        prompt = delegate.await_args.kwargs["prompt"]
+        self.assertTrue(prompt.startswith('What did Aki tell you?\n\n<handoff_context from="agent-designer" '
+                                          'channel="agent-management" captured="'))
+        self.assertIn('via="switch">\n<brief from="Aki">\nSpec the inbox scanner.\n</brief>\n<recent>', prompt)
+        for line in ("You: Let's replace the inbox prompt with a script.",
+                     "Aki: Plan: a script schedule with a state file.",
+                     "You: I think you can hand this over now.",
+                     "Aki: Handing you to Elephant."):
+            self.assertIn(line, prompt)
+        self.assertEqual(prompt.count("<handoff_context"), 1)
+        self.assertNotIn("<switch", prompt)
+
+    async def test_an_expired_capsule_is_not_attached(self):
+        from core.storage.handoff_capsules import TTL_S, HandoffCapsuleStore
+
+        HandoffCapsuleStore().park(from_agent="agent-designer", from_channel="agent-management",
+                                   to_agent="software-planner", to_channel="software-dev", capsule=CAPSULE,
+                                   now=time.time() - TTL_S - 1)
+        delegate, _, _ = await self._turn("What did Aki tell you?", "software-dev")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], "What did Aki tell you?")
+
+    async def test_nothing_is_parked_for_no_channel_for_itself_or_for_this_channel(self):
+        for teammate in ("graph-worker", "nobody", "agent-designer", "Aki"):
+            with self.subTest(teammate=teammate):
+                _, capsule_for, _ = await self._turn("Over to them.", "agent-management",
+                                                     reply=f'Sure. <switch to="{teammate}">brief</switch>')
+                capsule_for.assert_not_called()
+        with patch("graphs.main.graph.home_channel", return_value="agent-management"):
+            _, capsule_for, _ = await self._turn("Over to them.", "agent-management", reply=SWITCHES)
+        capsule_for.assert_not_called()
+        self.assertEqual(self._waiting(), [])
+
+    async def test_a_capsule_that_cant_be_parked_never_breaks_the_turn(self):
+        with patch("core.storage.handoff_capsules.HandoffCapsuleStore.park", side_effect=RuntimeError("disk full")), \
+             redirect_stderr(io.StringIO()) as errors:
+            await self._turn("I think you can hand this over now.", "agent-management", reply=SWITCHES)
+        self.assertEqual(self.state["messages"][-1].content, "🧬 Aki: Handing you to Elephant.")
+        self.assertIn("could not park a hand-off capsule for 'software-planner': disk full", errors.getvalue())
+
+    async def test_a_capsule_that_cant_be_read_never_breaks_the_turn(self):
+        with patch("core.storage.handoff_capsules.HandoffCapsuleStore.take", side_effect=RuntimeError("locked")), \
+             redirect_stderr(io.StringIO()) as errors:
+            delegate, _, _ = await self._turn("What did Aki tell you?", "software-dev")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], "What did Aki tell you?")
+        self.assertIn("could not read parked hand-off capsules for 'software-planner': locked", errors.getvalue())
+
+
+class TestSwitchCapsulesAndHandOffs(_SwitchTurns):
+    """The router's hand-off (you name the agent) with capsules parked by a <switch>."""
+
+    def _park(self, from_channel="agent-management", brief="Spec the inbox scanner."):
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+
+        return HandoffCapsuleStore().park(from_agent="agent-designer", from_channel=from_channel,
+                                          to_agent="software-planner", to_channel="software-dev",
+                                          capsule="<parked/>", brief=brief)
+
+    async def test_a_plain_hand_off_is_as_it_was(self):
+        delegate, capsule_for, _ = await self._turn("Elephant, spec this one", "general",
+                                                    capsule="<handoff_context>general</handoff_context>")
+        capsule_for.assert_called_once_with("general", loader=ANY, brief=None, via="handoff")
+        self.assertEqual((delegate.await_args.kwargs["agent_id"], delegate.await_args.kwargs["channel"]),
+                         ("software-planner", "software-dev"))
+        self.assertEqual(delegate.await_args.kwargs["prompt"],
+                         "Elephant, spec this one\n\n<handoff_context>general</handoff_context>")
+        self.assertEqual(self._waiting(), [])
+
+    async def test_one_parked_from_another_channel_goes_after_the_hand_offs_own(self):
+        self._park()
+        delegate, _, _ = await self._turn("Elephant, go ahead", "general",
+                                          capsule="<handoff_context>general</handoff_context>")
+        self.assertEqual(delegate.await_args.kwargs["prompt"],
+                         "Elephant, go ahead\n\n<handoff_context>general</handoff_context>\n\n<parked/>")
+        self.assertEqual(self._waiting(), [], "taken: it isn't attached again in #software-dev")
+
+    async def test_one_parked_from_the_same_channel_is_replaced_by_the_newer_capsule_with_its_brief(self):
+        self._park()
+        delegate, capsule_for, printed = await self._turn("Elephant, go ahead", "agent-management",
+                                                          capsule="<handoff_context>newer</handoff_context>")
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief="Spec the inbox scanner.",
+                                            via="handoff")
+        self.assertEqual(delegate.await_args.kwargs["prompt"],
+                         "Elephant, go ahead\n\n<handoff_context>newer</handoff_context>")
+        self.assertIn("is the conversation this hand-off came from", printed)
+        self.assertEqual(self._waiting(), [])
+
+    async def test_a_hand_offs_reply_that_switches_you_on_parks_a_capsule_from_its_channel(self):
+        _, capsule_for, _ = await self._turn("Ted, find the festival dates", "pkm-wiki",
+                                             reply='Found them. <switch to="day-planner">Block Oct 17-18.</switch>')
+        capsule_for.assert_called_with("topic-research", loader=ANY, brief="Block Oct 17-18.", via="switch",
+                                       max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual((row["from_agent"], row["from_channel"], row["to_agent"], row["to_channel"]),
+                         ("topic-researcher", "topic-research", "day-planner", "day-planning"))
+
+
+class TestTheReplyIsLoggedBeforeTheRunEnds(unittest.IsolatedAsyncioTestCase):
+    """Why a switch's capsule is built as soon as stream_delegate returns, not
+    later: the reply that switched is already in the transcript. LoggingHandler
+    writes it in on_llm_end, which LangChain awaits before the model call
+    returns -- so before the graph's event stream ends, and so before
+    Agent.execute_stream yields its final response."""
+
+    async def test_the_reply_is_in_the_transcript_when_the_stream_ends(self):
+        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+        from langgraph.prebuilt import create_react_agent
+
+        from core.runtime.observability.transcript import LoggingHandler
+        from core.storage.sessions import SessionStore
+
+        session = SessionManager.get_session("agent-designer", source="tool", channel="agent-management")
+        graph = create_react_agent(GenericFakeChatModel(messages=iter([AIMessage(content=SWITCHES)])), [])
+        config = {"callbacks": [LoggingHandler(session=session, human_message="hand it over")],
+                  "metadata": {"agent_id": "agent-designer"}}
+        async for _ in graph.astream_events({"messages": [HumanMessage("hand it over")]}, config=config,
+                                            version="v2"):
+            pass
+
+        rows = SessionStore().recent_history(session.session_id, limit=10)
+        self.assertEqual([(r["from"], r["message"]) for r in rows], [("user", "hand it over"), ("ai", SWITCHES)])
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ graphs/main appends this capsule to it: an excerpt of #pkm-wiki's
 conversation, read from the session that answers there
 (`channel_posts.reply_sessions`).
 
-    <handoff_context from="wiki-gardener" channel="pkm-wiki" captured="2026-10-24 08:12">
+    <handoff_context from="wiki-gardener" channel="pkm-wiki" captured="2026-10-24 08:12" via="handoff">
     <summary>...</summary>
     <recent>
     [07:00] William (scheduled post 'wiki-ingest'): Ingested "Effective context ..."
@@ -19,12 +19,26 @@ conversation, read from the session that answers there
     </touched>
     </handoff_context>
 
+An agent can hand you over too, its reply ending with <switch to="...">
+(core/prompts/templates/system/team.md). graphs/main then parks a capsule of
+the conversation (core/storage/handoff_capsules.py) for the teammate's first
+turn in its own channel. Its `via` is "switch", where a router hand-off's is
+"handoff", and it opens with what the agent wrote inside the tag for the
+teammate, if anything -- the request, the decisions made, the constraints:
+
+    <brief from="William">
+    ...
+    </brief>
+
 `summary` is the pruner's summary of older history, if the session has one.
 `recent` holds the last MAX_EXCHANGES exchanges: a message of yours with the
 agent's reply to it, or a post a scheduled job left in the channel. `touched`
 lists the files the agent's tools named during them. The capsule is capped at
-about CAPSULE_TOKENS tokens: lines are shortened first, then the summary goes,
-then the oldest exchanges. A session with nothing in it gives no capsule.
+about CAPSULE_TOKENS tokens for a router hand-off, and SWITCH_CAPSULE_TOKENS
+for a switch's, the teammate's only account of the work. Lines stay whole while
+the capsule fits; over the cap they are shortened first (LINE_CHARS), then the
+summary goes, then the oldest exchanges. The brief stays whole through all of
+it. A session with nothing in it, and no brief, gives no capsule.
 
 The source session is only read: the end of its transcript
 (core/storage/sessions.py, `recent_history`), which keeps timestamps and tool
@@ -52,9 +66,12 @@ Prompt = Union[str, list]
 
 # Exchanges in `recent`: a message of yours with its reply, or a channel post.
 MAX_EXCHANGES = 3
-# The capsule's size, estimated as the pruner does (budget.py).
+# The capsule's size, estimated as the pruner does (budget.py): a router
+# hand-off's, and a switch's, which is all the teammate gets of the work.
 CAPSULE_TOKENS = 1500
-# A line's length in characters, then the shorter ones tried while the capsule is over its cap.
+SWITCH_CAPSULE_TOKENS = 2500
+# The lengths a line is cut to in characters, tried in turn while the capsule is
+# over its cap. Until then lines are whole.
 LINE_CHARS = (600, 300, 150)
 SUMMARY_CHARS = 1200
 MAX_TOUCHED = 8
@@ -72,6 +89,9 @@ _REPLYING_TO = re.compile(r"\s*<replying_to\b[^>]*>.*?</replying_to>", re.S | re
 _THREAD_STARTER = re.compile(r"^\s*\[Thread starter message from .*?\"\]\s*", re.S)
 # A capsule the source session got from an earlier hand-off: never nested in a new one.
 _CAPSULE = re.compile(r"\s*<handoff_context\b[^>]*>.*?</handoff_context>", re.S | re.I)
+# When a message was sent, as the prompt stamps it ("[Mon 17:08] "): two tries
+# at the same words differ in it (`_superseded`).
+_STAMP = re.compile(r"^\[[A-Za-z]{3} \d{1,2}:\d{2}\]\s*")
 _TOOL = re.compile(r"^Tool (?P<tool>[^\s\[:]+)(?: \[(?P<extra>.*?)\])?:(?P<input>.*)\Z", re.S)
 _SUMMARY_ITEM = re.compile(r'"(?P<action>[^"]+)" on (?P<path>[^,\]]+)|(?<![\w"])on (?P<bare>[^,\]]+)|path: (?P<keyed>[^,\]]+)')
 
@@ -98,7 +118,8 @@ def source_session(channel: Any, loader: Any = None) -> Optional[Any]:
 
 def capsule_for(channel: Any, loader: Any = None, agent_name: Optional[str] = None, **kwargs: Any) -> str:
     """The capsule for a hand-off from `channel`, or "" if there is none or it
-    can't be built: a hand-off without context still reaches its agent."""
+    can't be built: a hand-off without context still reaches its agent.
+    `kwargs` go to `build_capsule`: a brief, how the user is handed over, a cap."""
     try:
         session = source_session(channel, loader=loader)
         if session is None:
@@ -121,30 +142,37 @@ def with_capsule(prompt: Prompt, capsule: str) -> Prompt:
     return f"{prompt}\n\n{capsule}" if prompt else capsule
 
 
-def build_capsule(session: Any, *, agent_name: Optional[str] = None, store: Any = None,
+def build_capsule(session: Any, *, agent_name: Optional[str] = None, brief: Optional[str] = None,
+                  via: Optional[str] = None, max_tokens: Optional[int] = None, store: Any = None,
                   checkpointer: Any = None, now: Optional[datetime] = None) -> str:
     """The capsule for `session`'s conversation (see the module docstring), or "".
 
     `agent_name` is how the session's agent is named in it ("William"); its id
-    by default. `store`, `checkpointer` and `now` are for tests.
+    by default. `brief` is what that agent wrote inside its <switch> for the
+    teammate, and `via` how the user is being handed over ("handoff",
+    "switch"), shown on the tag when given. `max_tokens` is the cap,
+    CAPSULE_TOKENS by default. `store`, `checkpointer` and `now` are for tests.
     """
     name = agent_name or session.agent_id
+    cap = max_tokens or CAPSULE_TOKENS
+    brief = _squash(brief or "")
     store = store or SessionStore()
     rows = store.recent_history(session.session_id, limit=HISTORY_ROWS, max_bytes=ROW_BYTES)
     exchanges = _exchanges(rows, name)[-MAX_EXCHANGES:]
     summary = _summary(session, checkpointer)
-    if not exchanges and not summary:
+    if not exchanges and not summary and not brief:
         return ""
     now = now or get_local_now()
 
-    # Smallest change first: shorter lines, then no summary, then fewer exchanges.
-    attempts = [(exchanges, summary, chars) for chars in LINE_CHARS]
+    # Smallest change first: whole lines, then shorter ones, then no summary,
+    # then fewer exchanges. The brief is in every attempt, whole.
+    attempts = [(exchanges, summary, None)] + [(exchanges, summary, chars) for chars in LINE_CHARS]
     attempts.append((exchanges, "", LINE_CHARS[-1]))
     attempts += [(exchanges[-keep:], "", LINE_CHARS[-1]) for keep in range(len(exchanges) - 1, 0, -1)]
     capsule = ""
     for kept, kept_summary, chars in attempts:
-        capsule = _render(session, kept, kept_summary, chars, now)
-        if estimate_message_tokens(capsule) <= CAPSULE_TOKENS:
+        capsule = _render(session, kept, kept_summary, chars, now, brief=brief, name=name, via=via)
+        if estimate_message_tokens(capsule) <= cap:
             break
     return capsule
 
@@ -153,7 +181,8 @@ def build_capsule(session: Any, *, agent_name: Optional[str] = None, store: Any 
 
 def _exchanges(rows: Sequence[Dict[str, Any]], agent_name: str) -> List[_Exchange]:
     """The transcript as exchanges, oldest first. The agent's last words in an
-    exchange are its reply; what it said before a tool call is left out."""
+    exchange are its reply; what it said before a tool call is left out, and so
+    is a message of yours that the next one repeats (`_superseded`)."""
     exchanges: List[_Exchange] = []
     current: Optional[_Exchange] = None
     for row in rows:
@@ -163,6 +192,8 @@ def _exchanges(rows: Sequence[Dict[str, Any]], agent_name: str) -> List[_Exchang
         if role == "user":
             words = _user_words(text)
             if words:
+                if _superseded(current, words):
+                    exchanges.pop()  # `current` is always the last exchange
                 current = _Exchange([_Line(ts, YOU, words)])
                 exchanges.append(current)
         elif role == "ai":
@@ -185,6 +216,18 @@ def _exchanges(rows: Sequence[Dict[str, Any]], agent_name: str) -> List[_Exchang
                 and not text.startswith("Tool Output"):
             current.tool_calls.append((text, ts))
     return [e for e in exchanges if e.lines]
+
+
+def _superseded(current: Optional[_Exchange], words: str) -> bool:
+    """Whether `current` is a message of yours that got no reply, and that
+    `words` -- your next message -- repeats from its start. In voice, a turn
+    cut off by more speech runs again with all of it ("They should" ->
+    "They should ideally ..."): the first is the same request, cut short, and
+    would take one of the capsule's few exchanges for nothing."""
+    if current is None or current.tool_calls or len(current.lines) != 1 or current.lines[0].speaker != YOU:
+        return False
+    earlier = _STAMP.sub("", current.lines[0].text)
+    return bool(earlier) and _STAMP.sub("", words).startswith(earlier)
 
 
 def _user_words(text: str) -> str:
@@ -317,9 +360,14 @@ def _parse(raw: str) -> Any:
 
 # --- writing the capsule ------------------------------------------------------------
 
-def _render(session: Any, exchanges: Sequence[_Exchange], summary: str, line_chars: int, now: datetime) -> str:
+def _render(session: Any, exchanges: Sequence[_Exchange], summary: str, line_chars: Optional[int], now: datetime,
+            *, brief: str = "", name: str = "", via: Optional[str] = None) -> str:
     attrs = f'from="{session.agent_id}" channel="{session.channel_name}" captured="{now:%Y-%m-%d %H:%M}"'
+    if via:
+        attrs += f' via="{via}"'
     out = [f"<handoff_context {attrs}>"]
+    if brief:
+        out += [f'<brief from="{name or session.agent_id}">', brief, "</brief>"]
     if summary:
         out += ["<summary>", _cut(summary, SUMMARY_CHARS), "</summary>"]
     lines = [line for exchange in exchanges for line in exchange.lines]
@@ -336,8 +384,9 @@ def _render(session: Any, exchanges: Sequence[_Exchange], summary: str, line_cha
     return "\n".join(out)
 
 
-def _cut(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit].rstrip() + " [...]"
+def _cut(text: str, limit: Optional[int]) -> str:
+    """`text`, cut to `limit` characters; whole when `limit` is None."""
+    return text if limit is None or len(text) <= limit else text[:limit].rstrip() + " [...]"
 
 
 def _stamp(ts: int, now: datetime) -> str:

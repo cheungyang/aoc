@@ -10,6 +10,13 @@ another agent by name goes to that agent in its own channel, with a capsule of
 the conversation it came from (`handoff`); and the ReAct agent runs only for
 turns that are the executing agent's own (`concierge`).
 
+An agent's reply can hand you on too, ending with <switch to="...">
+(core/prompts/templates/system/team.md). The voice room and the channel follow
+it on their own; this graph parks a capsule of the conversation for the
+teammate, with the brief the agent wrote inside the tag
+(core/storage/handoff_capsules.py), and `direct_call` attaches it to your first
+message in the teammate's channel.
+
 Two things to know before editing:
 
 1. This graph is the default for *every* agent (`GraphBuilder` falls back to
@@ -21,19 +28,21 @@ Two things to know before editing:
 2. The checkpointer belongs to this outer graph. The inner ReAct agent is
    compiled without one, or the two would write the same thread from two levels.
 """
+import asyncio
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
+from core.channel.handoff import agent_named
 from core.runtime.delegation import agent_header, prompt_to_text, safe_dispatch_custom_event, stream_delegate
 from core.runtime.foundation import events
 from core.runtime.foundation.addressing import message_text
-from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, decide
-from core.runtime.history.handoff import capsule_for, with_capsule
+from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, decide, home_channel
+from core.runtime.history.handoff import SWITCH_CAPSULE_TOKENS, capsule_for, with_capsule
 
 # What the `fixed` node answers: a message in a channel no single agent answers
 # (#general). It offers starting with an agent's name (a hand-off). Typed, it
@@ -42,6 +51,11 @@ from core.runtime.history.handoff import capsule_for, with_capsule
 UNADDRESSED_TEXT = ("No agent picks up here. Start with an agent's name (\"Daisy, …\"), "
                     "post in their channel, or type `!help`.")
 UNADDRESSED_SPEECH = "Who's it for? Start with their name, like 'Daisy, what's on today?'"
+
+# How a capsule's conversation reached the agent it's for, on its tag
+# (`via`) and in the turn ledger (core/proactive/taps.py).
+VIA_HANDOFF = "handoff"   # you named the agent: the router's hand-off
+VIA_SWITCH = "switch"     # an agent's reply handed you over: <switch to="...">
 
 
 def _record_turn(session, user_prompt, reply_text: str):
@@ -63,6 +77,96 @@ def _record_turn(session, user_prompt, reply_text: str):
             store.append_message(session.session_id, "ai", reply_text)
     except Exception as e:
         print(f"[graphs.main] Warning: could not record routed turn: {e}", file=sys.stderr)
+
+
+def _source(ctx: Any) -> Any:
+    """Where a turn's conversation is read from: its Discord channel or thread, else its name."""
+    return ctx.channel_obj if ctx.channel_obj is not None else ctx.channel_name
+
+
+def _session_id(agent_id: str, channel: Any) -> str:
+    """The session `agent_id` answers on in `channel`, as stream_delegate opens it."""
+    from core.runtime.foundation.sessions import SessionManager
+
+    return SessionManager.get_session(agent_id, source="tool", channel=channel).session_id
+
+
+def _park_switch(response: Any, *, agent_id: str, channel: str, source: Any, loader: Any) -> Optional[int]:
+    """Parks a capsule for the teammate a reply handed you to (<switch to="...">),
+    for its first turn in its own channel; the capsule's id, or None.
+
+    `agent_id` replied in `channel`, read from `source` (its thread, or its
+    name). Its run has ended, so the reply is in the transcript the capsule is
+    read from: LoggingHandler logs it when the model call ends, before the
+    stream does. Nothing is parked for a teammate with no channel of its own,
+    for the agent itself, or for one whose channel this is. Never raises: a
+    hand-over without context still reaches the teammate.
+    """
+    wanted = getattr(response, "switch_to", None)
+    if not isinstance(wanted, str) or not wanted:
+        return None
+    try:
+        teammate = agent_named(wanted, loader)
+        home = home_channel(teammate, loader) if teammate else None
+        if not home or teammate == agent_id or home == (channel or "").lower():
+            return None
+        brief = getattr(response, "switch_brief", None) or ""
+        capsule = capsule_for(source, loader=loader, brief=brief, via=VIA_SWITCH, max_tokens=SWITCH_CAPSULE_TOKENS)
+        if not capsule:
+            return None
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+
+        parked = HandoffCapsuleStore().park(from_agent=agent_id, from_channel=channel, to_agent=teammate,
+                                            to_channel=home, capsule=capsule, brief=brief, via=VIA_SWITCH)
+    except Exception as e:
+        print(f"[graphs.main] Warning: could not park a hand-off capsule for '{wanted}': {e}", file=sys.stderr)
+        return None
+    print(f"[graphs.main] Parked hand-off capsule #{parked} for '{teammate}' in #{home}: {len(capsule)} chars"
+          + (", with a brief" if brief else ""))
+    return parked
+
+
+def _take_parked(agent_id: str, channel: str, answers_in: Any) -> Optional[Any]:
+    """The capsule an agent's <switch> parked for `agent_id`'s next turn in
+    `channel`, claimed for the session it answers on in `answers_in` (the
+    channel, or a thread of it): None if there's none, or if it can't be read,
+    which only costs the turn its context."""
+    try:
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+
+        return HandoffCapsuleStore().take(agent_id, channel, session_id=_session_id(agent_id, answers_in))
+    except Exception as e:
+        print(f"[graphs.main] Warning: could not read parked hand-off capsules for '{agent_id}': {e}",
+              file=sys.stderr)
+        return None
+
+
+def _attached(parked: Any) -> str:
+    """A taken capsule's text, for the prompt, with the log line that says so."""
+    print(f"[graphs.main] Attached parked capsule #{parked.id} from '{parked.from_agent}' "
+          f"({len(parked.capsule)} chars)")
+    return parked.capsule
+
+
+def _handoff_capsules(source: Any, source_name: str, parked: Any, loader: Any) -> List[str]:
+    """What a router hand-off carries: a capsule of the conversation it came
+    from, and the one an agent's <switch> parked for the named agent there, if
+    any (`_take_parked`).
+
+    A capsule parked from the channel the hand-off came from is the same
+    conversation, read earlier: the hand-off's own capsule stands for both, and
+    carries its brief. One parked from another channel goes after it.
+    """
+    same = parked is not None and parked.from_channel == (source_name or "").lower()
+    brief = parked.brief if same else None
+    own = capsule_for(source, loader=loader, brief=brief, via=VIA_HANDOFF) if source else ""
+    if parked is None:
+        return [own]
+    if same and own:
+        print(f"[graphs.main] Parked capsule #{parked.id} from '{parked.from_agent}' is the conversation this "
+              f"hand-off came from: its own capsule carries it" + (", with the brief" if brief else ""))
+        return [own]
+    return [own, _attached(parked)]
 
 
 def fixed_reply(surface: str) -> str:
@@ -121,18 +225,29 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         }
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
-        """Hands the turn to the one agent allowed to answer here."""
+        """Hands the turn to the one agent allowed to answer here.
+
+        When an agent's <switch> handed you to this one, the capsule it parked
+        goes with your first message here, once. When this agent's reply hands
+        you on in turn, a capsule is parked for that teammate.
+        """
         from core.runtime.foundation.context import try_context
+        from core.loaders.agents_loader import AgentsLoader
 
         ctx = try_context()
         messages = state.get("messages") or []
         user_prompt = messages[-1].content if messages else ""
         target = state.get("route_agent_id")
+        channel = ctx.channel_name if ctx else ""
 
+        # Taken before the call. A call fails only before the agent runs (an
+        # unknown agent, a channel it may not answer), and the agent a channel
+        # routes to does neither.
+        parked = _take_parked(target, channel, answers_in=_source(ctx)) if ctx is not None else None
         result = await stream_delegate(
             agent_id=target,
-            prompt=user_prompt,
-            channel=(ctx.channel_name if ctx else ""),
+            prompt=with_capsule(user_prompt, _attached(parked) if parked else ""),
+            channel=channel,
             caller=(ctx.agent_id if ctx else owner_agent_id),
             routed=True,  # the channel chose it: the agent you're talking to
         )
@@ -146,13 +261,15 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         # Attributed, not bare. This text becomes part of the orchestrator's own
         # message history, and an unattributed reply would later read as
         # something the orchestrator itself said and reasoned its way to.
-        from core.loaders.agents_loader import AgentsLoader
-
-        target_config = AgentsLoader().get_agent_config(target) or {}
+        loader = AgentsLoader()
+        target_config = loader.get_agent_config(target) or {}
         attributed = f"{agent_header(target_config, target)}{result.text}" if result.text else ""
 
         if ctx is not None:
             _record_turn(ctx, user_prompt, attributed)
+            # Off the event loop: the reply's audio may still be streaming.
+            await asyncio.to_thread(_park_switch, result.response, agent_id=target, channel=channel,
+                                    source=_source(ctx), loader=loader)
 
         return {"messages": [AIMessage(content=attributed or result.text)]}
 
@@ -183,11 +300,13 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         The named agent answers on the session its own channel's messages use,
         so the conversation continues there, and the message carries a capsule
         of the one it came from (core/runtime/history/handoff.py), built
-        without a model. The readers of the stream (the Discord runner, voice)
-        learn of the move from the HANDOFF event and show the reply in that
-        channel; one that doesn't know the event shows it here. This turn's
-        own record -- the checkpoint, the host's log -- keeps the user's words
-        and the pointer, never the named agent's reply.
+        without a model -- and the capsule an agent's <switch> parked for it
+        there, if one waits (`_handoff_capsules`). The readers of the stream
+        (the Discord runner, voice) learn of the move from the HANDOFF event and
+        show the reply in that channel; one that doesn't know the event shows it
+        here. This turn's own record -- the checkpoint, the host's log -- keeps
+        the user's words and the pointer, never the named agent's reply. If the
+        reply hands you on, a capsule is parked for that teammate.
         """
         from core.runtime.foundation.context import try_context
         from core.loaders.agents_loader import AgentsLoader
@@ -200,10 +319,12 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         loader = AgentsLoader()
         target_config = loader.get_agent_config(target) or {}
 
-        source_channel = None
-        if ctx is not None:
-            source_channel = ctx.channel_obj if ctx.channel_obj is not None else ctx.channel_name
-        capsule = capsule_for(source_channel, loader=loader) if source_channel else ""
+        source_channel = _source(ctx) if ctx is not None else None
+        parked = _take_parked(target, home, answers_in=home) if home else None
+        capsules = _handoff_capsules(source_channel, ctx.channel_name if ctx else "", parked, loader)
+        prompt = user_prompt
+        for capsule in capsules:
+            prompt = with_capsule(prompt, capsule)
         pointer = handoff_pointer(target_config, target, home)
         await safe_dispatch_custom_event(events.ROUTE_HANDOFF, {
             "agent_id": target,
@@ -214,11 +335,12 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             "request": message_text(user_prompt),
         })
         print(f"[graphs.main] Hand-off to '{target}' in #{home} ready in "
-              f"{(time.perf_counter() - started) * 1000:.0f} ms, with {len(capsule)} chars of context")
+              f"{(time.perf_counter() - started) * 1000:.0f} ms, "
+              f"with {sum(len(capsule) for capsule in capsules)} chars of context")
 
         result = await stream_delegate(
             agent_id=target,
-            prompt=with_capsule(user_prompt, capsule),
+            prompt=prompt,
             channel=home,
             caller=(ctx.agent_id if ctx else owner_agent_id),
             routed=True,  # you named it: the agent you're talking to
@@ -229,6 +351,8 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
         if ctx is not None:
             _record_turn(ctx, user_prompt, pointer)
+        await asyncio.to_thread(_park_switch, result.response, agent_id=target, channel=home, source=home,
+                                loader=loader)
         return {"messages": [AIMessage(content=pointer)]}
 
     async def _concierge(state: MessagesState, config_: Optional[dict] = None) -> Dict[str, Any]:

@@ -89,3 +89,27 @@ class FollowUpPrompt(Prompt):
     reported: str      # when that was
     check: str         # "Check now: ..." for a model check; a scan check's findings follow
     last_check: bool = False  # no other check would come before `until` ends: offer to keep watching
+
+
+@dataclass
+class FollowUpOncePrompt(Prompt):
+    """A one-off follow-up, due now: a topic the user asked the agent to bring back at a set time.
+
+    core/proactive/follow_ups.py renders it from one claimed row: when the user
+    asked, for when, what to bring up and the agent's notes from then, and how
+    late it is when that's more than half an hour. The agent brings the topic up
+    in one short message and ends with one question, whether to get into it now,
+    marked as the question its post waits on, so a voice briefing can replay it.
+    It replies <silent/> only when its notes made bringing it up conditional.
+    Its post closes the follow-up (core/storage/follow_ups.py, `finish_check`).
+    """
+
+    template = "proactive/follow_up_once"
+
+    id: int
+    now: str
+    opened: str    # the day the user asked
+    due: str       # the day and time they asked for
+    goal: str      # what to bring up
+    notes: str     # the agent's notes from then; "" if none
+    late: str      # how late it comes, in words, past half an hour; "" otherwise

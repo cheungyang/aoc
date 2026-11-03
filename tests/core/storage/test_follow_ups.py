@@ -1,4 +1,5 @@
 """Follow-ups in memory.db (core/storage/follow_ups.py)."""
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, datetime
@@ -6,18 +7,24 @@ from datetime import date, datetime
 import pytest
 
 from core.storage.follow_ups import (
+    ONCE_ATTEMPTS,
+    RETRY_S,
     Check,
     Closer,
     DuplicateFollowUp,
     FollowUp,
     FollowUpStore,
+    Kind,
     Result,
     Status,
     cadence_text,
     check_key,
     end_of,
     ensure_first_check,
+    grace_until,
+    once_key,
     parse_until,
+    when_text,
 )
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
@@ -354,3 +361,201 @@ def test_the_words_the_tool_followups_and_the_radio_share():
     assert replace(closed, closed_by=Closer.SWITCHBOARD, close_reason="booked UA 990").closed_why("Miles") == \
         "you said it's done: booked UA 990"
     assert replace(closed, closed_by=Closer.SWITCHBOARD).closed_why("Miles") == "you said it's done"
+
+
+# -- one-offs ---------------------------------------------------------------------------
+
+DUE = datetime(2026, 11, 3, 9, 0, tzinfo=TZ).timestamp()  # a Tuesday, two days after NOV_1
+
+
+def _once(store, goal="The logo redesign", due_at=DUE, agent_id="agent-designer", at=NOV_1, **values):
+    """A one-off of Aki's, opened on Nov 1 in #agent-management, due Tuesday at 09:00 by default."""
+    fields = dict(notes="Two directions left: the serif and the geometric mark.", channel="agent-management",
+                  session_id="agent-designer:discord:agent-management")
+    fields.update(values)
+    return store.open_once(agent_id=agent_id, goal=goal, due_at=due_at, at=at, **fields)
+
+
+def test_a_one_off_opens_due_at_its_time_with_no_cadence_and_a_grace_day(store):
+    opened = _once(store)
+    assert (opened.kind, opened.is_once, opened.status, opened.agent_id) == (Kind.ONCE, True, Status.OPEN,
+                                                                             "agent-designer")
+    assert (opened.due_at, opened.next_check_at, opened.opened_at) == (DUE, DUE, NOV_1)
+    assert (opened.every_s, opened.interval_s, opened.until) == (0, 0, "2026-11-04")
+    assert opened.check == Check(type="model", what="The logo redesign")  # what nothing scans
+    assert opened.notes == "Two directions left: the serif and the geometric mark."
+    assert (opened.checks, opened.finds, opened.claimed_at, opened.close_when) == (0, 0, None, "")
+    assert store.get(opened.id) == opened
+    assert store.select_one("follow_ups", {"id": opened.id})["check_key"] == (
+        f"agent-designer:once:{int(DUE)}:the logo redesign")
+    watch = _open(store)
+    assert (watch.kind, watch.is_once, watch.due_at, watch.notes) == (Kind.WATCH, False, None, "")
+
+
+def test_the_grace_day_is_counted_in_days_not_seconds():
+    assert grace_until(DUE) == "2026-11-04"
+    assert grace_until(datetime(2026, 11, 3, 23, 59, tzinfo=TZ).timestamp()) == "2026-11-04"
+    # Nov 1 has 25 hours where the clocks fall back that night: a day of seconds after 00:30 is still Nov 1.
+    assert grace_until(datetime(2026, 11, 1, 0, 30, tzinfo=TZ).timestamp()) == "2026-11-02"
+
+
+def test_the_same_one_off_is_refused_but_another_time_agent_or_a_watch_is_not(store):
+    first = _once(store)
+    with pytest.raises(DuplicateFollowUp) as refused:
+        _once(store, goal="the  LOGO redesign")  # the same goal, normalised, at the same time
+    assert refused.value.existing == first
+    assert _once(store, due_at=DUE + HOUR).is_open                                   # an hour later
+    assert _once(store, agent_id="reward-travel").is_open                            # another agent's
+    assert _open(store, agent_id="agent-designer", check=_model("The logo redesign")).is_open  # a watch
+    store.close(first.id)
+    assert _once(store).is_open  # a closed one doesn't count
+    assert once_key("a", "Logo  Redesign", DUE) == once_key("a", "logo redesign", DUE)
+    assert once_key("a", "logo redesign", DUE) != once_key("a", "logo redesign", DUE + 60)
+    assert once_key("a", "x", DUE) != check_key("a", _model("x"))
+
+
+def test_a_one_off_is_due_at_its_time_claimed_once_and_a_post_closes_it(store):
+    opened = _once(store)
+    assert store.due(DUE - 1, "2026-11-03") == []
+    assert [f.id for f in store.due(DUE, "2026-11-03")] == [opened.id]
+    assert store.claim(opened.id, DUE) is True and store.claim(opened.id, DUE + 1) is False
+    assert store.due(DUE + 60, "2026-11-03") == []  # its run holds it
+    fired = store.finish_check(opened.id, Result.FOUND, DUE + 60, report="Morning! Yesterday we left the logo at two.")
+    assert (fired.status, fired.closed_by, fired.close_reason, fired.closed_at) == (Status.CLOSED, Closer.FIRED,
+                                                                                    "brought up", DUE + 60)
+    assert (fired.checks, fired.finds, fired.claimed_at) == (1, 1, None)
+    assert (fired.last_report, fired.last_found_at) == ("Morning! Yesterday we left the logo at two.", DUE + 60)
+    assert (fired.closed_why("Aki"), fired.tally()) == ("brought up", "")
+    assert store.due(DUE + 120, "2026-11-03") == []
+
+
+def test_a_silent_one_off_closes_with_nothing_to_bring_up(store):
+    opened = _once(store)
+    store.claim(opened.id, DUE)
+    quiet = store.finish_check(opened.id, Result.EMPTY, DUE + 60, fingerprint="ignored", report="ignored")
+    assert (quiet.status, quiet.closed_by, quiet.close_reason) == (Status.CLOSED, Closer.FIRED, "nothing to bring up")
+    assert (quiet.checks, quiet.finds, quiet.last_fingerprint, quiet.last_report) == (1, 0, "", "")
+
+
+def test_a_failed_one_off_is_tried_again_in_15_minutes_and_closed_after_3_failures(store):
+    opened = _once(store)
+    for attempt, at in ((1, DUE + 60), (2, DUE + 60 + RETRY_S)):
+        assert [f.id for f in store.due(at, "2026-11-03")] == [opened.id]
+        store.claim(opened.id, at)
+        retry = store.finish_check(opened.id, Result.FAILED, at)
+        assert (retry.status, retry.checks, retry.claimed_at, retry.finds) == (Status.OPEN, attempt, None, 0)
+        assert retry.next_check_at == at + RETRY_S == at + 15 * 60
+        assert store.due(at + RETRY_S - 1, "2026-11-03") == []
+    assert retry.tally() == "2 attempts"
+    last = DUE + 60 + 2 * RETRY_S
+    store.claim(opened.id, last)
+    gave_up = store.finish_check(opened.id, Result.FAILED, last)
+    assert (gave_up.status, gave_up.closed_by, gave_up.close_reason) == (Status.CLOSED, Closer.FIRED,
+                                                                         "couldn't bring it up")
+    assert (gave_up.checks, gave_up.closed_at) == (ONCE_ATTEMPTS, last)
+    assert (gave_up.closed_why("Aki"), gave_up.tally()) == ("couldn't bring it up", "3 attempts")
+
+
+def test_a_post_after_a_failure_still_brings_it_up(store):
+    opened = _once(store)
+    store.claim(opened.id, DUE)
+    store.finish_check(opened.id, Result.FAILED, DUE)
+    store.claim(opened.id, DUE + RETRY_S)
+    fired = store.finish_check(opened.id, Result.FOUND, DUE + RETRY_S)
+    assert (fired.status, fired.close_reason, fired.checks, fired.tally()) == (Status.CLOSED, "brought up", 2,
+                                                                                "2 attempts")
+
+
+def test_a_one_off_cancelled_during_its_run_stays_cancelled_and_counts_the_run(store):
+    opened = _once(store)
+    store.claim(opened.id, DUE)
+    store.close(opened.id, reason="we talked already", by=Closer.YOU, at=DUE + 30)
+    finished = store.finish_check(opened.id, Result.FOUND, DUE + 60, report="Morning!")
+    assert (finished.closed_by, finished.close_reason, finished.closed_at) == (Closer.YOU, "we talked already",
+                                                                               DUE + 30)
+    assert (finished.checks, finished.finds, finished.claimed_at) == (1, 1, None)
+    assert store.pending_lines()[-1].id == opened.id  # its closed line can go out now
+
+
+def test_a_one_off_whose_run_never_finished_is_freed_and_due_again(store):
+    opened = _once(store)
+    store.claim(opened.id, DUE)
+    assert store.release_stale(DUE + HOUR - 1, HOUR) == []
+    assert store.release_stale(DUE + HOUR + 1, HOUR) == [opened.id]
+    assert [f.id for f in store.due(DUE + HOUR + 1, "2026-11-03")] == [opened.id]
+
+
+def test_expire_leaves_an_unfired_one_off_until_its_grace_day_passes(store):
+    opened = _once(store)
+    for today, now in (("2026-11-03", DUE), ("2026-11-04", DUE + DAY)):  # its day, and its grace day
+        assert store.expire(today, now) == []
+        # A host that was down at 09:00 still brings it up when it's back.
+        assert [f.id for f in store.due(now, today)] == [opened.id]
+    (ended,) = store.expire("2026-11-05", DUE + 2 * DAY)
+    assert (ended.id, ended.closed_by, ended.close_reason) == (opened.id, Closer.UNTIL, "until passed")
+    assert (ended.closed_why("Aki"), ended.tally()) == ("never brought up", "")
+    assert store.due(DUE + 2 * DAY, "2026-11-05") == []
+
+
+def test_a_one_off_is_never_extended(store):
+    opened = _once(store)
+    for later in ("2026-11-10", "2026-12-31"):
+        assert store.extend(opened.id, later) is None
+        assert store.extend(opened.id, later, agent_id="agent-designer") is None
+    assert store.get(opened.id).until == "2026-11-04"
+
+
+def test_the_words_for_a_one_off():
+    once = make_follow_up(kind=Kind.ONCE, due_at=DUE, every_s=0, interval_s=0, until="2026-11-04")
+    assert (once.tally(), replace(once, checks=1).tally(), replace(once, checks=3).tally()) == ("", "", "3 attempts")
+    closed = replace(once, status=Status.CLOSED, closed_at=DUE)
+    assert replace(closed, closed_by=Closer.FIRED, close_reason="brought up").closed_why("Aki") == "brought up"
+    assert replace(closed, closed_by=Closer.UNTIL, close_reason="until passed").closed_why("Aki") == "never brought up"
+    assert replace(closed, closed_by=Closer.YOU).closed_why("Aki") == "you cancelled it"
+    assert replace(closed, closed_by=Closer.AGENT).closed_why("Aki") == "Aki closed it"
+    # A moment closer than six days is a weekday; further out, a date, where a weekday would mislead.
+    assert (when_text(NOV_1 + HOUR, NOV_1), when_text(DUE, NOV_1)) == ("Sun 10:00", "Tue 09:00")
+    assert when_text(NOV_1 + 9 * DAY, NOV_1) == "Nov 10 09:00"
+
+
+# The table as it shipped, before one-offs: production databases hold it, with rows.
+OLD_TABLE = """
+CREATE TABLE follow_ups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, goal TEXT NOT NULL,
+    check_spec TEXT NOT NULL DEFAULT '{}', check_key TEXT NOT NULL, every_s INTEGER NOT NULL,
+    interval_s INTEGER NOT NULL, until TEXT NOT NULL, close_when TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')), opened_at REAL NOT NULL,
+    closed_at REAL, close_reason TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL DEFAULT '',
+    session_id TEXT NOT NULL DEFAULT '', next_check_at REAL NOT NULL, checks INTEGER NOT NULL DEFAULT 0,
+    empty_checks INTEGER NOT NULL DEFAULT 0, last_checked_at REAL, last_fingerprint TEXT NOT NULL DEFAULT '',
+    last_found_at REAL, claimed_at REAL, finds INTEGER NOT NULL DEFAULT 0, last_report TEXT NOT NULL DEFAULT '',
+    closed_by TEXT NOT NULL DEFAULT '', radio_state TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO follow_ups (agent_id, goal, check_spec, check_key, every_s, interval_s, until, opened_at, next_check_at,
+                        checks, finds)
+VALUES ('reward-travel', 'Business award seats SFO→MAD', '{"type": "model", "what": "award seats"}',
+        'reward-travel:{"type": "model", "what": "award seats"}', 43200, 86400, '2026-11-30', 1000.0, 87400.0, 4, 1);
+"""
+
+
+def _columns(store):
+    return [tuple(row) for row in store.query("PRAGMA table_info(follow_ups)")]
+
+
+def test_an_older_table_gets_the_one_off_columns_and_keeps_its_rows(tmp_path):
+    path = tmp_path / "memory.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_TABLE)
+    conn.close()
+    store = FollowUpStore(str(path))
+    (old,) = store.list()
+    assert (old.goal, old.checks, old.finds, old.interval_s) == ("Business award seats SFO→MAD", 4, 1, 86400)
+    assert (old.kind, old.is_once, old.due_at, old.notes) == (Kind.WATCH, False, None, "")
+    assert _once(store).is_once and store.extend(old.id, "2026-12-15").until == "2026-12-15"
+    # Migrated, it's the table a new database gets: the same columns, in the same order.
+    fresh = FollowUpStore(str(tmp_path / "fresh.db"))
+    fresh.list()
+    assert _columns(store) == _columns(fresh)
+    assert [column[1] for column in _columns(store)][-3:] == ["kind", "due_at", "notes"]
+    with pytest.raises(sqlite3.IntegrityError):  # and it checks the kind, as a new one does
+        store.update("follow_ups", {"kind": "alarm"}, {"id": old.id})

@@ -418,6 +418,14 @@ The skill is granted to `reward-travel` (restaurants) and `excursion-planner` (e
 
 ---
 
+## Discord Voice: Hanging Up
+
+Say **"hanging up"** in the voice room to end the session the way a call ends: the agent you're with says goodbye, you're disconnected from the voice channel, and the bot leaves. Joining the channel again starts a new session, as always.
+
+Disconnecting you needs the **Move Members** permission for the voice-hosting bot (Server Settings → Roles → the bot's role, or the voice channel's permission overrides). Without it the bot still leaves, and says in the voice channel's chat that it couldn't disconnect you.
+
+---
+
 ## Running with Docker Compose (Recommended)
 
 ### 1. Build and Start the Service

@@ -3,11 +3,21 @@ import time
 import asyncio
 import os
 import discord
-from typing import Optional, List
-from core.channel.response_parser import AgentResponse
+from typing import Iterable, Optional, List, Tuple
+from core.channel.response_parser import AgentResponse, mask_code
 from core.channel.discord.ui import PollButtonView, PollSelectView
 from core.channel.chunks import safe_chunks
 from core.channel.handoff import switch_pointer
+
+
+def _cut(text: str, spans: Iterable[Tuple[int, int]]) -> str:
+    """`text` without the (start, end) spans, which are in order and don't overlap."""
+    kept, last = [], 0
+    for start, end in spans:
+        kept.append(text[last:start])
+        last = end
+    kept.append(text[last:])
+    return "".join(kept)
 
 
 class DiscordStreamBuffer:
@@ -37,8 +47,9 @@ class DiscordStreamBuffer:
     # Hidden from the channel while streaming. `speech` is what a voice turn
     # says aloud: the voice pipeline routes it away before this buffer, so it
     # is listed as the backstop for any path that doesn't. `switch` is a
-    # directive with no contents (<switch to="goal-setter"/>): the pointer
-    # `finalize` posts says where it leads.
+    # directive (<switch to="goal-setter"/>), sometimes with a brief for the
+    # teammate inside: the pointer `finalize` posts says where it leads. A tag
+    # inside code is text, and shows (core/channel/response_parser.py).
     _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech", "switch")
 
     @classmethod
@@ -70,34 +81,36 @@ class DiscordStreamBuffer:
     def filter_xml_for_stream(cls, text: str) -> str:
         """
         Suppresses completed and in-flight XML blocks (<poll>, <images>,
-        <videos>, <system_memory_log>, <speech>) and <switch .../> directives
-        during live streaming so Discord users only see natural text deltas.
+        <videos>, <system_memory_log>, <speech>, <switch>) and self-closing
+        <switch .../> directives during live streaming so Discord users only
+        see natural text deltas. Tags inside code are text: the patterns run
+        on a copy with code masked (`mask_code`), and what they find is cut
+        from the text itself. A code span still streaming isn't closed yet,
+        so a tag in it stays hidden until it is.
         """
         if not text:
             return ""
 
         tags = "|".join(cls._STREAM_TAGS)
-
-        # Remove self-closing tags first: they have no closing tag to wait for.
-        filtered = re.sub(rf'<(?:{tags})\b[^>]*/>', '', text, flags=re.IGNORECASE)
-
-        # Remove completed XML blocks (attributes allowed, e.g.
-        # <poll allow_multiple="false">) and their contents
-        filtered = re.sub(
-            rf'<({tags})\b[^>]*>.*?</\1\s*>', '', filtered,
-            flags=re.DOTALL | re.IGNORECASE
+        patterns = (
+            # Self-closing tags first: they have no closing tag to wait for.
+            re.compile(rf'<(?:{tags})\b[^>]*/>', re.IGNORECASE),
+            # Completed XML blocks (attributes allowed, e.g.
+            # <poll allow_multiple="false">) and their contents
+            re.compile(rf'<({tags})\b[^>]*>.*?</\1\s*>', re.DOTALL | re.IGNORECASE),
+            # Unclosed in-flight XML blocks
+            re.compile(rf'<(?:{tags})\b[^>]*>.*$', re.DOTALL | re.IGNORECASE),
         )
+        masked = mask_code(text)
+        for pattern in patterns:
+            spans = [m.span() for m in pattern.finditer(masked)]
+            text, masked = _cut(text, spans), _cut(masked, spans)
 
-        # Remove unclosed in-flight XML blocks
-        filtered = re.sub(
-            rf'<(?:{tags})\b[^>]*>.*$',
-            '', filtered, flags=re.DOTALL | re.IGNORECASE
-        )
+        # Remove a trailing partial tag opener, but only for known tags (and
+        # never one inside code: the masked copy has none there)
+        text = text[:len(cls._strip_partial_trailing_tag(masked))]
 
-        # Remove a trailing partial tag opener, but only for known tags
-        filtered = cls._strip_partial_trailing_tag(filtered)
-
-        return filtered.rstrip()
+        return text.rstrip()
 
     async def append_token(self, token: str):
         """Appends a token delta and updates Discord message if due."""

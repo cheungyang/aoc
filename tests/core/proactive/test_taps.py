@@ -176,6 +176,26 @@ class TestTheEntry:
         entry = entry_for(_turn(prompt="w" * 10_000))
         assert len(entry.user_text) < taps.TEXT_CHARS + 10
 
+    def test_a_capsule_that_came_with_the_message_is_noted_but_not_kept(self):
+        capsule = ('<handoff_context from="agent-designer" channel="agent-management" captured="2026-11-02 17:09" '
+                   'via="switch">\n<brief from="Aki">Spec the inbox scanner.</brief>\n</handoff_context>')
+        entry = entry_for(_turn(prompt=f"<caller>main</caller>\nWhat did Aki tell you?\n\n{capsule}"))
+        assert entry.user_text == "What did Aki tell you?"
+        assert entry.context["handoff"] == {"from": "agent-designer", "via": "switch", "chars": len(capsule)}
+
+    def test_a_capsule_without_via_came_by_the_routers_hand_off(self):
+        capsule = '<handoff_context from="wiki-gardener" channel="pkm-wiki">\n<recent>...</recent>\n</handoff_context>'
+        entry = entry_for(_turn(prompt=f"Ted, take this\n\n{capsule}"))
+        assert entry.context["handoff"] == {"from": "wiki-gardener", "via": "handoff", "chars": len(capsule)}
+        assert "handoff" not in entry_for(_turn()).context
+
+    def test_a_hand_off_that_took_a_parked_capsule_notes_both(self):
+        own = '<handoff_context from="main" channel="general" via="handoff">\n</handoff_context>'
+        parked = '<handoff_context from="agent-designer" channel="agent-management" via="switch">\n</handoff_context>'
+        handoff = entry_for(_turn(prompt=f"Elephant, go\n\n{own}\n\n{parked}")).context["handoff"]
+        assert handoff == {"from": "main", "via": "handoff", "chars": len(own),
+                           "also": [{"from": "agent-designer", "via": "switch", "chars": len(parked)}]}
+
 
 class TestTheWords:
 

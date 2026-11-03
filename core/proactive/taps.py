@@ -19,7 +19,11 @@ What a turn contributes:
             message that started the turn, when the surface names one
             (`source_message`): a live `now` route's reaction goes on it.
             And the CALLED mark when another agent asked for the turn: what
-            it was asked is that agent's words, not yours.
+            it was asked is that agent's words, not yours. And the hand-off
+            capsule your message carried (`handoff_of`): whose conversation
+            it was, how you came (you named the agent, or an agent's
+            <switch> sent you), and its size. Its text is left out of what
+            you said: that conversation was tapped where it happened.
 
 The taps hear about each tool call through the tool hooks
 (core/tooling/hooks.py): `CallLog` notes every finished call in its turn's
@@ -92,7 +96,11 @@ DONE = frozenset({"ok", "partial"})
 CALLED = "called"
 
 _CALLER = re.compile(r"<caller>\s*([^<]*?)\s*</caller>")
-_CAPSULE = re.compile(r"<handoff_context\b.*?</handoff_context>", re.DOTALL)
+# A hand-off capsule (core/runtime/history/handoff.py), its opening tag's attributes captured.
+_CAPSULE = re.compile(r"<handoff_context\b([^>]*)>.*?</handoff_context>", re.DOTALL)
+_ATTRIBUTE = re.compile(r'([\w-]+)="([^"]*)"')
+# How a capsule with no `via` came: by the router's hand-off, the only way before <switch> had one.
+HANDOFF_VIA = "handoff"
 _MEMORY_LINE = re.compile(r"^\s*(?:[-*•]\s*)?(?:\[\d{2}:\d{2}:\d{2}\]\s*)?(.+?)\s*$")
 
 
@@ -161,6 +169,9 @@ def entry_for(turn: Turn, now: Optional[float] = None) -> Optional[LedgerEntry]:
         context["message"] = message
     if ctx.called_by_agent:
         context[CALLED] = True
+    handoff = handoff_of(turn.prompt)
+    if handoff:
+        context["handoff"] = handoff
     return LedgerEntry(
         at=time.time() if now is None else now,
         agent_id=turn.agent_id,
@@ -201,6 +212,24 @@ def user_words(prompt: Any) -> str:
     """What was asked, without the wrappers, and without a hand-off's capsule:
     that conversation was tapped where it happened."""
     return _CAPSULE.sub("", message_text(prompt)).strip()
+
+
+def handoff_of(prompt: Any) -> Optional[Dict[str, Any]]:
+    """The hand-off capsule the message carried, as the ledger's context keeps
+    it: {"from": <the agent whose conversation it is>, "via": "handoff" or
+    "switch", "chars": N}. A router hand-off can carry a second one, parked by
+    an agent's <switch>: it goes under "also". None without a capsule."""
+    capsules = []
+    for match in _CAPSULE.finditer(message_text(prompt)):
+        attributes = dict(_ATTRIBUTE.findall(match.group(1)))
+        capsules.append({"from": attributes.get("from", ""), "via": attributes.get("via") or HANDOFF_VIA,
+                         "chars": len(match.group(0))})
+    if not capsules:
+        return None
+    first = capsules[0]
+    if len(capsules) > 1:
+        first["also"] = capsules[1:]
+    return first
 
 
 def reply_of(turn: Turn) -> str:

@@ -5,11 +5,11 @@ from datetime import datetime, time, timedelta
 import pytest
 
 from core.config.settings import Config
-from core.storage.follow_ups import Check, Closer, FollowUpStore, Status
+from core.storage.follow_ups import Check, Closer, FollowUpStore, Kind, Status
 from core.util.local_time import get_local_timezone
 from tests.helpers import execution_context, envelope
 from tools import follow_up as tool_module
-from tools.follow_up import cadence_text, follow_up, parse_every
+from tools.follow_up import MIN_AT_S, NOTES_CHARS, cadence_text, follow_up, parse_every
 
 TODAY = datetime.now(get_local_timezone()).date()
 # The tool's clock in these tests: 09:00 on TODAY, so a check due later today still comes before it ends.
@@ -120,12 +120,18 @@ def test_the_edges_of_the_cadence_and_the_end_are_allowed(live):
     assert (cadence_text(21600), cadence_text(172800), cadence_text(23400)) == ("6h", "2d", "390m")
 
 
-def test_its_description_says_own_tools_and_stays_short():
-    """Every prompt that has the tool carries this, so the rule cost about 20 characters:
-    it was 617 before it. `extend` fit in the same budget."""
-    assert "Only a check you can run with your own tools" in follow_up.description
-    assert "op: open, extend, close, or list yours." in follow_up.description
-    assert len(follow_up.description) <= 650
+def test_its_description_says_both_forms_and_stays_short():
+    """Every prompt that has the tool carries this, so it stays within 650 characters: it was
+    617 before the own-tools rule, and `extend` and the one-off fit in the same budget. The
+    one-off took "never reminders" out: a topic the user asks to come back to is one."""
+    description = follow_up.description
+    words = " ".join(description.split())
+    assert "A watch: a check you run with your own tools on a cadence until an end date." in words
+    assert "A one-off (at): a topic the user asks you to bring back at a set time." in words
+    assert "at, goal, notes: a one-off. at: YYYY-MM-DD HH:MM." in words
+    assert "op: open, extend, close, or list yours." in description
+    assert "reminder" not in description
+    assert len(description) <= 650
 
 
 def test_extend_moves_the_callers_until_later_and_tells_it_to_say_so(live):
@@ -246,3 +252,133 @@ def test_a_check_can_list_and_close_its_own_follow_up(live):
     closed = FollowUpStore().get(1)
     assert (closed.status, closed.closed_by, closed.close_reason) == (Status.CLOSED, Closer.AGENT,
                                                                       "found two seats, and Alva booked them")
+
+
+# -- one-offs: a topic the user asks to come back to at a set time ------------------------
+
+TOMORROW_9 = datetime.combine(TODAY + timedelta(days=1), time(9, 0), get_local_timezone())
+LOGO = "The logo redesign: pick between the two directions"
+NOTES = "We narrowed it to the serif and the geometric mark; Alva wanted to sleep on it."
+
+
+def _at(moment: float) -> str:
+    """A moment as `at` takes it: YYYY-MM-DD HH:MM on the user's clock."""
+    return f"{datetime.fromtimestamp(moment, get_local_timezone()):%Y-%m-%d %H:%M}"
+
+
+def _aki():
+    """A turn of Aki's, in its channel: where the user asked for this."""
+    return _as("agent-designer", "agent-management")
+
+
+def _open_once(**args):
+    values = dict(op="open", at=_at(TOMORROW_9.timestamp()), goal=LOGO, notes=NOTES)
+    values.update(args)
+    return _call(**values)
+
+
+def test_a_one_off_is_stored_due_at_its_time_and_the_reply_says_what_and_when(live):
+    with _aki():
+        reply = _open_once()
+    when = f"{TOMORROW_9:%A %Y-%m-%d %H:%M}"
+    assert reply["errors"] == "None"
+    assert reply["payload"] == (f'Opened follow-up #1: you\'ll bring up "{LOGO}" on {when}. Say in your reply what '
+                                f"you'll bring up, and when ({when}).")
+    (opened,) = FollowUpStore().list()
+    due = TOMORROW_9.timestamp()
+    assert (opened.kind, opened.is_once, opened.agent_id, opened.status) == (Kind.ONCE, True, "agent-designer",
+                                                                             Status.OPEN)
+    assert (opened.goal, opened.notes, opened.check) == (LOGO, NOTES, Check(type="model", what=LOGO))
+    assert (opened.due_at, opened.next_check_at, opened.opened_at) == (due, due, NOW)
+    assert (opened.every_s, opened.interval_s) == (0, 0)
+    assert opened.until == (TODAY + timedelta(days=2)).isoformat()  # a grace day after its own
+    assert opened.channel == "agent-management"
+
+
+@pytest.mark.parametrize("at", ["{day} 09:00", "{day}T09:00", " {day} 9:00 "])
+def test_at_is_a_time_on_the_users_clock_with_a_space_or_a_t(live, at):
+    with _aki():
+        assert _open_once(at=at.format(day=TOMORROW_9.date().isoformat()))["errors"] == "None"
+    assert FollowUpStore().get(1).due_at == TOMORROW_9.timestamp()
+
+
+@pytest.mark.parametrize("args, error", [
+    (dict(at="tomorrow at 9"), 'at is a time on the user\'s clock, "YYYY-MM-DD HH:MM"'),
+    (dict(at=(TODAY + timedelta(days=1)).isoformat()), "at is a time on the user's clock"),  # a day, but no time
+    (dict(at="2026-13-40 09:00"), "at is a time on the user's clock"),
+    (dict(at=_at(NOW - 3600)), f"at {_at(NOW - 3600)} has passed: it's {_at(NOW)}"),
+    (dict(at=_at(NOW + MIN_AT_S - 60)), f"at is at least 5 minutes out: it's {_at(NOW)}"),
+    (dict(at=_at(NOW + 90 * 86400 + 60)), f"at is at most 90 days out: {_at(NOW + 90 * 86400)} or sooner"),
+    (dict(every="12h"), "at can't go with every: a one-off is brought up once, at its time"),
+    (dict(until=(TODAY + timedelta(days=3)).isoformat()), "at can't go with until"),
+    (dict(check=MODEL), "at can't go with check"),
+    (dict(close_when="the user brings it up"), "at can't go with close_when"),
+    (dict(every="12h", until=(TODAY + timedelta(days=3)).isoformat()), "at can't go with every or until"),
+    (dict(goal="  "), "open needs a goal: what to bring up"),
+    (dict(goal="x" * 301), "goal is at most 300 characters"),
+    (dict(notes="x" * (NOTES_CHARS + 1)), "notes are at most 1000 characters"),
+])
+def test_a_one_off_is_refused_what_it_cant_keep(live, args, error):
+    with _aki():
+        reply = _open_once(**args)
+    assert reply["errors"].startswith("Error: ") and error in reply["errors"], reply["errors"]
+    assert FollowUpStore().list() == []
+
+
+def test_the_edges_of_a_one_offs_time_and_notes_are_allowed(live):
+    with _aki():
+        assert _open_once(at=_at(NOW + MIN_AT_S))["errors"] == "None"
+        assert _open_once(at=_at(NOW + 90 * 86400), notes="x" * NOTES_CHARS)["errors"] == "None"
+        assert _open_once(goal="Another topic", notes="  spread\n over   lines  ")["errors"] == "None"
+    assert [f.due_at for f in FollowUpStore().list()] == [NOW + MIN_AT_S, NOW + 90 * 86400, TOMORROW_9.timestamp()]
+    assert FollowUpStore().get(3).notes == "spread over lines"  # one line, as goal and close_when are
+
+
+def test_notes_go_only_with_at(live):
+    with _aki():
+        reply = _open(notes=NOTES)
+    assert reply["errors"] == 'Error: notes go with at, for a one-off: at is "YYYY-MM-DD HH:MM"'
+    assert FollowUpStore().list() == []
+
+
+def test_the_same_one_off_is_refused_but_another_time_or_a_watch_on_the_same_text_is_not(live):
+    with _aki():
+        assert _open_once()["errors"] == "None"
+        reply = _open_once(goal="the logo redesign:  pick between the two DIRECTIONS")  # the same, normalised
+        assert reply["errors"] == f'Error: follow-up #1 already brings this up then: "{LOGO}"'
+        assert _open_once(at=_at(TOMORROW_9.timestamp() + 3600))["errors"] == "None"  # an hour later
+        assert _open(goal=LOGO, check=json.dumps({"type": "model", "what": LOGO}))["errors"] == "None"  # a watch
+    assert [(f.id, f.kind) for f in FollowUpStore().list()] == [(1, Kind.ONCE), (2, Kind.ONCE), (3, Kind.WATCH)]
+
+
+@pytest.mark.parametrize("until", [(TODAY + timedelta(days=5)).isoformat(), "", "next week"])
+def test_a_one_off_cant_be_extended_whatever_until_says(live, until):
+    with _aki():
+        _open_once()
+        reply = _call(op="extend", id=1, until=until)
+    assert reply["errors"] == ("Error: follow-up #1 is a one-off, brought up once: it can't be extended. Close it, "
+                               "and open another at the new time")
+    assert FollowUpStore().get(1).until == (TODAY + timedelta(days=2)).isoformat()
+
+
+def test_list_shows_a_one_off_by_its_time_and_close_ends_it(live):
+    with _aki():
+        _open(goal="Agent roster review", check=json.dumps({"type": "model", "what": "roster gaps"}), close_when="")
+        _open_once()
+        lines = _call(op="list")["payload"].splitlines()
+        assert lines[1] == f'#2 · once at {TOMORROW_9:%a %Y-%m-%d %H:%M} · "{LOGO}"'
+        assert "every" in lines[0] and "every" not in lines[1]
+        reply = _call(op="close", id=2, reason="the user brought it up first")
+    assert reply["payload"] == f'Closed follow-up #2: "{LOGO}".'
+    closed = FollowUpStore().get(2)
+    assert (closed.status, closed.closed_by, closed.close_reason) == (Status.CLOSED, Closer.AGENT,
+                                                                      "the user brought it up first")
+
+
+@pytest.mark.parametrize("source", ["scheduled", "proactive", "followup"])
+def test_a_one_off_is_refused_on_the_scheduled_surface_too(live, source):
+    with execution_context(agent_id="agent-designer", source=source, channel="agent-management", stateless=False):
+        reply = _open_once()
+    assert reply["errors"] == ("Error: open or extend a follow-up in a conversation, after the user agreed; you can "
+                               "offer it in your message")
+    assert FollowUpStore().list() == []
