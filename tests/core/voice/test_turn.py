@@ -9,9 +9,10 @@ import pytest
 
 from core.runtime.observability.turn_trace import Outcome
 from core.voice.foundation import settings as voice_settings
-from core.voice.foundation.utterance import Utterance
+from core.voice.foundation.utterance import Transcript, Utterance
 from core.voice.speech.missing_speech import alert
 from core.voice.speech.reply import ERROR_LINE
+from core.voice.turn import DIDNT_CATCH
 from core.voice.voice_manager import VoiceManager
 from tests.core.voice.voice_room import (
     QUESTION, TEXT_OUTPUT, _final, _play_at_once, _say, _spoken, _spoken_reply, _streaming_fixture,
@@ -755,3 +756,33 @@ async def test_the_recognizer_reciting_its_vocabulary_is_noise_not_a_request(moc
     assert vm.focus().is_lobby, "the room stays where it was"
     assert traces[0].meta["outcome"] == Outcome.NO_TRANSCRIPT
     assert traces[0].meta["stt_echo"] == ["a roster of 4 vocabulary terms"]
+
+
+@pytest.mark.asyncio
+async def test_words_no_recognizer_could_transcribe_get_an_apology_not_silence(mock_bot_runner, tmp_path):
+    """The live final never came, it had heard nothing before, and batch transcription
+    failed too (stt.py): the room says it didn't catch that, rather than leave you
+    waiting for an answer, and the trace says why."""
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    prompts = _scripted_agent(agent, [None])
+    vm.reply.say = AsyncMock()
+    lost = Utterance(user=MagicMock(display_name="Sam", bot=False))
+    lost.transcript = Transcript("", "transcribe", failed="no final transcript; then batch transcription took over 2.0 s")
+    lost.stream = MagicMock(timings={"connect_ms": 310.2, "setup_ms": 455.0}, error="no final transcript")
+    traces = []
+    with patch("core.runtime.observability.turn_trace.TurnTrace.finish", autospec=True,
+               side_effect=lambda self, session_id=None, surface="voice": traces.append(self)):
+        with patch("core.voice.voice_manager.AgentsLoader") as mock_loader, \
+             patch("core.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+            mock_loader.return_value.get_agent.return_value = agent
+            vm.floor.utterance_opened(lost)
+            vm.floor.utterance_finished(lost)
+            await vm._current_task
+
+    assert prompts == []
+    assert vm.reply.say.await_args.args[0] == DIDNT_CATCH
+    assert vm.floor.unanswered() == []
+    meta = traces[0].meta
+    assert meta["outcome"] == Outcome.STT_FAILED
+    assert meta["stt_failed"] == "no final transcript; then batch transcription took over 2.0 s"
+    assert (meta["stt_error"], meta["stt_live_ms"]) == ("no final transcript", {"connect_ms": 310, "setup_ms": 455})

@@ -1,23 +1,31 @@
-"""Speech-to-text for voice turns: streaming Gemini first, local Whisper as the fallback.
+"""Speech-to-text for voice turns: streaming Gemini, and the cloud when it fails.
 
 `SpeechRecognizer` is what VoiceManager talks to. It opens a live session for
 each utterance (when the provider is "gemini_live" and a Gemini key is
 configured), forwards the VAD's audio and segment boundaries to it, and turns
-the result into a `Transcript`. If the live session fails or misses its
-deadline, the utterance's buffered audio goes to Whisper instead, with greedy
-decoding: it is the slow path, so it should at least not be slower than needed.
+the result into a `Transcript`. When the live session fails or misses its
+deadline, the turn is already late, so the fallbacks are quick ones:
 
-A live transcript that is the recognizer reciting its vocabulary instead of
-what was said (vocabulary_echo.py) counts as no words, as noise does. Whisper
-is given no vocabulary, so its fallback has nothing to recite.
+    1. what the live session heard before it failed, its partial transcript;
+    2. else the utterance's audio to batch transcription (cloud_stt.py),
+       within STT_FALLBACK_TIMEOUT_S;
+    3. else no words, marked failed: the turn says it didn't catch that.
+
+There is no local recognizer: Whisper on the NAS took ~8 s, slower than asking
+again.
+
+A transcript that is the recognizer reciting its vocabulary instead of what
+was said (vocabulary_echo.py) counts as no words, as noise does.
 """
 import asyncio
+import time
 from typing import Callable, Iterable, List, Optional
 
 from core.config.settings import Config
-from core.config.models import TRANSCRIBE_LIVE
+from core.config.models import TRANSCRIBE, TRANSCRIBE_LIVE
 from core.runtime.foundation.routing import home_channel
 from core.voice.foundation import settings
+from core.voice.engines.cloud_stt import transcribe_wav
 from core.voice.engines.live_stt import LiveSTTSession
 from core.voice.engines.vocabulary_echo import vocabulary_echo
 from core.voice.foundation.utterance import Transcript, Utterance
@@ -63,18 +71,16 @@ class SpeechRecognizer:
         provider: Optional[str] = None,
         vocabulary: Iterable[str] = (),
         api_key: Optional[str] = None,
-        whisper_model: Optional[str] = None,
         session_factory: Callable = LiveSTTSession,
+        cloud: Optional[Callable] = None,
     ):
         self.provider = provider or settings.STT_PROVIDER
         self.vocabulary = _unique_terms(vocabulary)[: settings.STT_VOCABULARY_LIMIT]
         if api_key is None:
             api_key = Config().gemini_api_key or ""
         self._api_key = api_key
-        self._whisper_model = whisper_model or settings.WHISPER_MODEL
-        self._whisper = None
-        self._whisper_loading: Optional[asyncio.Future] = None
         self._session_factory = session_factory
+        self._cloud = cloud or transcribe_wav  # batch transcription (cloud_stt.py)
 
     @property
     def streaming(self) -> bool:
@@ -136,38 +142,60 @@ class SpeechRecognizer:
         return utterance.transcript
 
     async def _transcribe(self, utterance: Utterance) -> Transcript:
-        if utterance.stream is not None:
-            text = await utterance.stream.result()
-            if text is not None:
-                return self._live(utterance, text)
-            print(f"[SpeechRecognizer] Live transcription failed for {utterance!r}; falling back to Whisper.")
-        text = await self.whisper_transcribe(utterance.wav())
-        return Transcript(text, "whisper_fallback" if self.streaming else "whisper")
+        session = utterance.stream
+        if session is None:
+            return await self._from_cloud(utterance, settings.STT_TRANSCRIBE_TIMEOUT_S)
+        text = await session.result()
+        if text is not None:
+            return self._heard(utterance, text, "gemini_live")
+        error = getattr(session, "error", None) or "no final transcript"
+        partial = utterance.text_so_far()
+        if partial:
+            print(f"[SpeechRecognizer] Live transcription failed for {utterance!r} ({error}); "
+                  "using what it heard before.")
+            return self._heard(utterance, partial, "gemini_live_partial")
+        print(f"[SpeechRecognizer] Live transcription failed for {utterance!r} ({error}); "
+              "sending the audio to batch transcription.")
+        return await self._from_cloud(utterance, settings.STT_FALLBACK_TIMEOUT_S, live_error=error)
+
+    async def _from_cloud(self, utterance: Utterance, timeout: float, live_error: Optional[str] = None) -> Transcript:
+        """The utterance's audio to batch transcription, given `timeout` seconds. When that
+        fails too, no words, marked failed with the reasons, so the turn can say so."""
+        failed = None
+        wav = utterance.wav()
+        if not wav:
+            return Transcript("", "transcribe")
+        if not self._api_key:
+            failed = "no Gemini API key for batch transcription"
+        else:
+            started = time.monotonic()
+            try:
+                text = await asyncio.wait_for(self._cloud(
+                    wav, api_key=self._api_key, model=TRANSCRIBE, language_codes=settings.STT_LANGUAGE_CODES,
+                    vocabulary=self.vocabulary, mode=settings.STT_MODE, timeout=timeout), timeout)
+            except asyncio.TimeoutError:
+                failed = f"batch transcription took over {timeout:.1f} s"
+            except Exception as e:  # any failure here ends in the same apology
+                failed = f"batch transcription failed: {type(e).__name__}: {e}"
+            else:
+                transcript = self._heard(utterance, text, "transcribe")
+                transcript.ms = round((time.monotonic() - started) * 1000)
+                return transcript
+        reasons = "; then ".join(reason for reason in (live_error, failed) if reason)
+        print(f"[SpeechRecognizer] Couldn't transcribe {utterance!r}: {reasons}")
+        return Transcript("", "transcribe", failed=reasons)
 
     def echo(self, utterance: Utterance, text: str) -> Optional[str]:
-        """Why live `text` is the recognizer reciting its vocabulary rather than
+        """Why `text` is the recognizer reciting its vocabulary rather than
         what was said (vocabulary_echo.py), or None. The floor asks too, before
         words heard over the agent stop its reply."""
         return vocabulary_echo(text, self.vocabulary, utterance.speech_ms())
 
-    def _live(self, utterance: Utterance, text: str) -> Transcript:
-        """The live transcript; for a vocabulary echo, no words, as for noise,
-        with what was heard kept for the logs."""
+    def _heard(self, utterance: Utterance, text: str, provider: str) -> Transcript:
+        """`text` as the utterance's transcript; for a vocabulary echo, no words, as for
+        noise, with what was heard kept for the logs. Both recognizers get the vocabulary."""
         echo = self.echo(utterance, text)
         if echo is None:
-            return Transcript(text, "gemini_live")
+            return Transcript(text, provider)
         print(f"[SpeechRecognizer] 🦜 Dropped a vocabulary echo from utterance #{utterance.id} ({echo}): {text!r}")
-        return Transcript("", "gemini_live", heard=text, echo=echo)
-
-    async def whisper_transcribe(self, wav: bytes) -> str:
-        """Local Whisper, loaded on first use: with streaming on, it's only the fallback."""
-        if not wav:
-            return ""
-        if self._whisper is None:
-            if self._whisper_loading is None:
-                from core.voice.engines.stt_engine import STTEngine
-
-                loop = asyncio.get_running_loop()
-                self._whisper_loading = loop.run_in_executor(None, lambda: STTEngine(model_size=self._whisper_model))
-            self._whisper = await self._whisper_loading
-        return await self._whisper.transcribe(wav)
+        return Transcript("", provider, heard=text, echo=echo)

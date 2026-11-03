@@ -15,9 +15,9 @@ Per utterance, from the VAD's view of the speech:
     ready     last voiced frame -> transcript    (what the listener waits for)
 
 plus the live session's own timings, word error rate against the script, and
-whether agent names came through. Unless --no-whisper is given, the same audio
-also goes to local Whisper (greedy, the fallback) for comparison -- measured
-on this machine, which is faster than the NAS.
+whether agent names came through. An utterance the live session fails on
+takes the production fallbacks (its partial transcript, then batch
+transcription) and is reported with that provider.
 
 Usage:
     python scripts/stt_benchmark.py                      # all cases, 2 voices, 2 runs
@@ -263,10 +263,6 @@ class TurnRecord:
     wer: float
     missed_terms: List[str]
     session: Dict[str, float] = field(default_factory=dict)
-    whisper_ms: Optional[float] = None
-    whisper_text: Optional[str] = None
-    whisper_wer: Optional[float] = None
-    whisper_missed_terms: Optional[List[str]] = None
 
 
 @dataclass
@@ -309,19 +305,6 @@ def score(case: Case, voice: str, run: int, heard: List[Heard]) -> CaseRun:
     return CaseRun(case.id, voice, run, case.turns, records)
 
 
-async def add_whisper(records: List[TurnRecord], heard: List[Heard], case: Case, engine) -> None:
-    """The old pipeline's STT stage: the whole utterance to Whisper after the turn ended."""
-    from tts_benchmark import score_pronunciation
-
-    for record, item in zip(records, heard):
-        started = time.monotonic()
-        text = await engine.transcribe(item.utterance.wav())
-        record.whisper_ms = round((time.monotonic() - started) * 1000, 1)
-        record.whisper_text = text
-        scored = score_pronunciation(record.reference, text, list(case.terms))
-        record.whisper_wer, record.whisper_missed_terms = scored["wer"], scored["missed_terms"]
-
-
 # --- report ---------------------------------------------------------------------------
 
 def _pct(values, q):
@@ -345,7 +328,6 @@ def summarize(runs: List[CaseRun]) -> Dict:
     session = lambda key: [t.session.get(key) for t in live]  # noqa: E731
     named = [t for t in turns if t.missed_terms is not None]
     term_total = sum(len(next(c for c in CASES if c.id == t.case).terms) for t in named)
-    whisper = [t for t in turns if t.whisper_ms is not None]
     stt_p50 = _pct(metric("stt_ms", live), 50)
     return {
         "utterances": len(turns),
@@ -359,9 +341,6 @@ def summarize(runs: List[CaseRun]) -> Dict:
         "connect_p50": _pct(session("connect_ms"), 50), "setup_p50": _pct(session("setup_ms"), 50),
         "wer_mean": (sum(t.wer for t in turns) / len(turns)) if turns else None,
         "terms_missed": sum(len(t.missed_terms) for t in named), "terms_total": term_total,
-        "whisper_p50": _pct([t.whisper_ms for t in whisper], 50), "whisper_p90": _pct([t.whisper_ms for t in whisper], 90),
-        "whisper_wer_mean": (sum(t.whisper_wer for t in whisper) / len(whisper)) if whisper else None,
-        "whisper_terms_missed": sum(len(t.whisper_missed_terms or []) for t in whisper) if whisper else None,
         "target_met": stt_p50 is not None and stt_p50 <= STT_TARGET_P50_MS,
     }
 
@@ -381,17 +360,12 @@ def render(runs: List[CaseRun], meta: Dict) -> str:
         f"| Live session: transcript after the turn ended (its own clock) | {_fmt(s['final_after_end_p50'])} | |",
         f"| Live connect / setup (overlaps speech) | {_fmt(s['connect_p50'])} / {_fmt(s['setup_p50'])} | |",
     ]
-    if s["whisper_p50"] is not None:
-        lines.append(f"| Whisper {voice_settings.WHISPER_MODEL} greedy on this machine, after the turn ends | "
-                     f"{_fmt(s['whisper_p50'])} | {_fmt(s['whisper_p90'])} |")
     lines += [
         "",
-        f"- Utterances: {s['utterances']}; fell back to Whisper: {s['fallbacks']}.",
+        f"- Utterances: {s['utterances']}; the live session failed on: {s['fallbacks']}.",
         f"- Turn segmentation as expected: {s['turns_ok']}/{s['case_runs']} case runs.",
-        f"- Mean WER: live {_fmt_rate(s['wer_mean'])}"
-        + (f", Whisper {_fmt_rate(s['whisper_wer_mean'])}" if s["whisper_wer_mean"] is not None else "") + ".",
-        f"- Agent names missed: live {s['terms_missed']}/{s['terms_total']}"
-        + (f", Whisper {s['whisper_terms_missed']}/{s['terms_total']}" if s["whisper_terms_missed"] is not None else "") + ".",
+        f"- Mean WER: {_fmt_rate(s['wer_mean'])}.",
+        f"- Agent names missed: {s['terms_missed']}/{s['terms_total']}.",
         "", "| Case | Voice | Run | Turns | Endpoint | STT | Ready | WER | Transcript |", "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in runs:
@@ -438,11 +412,6 @@ async def run(args) -> int:
                 f.write(pcm_to_wav(silence.join(parts)))
 
     recognizer = SpeechRecognizer(provider="gemini_live", vocabulary=args.vocabulary)
-    whisper = None
-    if not args.no_whisper:
-        from core.voice.engines.stt_engine import STTEngine
-        print(f"Loading Whisper {voice_settings.WHISPER_MODEL} for the comparison...")
-        whisper = await asyncio.to_thread(STTEngine, model_size=voice_settings.WHISPER_MODEL)
 
     runs: List[CaseRun] = []
     for run_index in range(1, args.runs + 1):
@@ -450,8 +419,6 @@ async def run(args) -> int:
             for voice in voices:
                 heard = await listen(audio[(case.id, voice)], case.gap_ms, recognizer)
                 case_run = score(case, voice.rsplit("-", 1)[-1], run_index, heard)
-                if whisper is not None:
-                    await add_whisper(case_run.turns, heard, case, whisper)
                 runs.append(case_run)
                 cells = "; ".join(f"stt {_fmt(t.stt_ms)} endpoint {_fmt(t.endpoint_ms)} {t.transcript!r}" for t in case_run.turns)
                 print(f"[run {run_index}] {case.id} / {case_run.voice}: {len(heard)} turn(s) {cells or '(nothing heard)'}")
@@ -476,7 +443,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case", action="append", choices=[c.id for c in CASES], help="Only this case (repeatable).")
     parser.add_argument("--voices", type=lambda s: [v.strip() for v in s.split(",") if v.strip()],
                         default=list(DEFAULT_VOICES), help="Chirp 3: HD voice names (default: Aoede,Charon).")
-    parser.add_argument("--no-whisper", action="store_true", help="Skip the local Whisper comparison.")
     parser.add_argument("--out", help="Output directory (default scratch/stt_benchmark/<timestamp>).")
     return parser
 

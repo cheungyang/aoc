@@ -35,7 +35,7 @@ not (core/runtime/model/thinking.py).
 import asyncio
 import random
 import time
-from typing import Any, AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, List, Optional, Tuple
 
 from google.genai.types import HttpOptions, HttpRetryOptions
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
@@ -210,6 +210,13 @@ def _picked(result: ChatResult) -> ChatResult:
     return ChatResult(generations=generations, llm_output=result.llm_output)
 
 
+def _traced_call() -> Tuple[Optional[Any], Optional[int]]:
+    """The voice turn's trace and the number of the model call `_with_thinking` just
+    recorded on it, for that call's reply events; (None, None) outside a voice turn."""
+    trace = current_turn_trace()
+    return (trace, trace.calls) if trace is not None else (None, None)
+
+
 class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI that hides 503s from callers. See module docstring."""
 
@@ -285,6 +292,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
 
     async def _agenerate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
         kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
+        trace, call = _traced_call()
         attempt, waited = 1, 0.0
         while True:
             try:
@@ -299,10 +307,14 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 attempt += 1
                 continue
             self._log_recovered(attempt, waited)
+            if trace is not None:
+                trace.model_reply(call, "done")
             return _picked(result)
 
     async def _astream(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
+        trace, call = _traced_call()
+        replied = False     # its first chunk recorded on the trace, once, retries included
         attempt, waited = 1, 0.0
         partial = ""        # text already yielded, across attempts
         resumable = True    # False once a non-text chunk has been yielded
@@ -312,6 +324,9 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             request = [*messages, AIMessage(content=partial)] if partial else messages
             try:
                 async for gen in super()._astream(request, stop=stop, run_manager=run_manager, **kwargs):
+                    if trace is not None and not replied:
+                        trace.model_reply(call, "first_chunk")
+                        replied = True
                     if trim_pending and gen.text:
                         gen = _trim_seam(gen, partial)
                         trim_pending = False
@@ -328,6 +343,8 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 if marker.level:
                     pick_thinking(marker.level)
                 self._log_recovered(attempt, waited)
+                if trace is not None:
+                    trace.model_reply(call, "done")
                 return
             except Exception as e:
                 phase = "mid-stream" if partial or not resumable else "request"

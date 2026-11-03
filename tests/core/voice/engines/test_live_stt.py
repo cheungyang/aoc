@@ -292,7 +292,7 @@ async def test_a_segment_with_no_speech_settles_with_empty_text():
     assert await session.result() == ""
 
 
-# --- failures: None means "fall back to Whisper" ---------------------------------------
+# --- failures: None means "fall back" (stt.py) --------------------------------------------
 
 @pytest.mark.asyncio
 async def test_a_rejected_setup_fails_over():

@@ -1,12 +1,17 @@
 """The voice replay benchmark (scripts/voice_dryrun.py)."""
 import json
 import os
+from contextlib import contextmanager
+from dataclasses import asdict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from scripts import voice_dryrun as replay
 from core.channel.response_parser import AgentResponse
+from core.config.models import FLASH, FLASH_LITE, PRO
+from core.runtime.foundation.context import current_execution_context
+from core.scheduler.script_runner import write_reason
 from scripts.voice_dryrun import (
     CASES_PATH,
     CaseResult,
@@ -437,3 +442,354 @@ def test_every_tool_that_declares_read_actions_is_guarded():
     assert "google_health" in declared
     for tool in declared:
         assert allowed[tool] == set(importlib.import_module(loader.module_path(tool)).READ_ACTIONS), tool
+
+
+# --- the model x thinking benchmark ---------------------------------------------------------
+
+def test_python_runs_the_benchmark_without_yes():
+    assert write_reason(replay.__file__, ["--matrix", "--runs", "3", "--rpm", "20", "--out", "results.json"]) == ""
+    assert write_reason(replay.__file__, ["--combo", "FLASH:low", "--allow-mutations"]) != ""
+
+
+class TestCombos:
+
+    def test_parsing_and_labels(self):
+        assert replay.parse_combo("flash_lite:MINIMAL") == replay.Combo("FLASH_LITE", "minimal")
+        assert replay.parse_combo("FLASH-LITE:minimal").label == "FLASH_LITE:minimal"
+        assert replay.parse_combo("FLASH").label == "FLASH:prod", "production's thinking"
+        assert replay.parse_combo("prod:low").label == "prod:low", "each agent's own model"
+        assert replay.parse_combo("prod") == replay.Combo() and replay.Combo().label == "prod"
+
+    def test_only_the_repos_tiers_and_the_levels_each_tier_takes(self):
+        with pytest.raises(ValueError, match="unknown tier 'TURBO'"):
+            replay.parse_combo("TURBO:low")
+        with pytest.raises(ValueError, match="unknown tier 'IMAGE'"):
+            replay.parse_combo("IMAGE:low")
+        with pytest.raises(ValueError, match="unknown thinking level 'max'"):
+            replay.parse_combo("FLASH:max")
+        with pytest.raises(ValueError, match="PRO doesn't take minimal thinking: use low, medium, high"):
+            replay.parse_combo("PRO:minimal")
+
+    def test_what_a_replay_asks_for(self):
+        def labels(**kwargs):
+            return [combo.label for combo in replay.combos_from(**kwargs)]
+
+        assert labels() == ["prod"]
+        assert labels(combos=["FLASH:low,PRO:low", "flash:low"]) == ["FLASH:low", "PRO:low"]
+        assert labels(model="FLASH", thinking="low") == ["FLASH:low"]
+        assert labels(thinking="medium") == ["prod:medium"]
+        assert labels(use_matrix=True) == ["FLASH_LITE:minimal", "FLASH_LITE:low", "FLASH_LITE:medium",
+                                           "FLASH:minimal", "FLASH:low", "FLASH:medium", "PRO:low", "PRO:medium",
+                                           "prod"]
+        assert replay.REFERENCE == "PRO:low" and replay.REFERENCE in labels(use_matrix=True)
+
+    @pytest.mark.asyncio
+    async def test_a_bad_combo_is_refused_before_anything_runs(self, tmp_path):
+        with patch.object(replay, "run_case") as run, pytest.raises(SystemExit):
+            await replay.main(["--cases", _cases_file(tmp_path, CASES), "--combo", "PRO:minimal"])
+        run.assert_not_called()
+
+    def test_a_case_run_goes_on_every_combo_with_the_first_place_rotating(self):
+        combos = replay.combos_from(combos=["FLASH:low,PRO:low,prod"])
+        assert [c.label for c in replay.rotated(combos, 0)] == ["FLASH:low", "PRO:low", "prod"]
+        assert [c.label for c in replay.rotated(combos, 1)] == ["PRO:low", "prod", "FLASH:low"]
+        assert [c.label for c in replay.rotated(combos, 3)] == ["FLASH:low", "PRO:low", "prod"]
+
+
+def _context(agent_id, **kwargs):
+    """A context as stream_delegate mints one for the room's agent: no model or level of its own."""
+    from core.runtime.foundation.sessions import SessionManager
+
+    return SessionManager().get_session(agent_id=agent_id, source="tool", channel="home-automation",
+                                        surface="voice", **kwargs)
+
+
+@contextmanager
+def _running(ctx):
+    token = current_execution_context.set(ctx)
+    try:
+        yield ctx
+    finally:
+        current_execution_context.reset(token)
+
+
+@pytest.fixture
+def builds(monkeypatch):
+    """GraphBuilder's chat_model, recording each (agent, ctx.model, agent.json model) it's asked for."""
+    from core.runtime import graph_builder
+
+    built = []
+    monkeypatch.setattr(graph_builder, "chat_model",
+                        lambda ctx, config: built.append((ctx.agent_id, ctx.model, config.get("model"))))
+    return built
+
+
+class TestComboScope:
+
+    def test_it_reaches_the_delegated_agents_own_context_and_spares_workers(self, builds):
+        from core.runtime import graph_builder
+        from core.runtime.model import retry
+        from core.runtime.model.thinking import PICK_KEY
+
+        before = graph_builder.chat_model, retry.resolve_thinking_level
+        specialist, worker = _context("home-steward"), _context("graph-worker", stateless=True)
+        with replay.combo_scope(replay.Combo("FLASH_LITE", "minimal")):
+            graph_builder.chat_model(specialist, {"model": "FLASH"})
+            graph_builder.chat_model(worker, {"model": "FLASH", "stateless": True})
+            with _running(specialist):
+                specialist.turn_hints[PICK_KEY] = "high"  # the model asked for more
+                assert retry.resolve_thinking_level(FLASH_LITE) == "minimal"
+                assert PICK_KEY not in specialist.turn_hints, "the pick is still taken, as in production"
+            with _running(worker):
+                assert retry.resolve_thinking_level(FLASH) is None, "a worker keeps its model's own default"
+        assert builds == [("home-steward", "FLASH_LITE", "FLASH"), ("graph-worker", None, "FLASH")]
+        assert (graph_builder.chat_model, retry.resolve_thinking_level) == before
+
+    def test_a_level_the_model_doesnt_take_is_raised_to_the_nearest(self):
+        from core.runtime.model import retry
+
+        with replay.combo_scope(replay.Combo(None, "minimal")), _running(_context("goal-setter")):
+            assert retry.resolve_thinking_level(PRO) == "low"
+            assert retry.resolve_thinking_level(FLASH) == "minimal"
+
+    def test_the_real_model_wrapper_is_built_and_sent_on_the_combo(self, monkeypatch):
+        """The real chat_model and model wrapper, short of sending the request."""
+        import contextvars
+
+        from core.runtime import graph_builder
+        from core.runtime.model import chat
+        from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
+        from core.runtime.observability.turn_trace import start_turn_trace
+
+        monkeypatch.setattr(chat, "RetryingChatGoogleGenerativeAI",
+                            lambda **kwargs: RetryingChatGoogleGenerativeAI(google_api_key="test", **kwargs))
+        specialist = _context("home-steward")
+
+        def turn():
+            trace = start_turn_trace("main", 1)
+            with replay.combo_scope(replay.Combo("FLASH_LITE", "minimal")):
+                llm = graph_builder.chat_model(specialist, {"model": "FLASH"})
+                with _running(specialist):
+                    sent = llm._with_thinking({})
+            return llm, sent, trace
+
+        llm, sent, trace = contextvars.copy_context().run(turn)
+        assert (llm.model, sent["thinking_level"]) == (FLASH_LITE, "minimal")
+        calls = [(e["agent"], e["model"], e["thinking"]) for e in trace.events if e["kind"] == "model_call"]
+        assert calls == [("home-steward", FLASH_LITE, "minimal")]
+        assert replay.combo_misses(replay.Combo("FLASH_LITE", "minimal"),
+                                   [e for e in trace.events if e["kind"] == "model_call"]) == []
+
+    def test_each_forced_model_gets_agents_of_its_own(self, monkeypatch):
+        from core.loaders.agents_loader import AgentsLoader
+
+        monkeypatch.setattr(replay, "_AGENTS_BY_MODEL", {})
+        loader = AgentsLoader()
+        prod = loader.get_agent("home-steward")
+        with replay.combo_scope(replay.Combo("FLASH", "low")):
+            flash = loader.get_agent("home-steward")
+        with replay.combo_scope(replay.Combo("FLASH", "medium")):
+            assert loader.get_agent("home-steward") is flash, "graphs are built once per model"
+        with replay.combo_scope(replay.Combo(None, "low")):
+            assert loader.get_agent("home-steward") is prod, "a level is sent per call: the same graphs"
+        assert flash is not prod and loader.get_agent("home-steward") is prod
+
+    def test_it_replaces_what_every_agent_model_call_goes_through(self):
+        """Were either moved, a combo would quietly run production's model: combo_misses
+        fails such runs on the NAS, and this fails the change here."""
+        import inspect
+        import re as regex
+
+        from core.runtime import graph_builder
+        from core.runtime.model import retry
+
+        assert regex.search(r"(?<![\w.])chat_model\(ctx, config\)",
+                            inspect.getsource(graph_builder.GraphBuilder.build_graph))
+        assert regex.search(r"(?<![\w.])resolve_thinking_level\(self\.model\)",
+                            inspect.getsource(retry.RetryingChatGoogleGenerativeAI._with_thinking))
+
+    def test_a_call_off_the_combo_fails_the_run(self):
+        calls = [{"agent": "home-steward", "model": FLASH, "thinking": "low"},
+                 {"agent": "graph-worker", "model": FLASH_LITE, "thinking": None}]
+        assert replay.combo_misses(replay.Combo("FLASH", "low"), calls) == []
+        assert replay.combo_misses(replay.Combo("PRO", "low"), calls) == [
+            f"not on PRO:low: home-steward ran {FLASH}"]
+        assert replay.combo_misses(replay.Combo(None, "medium"), calls) == [
+            "not on prod:medium: home-steward thought at low"]
+        assert replay.combo_misses(replay.Combo(), calls) == []
+
+
+@pytest.mark.asyncio
+async def test_run_combo_labels_the_run_and_checks_its_calls(tmp_path):
+    from core.runtime.observability.turn_trace import current_turn_trace
+
+    case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?", "expect": {}}
+    raw = "<speech>The kitchen light is on.</speech>The kitchen light is on."
+
+    async def fake_stream(prompt, session):
+        trace = current_turn_trace()  # as the model wrapper records a call
+        trace.event("model_call", call=1, agent="home-steward", model=FLASH, thinking="low")
+        trace.event("model_reply", call=1, phase="first_chunk")
+        yield {"type": "token", "content": raw, "agent_id": "home-steward"}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        loader.return_value.get_agent_config.return_value = {}
+        held = await replay.run_combo(case, 1, replay.Combo("FLASH", "low"), db, measure_tts=False)
+        missed = await replay.run_combo(case, 1, replay.Combo("PRO", "low"), db, measure_tts=False)
+
+    assert held.passed, held.failures
+    assert (held.combo, held.room) == ("FLASH:low", "home-automation")
+    assert [(e["call"], e["phase"]) for e in held.model_replies] == [(1, "first_chunk")]
+    assert missed.failures == [f"not on PRO:low: home-steward ran {FLASH}"]
+
+
+class TestBenchmarkReport:
+
+    def test_a_report_per_combo_and_one_combo_reads_as_before(self):
+        results = [CaseResult(case_id="a", run=1, marks={"first_token": 900}, combo="FLASH:low"),
+                   CaseResult(case_id="a", run=1, marks={"first_token": 2900}, combo="PRO:low",
+                              failures=["reply lacks /x/"])]
+        report = replay.render_combos(results, ["PRO:low", "FLASH:low"])
+        assert report.index("### PRO:low") < report.index("### FLASH:low")
+        assert "Quality: 0/1 runs passed." in report and "Quality: 1/1 runs passed." in report
+        assert replay.render_combos(results[:1]) == render_report(results[:1])
+
+    def test_a_combo_that_sets_the_level_shows_the_models_picks_as_asks(self):
+        pick = {"kind": "thinking_pick", "level": "high", "applied": "medium"}
+        assert replay._picks(CaseResult(case_id="a", run=1, marks={}, combo="FLASH:low", thinking_picks=[pick])) \
+            == ["asked high (the combo's level held)"]
+        assert replay._picks(CaseResult(case_id="a", run=1, marks={}, combo="FLASH:prod", thinking_picks=[pick])) \
+            == ["picked medium (asked high)"]
+
+
+def _stored(case_id="read", run=1, combo="prod", **kwargs):
+    return {**asdict(CaseResult(case_id=case_id, run=run, marks={}, combo=combo, **kwargs)), "passed": True}
+
+
+class TestResuming:
+
+    @pytest.mark.asyncio
+    async def test_a_rerun_skips_the_runs_its_out_file_has_and_saves_after_every_run(self, tmp_path, capsys):
+        out = tmp_path / "bench" / "results.json"
+        out.parent.mkdir()
+        out.write_text(json.dumps([_stored(combo="FLASH:low")]))
+        seen = []
+
+        async def fake_run_case(case, run, db_path, **kwargs):
+            seen.append((case["id"], run, len(json.loads(out.read_text()))))
+            return CaseResult(case_id=case["id"], run=run, marks={})
+
+        with patch.object(replay, "run_case", fake_run_case), patch.object(replay, "guard_writes"), \
+             patch("core.voice.engines.tts.TTSEngine"):
+            code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
+                                      "--out", str(out), "--combo", "FLASH:low,PRO:low", "--runs", "2"])
+
+        assert code == 0
+        assert seen == [("read", 1, 1), ("read", 2, 2), ("read", 2, 3)], "each run sees the one before it saved"
+        assert [(r["run"], r["combo"]) for r in json.loads(out.read_text())] == [
+            (1, "FLASH:low"), (1, "PRO:low"), (2, "PRO:low"), (2, "FLASH:low")]  # run 2 starts on PRO:low
+        report = capsys.readouterr().out
+        assert "### FLASH:low" in report and "### PRO:low" in report
+
+    @pytest.mark.asyncio
+    async def test_a_finished_replay_only_reports_and_old_runs_count_as_prod(self, tmp_path, capsys):
+        out = tmp_path / "results.json"
+        old = _stored()
+        del old["combo"]  # written before combos
+        out.write_text(json.dumps([old]))
+        with patch.object(replay, "isolate_sessions", side_effect=AssertionError("nothing to run")):
+            code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--out", str(out)])
+        assert code == 0
+        assert "| read | 1 | PASS |" in capsys.readouterr().out
+
+    def test_results_are_saved_whole_or_not_at_all(self, tmp_path):
+        path = tmp_path / "bench" / "results.json"
+        replay.save_json(str(path), [{"run": 1}])
+        with pytest.raises(TypeError):
+            replay.save_json(str(path), [{(1, 2): "not JSON"}])
+        assert json.loads(path.read_text()) == [{"run": 1}]
+        assert os.listdir(path.parent) == ["results.json"], "no temp file left behind"
+
+
+class TestRateLimits:
+
+    @pytest.fixture
+    def waits(self, monkeypatch):
+        waited = []
+
+        async def fake_sleep(seconds):
+            waited.append(seconds)
+
+        monkeypatch.setattr(replay, "_sleep", fake_sleep)
+        return waited
+
+    async def _main(self, tmp_path, run_case, *args):
+        with patch.object(replay, "run_case", run_case), patch.object(replay, "guard_writes"), \
+             patch("core.voice.engines.tts.TTSEngine"):
+            return await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
+                                      "--out", str(tmp_path / "results.json"), *args])
+
+    @pytest.mark.asyncio
+    async def test_a_refused_run_waits_and_runs_again(self, tmp_path, waits):
+        refused = CaseResult(case_id="read", run=1, marks={}, errored=True, failures=[
+            "agent error: [Error: [429] You exceeded your current quota. Please retry in 42.5s.]"])
+        run = AsyncMock(side_effect=[refused, RuntimeError("429 RESOURCE_EXHAUSTED"),
+                                     CaseResult(case_id="read", run=1, marks={})])
+        assert await self._main(tmp_path, run) == 0
+        assert waits == [42.5, 60], "as long as the API asked, else the next wait"
+        stored = json.loads((tmp_path / "results.json").read_text())
+        assert [r["errored"] for r in stored] == [False], "only the run that went through is kept"
+
+    @pytest.mark.asyncio
+    async def test_a_run_still_refused_after_every_wait_stops_the_replay_unrecorded(self, tmp_path, waits):
+        refused = CaseResult(case_id="read", run=1, marks={}, errored=True,
+                             failures=["agent error: [429] Resource has been exhausted (e.g. check quota)."])
+        run = AsyncMock(return_value=refused)
+        assert await self._main(tmp_path, run) == 3
+        assert run.await_count == len(replay.RATE_LIMIT_WAITS) + 1
+        assert waits == list(replay.RATE_LIMIT_WAITS)
+        assert not (tmp_path / "results.json").exists(), "a rerun tries it again"
+
+    @pytest.mark.asyncio
+    async def test_other_failures_are_results_or_errors_not_retries(self, tmp_path, waits):
+        failed = CaseResult(case_id="read", run=1, marks={}, errored=True, failures=["agent error: [503] overloaded"])
+        assert await self._main(tmp_path, AsyncMock(return_value=failed)) == 2
+        assert waits == []
+        with pytest.raises(ValueError):
+            await self._main(tmp_path, AsyncMock(side_effect=ValueError("a bug")), "--runs", "2")
+
+    @pytest.mark.asyncio
+    async def test_the_pacer_spaces_runs_by_the_calls_their_traces_show(self, monkeypatch, waits):
+        now = [100.0]
+        monkeypatch.setattr(replay, "_clock", lambda: now[0])
+        pacer = replay.Pacer(rpm=12)  # 5 s a call
+        await pacer.wait()
+        pacer.ran(started=100.0, calls=3)
+        now[0] = 108.0  # the run took 8 s
+        await pacer.wait()
+        assert waits == [7.0], "3 calls take 15 s at 12 a minute"
+        now[0] = 115.0
+        pacer.ran(started=115.0, calls=0)  # the fixed line: no model call
+        await pacer.wait()
+        unpaced = replay.Pacer()
+        unpaced.ran(started=115.0, calls=50)
+        await unpaced.wait()
+        assert waits == [7.0]
+
+    @pytest.mark.asyncio
+    async def test_main_paces_by_each_runs_model_calls(self, tmp_path, monkeypatch, waits):
+        now = [0.0]
+        monkeypatch.setattr(replay, "_clock", lambda: now[0])
+
+        async def fake_run_case(case, run, db_path, **kwargs):
+            now[0] += 2.0  # each run takes 2 s and makes 2 calls
+            return CaseResult(case_id=case["id"], run=run, marks={}, model_calls=[{"kind": "model_call"}] * 2)
+
+        assert await self._main(tmp_path, fake_run_case, "--runs", "2", "--rpm", "6") == 0
+        assert waits == [18.0], "2 calls at 6 a minute take 20 s; the first run used 2"

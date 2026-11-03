@@ -34,6 +34,8 @@ tantivy==0.26.0
 pyarrow==25.0.1
 discord-ext-voice-recv
 pynacl
+# Only for the Silero VAD graph its wheel ships (core/voice/listening/vad_sink.py
+# loads it by path). Whisper itself no longer transcribes anything.
 faster-whisper==1.2.1
 onnxruntime==1.30.0
 numpy==2.4.6

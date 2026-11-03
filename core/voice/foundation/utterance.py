@@ -7,7 +7,8 @@ side: the audio thread writes `pcm`, `speech_start`, `speech_end` and
 `speech_end_at`; the loop writes `segments`, `interim` and the rest. The audio
 thread reads the text through `text_so_far()` (for end-of-turn timing); the
 loop reads the PCM through `wav()` and `speech_pcm()` only after the turn has
-ended (for the Whisper fallback, and the voiceprint gate).
+ended (for batch transcription when the live session fails, and the voiceprint
+gate).
 """
 import io
 import itertools
@@ -27,11 +28,18 @@ _ids = itertools.count(1)
 @dataclass
 class Transcript:
     text: str
-    provider: str  # "gemini_live", "whisper", or "whisper_fallback"
+    # "gemini_live"; "gemini_live_partial": what a failed live session heard before it
+    # failed; "transcribe": batch transcription (core/voice/engines/cloud_stt.py).
+    provider: str
     # A vocabulary echo (core/voice/engines/vocabulary_echo.py) keeps no text:
     # `heard` is what the recognizer returned, `echo` why it was dropped.
     heard: Optional[str] = None
     echo: Optional[str] = None
+    # Why no recognizer could say what the words were, if none could. Unlike
+    # noise, the user said something: the turn says it didn't catch it.
+    failed: Optional[str] = None
+    # How long batch transcription took, in ms, when it ran.
+    ms: Optional[int] = None
 
 
 class Utterance:
@@ -92,7 +100,7 @@ class Utterance:
 
 def pcm_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
     """16-bit mono PCM to a WAV, peak-normalized so quiet speech (boosted up to 8x)
-    reaches Whisper at a usable level."""
+    reaches the recognizer at a usable level."""
     if not pcm:
         return b""
 

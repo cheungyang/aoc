@@ -11,6 +11,7 @@ from core.scheduler.schedule_runner import ScheduleRunner
 from core.channel.discord.ownership import DEV, PROD, Ownership
 from core.proactive.service import install as install_proactive
 from core.runtime import bootstrap
+from core.runtime.observability import loop_lag
 from core.storage.sessions import SessionStore
 
 # Dump Python tracebacks on low-level crashes (SIGSEGV, SIGFPE, SIGABRT, SIGBUS, SIGILL)
@@ -86,7 +87,8 @@ async def run_bots(dev: bool = False, agents: list = None):
     # folded in every 30 s on a thread of its own, so no commit has to (core/storage/base.py).
     sessions.hold_open(fold_every=30)
 
-    tasks = []
+    # How late the event loop runs, for each voice turn's trace (core/runtime/observability/loop_lag.py).
+    tasks = [loop_lag.watch()]
     for agent_id in agent_ids:
         bot = bots_loader.get_bot(agent_id)
         if bot:

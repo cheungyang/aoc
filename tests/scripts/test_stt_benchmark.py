@@ -107,8 +107,8 @@ def test_the_summary_judges_the_stt_target_on_live_transcripts_only():
     runs = [
         bench.CaseRun("names_daisy", "Aoede", 1, 1, [_record(stt_ms=40)]),
         bench.CaseRun("names_daisy", "Aoede", 2, 1, [_record(stt_ms=120, run=2)]),
-        # A fallback is reported, but its Whisper time isn't the streaming stage.
-        bench.CaseRun("names_daisy", "Aoede", 3, 1, [_record(stt_ms=2400, provider="whisper_fallback", run=3,
+        # A fallback is reported, but its batch transcription time isn't the streaming stage.
+        bench.CaseRun("names_daisy", "Aoede", 3, 1, [_record(stt_ms=2400, provider="transcribe", run=3,
                                                              missed_terms=["Daisy"])]),
     ]
     summary = bench.summarize(runs)
@@ -119,7 +119,7 @@ def test_the_summary_judges_the_stt_target_on_live_transcripts_only():
 
     report = bench.render(runs, {"when": "now", "host": "mac", "voices": ["Aoede"], "runs": 3, "mode": "SMART"})
     assert "target ≤ 300 ms: ✅ met" in report
-    assert "(whisper_fallback)" in report and "missed Daisy" in report
+    assert "(transcribe)" in report and "missed Daisy" in report
 
 
 def test_the_report_survives_a_run_that_heard_nothing():

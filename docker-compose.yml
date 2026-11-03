@@ -64,7 +64,6 @@ services:
       - GOOGLE_HEALTH_WRITE_ENABLED=${GOOGLE_HEALTH_WRITE_ENABLED:-false}
       - GOOGLE_HEALTH_REQUEST_TIMEOUT=${GOOGLE_HEALTH_REQUEST_TIMEOUT:-20}
       # Resource and stability tuning for NAS and multi-core hosts
-      - AOC_STT_THREADS=${AOC_STT_THREADS:-2}
       - AOC_SCRIPT_TIMEOUT=${AOC_SCRIPT_TIMEOUT:-300}
       # Browser tool (tools/browser.py) drives the "Agent Chrome" on the user's
       # desktop (scripts/desktop_agent_chrome/); no browser runs in here. Both
@@ -106,9 +105,9 @@ services:
       - ${PKM_HOST_DIR:-../pkm}:/home/appuser/pkm
       # Workspaces directory mount (mapped to ../workspaces on host machine)
       - ${WORKSPACES_HOST_DIR:-../workspaces}:/home/appuser/workspaces
-      # Baked assets that are not in git (faster-whisper weights, ~150MB).
+      # Baked assets that are not in git (the speaker model, ~30MB).
       # A named volume, not a bind mount: Docker populates it from the image the
-      # first time it is used, so a fresh deploy still starts with the weights
+      # first time it is used, so a fresh deploy still starts with the model
       # the build downloaded, while later rebuilds reuse the volume instead of
       # re-fetching. Survives `docker compose down`; clear it with
       # `docker compose down -v` or `docker volume rm aoc_aoc-assets`.

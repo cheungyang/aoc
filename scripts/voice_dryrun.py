@@ -48,11 +48,29 @@ replay never writes an agent memory log. Traces are logged, not stored.
 Without Discord there is no playback, so the reported time to first audio is
 `tts_first_byte`: the moment the first chunk's audio is ready to play.
 
+Model x thinking benchmark, to pick the light model of the voice graph (B1):
+--combo TIER:LEVEL runs every case on each combo given, with every agent
+model call of the run -- main's and the room's agent's -- on that tier and
+thinking level (`combo_scope`). `prod` is production as configured, and
+--matrix is the planned set: FLASH_LITE, FLASH and PRO at minimal, low and
+medium (PRO has no minimal), plus prod. Each result records its combo, and
+scripts/voice_judge.py compares every combo's replies with the reference's:
+PRO:low by default, PRO at the voice default level, since the light model's
+bar is set against PRO. Each run of a case goes on every combo back to back,
+so all of them see the same live data.
+It's safe for the rate limit the live bot shares: one run at a time, --rpm
+caps the model calls a minute (counted from each run's trace), a run the
+API refuses with 429 / RESOURCE_EXHAUSTED waits and runs again, and --out
+is read first and rewritten after every run, so rerunning the same command
+resumes where it stopped.
+
 Usage:
     python scripts/voice_dryrun.py                        # every read-only case, once
     python scripts/voice_dryrun.py --case lights-status --runs 3
     python scripts/voice_dryrun.py --stt live             # speak it into the VAD and streaming STT first
     python scripts/voice_dryrun.py --out results.json
+    python scripts/voice_dryrun.py --combo FLASH_LITE:minimal,FLASH:low --case lights-status
+    python scripts/voice_dryrun.py --matrix --runs 3 --rpm 20 --out sessions/voice_bench/results.json
 """
 import argparse
 import asyncio
@@ -60,13 +78,18 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 from collections import Counter
-from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, fields, replace
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Constants only: importing them loads none of the runtime, which waits for isolate_sessions.
+from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS, TIER_ORDER, TIER_THINKING_LEVELS  # noqa: E402
 
 CASES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_replay_cases.json")
 REPLAY_SOURCE = "voice_replay"
@@ -171,17 +194,155 @@ def guard_writes() -> None:
     tools.gog.subprocess = _ReadOnlySubprocess(real_subprocess)
 
 
+# --- combos: the model x thinking benchmark ----------------------------------
+
+PROD = "prod"  # production as configured: each agent's own model and thinking
+# What scripts/voice_judge.py compares every combo with: PRO at the voice
+# default level, since the light model's bar is set against PRO's replies.
+REFERENCE = f"PRO:{THINKING_BY_SURFACE['voice']}"
+MATRIX_LEVELS = ("minimal", "low", "medium")  # voice caps the model's own picks at medium
+
+
+@dataclass(frozen=True)
+class Combo:
+    """The tier and thinking level every agent model call of a run is held to;
+    None keeps production's choice for that half."""
+    model: Optional[str] = None
+    thinking: Optional[str] = None
+
+    @property
+    def label(self) -> str:
+        if self.model is None and self.thinking is None:
+            return PROD
+        return f"{self.model or PROD}:{self.thinking or PROD}"
+
+
+def parse_combo(text: str) -> Combo:
+    """`FLASH:low`; `FLASH` keeps production's thinking, `prod:low` each agent's
+    own model, `prod` both. Checked against core/config/models.py, down to the
+    levels each tier takes: a PRO:minimal run would quietly be PRO:low."""
+    tier, _, level = text.strip().partition(":")
+    tier, level = tier.strip().upper().replace("-", "_"), level.strip().lower()
+    model = None if tier in ("", PROD.upper()) else tier
+    thinking = None if level in ("", PROD) else level
+    if model is not None and model not in TIER_ORDER:
+        raise ValueError(f"unknown tier {tier!r} in {text!r}: use {', '.join(TIER_ORDER)} or {PROD}")
+    if thinking is not None and thinking not in THINKING_LEVELS:
+        raise ValueError(f"unknown thinking level {level!r} in {text!r}: use {', '.join(THINKING_LEVELS)} or {PROD}")
+    if model and thinking and thinking not in TIER_THINKING_LEVELS[model]:
+        raise ValueError(f"{model} doesn't take {thinking} thinking: use {', '.join(TIER_THINKING_LEVELS[model])}")
+    return Combo(model, thinking)
+
+
+def matrix() -> List[Combo]:
+    """The planned matrix: each agent tier at each of MATRIX_LEVELS it takes, then prod."""
+    return [Combo(tier, level) for tier in TIER_ORDER for level in MATRIX_LEVELS
+            if level in TIER_THINKING_LEVELS[tier]] + [Combo()]
+
+
+def combos_from(model: Optional[str] = None, thinking: Optional[str] = None,
+                combos: Optional[List[str]] = None, use_matrix: bool = False) -> List[Combo]:
+    """The combos asked for, in order and each once: --matrix's, every --combo
+    (repeated or comma-separated), then --model with --thinking as one more.
+    None asked for: prod."""
+    found = matrix() if use_matrix else []
+    found += [parse_combo(text) for value in combos or [] for text in value.split(",") if text.strip()]
+    if model or thinking:
+        found.append(parse_combo(f"{model or PROD}:{thinking or PROD}"))
+    return list(dict.fromkeys(found)) or [Combo()]
+
+
+# Agents built under each model a combo forces: a compiled graph has its model
+# built in (Agent._get_graph caches it), so each forced model gets agents of
+# its own, kept for the next runs on it.
+_AGENTS_BY_MODEL: Dict[str, dict] = {}
+
+
+@contextmanager
+def combo_scope(combo: Combo) -> Iterator[None]:
+    """Holds every agent model call made inside the block to `combo`.
+
+    A voice turn starts on main and is handed to the room's agent, which runs
+    on a context of its own (core/runtime/delegation.py), so an override on
+    the turn's context would never reach it, and `with_agent` drops one too.
+    So, in this process only, this replaces what every agent's calls pass
+    through instead: the model GraphBuilder builds a graph with
+    (`chat_model`), and the level the model wrapper sends each call at
+    (`resolve_thinking_level`; the model's own <next_thinking> pick is still
+    taken, but not applied). Stateless workers keep their own model and level,
+    as B1 would. `combo_misses` then checks the trace for a call this missed.
+    """
+    if combo.model is None and combo.thinking is None:
+        yield
+        return
+    import core.runtime.graph_builder as graph_builder
+    import core.runtime.model.retry as retry
+    from core.config.models import clamp_thinking_level
+    from core.loaders.agents_loader import AgentsLoader
+    from core.runtime.foundation.context import try_context
+
+    loader = AgentsLoader()
+    build, resolve, agents = graph_builder.chat_model, retry.resolve_thinking_level, loader._agents_cache
+
+    def chat_model(ctx, agent_config):
+        if agent_config.get("stateless"):
+            return build(ctx, agent_config)
+        return build(replace(ctx, model=combo.model), agent_config)
+
+    def resolve_thinking_level(model_id):
+        level = resolve(model_id)  # takes the model's pick, which this level overrides
+        ctx = try_context()
+        if ctx is None or (loader.get_agent_config(ctx.agent_id) or {}).get("stateless"):
+            return level
+        return clamp_thinking_level(combo.thinking, model_id)
+
+    if combo.model:
+        graph_builder.chat_model = chat_model
+        loader._agents_cache = _AGENTS_BY_MODEL.setdefault(combo.model, {})
+    if combo.thinking:
+        retry.resolve_thinking_level = resolve_thinking_level
+    try:
+        yield
+    finally:
+        graph_builder.chat_model, retry.resolve_thinking_level, loader._agents_cache = build, resolve, agents
+
+
+def combo_misses(combo: Combo, model_calls: List[dict]) -> List[str]:
+    """The run's agent model calls that weren't on `combo`, as failures: such a
+    run would be mislabeled, so a change to where models are chosen fails
+    loudly here instead of skewing the benchmark."""
+    if combo.model is None and combo.thinking is None:
+        return []
+    from core.config.models import clamp_thinking_level, resolve_model
+    from core.loaders.agents_loader import AgentsLoader
+
+    loader = AgentsLoader()
+    misses = []
+    for call in model_calls:
+        if (loader.get_agent_config(call.get("agent")) or {}).get("stateless"):
+            continue
+        model = str(call.get("model") or "").removeprefix("models/")
+        if combo.model and model != resolve_model(combo.model):
+            misses.append(f"{call.get('agent')} ran {model}")
+        elif combo.thinking and call.get("thinking") != clamp_thinking_level(combo.thinking, model):
+            misses.append(f"{call.get('agent')} thought at {call.get('thinking')}")
+    return [f"not on {combo.label}: {miss}" for miss in dict.fromkeys(misses)]
+
+
 @dataclass
 class CaseResult:
     case_id: str
     run: int
     marks: Dict[str, int]
+    combo: str = PROD           # the Combo label the run's agent model calls were held to
+    room: str = ""
     reply: str = ""
     transcript: str = ""
     spoken: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list)
     agents: List[str] = field(default_factory=list)
     model_calls: List[dict] = field(default_factory=list)
+    model_replies: List[dict] = field(default_factory=list)   # each call's first streamed chunk and end
     thinking_picks: List[dict] = field(default_factory=list)  # the model's <next_thinking> picks: level, applied
     tokens: Dict[str, int] = field(default_factory=dict)
     blocked_writes: List[str] = field(default_factory=list)
@@ -195,6 +356,12 @@ class CaseResult:
     @property
     def passed(self) -> bool:
         return not self.failures
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CaseResult":
+        """A run as --out stored it; `passed` is worked out again."""
+        names = {f.name for f in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in names})
 
 
 def load_cases(path: str = CASES_PATH, only: Optional[List[str]] = None, allow_mutations: bool = False) -> List[dict]:
@@ -550,8 +717,22 @@ def render_report(results: List[CaseResult]) -> str:
     return "\n".join(lines)
 
 
+def render_combos(results: List[CaseResult], combos: Optional[List[str]] = None) -> str:
+    """`render_report` for each combo in turn (in `combos`' order), under its
+    label; a replay on a single combo reads as it always did."""
+    labels = combos or list(dict.fromkeys(r.combo for r in results))
+    labels = [label for label in labels if any(r.combo == label for r in results)]
+    if len(labels) <= 1:
+        return render_report(results)
+    return "\n\n".join(f"### {label}\n\n" + render_report([r for r in results if r.combo == label])
+                       for label in labels)
+
+
 def _picks(r: CaseResult) -> List[str]:
-    """The model's <next_thinking> picks: the level applied, and what it asked for when capped."""
+    """The model's <next_thinking> picks: the level applied, and what it asked for when capped.
+    A combo that sets the level overrides them, so there they're only what it asked for."""
+    if r.combo != PROD and not r.combo.endswith(f":{PROD}"):
+        return [f"asked {p['level']} (the combo's level held)" for p in r.thinking_picks]
     return [f"picked {p['applied']}" + (f" (asked {p['level']})" if p["level"] != p["applied"] else "")
             for p in r.thinking_picks]
 
@@ -662,7 +843,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     reset_history(db_path)
     BLOCKED_WRITES.clear()
     heard = await hear(case["utterance"]) if hear is not None else None
-    result = CaseResult(case_id=case["id"], run=run, marks={})
+    result = CaseResult(case_id=case["id"], run=run, marks={}, room=case.get("room", ""))
     if hear is not None and heard is None:
         result.transcript = ""
         result.failures.append("STT heard nothing")
@@ -757,6 +938,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     summary = trace.finish(session_id=None)
     result.marks = summary["marks"]
     result.model_calls = [e for e in summary["events"] if e["kind"] == "model_call"]
+    result.model_replies = [e for e in summary["events"] if e["kind"] == "model_reply"]
     result.thinking_picks = [e for e in summary["events"] if e["kind"] == "thinking_pick"]
     result.tokens = replay_tokens(started, db_path)
     result.blocked_writes = [f"{tool}.{action} {target or ''}".strip() for tool, action, target in BLOCKED_WRITES]
@@ -764,6 +946,143 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     speech_failures, result.notes = check_speech(result)
     result.failures += speech_failures
     return result
+
+
+# --- the benchmark's runs: combos, pacing, rate limits, resuming ---------------
+
+async def run_combo(case: dict, run: int, combo: Combo, db_path: str, **kwargs) -> CaseResult:
+    """`run_case` with every agent model call held to `combo` (`combo_scope`)."""
+    with combo_scope(combo):
+        result = await run_case(case, run, db_path, **kwargs)
+    result.combo = combo.label
+    result.failures += combo_misses(combo, result.model_calls)
+    return result
+
+
+def rotated(combos: List[Combo], turn: int) -> List[Combo]:
+    """`combos` from the `turn`-th on, wrapping around. A case's run goes on every
+    combo back to back, so all of them see the same live data, and each combo
+    takes the first place in turn: the first run warms what the next ones
+    reuse, Gemini's cache of the agent's prompt and the tools' own caches."""
+    k = turn % len(combos)
+    return combos[k:] + combos[:k]
+
+
+# A run the API refused for its rate limit: Gemini's 429 RESOURCE_EXHAUSTED,
+# which core/util/errors.py words as "[429] You exceeded your current quota...".
+RATE_LIMIT_RE = re.compile(r"\b429\b|resource.?exhausted|resource has been exhausted|too many requests|quota",
+                           re.IGNORECASE)
+# How long the refusal asks for: "Please retry in 38.9s.", or RetryInfo's "retryDelay": "38s".
+RETRY_IN_RE = re.compile(r"retry in (\d+(?:\.\d+)?) ?s|retryDelay\W+(\d+(?:\.\d+)?)s", re.IGNORECASE)
+# Seconds before each new try of a refused run. By the time a run fails, the
+# SDK has already retried the call itself for ~30 s (core/runtime/model/retry.py).
+RATE_LIMIT_WAITS = (30, 60, 120, 240, 300)
+
+# Indirection so tests can skip the waits.
+_sleep = asyncio.sleep
+_clock = time.monotonic
+
+
+def rate_limited(result: CaseResult) -> Optional[str]:
+    """The error a rate-limit refusal failed `result` with, or None."""
+    if not result.errored:
+        return None
+    return next((f for f in result.failures if f.startswith("agent error") and RATE_LIMIT_RE.search(f)), None)
+
+
+def retry_wait(error: str, attempt: int) -> float:
+    """Seconds to wait after refusal number `attempt` (0 for the first): the next
+    of RATE_LIMIT_WAITS, or longer when the refusal asks for longer."""
+    match = RETRY_IN_RE.search(error)
+    asked = float(next(group for group in match.groups() if group)) if match else 0.0
+    return max(asked, RATE_LIMIT_WAITS[min(attempt, len(RATE_LIMIT_WAITS) - 1)])
+
+
+class Pacer:
+    """Keeps the replay under `rpm` model calls a minute (0: no cap).
+
+    A run's calls are counted from its trace, its `model_call` events, and the
+    next run starts no sooner than they allow: at --rpm 12, a run that made 3
+    calls takes at least 15 s, waiting out what it didn't use. Runs go one at
+    a time, so that holds the rate across runs; within one, a burst is a few
+    calls at most, and a refusal is waited out anyway (`run_paced`).
+    """
+
+    def __init__(self, rpm: int = 0):
+        self.rpm = rpm
+        self._next = 0.0  # the earliest the next run may start, on `_clock`
+
+    async def wait(self) -> None:
+        delay = self._next - _clock()
+        if delay > 0:
+            if delay >= 1:
+                print(f"[replay] waiting {delay:.0f} s to stay under {self.rpm} model calls a minute",
+                      file=sys.stderr)
+            await _sleep(delay)
+
+    def ran(self, started: float, calls: int) -> None:
+        """A run that began at `started`, on `_clock`, made `calls` model calls."""
+        if self.rpm > 0:
+            self._next = max(self._next, started + calls * 60 / self.rpm)
+
+
+async def run_paced(case: dict, run: int, combo: Combo, db_path: str, pacer: Pacer,
+                    **kwargs) -> Optional[CaseResult]:
+    """One run of `case` on `combo` once the pacer allows, tried again while the
+    API refuses it for the rate limit. None when it still does after every
+    RATE_LIMIT_WAITS: the replay stops there, and the same command resumes."""
+    for attempt in range(len(RATE_LIMIT_WAITS) + 1):
+        await pacer.wait()
+        started = _clock()
+        try:
+            result = await run_combo(case, run, combo, db_path, **kwargs)
+            refused, calls = rate_limited(result), len(result.model_calls)
+        except Exception as e:  # a refusal the agent's own error handling didn't see: TTS, say
+            if not RATE_LIMIT_RE.search(str(e)):
+                raise
+            result, refused, calls = None, f"{type(e).__name__}: {e}", 0
+        pacer.ran(started, calls)
+        if refused is None:
+            return result
+        if attempt < len(RATE_LIMIT_WAITS):
+            wait = retry_wait(refused, attempt)
+            print(f"[replay] rate-limited ({refused[:200]}); trying again in {wait:.0f} s", file=sys.stderr)
+            await _sleep(wait)
+    return None
+
+
+def load_results(path: Optional[str]) -> List[dict]:
+    """The runs a results file holds, as --out writes them; none without the file."""
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError(f"{path} isn't a list of runs")
+    return data
+
+
+def save_json(path: str, data) -> None:
+    """Writes `data` to `path` whole or not at all: into a file beside it, synced,
+    then renamed over it. So a replay stopped at its timeout keeps every run it
+    finished, and the file is never half written."""
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def _key(run: dict) -> Tuple[str, str, int]:
+    """A stored run's (case, combo, run); one stored before combos ran on prod."""
+    return run["case_id"], run.get("combo", PROD), run["run"]
 
 
 async def main(argv: Optional[List[str]] = None) -> int:
@@ -778,40 +1097,79 @@ async def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--voice-bot", default="main", help="The bot that hosts the rooms (default: main).")
     parser.add_argument("--state-dir", default=None,
                         help="Where the throwaway session DB goes (default: a new temp directory).")
-    parser.add_argument("--out", help="Write results as JSON to this path.")
+    parser.add_argument("--model", metavar="TIER",
+                        help=f"Run every agent model call on this tier: {', '.join(TIER_ORDER)}.")
+    parser.add_argument("--thinking", metavar="LEVEL",
+                        help=f"Run every agent model call at this thinking level: {', '.join(THINKING_LEVELS)}.")
+    parser.add_argument("--combo", action="append", metavar="TIER:LEVEL",
+                        help=f"Run each case on this combo (repeatable, or comma-separated), e.g. FLASH:low. "
+                             f"TIER alone keeps production's thinking, {PROD}:LEVEL each agent's own model, "
+                             f"{PROD} both.")
+    parser.add_argument("--matrix", action="store_true",
+                        help=f"Run the planned matrix: {', '.join(TIER_ORDER)} at {', '.join(MATRIX_LEVELS)} "
+                             f"thinking where the tier takes it, plus {PROD}.")
+    parser.add_argument("--rpm", type=int, default=0,
+                        help="Keep model calls under this many a minute, counted from each run's trace (0: no cap).")
+    parser.add_argument("--out", help="Results JSON: read first, so the same command resumes, "
+                                      "and rewritten after every run.")
     args = parser.parse_args(argv)
+    try:
+        combos = combos_from(args.model, args.thinking, args.combo, args.matrix)
+    except ValueError as e:
+        parser.error(str(e))
+    if args.rpm < 0:
+        parser.error("--rpm can't be negative")
 
     cases = load_cases(args.cases, args.only, args.allow_mutations)
     if not cases:
         print("No cases to run.")
         return 1
 
-    import tempfile
-    db_path = isolate_sessions(args.state_dir or tempfile.mkdtemp(prefix="aoc-voice-replay-"))
+    # Case by case and run by run, each on every combo (see `rotated`).
+    case_runs = [(case, run) for case in cases for run in range(1, args.runs + 1)]
+    plan = [(case, run, combo) for turn, (case, run) in enumerate(case_runs) for combo in rotated(combos, turn)]
+    done = load_results(args.out)
+    have = {_key(r) for r in done}
+    todo = [(case, run, combo) for case, run, combo in plan if (case["id"], combo.label, run) not in have]
+    if len(todo) < len(plan):
+        print(f"[replay] {len(plan) - len(todo)} of the {len(plan)} runs are in {args.out} already", file=sys.stderr)
 
-    from core.runtime import bootstrap
-    from core.runtime.foundation.context import surface_scope
-    from core.voice.engines.tts import TTSEngine
+    stopped = False
+    if todo:
+        db_path = isolate_sessions(args.state_dir or tempfile.mkdtemp(prefix="aoc-voice-replay-"))
 
-    bootstrap.wire()
-    tts = TTSEngine() if not args.no_tts else None
-    hear = live_hearing() if args.stt == "live" else None
+        from core.runtime import bootstrap
+        from core.runtime.foundation.context import surface_scope
+        from core.voice.engines.tts import TTSEngine
 
-    if not args.allow_mutations:
-        guard_writes()
+        bootstrap.wire()
+        tts = TTSEngine() if not args.no_tts else None
+        hear = live_hearing() if args.stt == "live" else None
 
-    results = []
-    with surface_scope("voice"):
-        for case in cases:
-            for run in range(1, args.runs + 1):
-                print(f"[replay] {case['id']} run {run}: {case['utterance']!r}", file=sys.stderr)
-                results.append(await run_case(case, run, db_path, args.voice_bot, hear=hear, tts=tts,
-                                              measure_tts=not args.no_tts))
+        if not args.allow_mutations:
+            guard_writes()
 
-    print(render_report(results))
-    if args.out:
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump([{**asdict(r), "passed": r.passed} for r in results], f, indent=2)
+        pacer = Pacer(args.rpm)
+        with surface_scope("voice"):
+            for case, run, combo in todo:
+                print(f"[replay] {case['id']} run {run} on {combo.label}: {case['utterance']!r}", file=sys.stderr)
+                result = await run_paced(case, run, combo, db_path, pacer, voice_bot=args.voice_bot, hear=hear,
+                                         tts=tts, measure_tts=not args.no_tts)
+                if result is None:
+                    print("[replay] Still rate-limited, so stopping here: run the same command again to resume.",
+                          file=sys.stderr)
+                    stopped = True
+                    break
+                done.append({**asdict(result), "passed": result.passed})
+                if args.out:
+                    save_json(args.out, done)
+
+    order = {(case["id"], combo.label, run): i for i, (case, run, combo) in enumerate(plan)}
+    results = sorted((CaseResult.from_dict(r) for r in done if _key(r) in order),
+                     key=lambda r: order[(r.case_id, r.combo, r.run)])
+    print(render_combos(results, [combo.label for combo in combos]))
+    if stopped:
+        return 3
     return 0 if all(r.passed for r in results) else 2
 
 

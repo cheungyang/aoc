@@ -26,7 +26,8 @@ In WAL mode, though, the last connection to close folds the WAL into the file
 and syncs it, so where every connection closes, nearly every write pays that.
 `hold_open()` keeps one idle connection to a file for the process's life, which
 no call uses; main.py holds memory.db's, and has it fold the WAL in on a
-background thread, so that no commit has to (WAL_PRAGMAS).
+background thread, so that no commit has to (WAL_PRAGMAS), nor sync the
+header of the WAL each full fold starts over.
 """
 import os
 import sqlite3
@@ -58,23 +59,40 @@ class _Hold:
         self.conn = conn
         self.stop = threading.Event()
         self.folder = None
+        self._seen: Optional[int] = None  # data_version at the last fold
         if fold_every:
             self.folder = threading.Thread(target=self._fold, args=(fold_every,), name="wal-fold", daemon=True)
             self.folder.start()
 
     def _fold(self, every: float) -> None:
-        """Every `every` seconds, folds what the WAL holds into the file. PASSIVE: it waits
-        for no reader or writer, and with nothing new, it does nothing."""
+        """Every `every` seconds, a fold()."""
         while not self.stop.wait(every):
             started = time.monotonic()
             try:
-                _, pages, folded = self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()[0]
+                done = self.fold()
             except sqlite3.Error as e:
                 print(f"[storage] Background WAL fold failed: {type(e).__name__}: {e}")
                 continue
             took = time.monotonic() - started
-            if took >= 1.0:
-                print(f"[storage] Folded {folded} of {pages} WAL pages in {took:.1f} s, in the background")
+            if done and took >= 1.0:
+                print(f"[storage] Folded {done[1]} of {done[0]} WAL pages in {took:.1f} s, in the background")
+
+    def fold(self) -> Optional[Tuple[int, int]]:
+        """Folds what the WAL holds into the file; the WAL's (pages, folded), or None when no
+        other connection wrote since the last fold (data_version says), so an idle bot does no
+        disk I/O. PASSIVE: it waits for no reader or writer.
+
+        When it folded everything, it starts the WAL over itself (_restart_wal), so the sync
+        that takes isn't left to the next store's commit, often on the event loop.
+        """
+        version = self.conn.execute("PRAGMA data_version").fetchall()[0][0]
+        if version == self._seen:
+            return None
+        _, pages, folded = self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()[0]
+        if pages and folded == pages:
+            _restart_wal(self.conn)
+        self._seen = version
+        return pages, folded
 
     def close(self) -> None:
         self.stop.set()
@@ -83,6 +101,15 @@ class _Hold:
             if self.folder.is_alive():
                 return  # a fold still running: closing under it would break it
         self.conn.close()
+
+
+def _restart_wal(conn: sqlite3.Connection) -> None:
+    """Writes one page with `conn`: the header's user_version, as it is. Once the whole WAL
+    is folded in, the next write starts it over and syncs its new header (70-170 ms on the
+    NAS), on whatever thread writes first; this way, it's `conn`'s. Nothing here uses
+    user_version. Each statement runs to its end, so no read is left open."""
+    version = conn.execute("PRAGMA user_version").fetchall()[0][0]
+    conn.execute(f"PRAGMA user_version = {int(version)}").fetchall()
 
 
 # The connections hold_open() keeps, one per file, for the process's life.
@@ -184,9 +211,12 @@ class Store:
         is the last, in this process or another.
 
         `fold_every` (seconds) also starts a thread that folds the WAL in with
-        this connection, at that interval. Otherwise the commit that takes the
-        WAL past SQLite's threshold does it, on whatever thread made the commit;
-        WAL_PRAGMAS raise that threshold to a safety net the thread stays under.
+        this connection, at that interval (_Hold.fold). Otherwise the commit that
+        takes the WAL past SQLite's threshold does it, on whatever thread made
+        the commit; WAL_PRAGMAS raise that threshold to a safety net the thread
+        stays under. A full fold leaves the next write to start the WAL over and
+        sync its header, so the fold thread makes that write itself, as this
+        does once now, for the WAL a new process starts.
 
         The connection runs the store's pragmas and one read, each to its end,
         and then only the folds, so it never keeps a read open: one would stop
@@ -200,6 +230,8 @@ class Store:
         for statement in (*(f"PRAGMA {pragma}" for pragma in self.pragmas), "SELECT count(*) FROM sqlite_master"):
             conn.execute(statement).fetchall()
         mode = conn.execute("PRAGMA journal_mode").fetchall()[0][0]
+        if mode == "wal":
+            _restart_wal(conn)
         _HELD[path] = _Hold(conn, fold_every)
         folds = f", folding its WAL in every {fold_every:g} s" if fold_every else ""
         print(f"[storage] Holding {path} open (journal_mode={mode}){folds}, so closing other connections won't checkpoint it")

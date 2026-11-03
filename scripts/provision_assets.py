@@ -2,8 +2,7 @@
 """Provision the runtime assets that are deliberately absent from git.
 
 Several things this app needs at runtime are never committed (see `.gitignore`):
-the faster-whisper STT weights, the speaker-embedding model of the voiceprint
-gate, generated audio cues, the LanceDB vector index, and the various runtime
+the speaker-embedding model of the voiceprint gate, generated audio cues, the LanceDB vector index, and the various runtime
 directories. A developer machine accumulates them
 organically; a freshly built container has none of them, so the first request
 that touches voice or vault search either stalls on a multi-hundred-megabyte
@@ -45,7 +44,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # outlive the image that created it — every consumer below therefore treats it
 # as a cache that may be empty or stale, never as a guaranteed input.
 ASSET_ROOT = os.environ.get("AOC_ASSET_ROOT", "/opt/aoc")
-HF_CACHE = os.environ.get("HF_HOME", os.path.join(ASSET_ROOT, "hf"))
 
 # Files destined for /app, staged because the bind mount hides whatever the
 # build wrote there. Deliberately NOT under ASSET_ROOT: Docker only copies image
@@ -108,47 +106,6 @@ def _rel(path):
 # --------------------------------------------------------------------------
 # Build stage
 # --------------------------------------------------------------------------
-
-def _fetch_stt_model(model, local_files_only=False):
-    """Resolves the faster-whisper weights, downloading them unless told not to.
-
-    Returns the snapshot path. Raises if `local_files_only` is set and the cache
-    does not already hold the model.
-    """
-    os.environ.setdefault("HF_HOME", HF_CACHE)
-    try:
-        from faster_whisper.utils import download_model
-        return download_model(model, local_files_only=local_files_only)
-    except ImportError:
-        # Older faster-whisper exposes no download helper; instantiating the
-        # model performs the same fetch.
-        from faster_whisper import WhisperModel
-        WhisperModel(model, device="cpu", compute_type="int8",
-                     local_files_only=local_files_only)
-        return HF_CACHE
-
-
-def task_stt_model(rep):
-    """Bakes the faster-whisper weights into the image.
-
-    Without this the first transcription downloads ~150MB from HuggingFace,
-    which both delays the first voice reply and makes the container depend on
-    HF being reachable. The download honours HF_HOME, which the Dockerfile
-    pins to $AOC_ASSET_ROOT/hf for both build and runtime so the cache the
-    build populates is the cache STTEngine reads.
-    """
-    model = os.environ.get("AOC_STT_MODEL", "base.en")
-    if rep.dry_run:
-        rep.record("stt_model", SKIP, f"would download '{model}' into {HF_CACHE}")
-        return
-
-    os.makedirs(HF_CACHE, exist_ok=True)
-    try:
-        path = _fetch_stt_model(model)
-        rep.record("stt_model", OK, f"'{model}' cached at {path}")
-    except Exception as e:
-        rep.record("stt_model", FAIL, f"could not fetch '{model}': {e}")
-
 
 def task_vad_model(rep):
     """Verifies the Silero VAD graph that ships inside the faster-whisper wheel.
@@ -268,40 +225,11 @@ def task_seed_audio(rep):
 # Runtime stage
 # --------------------------------------------------------------------------
 
-def task_stt_cache(rep):
-    """Repopulates the model cache when the mapped volume does not hold it.
-
-    ASSET_ROOT is a named volume, so the weights the build baked in are only
-    copied into it while it is empty. A volume created by an older image, or one
-    that predates an AOC_STT_MODEL change, would otherwise leave STTEngine to
-    discover the gap mid-conversation. Checking here turns that into a slow
-    start instead of a failed transcription.
-    """
-    model = os.environ.get("AOC_STT_MODEL", "base.en")
-    try:
-        path = _fetch_stt_model(model, local_files_only=True)
-        rep.record("stt_cache", OK, f"'{model}' present at {path}")
-        return
-    except Exception:
-        pass  # Not cached: fall through and fetch it.
-
-    if rep.dry_run:
-        rep.record("stt_cache", SKIP, f"would download '{model}' into {HF_CACHE}")
-        return
-
-    try:
-        os.makedirs(HF_CACHE, exist_ok=True)
-        path = _fetch_stt_model(model)
-        rep.record("stt_cache", OK, f"'{model}' downloaded into {path}")
-    except Exception as e:
-        rep.record("stt_cache", FAIL, f"could not fetch '{model}': {e}")
-
-
 def task_speaker_cache(rep):
     """Fetches the speaker model when the mapped volume predates it.
 
-    Like the STT weights, ASSET_ROOT is a named volume that only receives the
-    image's files while empty. Without the model the gate stays off and says
+    ASSET_ROOT is a named volume that only receives the image's files while
+    empty. Without the model the gate stays off and says
     so; this turns that into a slower start instead.
     """
     path = os.path.join(MODELS_DIR, SPEAKER_MODEL)
@@ -451,14 +379,12 @@ def task_vector_index(rep):
 
 
 BUILD_TASKS = {
-    "stt": task_stt_model,
     "vad": task_vad_model,
     "speaker": task_speaker_model,
     "audio": task_seed_audio,
 }
 
 RUNTIME_TASKS = {
-    "stt": task_stt_cache,
     "speaker": task_speaker_cache,
     "seed": task_restore_seed,
     "dirs": task_runtime_dirs,

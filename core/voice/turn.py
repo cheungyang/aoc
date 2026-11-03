@@ -28,11 +28,36 @@ from core.runtime.foundation.sessions import SessionManager
 from core.runtime.observability.turn_trace import Outcome, Stage, start_turn_trace
 from core.util.errors import format_error_message
 from core.voice.engines.stt import SpeechRecognizer
-from core.voice.foundation.utterance import Utterance
+from core.voice.foundation.utterance import Transcript, Utterance
 from core.voice.listening.floor import Floor
 from core.voice.listening.turn_taking import merge_transcripts
 from core.voice.room.focus import VoiceFocus
 from core.voice.speech.reply import ReplyStreamer, TurnSpeech
+
+# What a turn says when words were heard but no recognizer could say what they were.
+DIDNT_CATCH = "Sorry, I didn't catch that."
+
+
+def record_stt(trace: Any, transcript: Transcript, utterance: Utterance) -> None:
+    """Puts on the trace how the newest utterance was transcribed: the recognizer, the
+    live session's timings (ms since speech onset) and why it failed if it did, how long
+    batch transcription took, and why nothing could transcribe it, if so."""
+    trace.meta["stt"] = transcript.provider
+    session = utterance.stream
+    timings = getattr(session, "timings", None)
+    if isinstance(timings, dict):
+        ms = {key: round(value) for key, value in timings.items() if isinstance(value, (int, float))}
+        if "final_after_end_ms" in ms:
+            trace.meta["stt_final_after_end_ms"] = ms.pop("final_after_end_ms")
+        if ms:
+            trace.meta["stt_live_ms"] = ms
+    error = getattr(session, "error", None)
+    if isinstance(error, str) and error:
+        trace.meta["stt_error"] = error
+    if transcript.ms is not None:
+        trace.meta["stt_transcribe_ms"] = transcript.ms
+    if transcript.failed:
+        trace.meta["stt_failed"] = transcript.failed
 
 
 class TurnRoom(VoiceControls, Protocol):
@@ -147,6 +172,7 @@ class VoiceTurn:
         # 1. Instantly play static acoustic blurp
         self._log("🔔 Playing signature blurp...")
         room.reply.cue()
+        trace.event("cue")
 
         # 2. The transcripts were streamed while the user spoke, so they
         #    are usually final already.
@@ -154,10 +180,7 @@ class VoiceTurn:
         transcript = merge_transcripts(t.text for t in transcripts)
         newest = transcripts[-1].text.strip()
         trace.mark(Stage.STT_DONE)
-        trace.meta["stt"] = transcripts[-1].provider
-        final_ms = (getattr(utterances[-1].stream, "timings", None) or {}).get("final_after_end_ms")
-        if isinstance(final_ms, (int, float)):
-            trace.meta["stt_final_after_end_ms"] = round(final_ms)
+        record_stt(trace, transcripts[-1], utterances[-1])
         if len(utterances) > 1:
             trace.meta["merged_utterances"] = len(utterances)
         # The recognizer reciting its vocabulary came back as no words (stt.py);
@@ -165,6 +188,16 @@ class VoiceTurn:
         echoes = [t.echo for t in transcripts if t.echo]
         if echoes:
             trace.meta["stt_echo"] = echoes
+        if not newest and transcripts[-1].failed:
+            # Words, but no recognizer could say what they were: say so, rather
+            # than leave the user waiting for an answer. Anything older stays
+            # unanswered, as for noise.
+            self._log(f"Couldn't transcribe the utterance: {transcripts[-1].failed}")
+            trace.meta["outcome"] = Outcome.STT_FAILED
+            room.floor.forget(utterances[-1:])
+            if is_current():
+                await room.reply.say(DIDNT_CATCH, room.focus().agent_id, is_current=is_current)
+            return
         if not newest:
             # Noise, not words. Anything older stays unanswered.
             self._log("Transcription empty. Ignoring.")

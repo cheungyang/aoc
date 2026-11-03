@@ -13,6 +13,7 @@ from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
 from core.runtime.model import retry as llm_retry
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI, is_503_error, backoff_delay
+from core.runtime.observability.turn_trace import start_turn_trace
 
 
 def _503():
@@ -244,6 +245,37 @@ class TestNextThinkingMarker(unittest.IsolatedAsyncioTestCase):
         with patch.object(ChatGoogleGenerativeAI, "_generate", MagicMock(return_value=result)):
             self.assertEqual(self.llm._generate([HumanMessage(content="hi")]).generations[0].message.content, "")
         self.pick.assert_called_once_with("high")
+
+
+class TestTurnTraceSpans(unittest.IsolatedAsyncioTestCase):
+    """Each model call's round trip on the voice turn's trace: sent, first chunk, done."""
+
+    def setUp(self):
+        self.llm = RetryingChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake", max_retries=6)
+        patch.object(llm_retry, "_async_sleep", new=AsyncMock()).start()
+        patch.object(llm_retry, "_announce_retry", new=AsyncMock()).start()
+        self.addCleanup(patch.stopall)
+
+    @staticmethod
+    def spans(trace):
+        return [(e["kind"], e.get("call"), e.get("phase")) for e in trace.events]
+
+    async def test_a_streamed_call_records_its_first_chunk_and_its_end_once_across_a_retry(self):
+        trace = start_turn_trace("day-planner", 1)
+        script = [[_text("The first half, "), _503()], [_text("and the second.")]]
+        patch.object(ChatGoogleGenerativeAI, "_astream", _scripted_stream(script, [])).start()
+        out = [gen async for gen in self.llm._astream([HumanMessage(content="hi")])]
+
+        self.assertEqual("".join(g.text for g in out), "The first half, and the second.")
+        self.assertEqual(self.spans(trace), [("model_call", 1, None), ("model_reply", 1, "first_chunk"),
+                                             ("model_reply", 1, "done")])
+
+    async def test_a_whole_call_records_its_end(self):
+        trace = start_turn_trace("day-planner", 1)
+        result = ChatResult(generations=[ChatGeneration(message=AIMessage(content="ok"))])
+        with patch.object(ChatGoogleGenerativeAI, "_agenerate", AsyncMock(return_value=result)):
+            await self.llm._agenerate([HumanMessage(content="hi")])
+        self.assertEqual(self.spans(trace), [("model_call", 1, None), ("model_reply", 1, "done")])
 
 
 if __name__ == "__main__":

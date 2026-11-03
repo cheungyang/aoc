@@ -198,6 +198,53 @@ class TestHoldOpen(SchemaDir):
         store.release_hold()
         self.assertEqual([t for t in threading.enumerate() if t.name == "wal-fold"], [])
 
+    def held(self, store):
+        return base._HELD[os.path.abspath(store.path)]
+
+    def wal_frames(self, store):
+        """How many frames the WAL holds, folded in or not, read with a connection of its own."""
+        with store.connect() as conn:
+            return conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()[1]
+
+    def test_after_a_full_fold_the_held_connection_starts_the_wal_over_itself(self):
+        """Otherwise the next store's commit would, and sync the new WAL's header with it:
+        70-170 ms on the NAS, often on the event loop."""
+        store = self.wal_store(hold=False)
+        with store.connect() as conn:
+            conn.execute("PRAGMA user_version = 7")
+        store.hold_open()
+        for i in range(5):
+            store.insert("notes", {"topic": f"t{i}", "body": "x" * 5000})
+
+        pages, folded = self.held(store).fold()
+
+        self.assertEqual(folded, pages)
+        self.assertGreater(pages, 5)
+        self.assertEqual(self.wal_frames(store), 1, "started over, with the held connection's one page in it")
+        with store.connect() as conn:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 7, "the header's value, as it was")
+
+    def test_with_nothing_new_from_others_a_fold_does_nothing(self):
+        """Not even fold its own page again: an idle bot does no disk I/O, every 30 s, forever."""
+        store = self.wal_store()
+        store.insert("notes", {"topic": "t"})
+        self.assertIsNotNone(self.held(store).fold())
+        with store.connect() as conn:
+            before = conn.execute("PRAGMA data_version").fetchone()[0]
+            self.assertIsNone(self.held(store).fold())
+            self.assertIsNone(self.held(store).fold())
+            self.assertEqual(conn.execute("PRAGMA data_version").fetchone()[0], before, "the held one wrote nothing")
+        store.insert("notes", {"topic": "u"})
+        self.assertIsNotNone(self.held(store).fold(), "a write from another connection: folds again")
+
+    def test_holding_a_file_starts_its_wal_then(self):
+        """A new process's first write would otherwise sync the fresh WAL's header: at startup, not mid-turn."""
+        store = self.wal_store(hold=False)
+        store.insert("notes", {"topic": "t"})  # its close folds the WAL in and deletes it
+        self.assertIsNone(self.wal_bytes(store))
+        store.hold_open()
+        self.assertGreater(self.wal_bytes(store), 0)
+
 
 class TestSchema(SchemaDir):
 

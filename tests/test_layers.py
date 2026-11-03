@@ -64,10 +64,9 @@ VOICE_LAYERS = (
 # The adapters that may import voice.
 VOICE_HOSTS = ("core.channel.discord.runner",)
 # Modules that load an optional heavy dependency when imported: importing one
-# inside a function is how it stays optional.
-HEAVY = (
-    "core.voice.engines.stt_engine",  # faster_whisper, the local fallback
-)
+# inside a function is how it stays optional. None today: the one there was,
+# the local Whisper engine, is gone.
+HEAVY: Tuple[str, ...] = ()
 
 # "importer -> imported", or for R4 the package whose __init__.py imports.
 ALLOWED: Dict[str, Set[str]] = {

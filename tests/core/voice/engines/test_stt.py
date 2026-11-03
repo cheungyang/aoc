@@ -1,10 +1,11 @@
-"""SpeechRecognizer: streams to a live session per utterance, falls back to Whisper."""
+"""SpeechRecognizer: streams to a live session per utterance; when it fails, uses
+what it heard, else batch transcription, else gives up and says so."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.models import TRANSCRIBE_LIVE
+from core.config.models import TRANSCRIBE, TRANSCRIBE_LIVE
 from core.voice.foundation import settings
 from core.voice.engines.stt import SpeechRecognizer
 from core.voice.foundation.utterance import Utterance
@@ -19,6 +20,7 @@ class FakeSession:
         self.utterance = utterance
         self.kwargs = kwargs
         self.calls = []
+        self.error = None
         self.outcome = asyncio.get_running_loop().create_future()
         FakeSession.instances.append(self)
 
@@ -66,12 +68,12 @@ def _with_audio(ms=2000):
 def test_streams_only_with_the_live_provider_and_a_key():
     assert _live().streaming
     assert not _live(api_key="").streaming
-    assert not SpeechRecognizer(provider="whisper", api_key="key").streaming
+    assert not SpeechRecognizer(provider="transcribe", api_key="key").streaming
 
 
 def test_the_provider_defaults_to_settings():
-    # conftest sets it to "whisper" so no test opens a socket by accident.
-    assert SpeechRecognizer(api_key="key").provider == settings.STT_PROVIDER == "whisper"
+    # conftest sets it to "transcribe" so no test opens a socket by accident.
+    assert SpeechRecognizer(api_key="key").provider == settings.STT_PROVIDER == "transcribe"
 
 
 def test_vocabulary_is_deduplicated_and_capped():
@@ -120,7 +122,7 @@ async def test_the_vad_lifecycle_is_forwarded_to_the_session():
 
 @pytest.mark.asyncio
 async def test_without_streaming_the_lifecycle_is_a_no_op():
-    recognizer = SpeechRecognizer(provider="whisper", api_key="key", session_factory=FakeSession)
+    recognizer = SpeechRecognizer(provider="transcribe", api_key="key", session_factory=FakeSession)
     utterance = Utterance()
     recognizer.open(utterance)
     recognizer.audio(utterance, b"\x00")
@@ -133,35 +135,36 @@ async def test_without_streaming_the_lifecycle_is_a_no_op():
 
 @pytest.mark.asyncio
 async def test_a_live_result_is_the_transcript():
-    recognizer = _live()
-    recognizer.whisper_transcribe = AsyncMock()
+    cloud = AsyncMock()
+    recognizer = _live(cloud=cloud)
     utterance = _with_audio()
     recognizer.open(utterance)
     utterance.stream.outcome.set_result("Add milk to the list.")
 
     transcript = await recognizer.transcribe(utterance)
-    assert (transcript.text, transcript.provider) == ("Add milk to the list.", "gemini_live")
-    recognizer.whisper_transcribe.assert_not_awaited()
+    assert (transcript.text, transcript.provider, transcript.failed) == ("Add milk to the list.", "gemini_live", None)
+    cloud.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_an_empty_live_result_is_still_a_live_result():
-    recognizer = _live()
-    recognizer.whisper_transcribe = AsyncMock()
+    cloud = AsyncMock()
+    recognizer = _live(cloud=cloud)
     utterance = _with_audio()
     recognizer.open(utterance)
     utterance.stream.outcome.set_result("")
-    assert (await recognizer.transcribe(utterance)).text == ""
-    recognizer.whisper_transcribe.assert_not_awaited()
+    transcript = await recognizer.transcribe(utterance)
+    assert (transcript.text, transcript.failed) == ("", None), "noise, not a failure"
+    cloud.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_the_recognizer_reciting_its_vocabulary_is_no_words():
     """What 1.8 s of noise came back as on 2026-10-28, shortened: the turn
     gets no words, as for noise, and what was heard is kept for the logs.
-    Not Whisper either: there was nothing to transcribe."""
-    recognizer = _live(vocabulary=["Aki", "agent designer", "William", "wiki gardener"])
-    recognizer.whisper_transcribe = AsyncMock()
+    Not batch transcription either: there was nothing to transcribe."""
+    cloud = AsyncMock()
+    recognizer = _live(vocabulary=["Aki", "agent designer", "William", "wiki gardener"], cloud=cloud)
     utterance = _with_audio(1836)
     recognizer.open(utterance)
     recital = "Here is the list of added phrases:\n\n- Aki, agent designer\n- William, wiki gardener"
@@ -170,7 +173,7 @@ async def test_the_recognizer_reciting_its_vocabulary_is_no_words():
     transcript = await recognizer.transcribe(utterance)
     assert (transcript.text, transcript.provider, transcript.heard) == ("", "gemini_live", recital)
     assert transcript.echo == "the recognizer's preamble to its list"
-    recognizer.whisper_transcribe.assert_not_awaited()
+    cloud.assert_not_awaited()
 
 
 def test_an_echo_is_judged_against_the_speech_it_came_from():
@@ -195,36 +198,107 @@ def test_the_vocabulary_is_the_agents_you_can_reach_by_name():
 
 
 @pytest.mark.asyncio
-async def test_a_failed_live_session_falls_back_to_whisper_on_the_buffered_audio():
-    recognizer = _live()
-    recognizer.whisper_transcribe = AsyncMock(return_value="add milk to the list")
+async def test_a_failed_live_session_uses_what_it_heard_before_it_failed():
+    """The live final missed its deadline, but the session had heard the words: no second request."""
+    cloud = AsyncMock()
+    recognizer = _live(cloud=cloud)
+    utterance = _with_audio()
+    recognizer.open(utterance)
+    utterance.segments, utterance.interim = ["Add milk"], "to the list"
+    utterance.stream.error = "no final transcript 2.0s after the turn ended"
+    utterance.stream.outcome.set_result(None)
+
+    transcript = await recognizer.transcribe(utterance)
+    assert (transcript.text, transcript.provider, transcript.failed) == (
+        "Add milk to the list", "gemini_live_partial", None)
+    cloud.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_with_nothing_heard_live_the_audio_goes_to_batch_transcription():
+    cloud = AsyncMock(return_value="Add milk to the list.")
+    recognizer = _live(vocabulary=["Frankie"], cloud=cloud)
+    utterance = _with_audio()
+    recognizer.open(utterance)
+    utterance.stream.error = "ConnectionClosedError: no close frame received"
+    utterance.stream.outcome.set_result(None)
+
+    transcript = await recognizer.transcribe(utterance)
+    assert (transcript.text, transcript.provider, transcript.failed) == ("Add milk to the list.", "transcribe", None)
+    assert isinstance(transcript.ms, int)
+    wav, kwargs = cloud.call_args.args[0], cloud.call_args.kwargs
+    assert wav[:4] == b"RIFF"
+    assert (kwargs["model"], kwargs["vocabulary"], kwargs["mode"]) == (TRANSCRIBE, ["Frankie"], settings.STT_MODE)
+    assert kwargs["timeout"] == settings.STT_FALLBACK_TIMEOUT_S
+
+
+@pytest.mark.asyncio
+async def test_batch_transcription_past_its_deadline_gives_up_with_both_reasons(monkeypatch):
+    monkeypatch.setattr(settings, "STT_FALLBACK_TIMEOUT_S", 0.05)
+
+    async def slow(*_args, **_kwargs):
+        await asyncio.sleep(5)
+
+    recognizer = _live(cloud=slow)
+    utterance = _with_audio()
+    recognizer.open(utterance)
+    utterance.stream.error = "no final transcript 2.0s after the turn ended"
+    utterance.stream.outcome.set_result(None)
+
+    transcript = await recognizer.transcribe(utterance)
+    assert transcript.text == ""
+    assert transcript.failed == ("no final transcript 2.0s after the turn ended; "
+                                 "then batch transcription took over 0.1 s")
+
+
+@pytest.mark.asyncio
+async def test_a_batch_error_gives_up_too():
+    recognizer = _live(cloud=AsyncMock(side_effect=RuntimeError("HTTP 503: unavailable")))
     utterance = _with_audio()
     recognizer.open(utterance)
     utterance.stream.outcome.set_result(None)
 
     transcript = await recognizer.transcribe(utterance)
-    assert (transcript.text, transcript.provider) == ("add milk to the list", "whisper_fallback")
-    wav = recognizer.whisper_transcribe.call_args.args[0]
-    assert wav[:4] == b"RIFF"
+    assert transcript.text == ""
+    assert transcript.failed == ("no final transcript; "
+                                 "then batch transcription failed: RuntimeError: HTTP 503: unavailable")
 
 
 @pytest.mark.asyncio
-async def test_the_local_provider_uses_whisper_directly():
-    recognizer = SpeechRecognizer(provider="whisper", api_key="key")
-    recognizer.whisper_transcribe = AsyncMock(return_value="hello")
+async def test_the_batch_provider_transcribes_after_the_turn():
+    cloud = AsyncMock(return_value="hello")
+    recognizer = SpeechRecognizer(provider="transcribe", api_key="key", cloud=cloud)
     transcript = await recognizer.transcribe(_with_audio())
-    assert (transcript.text, transcript.provider) == ("hello", "whisper")
+    assert (transcript.text, transcript.provider) == ("hello", "transcribe")
+    assert cloud.call_args.kwargs["timeout"] == settings.STT_TRANSCRIBE_TIMEOUT_S
+
+
+@pytest.mark.asyncio
+async def test_without_a_key_nothing_is_sent_and_the_words_are_not_caught():
+    cloud = AsyncMock()
+    recognizer = SpeechRecognizer(provider="transcribe", api_key="", cloud=cloud)
+    transcript = await recognizer.transcribe(_with_audio())
+    assert (transcript.text, transcript.failed) == ("", "no Gemini API key for batch transcription")
+    cloud.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_audio_is_no_words_not_a_failure():
+    cloud = AsyncMock()
+    transcript = await SpeechRecognizer(provider="transcribe", api_key="key", cloud=cloud).transcribe(Utterance())
+    assert (transcript.text, transcript.failed) == ("", None)
+    cloud.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_the_transcript_is_computed_once_per_utterance():
-    recognizer = SpeechRecognizer(provider="whisper", api_key="key")
-    recognizer.whisper_transcribe = AsyncMock(return_value="once")
+    cloud = AsyncMock(return_value="once")
+    recognizer = SpeechRecognizer(provider="transcribe", api_key="key", cloud=cloud)
     utterance = _with_audio()
     first, second = await asyncio.gather(recognizer.transcribe(utterance), recognizer.transcribe(utterance))
     third = await recognizer.transcribe(utterance)
     assert first.text == second.text == third.text == "once"
-    recognizer.whisper_transcribe.assert_awaited_once()
+    cloud.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -241,16 +315,3 @@ async def test_a_cancelled_turn_does_not_cancel_the_transcription():
 
     utterance.stream.outcome.set_result("Still transcribed.")
     assert (await recognizer.transcribe(utterance)).text == "Still transcribed."
-
-
-@pytest.mark.asyncio
-async def test_whisper_loads_lazily_once_and_skips_empty_audio():
-    engine = MagicMock()
-    engine.transcribe = AsyncMock(return_value="text")
-    recognizer = SpeechRecognizer(provider="whisper", api_key="", whisper_model="tiny.en")
-    with patch("core.voice.engines.stt_engine.STTEngine", return_value=engine) as engine_class:
-        assert await recognizer.whisper_transcribe(b"") == ""
-        engine_class.assert_not_called()
-        assert await recognizer.whisper_transcribe(b"RIFF1") == "text"
-        assert await recognizer.whisper_transcribe(b"RIFF2") == "text"
-    engine_class.assert_called_once_with(model_size="tiny.en")

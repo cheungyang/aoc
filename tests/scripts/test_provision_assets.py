@@ -18,10 +18,10 @@ class TestProvisionAssetsStages(unittest.TestCase):
         # Build-stage work must never touch mounted state, and runtime work must
         # be safe to repeat on every boot, so the two registries stay separate.
         self.assertEqual(
-            set(provision_assets.BUILD_TASKS), {"stt", "vad", "speaker", "audio"}
+            set(provision_assets.BUILD_TASKS), {"vad", "speaker", "audio"}
         )
         self.assertEqual(
-            set(provision_assets.RUNTIME_TASKS), {"stt", "speaker", "seed", "dirs", "env", "index"}
+            set(provision_assets.RUNTIME_TASKS), {"speaker", "seed", "dirs", "env", "index"}
         )
 
     def test_the_speaker_model_lives_in_the_mapped_volume(self):
@@ -45,13 +45,6 @@ class TestProvisionAssetsStages(unittest.TestCase):
             f"ASSET_ROOT {provision_assets.ASSET_ROOT}"
         )
 
-    def test_hf_cache_is_inside_the_mapped_volume(self):
-        # The opposite requirement: the model cache is exactly what the volume
-        # exists to persist across rebuilds.
-        self.assertTrue(
-            provision_assets.HF_CACHE.startswith(provision_assets.ASSET_ROOT)
-        )
-
     def test_unknown_task_is_rejected(self):
         with self.assertRaises(SystemExit):
             provision_assets.run_stage("build", only=["does-not-exist"])
@@ -63,52 +56,6 @@ class TestProvisionAssetsStages(unittest.TestCase):
                 rep = provision_assets.run_stage("build", only=["audio"], dry_run=True)
         self.assertFalse(rep.failed)
         self.assertEqual(os.listdir(tmp) if os.path.isdir(tmp) else [], [])
-
-
-class TestSttCacheSelfHeal(unittest.TestCase):
-    """A persistent volume can outlive the image that filled it."""
-
-    def test_cached_model_is_not_redownloaded(self):
-        with patch.object(provision_assets, "_fetch_stt_model",
-                          return_value="/opt/aoc/hf/snap") as mock_fetch:
-            rep = provision_assets.run_stage("runtime", only=["stt"])
-        mock_fetch.assert_called_once()
-        self.assertTrue(mock_fetch.call_args.kwargs["local_files_only"])
-        self.assertFalse(rep.failed)
-
-    def test_empty_volume_triggers_a_download(self):
-        # First call probes the cache and misses; second must actually fetch.
-        calls = []
-
-        def fake_fetch(model, local_files_only=False):
-            calls.append(local_files_only)
-            if local_files_only:
-                raise RuntimeError("not cached")
-            return "/opt/aoc/hf/snap"
-
-        with patch.object(provision_assets, "_fetch_stt_model", side_effect=fake_fetch), \
-             patch("os.makedirs"):
-            rep = provision_assets.run_stage("runtime", only=["stt"])
-
-        self.assertEqual(calls, [True, False])
-        self.assertFalse(rep.failed)
-
-    def test_download_failure_is_reported(self):
-        with patch.object(provision_assets, "_fetch_stt_model",
-                          side_effect=RuntimeError("offline")), \
-             patch("os.makedirs"):
-            rep = provision_assets.run_stage("runtime", only=["stt"])
-        self.assertTrue(rep.failed)
-
-    def test_dry_run_never_downloads(self):
-        def fake_fetch(model, local_files_only=False):
-            if local_files_only:
-                raise RuntimeError("not cached")
-            raise AssertionError("dry run must not download")
-
-        with patch.object(provision_assets, "_fetch_stt_model", side_effect=fake_fetch):
-            rep = provision_assets.run_stage("runtime", only=["stt"], dry_run=True)
-        self.assertFalse(rep.failed)
 
 
 class TestSpeakerModel(unittest.TestCase):

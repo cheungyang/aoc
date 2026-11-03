@@ -1,4 +1,4 @@
-"""Utterance: the PCM and text of one stretch of speech, and its WAV for Whisper."""
+"""Utterance: the PCM and text of one stretch of speech, and its WAV for batch transcription."""
 import io
 import wave
 
@@ -28,7 +28,7 @@ def test_duration_counts_16khz_16bit_mono():
 
 
 def test_transcript_records_its_provider():
-    assert Transcript("hi", "whisper_fallback").provider == "whisper_fallback"
+    assert Transcript("hi", "transcribe").provider == "transcribe"
 
 
 def test_pcm_to_wav_writes_16khz_mono():

@@ -21,10 +21,24 @@ later token never moves `first_token`):
 `Stage` names the stages and `Outcome` how a turn ended (`meta["outcome"]`;
 none means it was answered), so a misspelled one fails at import.
 
-Repeated events (`tool_start`, `tool_end`, `model_call` with the thinking
-level it was sent with) are kept in order as `events`. A `prune_wait` event
-records the milliseconds a turn waited for the previous turn's history prune;
-it appears only when there was one to wait for.
+Repeated events are kept in order as `events`:
+
+- `cue`: the "heard you" sound was started;
+- `tool_start`, `tool_end`;
+- `model_call`: a model call was sent, numbered (`call`) within the turn,
+  with its model and the thinking level it was sent with; then its
+  `model_reply` events, with the same number: `first_chunk` when it began to
+  stream, `done` when it ended. So each round trip's own latency is there,
+  not only the turn's first token;
+- `prune_wait`: the milliseconds a turn waited for the previous turn's
+  history prune, only when there was one to wait for.
+
+How the words were heard is in `meta` (core/voice/turn.py `record_stt`): the
+recognizer (`stt`), the live session's own timings (`stt_live_ms`, from speech
+onset; `stt_final_after_end_ms`), why it failed (`stt_error`), how long batch
+transcription took (`stt_transcribe_ms`), and why nothing could transcribe the
+words (`stt_failed`). `loop_lag` is how long the event loop was stalled during
+the turn, when the probe runs (loop_lag.py).
 
 VoiceManager opens one trace per turn with `start_turn_trace`, which binds it
 to the running task's context; code inside the turn (the model wrapper, the
@@ -40,6 +54,8 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from core.runtime.observability.loop_lag import lag_between
 
 class Stage:
     """The stages above, by name: `trace.mark(Stage.STT_DONE)`."""
@@ -73,6 +89,7 @@ class Outcome:
     ERROR = "error"                  # the pipeline raised
     SUPERSEDED = "superseded"        # a newer turn started before it finished
     NO_TRANSCRIPT = "no_transcript"  # noise, not words
+    STT_FAILED = "stt_failed"        # words, but no recognizer could say what: "didn't catch that"
     STOP_HOLD = "stop_hold"          # "wait": the reply stopped, the words kept
     STOP_CANCEL = "stop_cancel"      # "stop": the reply stopped, the words dropped
     HOOK = "hook"                    # a voice hook answered it ("next agent")
@@ -95,6 +112,7 @@ class TurnTrace:
     events: List[Dict[str, Any]] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
     finished: bool = False
+    calls: int = 0  # model calls sent so far: the last one's number
 
     def __post_init__(self):
         self.marks.setdefault(Stage.SPEECH_END, 0)
@@ -116,8 +134,15 @@ class TurnTrace:
             return
         self.events.append({"t": self._ms(), "kind": kind, **data})
 
-    def model_call(self, agent_id: Optional[str], model: str, thinking_level: Optional[str]) -> None:
-        self.event("model_call", agent=agent_id, model=model, thinking=thinking_level)
+    def model_call(self, agent_id: Optional[str], model: str, thinking_level: Optional[str]) -> int:
+        """Records a model call as it's sent; returns its number, for its `model_reply` events."""
+        self.calls += 1
+        self.event("model_call", call=self.calls, agent=agent_id, model=model, thinking=thinking_level)
+        return self.calls
+
+    def model_reply(self, call: int, phase: str) -> None:
+        """Model call `call` began to stream (`first_chunk`) or ended (`done`)."""
+        self.event("model_reply", call=call, phase=phase)
 
     def stage_deltas(self) -> Dict[str, int]:
         """Milliseconds spent between consecutive reached stages, keyed by the later one."""
@@ -150,6 +175,9 @@ class TurnTrace:
         if self.finished:
             return self.summary()
         self.mark(Stage.TURN_END)
+        lag = lag_between(self.anchor, time.monotonic())
+        if lag is not None:
+            self.meta["loop_lag"] = lag
         self.finished = True
         summary = self.summary()
         print(f"[TurnTrace] {json.dumps(summary, separators=(',', ':'), default=str)}")

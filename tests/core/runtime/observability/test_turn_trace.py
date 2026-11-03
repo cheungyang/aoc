@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 from core.runtime.observability import turn_trace
 from core.runtime.observability.turn_trace import STAGES, TurnTrace, current_turn_trace, detach_turn_trace, start_turn_trace
@@ -58,6 +59,29 @@ class TestTurnTrace(unittest.TestCase):
     def test_stages_are_documented_in_order(self):
         self.assertEqual(STAGES[0], "speech_end")
         self.assertEqual(STAGES[-1], "turn_end")
+
+    def test_model_calls_are_numbered_and_their_replies_carry_the_number(self):
+        trace = TurnTrace(agent_id="main", turn_id=1, anchor=time.monotonic())
+        first = trace.model_call("main", "flash", "low")
+        trace.model_reply(first, "first_chunk")
+        second = trace.model_call("day-planner", "pro", "medium")
+        trace.model_reply(second, "done")
+        self.assertEqual((first, second), (1, 2))
+        self.assertEqual([(e["kind"], e["call"]) for e in trace.events],
+                         [("model_call", 1), ("model_reply", 1), ("model_call", 2), ("model_reply", 2)])
+        self.assertEqual(trace.events[0]["thinking"], "low")
+        self.assertEqual(trace.events[1]["phase"], "first_chunk")
+
+    def test_the_loop_lag_over_the_turn_is_recorded_when_the_probe_runs(self):
+        trace = TurnTrace(agent_id="main", turn_id=1, anchor=time.monotonic())
+        lag = {"stalls": 2, "total_ms": 310, "max_ms": 180}
+        with unittest.mock.patch.object(turn_trace, "lag_between", return_value=lag) as between:
+            self.assertEqual(trace.finish()["loop_lag"], lag)
+        self.assertEqual(between.call_args.args[0], trace.anchor)
+
+    def test_without_the_probe_there_is_no_loop_lag(self):
+        trace = TurnTrace(agent_id="main", turn_id=1, anchor=time.monotonic())
+        self.assertNotIn("loop_lag", trace.finish())
 
 
 class TestStorage(unittest.TestCase):

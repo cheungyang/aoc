@@ -24,8 +24,10 @@ from core.config.settings import Config
 
 # --- Speech to text --------------------------------------------------------
 # "gemini_live": each utterance streams to gemini-3.5-transcribe-live while the
-# user is still talking (core/voice/engines/live_stt.py); local Whisper takes over only
-# if a live session fails. "whisper": local only, for running without network.
+# user is still talking (core/voice/engines/live_stt.py); if a live session
+# fails, its partial transcript or batch transcription takes over
+# (core/voice/engines/stt.py). "transcribe": batch transcription only, after
+# each turn: no live socket.
 STT_PROVIDER = os.getenv("AOC_STT_PROVIDER", "gemini_live")
 STT_LANGUAGE_CODES = ["en-US"]
 # SMART drops "um"s and false starts and resolves self-corrections ("Tuesday --
@@ -36,17 +38,19 @@ STT_MODE = "SMART"
 STT_VOCABULARY_LIMIT = 100
 STT_CONNECT_TIMEOUT_S = 5.0
 # How long after the turn ends to wait for the live transcript before falling
-# back to Whisper. Finals normally arrive ~0.4 s after the segment ends.
+# back. Finals normally arrive ~0.4 s after the segment ends.
 STT_FINAL_TIMEOUT_S = 2.0
+# How long batch transcription gets as the fallback: the turn is already late,
+# so past this the turn says it didn't catch that instead.
+STT_FALLBACK_TIMEOUT_S = 2.0
+# How long it gets with STT_PROVIDER="transcribe", where it's the only recognizer.
+STT_TRANSCRIBE_TIMEOUT_S = 10.0
 # Silence after which the open speech segment is finalized speculatively, so its
 # transcript is usually ready by the time the end-of-turn silence has elapsed.
 # Disabled (None): mid-sentence pauses while collecting thoughts otherwise send
 # ACTIVITY_END, causing SMART mode to punctuate incomplete clauses and split
 # acoustic context across segments.
 STT_EARLY_END_MS = None
-# Whisper model for the fallback (and for STT_PROVIDER="whisper"). The same
-# variable selects what scripts/provision_assets.py caches into the image.
-WHISPER_MODEL = os.getenv("AOC_STT_MODEL", "base.en")
 
 # --- Turn taking -----------------------------------------------------------
 # How long a silence ends the turn depends on what was said so far

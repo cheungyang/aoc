@@ -32,6 +32,11 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         store = patch('main.SessionStore')
         self.session_store = store.start()
         self.addCleanup(store.stop)
+        # The event-loop lag probe never returns either. Stood in for.
+        lag = patch('main.loop_lag')
+        self.loop_lag = lag.start()
+        self.loop_lag.watch = AsyncMock()
+        self.addCleanup(lag.stop)
 
     def tearDown(self):
         self.config.reset()
@@ -85,6 +90,8 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         sessions = self.session_store.return_value
         self.assertEqual([c for c in sessions.mock_calls if c[0] in ("archive_inactive", "hold_open")],
                          [call.archive_inactive(["agent1", "agent2", "agent3"]), call.hold_open(fold_every=30)])
+        # The event-loop lag probe runs next to the bots, for the voice turns' traces.
+        self.loop_lag.watch.assert_awaited_once()
 
     @patch('main.ScheduleRunner')
     @patch('main.AgentsLoader')

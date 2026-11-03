@@ -1,9 +1,11 @@
 """Voice tests never reach the network.
 
 The streaming recognizer opens a WebSocket per utterance whenever a Gemini key
-is configured, and a developer's .env usually has one. Every test here gets the
-local provider by default; tests of the live path pass their own provider and
-session factory. As a backstop, opening a real Live API connection fails.
+is configured, and a developer's .env usually has one; batch transcription
+posts the audio. Every test here gets the batch provider by default, which
+opens no socket, and batch transcription refuses to run: tests of either path
+pass their own provider, session factory or transcriber. As a backstop,
+opening a real Live API connection fails too.
 
 Text-to-speech never reaches the network either; that guard is suite-wide, in
 tests/conftest.py (`_no_tts_network`), since tests outside this folder build
@@ -19,13 +21,17 @@ import pytest
 @pytest.fixture(autouse=True)
 def _no_live_stt(monkeypatch):
     from core.voice.foundation import settings
-    from core.voice.engines import live_stt
+    from core.voice.engines import live_stt, stt
 
     async def refuse(*_args, **_kwargs):
         raise RuntimeError("tests must not open a Live API connection")
 
-    monkeypatch.setattr(settings, "STT_PROVIDER", "whisper")
+    async def refuse_batch(*_args, **_kwargs):
+        raise RuntimeError("tests must not send audio to batch transcription")
+
+    monkeypatch.setattr(settings, "STT_PROVIDER", "transcribe")
     monkeypatch.setattr(live_stt, "connect_live", refuse)
+    monkeypatch.setattr(stt, "transcribe_wav", refuse_batch)
 
 
 @pytest.fixture
