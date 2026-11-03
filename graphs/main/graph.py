@@ -17,6 +17,11 @@ teammate, with the brief the agent wrote inside the tag
 (core/storage/handoff_capsules.py), and `direct_call` attaches it to your first
 message in the teammate's channel.
 
+On a voice turn, the `route` step also drops the copies of your words that a
+turn cancelled when you went on talking left unanswered, since this turn's
+message repeats them (core/runtime/history/repeats.py). It runs first in
+every history a voice turn runs on: main's for the channel, and the agent's.
+
 Two things to know before editing:
 
 1. This graph is the default for *every* agent (`GraphBuilder` falls back to
@@ -33,7 +38,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, RemoveMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 
@@ -43,6 +48,8 @@ from core.runtime.foundation import events
 from core.runtime.foundation.addressing import message_text
 from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, decide, home_channel
 from core.runtime.history.handoff import SWITCH_CAPSULE_TOKENS, capsule_for, with_capsule
+from core.runtime.history.repeats import unanswered_repeats
+from core.runtime.observability.turn_trace import current_turn_trace
 
 # What the `fixed` node answers: a message in a channel no single agent answers
 # (#general). It offers starting with an agent's name (a hand-off). Typed, it
@@ -185,6 +192,24 @@ def handoff_pointer(agent_config: dict, agent_id: str, channel: str) -> str:
     return f"→ {agent_config.get('emoji', '🤖')} {agent_config.get('name', agent_id)} has this in #{channel}"
 
 
+def drop_repeats(messages: List[Any], ctx: Any) -> List[RemoveMessage]:
+    """On a voice turn, removes the copies of your words a cancelled turn left
+    unanswered right before this turn's message, which repeats them
+    (core/runtime/history/repeats.py); nothing on any other turn. Logged, and
+    put on the voice trace (`repeats_dropped`)."""
+    if ctx is None or ctx.get_surface() != "voice":
+        return []
+    ids = unanswered_repeats(messages)
+    if not ids:
+        return []
+    print(f"[graphs.main] Dropped {len(ids)} unanswered {'copy' if len(ids) == 1 else 'copies'} of the words "
+          f"this turn repeats, from {ctx.agent_id}'s history")
+    trace = current_turn_trace()
+    if trace is not None:
+        trace.event("repeats_dropped", agent=ctx.agent_id, count=len(ids))
+    return [RemoveMessage(id=message_id) for message_id in ids]
+
+
 def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, config=None, **kwargs):
     """Compiles the router in front of the conversational ReAct agent."""
     agent_config = config or {}
@@ -193,7 +218,8 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
     concierge_agent = create_react_agent(llm, tools, prompt=prompt)
 
     def _decide(state: MessagesState) -> Dict[str, Any]:
-        """Resolves the route and stashes it for the conditional edge."""
+        """Resolves the route and stashes it for the conditional edge. On a
+        voice turn, it also drops the copies of your words this turn repeats."""
         from core.runtime.foundation.context import try_context
         from core.loaders.agents_loader import AgentsLoader
 
@@ -217,12 +243,16 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         elif decision.target == FIXED:
             print(f"[graphs.main] Fixed line ({decision.reason})")
 
-        return {
+        update: Dict[str, Any] = {
             "route": decision.target,
             "route_agent_id": decision.agent_id,
             "route_reason": decision.reason,
             "route_channel": decision.channel,
         }
+        repeats = drop_repeats(messages, ctx)
+        if repeats:
+            update["messages"] = repeats
+        return update
 
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
         """Hands the turn to the one agent allowed to answer here.

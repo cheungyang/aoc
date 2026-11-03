@@ -651,5 +651,134 @@ class TestTheReplyIsLoggedBeforeTheRunEnds(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(r["from"], r["message"]) for r in rows], [("user", "hand it over"), ("ai", SWITCHES)])
 
 
+# A voice turn cancelled when you went on talking left its words in history;
+# the turn that answers carries them again, first (core/runtime/history/repeats.py).
+CANCELLED = "[Mon 17:00] scan"
+ANSWERS = "[Mon 17:00] scan this receipt please"
+
+
+class TestVoiceTurnsDropTheirRepeats(unittest.IsolatedAsyncioTestCase):
+    """The `route` step of a voice turn drops the copies its message repeats,
+    in main's history and in the agent's, before anything reads them."""
+
+    def _loader(self, hosts=("receipts",), eligible=("receipt-processor",)):
+        loader = MagicMock()
+        loader.hosts_channel.side_effect = lambda agent_id, channel: channel in hosts
+        loader.eligible_agents_for_channel.return_value = list(eligible)
+        loader.get_agent_config.return_value = {"emoji": "🧾", "name": "Receipt Processor"}
+        return loader
+
+    def _concierge(self):
+        """Stands in for the ReAct agent, keeping what it was given to read."""
+        agent = MagicMock()
+        agent.read = []
+
+        async def ainvoke(state, config=None):
+            agent.read.append([m.content for m in state["messages"]])
+            return {"messages": list(state["messages"]) + [AIMessage(content="Logged $12.40.")]}
+
+        agent.ainvoke = ainvoke
+        return agent
+
+    async def _run(self, messages, *, agent_id="main", config=ORCHESTRATOR, source="discord", surface="voice",
+                   loader=None):
+        delegate = AsyncMock(return_value=DelegationResult(agent_id="receipt-processor", text="Logged $12.40."))
+        concierge = self._concierge()
+        with patch("graphs.main.graph.create_react_agent", return_value=concierge), \
+             patch("graphs.main.graph.stream_delegate", delegate), \
+             patch("graphs.main.graph.safe_dispatch_custom_event", new_callable=AsyncMock), \
+             patch("core.loaders.agents_loader.AgentsLoader", return_value=loader or self._loader()), \
+             patch("graphs.main.graph._record_turn"):
+            graph = create_graph(llm=MagicMock(), tools=[], agent_id=agent_id, config=config)
+            with _session(agent_id=agent_id, source=source, channel="receipts", surface=surface):
+                state = await graph.ainvoke({"messages": [HumanMessage(content=m) for m in messages]})
+        return state, delegate, concierge
+
+    def _specialist(self, messages, surface="voice"):
+        """The agent the channel routes a voice turn to: its own run, on its own history."""
+        return self._run(messages, agent_id="receipt-processor", source="tool", surface=surface,
+                         config={"agent_id": "receipt-processor", "channels": ["receipts"], "tools": {}},
+                         loader=self._loader(hosts=(), eligible=()))
+
+    async def test_mains_history_keeps_only_the_message_that_answers(self):
+        state, delegate, _ = await self._run([CANCELLED, ANSWERS])
+
+        self.assertEqual([m.content for m in state["messages"]], [ANSWERS, "🧾 Receipt Processor: Logged $12.40."])
+        self.assertEqual(delegate.await_args.kwargs["prompt"], ANSWERS)
+
+    async def test_the_agents_model_never_reads_the_copy(self):
+        caller = "<caller>main</caller>\n"
+        state, _, concierge = await self._specialist([f"[Mon 17:00] {caller}{CANCELLED}",
+                                                      f"[Mon 17:00] {caller}{ANSWERS}"])
+
+        self.assertEqual(concierge.read, [[f"[Mon 17:00] {caller}{ANSWERS}"]])
+        self.assertEqual(len(state["messages"]), 2)
+
+    async def test_a_typed_turn_keeps_its_history_as_it_is(self):
+        _, _, concierge = await self._specialist([CANCELLED, ANSWERS], surface=None)
+
+        self.assertEqual(concierge.read, [[CANCELLED, ANSWERS]])
+
+    async def test_words_the_turn_doesnt_repeat_stay(self):
+        _, _, concierge = await self._specialist(["[Mon 17:00] What's on today?", ANSWERS])
+
+        self.assertEqual(concierge.read, [["[Mon 17:00] What's on today?", ANSWERS]])
+
+    async def test_the_drop_is_logged_and_on_the_voice_trace(self):
+        from core.runtime.observability.turn_trace import start_turn_trace
+
+        trace = start_turn_trace("main", 1)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            await self._specialist([CANCELLED, "[Mon 17:00] scan this", ANSWERS])
+
+        self.assertIn("Dropped 2 unanswered copies of the words this turn repeats, from receipt-processor's history",
+                      out.getvalue())
+        (event,) = [e for e in trace.events if e["kind"] == "repeats_dropped"]
+        self.assertEqual((event["agent"], event["count"]), ("receipt-processor", 2))
+
+    async def test_a_cancelled_run_leaves_its_words_and_the_next_voice_turn_drops_them(self):
+        """The sequence in production: LangGraph saves the run's input as it
+        starts, the run is cancelled while the model works (you went on
+        talking), and the next turn on the same history carries the words
+        again."""
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        entered, never = asyncio.Event(), asyncio.Event()
+        read = []
+
+        async def ainvoke(state, config=None):
+            read.append([m.content for m in state["messages"]])
+            if len(read) == 1:
+                entered.set()
+                await never.wait()  # the model is still working when you go on talking
+            return {"messages": list(state["messages"]) + [AIMessage(content="Logged $12.40.")]}
+
+        concierge = MagicMock()
+        concierge.ainvoke = ainvoke
+        saver = InMemorySaver()
+        thread = {"configurable": {"thread_id": "receipt-processor:tool:receipts"}}
+        config = {"agent_id": "receipt-processor", "channels": ["receipts"], "tools": {}}
+        with patch("graphs.main.graph.create_react_agent", return_value=concierge), \
+             patch("core.loaders.agents_loader.AgentsLoader", return_value=self._loader(hosts=(), eligible=())):
+            graph = create_graph(llm=MagicMock(), tools=[], checkpointer=saver, agent_id="receipt-processor",
+                                 config=config)
+            with _session(agent_id="receipt-processor", source="tool", channel="receipts", surface="voice"):
+                run = asyncio.create_task(graph.ainvoke({"messages": [HumanMessage(content=CANCELLED)]}, thread))
+                await entered.wait()
+                run.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await run
+                left = graph.get_state(thread).values["messages"]
+                self.assertEqual([m.content for m in left], [CANCELLED])
+
+                state = await graph.ainvoke({"messages": [HumanMessage(content=ANSWERS)]}, thread)
+
+        self.assertEqual(read, [[CANCELLED], [ANSWERS]])
+        self.assertEqual([m.content for m in state["messages"]], [ANSWERS, "Logged $12.40."])
+        self.assertEqual([m.content for m in graph.get_state(thread).values["messages"]],
+                         [ANSWERS, "Logged $12.40."])
+
+
 if __name__ == "__main__":
     unittest.main()

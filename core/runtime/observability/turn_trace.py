@@ -37,6 +37,9 @@ Repeated events are kept in order as `events`:
 - `model_hedge`: the stall guard sent a call again, having had no first chunk
   by its deadline (`phase` sent, `after_s`); then which request answered first
   (`phase` won, `by` first or second);
+- `repeats_dropped`: the copies of the user's words a cancelled turn left
+  unanswered, which this turn's message repeats, were dropped from an agent's
+  history (`agent`, `count`; graphs/main, core/runtime/history/repeats.py);
 - `prune_wait`: the milliseconds a turn waited for the previous turn's
   history prune, only when there was one to wait for.
 

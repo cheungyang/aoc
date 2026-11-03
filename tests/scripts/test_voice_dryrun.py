@@ -192,6 +192,22 @@ class TestSpeechContract:
                  "2. It arrives Friday at 14:30.")
         assert speech_coverage(reply, "Your order shipped and arrives Friday at two thirty.") == []
 
+    def test_a_thousands_separator_is_part_of_one_number(self):
+        """market-movers on Nov 3: a price of $1,409.38 ended the matrix run."""
+        reply = "NVDA is at $1,409.38, the S&P 500 at 6,712.15, and 1,250 shares are yours."
+        speech = ("Nvidia is at fourteen hundred and nine dollars and thirty-eight cents, the S and P 500 at "
+                  "6,712.15, and twelve hundred fifty shares are yours.")
+        assert replay.missed_numbers(reply, speech) == []
+        assert replay.missed_numbers(reply, "Nvidia is up, and so is the S and P.") == [
+            "$1,409.38", "500", "6,712.15", "1,250"]
+        assert check_speech(self.result(reply=reply, speech=speech)) == ([], [])
+
+    def test_what_isnt_one_number_isnt_required_and_breaks_nothing(self):
+        """A version, an address, a ratio: neither side of the check reads them as numbers."""
+        assert replay.missed_numbers("Update to 1.2.3 on 10.0.0.1, and set the screen to 16:9.",
+                                     "Update it and set the screen.") == []
+        assert spoken_numbers("1.2.3, 10.0.0.1 and 1.5:30") == set()
+
     def result(self, **kw):
         base = dict(case_id="c", run=1, marks={}, reply="Mount Tam is 45 minutes away.",
                     speech="Mount Tam is forty-five minutes away.")
@@ -330,6 +346,31 @@ async def test_run_case_fails_a_reply_without_speech_and_speaks_the_fallback(tmp
     assert result.speech_missing
     assert result.failures == ["no <speech> block (the fallback was spoken)"]
     assert result.spoken == ["The kitchen light is on. The rest is in the channel."]
+
+
+@pytest.mark.asyncio
+async def test_a_gap_in_the_speech_checks_is_noted_and_the_benchmark_goes_on(tmp_path):
+    """The checks read whatever the model wrote; one they can't read is noted
+    on its run, instead of ending a benchmark hours in."""
+    case = {"id": "market-movers", "room": "market-scout", "utterance": "How are my stocks?", "expect": {}}
+    raw = "<speech>Up a little today.</speech>Up a little today."
+
+    async def fake_stream(prompt, session):
+        yield {"type": "token", "content": raw}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    broken = ValueError("could not convert string to float: '1,409.38'")
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader, \
+         patch.object(replay, "check_speech", side_effect=broken):
+        loader.return_value.get_agent.return_value = agent
+        result = await run_case(case, 1, db, measure_tts=False)
+
+    assert result.passed, result.failures
+    assert result.notes == ["speech check skipped: ValueError: could not convert string to float: '1,409.38'"]
 
 
 @pytest.mark.asyncio

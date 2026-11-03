@@ -450,6 +450,21 @@ def _number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
+# A time of day in digits, a number with thousands separators, and a plain one.
+_TIME = re.compile(r"(\d{1,2}):(\d{2})")
+_THOUSANDS = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")
+_PLAIN = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _plain_number(token: str) -> Optional[str]:
+    """`token` as one plain number, its thousands separators out ("1,409.38"
+    gives "1409.38"); None when it isn't one number: a version (1.2.3), an
+    address, digits run together with commas."""
+    if _THOUSANDS.fullmatch(token):
+        token = token.replace(",", "")
+    return token if _PLAIN.fullmatch(token) else None
+
+
 def spoken_numbers(text: str) -> Set[str]:
     """Every number `text` says, as digits: "45", "forty-five" and "forty five"
     all give "45"; "seven thirty" gives "7" and "30"; "October" gives "10"."""
@@ -518,9 +533,11 @@ def spoken_numbers(text: str) -> Set[str]:
 def _digit_forms(token: str) -> Set[str]:
     """A number written in digits, in the forms speech may give it."""
     if ":" in token:  # a time: the hour either way round the clock, and the minutes
-        hour, _, minutes = token.partition(":")
-        forms = {str(int(hour)), str(int(hour) % 12 or 12)}
-        return forms | ({str(int(minutes))} if minutes.isdigit() and int(minutes) else set())
+        time = _TIME.fullmatch(token)
+        if not time:
+            return set()
+        hour, minutes = int(time.group(1)), int(time.group(2))
+        return {str(hour), str(hour % 12 or 12)} | ({str(minutes)} if minutes else set())
     token = token.replace(",", "")
     try:
         return {_number(float(token))}
@@ -530,7 +547,8 @@ def _digit_forms(token: str) -> Set[str]:
 
 def _required_numbers(reply: str) -> List[Tuple[str, List[Set[str]]]]:
     """(label, alternatives): each number of the reply that speech must keep, with
-    the sets of spoken forms that count as keeping it."""
+    the sets of spoken forms that count as keeping it. What isn't one number --
+    a version (1.2.3), an address, a ratio (16:9) -- isn't required."""
     text = re.sub(r"```.*?```|`[^`]*`|https?://\S+|\]\([^)]*\)|\S*/\S*", " ", reply, flags=re.DOTALL)
     text = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", text, flags=re.MULTILINE)  # list markers
     required = []
@@ -545,20 +563,28 @@ def _required_numbers(reply: str) -> List[Tuple[str, List[Set[str]]]]:
         if re.match(r"-\d", text[match.end():match.end() + 2]) or re.search(r"\d-$", text[:match.start()]):
             continue  # the rest of an ISO date
         if ":" in token:
-            hour, _, minutes = token.partition(":")
-            alternatives = [{str(int(hour))}, {str(int(hour) % 12 or 12)}]
-            if minutes.isdigit() and int(minutes):
-                alternatives = [a | {str(int(minutes))} for a in alternatives]
+            time = _TIME.fullmatch(token)
+            if not time:
+                continue  # not a time of day
+            hour, minutes = int(time.group(1)), int(time.group(2))
+            alternatives = [{str(hour)}, {str(hour % 12 or 12)}]
+            if minutes:
+                alternatives = [a | {str(minutes)} for a in alternatives]
             required.append((token, alternatives))
-        elif "." in token and money:  # $3.50: dollars and cents
-            dollars, _, cents = token.partition(".")
-            forms = {str(int(dollars))} | ({str(int(cents))} if int(cents) else set())
-            required.append((f"${token}", [{_number(float(token))}, forms]))
-        elif "." in token:
-            whole, _, fraction = token.partition(".")
-            required.append((token, [{_number(float(token))}, {str(int(whole)), str(int(fraction))}]))
+            continue
+        number = _plain_number(token)
+        if number is None:
+            continue  # not one number
+        label = (money or "") + token
+        if "." in number:
+            whole, _, fraction = number.partition(".")
+            if money:  # $3.50: dollars and cents
+                forms = {str(int(whole))} | ({str(int(fraction))} if int(fraction) else set())
+            else:
+                forms = {str(int(whole)), str(int(fraction))}
+            required.append((label, [{_number(float(number))}, forms]))
         else:
-            required.append(((money or "") + token, [{_number(float(token.replace(",", "")))}]))
+            required.append((label, [{_number(float(number))}]))
     return required
 
 
@@ -948,7 +974,12 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     result.tokens = replay_tokens(started, db_path)
     result.blocked_writes = [f"{tool}.{action} {target or ''}".strip() for tool, action, target in BLOCKED_WRITES]
     result.failures += check_expectations(case, result)
-    speech_failures, result.notes = check_speech(result)
+    try:
+        speech_failures, result.notes = check_speech(result)
+    except Exception as e:
+        # The checks read whatever the model wrote. A gap in them is noted on
+        # this run, and must not end a benchmark that has run for hours.
+        speech_failures, result.notes = [], [f"speech check skipped: {type(e).__name__}: {e}"]
     result.failures += speech_failures
     return result
 
