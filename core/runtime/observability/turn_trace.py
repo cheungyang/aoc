@@ -34,6 +34,9 @@ Repeated events are kept in order as `events`:
   `status` of 408, 429, 500, 502 or 504, or none for a dropped connection)
   or by the model wrapper (503), with the wait before it (`wait_s`) when known
   (core/runtime/model/retry.py);
+- `model_hedge`: the stall guard sent a call again, having had no first chunk
+  by its deadline (`phase` sent, `after_s`); then which request answered first
+  (`phase` won, `by` first or second);
 - `prune_wait`: the milliseconds a turn waited for the previous turn's
   history prune, only when there was one to wait for.
 

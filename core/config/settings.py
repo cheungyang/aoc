@@ -305,6 +305,11 @@ class Config:
     # of backoff. `LLM_MAX_RETRIES`, min 1 (1 = no retries).
     llm_max_retries = Setting("LLM_MAX_RETRIES", 6, int, minimum=1)
 
+    # The stall guard on voice turns' model calls (core.runtime.model.retry): a
+    # call with no first chunk by its tier's deadline is sent again, and the
+    # first of the two to answer is used. `LLM_STALL_GUARD`, false turns it off.
+    llm_stall_guard = Setting("LLM_STALL_GUARD", True, bool)
+
     # The one cap on concurrent model-driven executions across the system
     # (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1.
     max_concurrency = Setting("AOC_MAX_CONCURRENCY", DEFAULT_MAX_CONCURRENCY, int, minimum=1, warn=True)

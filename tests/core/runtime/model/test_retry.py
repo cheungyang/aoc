@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock, MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
@@ -15,6 +17,8 @@ from langchain_core.outputs import ChatGenerationChunk, ChatGeneration, ChatResu
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
+from core.config.models import FLASH, FLASH_LITE, PRO
+from core.runtime.foundation.context import current_execution_context
 from core.runtime.model import retry as llm_retry
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI, is_503_error, backoff_delay
 from core.runtime.observability.turn_trace import start_turn_trace
@@ -358,6 +362,175 @@ class TestTheSdksOwnRetriesShow(unittest.IsolatedAsyncioTestCase):
         line = self.printed.call_args.args[0]
         self.assertTrue(line.startswith("[LLMRetry] SDK retry agent="), line)
         self.assertIn("retry_in=0.0s: 429 RESOURCE_EXHAUSTED", line)
+
+
+def _stalls(*scripts):
+    """A stand-in for the SDK's stream: each request sent takes the next script,
+    (seconds before its first chunk, or an asyncio.Event to wait for; [texts,
+    or an exception to raise]). Also returns a log of how many requests were
+    sent and which streams ended: finished, failed, cancelled or closed."""
+    log = {"sent": 0, "ended": []}
+
+    def fake(self, messages, stop=None, run_manager=None, **kwargs):
+        index = log["sent"]
+        log["sent"] += 1
+        delay, items = scripts[index]
+
+        async def stream():
+            try:
+                await (delay.wait() if isinstance(delay, asyncio.Event) else asyncio.sleep(delay))
+                for item in items:
+                    if isinstance(item, BaseException):
+                        raise item
+                    yield _text(item)
+            finally:
+                log["ended"].append(index)
+        return stream()
+    return fake, log
+
+
+class TestStallDeadlines(unittest.TestCase):
+
+    def test_each_tier_waits_well_past_its_usual_first_chunk(self):
+        self.assertEqual(llm_retry.STALL_DEADLINE_S, {FLASH_LITE: 5.0, FLASH: 8.0, PRO: 20.0})
+
+    def test_only_voice_turns_are_guarded_and_the_switch_turns_it_off(self):
+        on = lambda surface: patch.object(llm_retry, "try_context",
+                                          return_value=SimpleNamespace(get_surface=lambda: surface))
+        with on("voice"):
+            self.assertEqual(llm_retry._stall_deadline(f"models/{FLASH}"), 8.0)
+            self.assertIsNone(llm_retry._stall_deadline("gemini-pinned-version"))
+            with patch.object(llm_retry, "Config", return_value=SimpleNamespace(llm_stall_guard=False)):
+                self.assertIsNone(llm_retry._stall_deadline(FLASH))
+        with on("text"):
+            self.assertIsNone(llm_retry._stall_deadline(FLASH))
+        with patch.object(llm_retry, "try_context", return_value=None):
+            self.assertIsNone(llm_retry._stall_deadline(FLASH))
+
+
+class TestStallGuard(unittest.IsolatedAsyncioTestCase):
+    """On a voice turn, a call with no first chunk by its deadline is sent again:
+    the first of the two to answer is used, and the other is cancelled."""
+
+    DEADLINE = 0.05
+
+    def setUp(self):
+        self.llm = RetryingChatGoogleGenerativeAI(model="gemini-x", google_api_key="fake", max_retries=6)
+        patch.object(llm_retry, "STALL_DEADLINE_S", {"gemini-x": self.DEADLINE}).start()
+        patch.object(llm_retry, "resolve_thinking_level", lambda model: None).start()
+        patch.object(llm_retry, "_async_sleep", new=AsyncMock()).start()
+        patch.object(llm_retry, "_announce_retry", new=AsyncMock()).start()
+        self.printed = patch("builtins.print").start()
+        self.addCleanup(patch.stopall)
+
+    async def asyncSetUp(self):
+        self.trace = start_turn_trace("home-steward", 1)
+        self.on("voice")
+
+    @staticmethod
+    def on(surface):
+        current_execution_context.set(SimpleNamespace(agent_id="home-steward", get_surface=lambda: surface))
+
+    async def answer(self, *scripts, **kwargs):
+        fake, log = _stalls(*scripts)
+        patch.object(ChatGoogleGenerativeAI, "_astream", fake).start()
+        started = asyncio.get_running_loop().time()
+        text = "".join([gen.text async for gen in self.llm._astream([HumanMessage(content="hi")], **kwargs)])
+        log["seconds"] = asyncio.get_running_loop().time() - started
+        return text, log
+
+    def hedges(self):
+        return [(e["phase"], e.get("by")) for e in self.trace.events if e["kind"] == "model_hedge"]
+
+    async def test_an_answer_before_the_deadline_is_the_only_request(self):
+        text, log = await self.answer((0, ["Hel", "lo"]))
+        self.assertEqual((text, log["sent"]), ("Hello", 1))
+        self.assertEqual(self.hedges(), [])
+
+    async def test_a_hang_is_sent_again_and_the_first_to_answer_wins(self):
+        text, log = await self.answer((5, ["never"]), (0, ["Fast", " answer"]))
+        self.assertEqual(text, "Fast answer")
+        self.assertLess(log["seconds"], 1, "the answer doesn't wait for the hung request")
+        self.assertEqual(log["sent"], 2)
+        self.assertEqual(sorted(log["ended"]), [0, 1], "the hung request is cancelled, not left open")
+        self.assertEqual(self.hedges(), [("sent", None), ("won", "second")])
+        [sent] = [e for e in self.trace.events if e["kind"] == "model_hedge" and e["phase"] == "sent"]
+        self.assertEqual(sent["after_s"], self.DEADLINE)
+        self.assertEqual([e["kind"] for e in self.trace.events].count("model_reply"), 2, "one first chunk, one end")
+
+    async def test_the_first_request_still_wins_when_it_answers_first(self):
+        text, log = await self.answer((0.1, ["First"]), (5, ["never"]))
+        self.assertEqual(text, "First")
+        self.assertLess(log["seconds"], 1, "nor for the second, once the first has answered")
+        self.assertEqual(sorted(log["ended"]), [0, 1], "the second request is cancelled")
+        self.assertEqual(self.hedges(), [("sent", None), ("won", "first")])
+
+    async def test_a_tie_goes_to_the_first_request_and_the_second_is_closed(self):
+        both = asyncio.Event()
+        fake, log = _stalls((both, ["First"]), (both, ["Second"]))
+        patch.object(ChatGoogleGenerativeAI, "_astream", fake).start()
+
+        async def consume():
+            return "".join([gen.text async for gen in self.llm._astream([HumanMessage(content="hi")])])
+
+        task = asyncio.create_task(consume())
+        while log["sent"] < 2:
+            await asyncio.sleep(0.01)
+        both.set()  # both answer at the same moment
+        self.assertEqual(await task, "First")
+        self.assertEqual(sorted(log["ended"]), [0, 1], "the second, already streaming, is closed, not left open")
+
+    async def test_a_request_that_fails_leaves_the_race_to_the_other(self):
+        text, _ = await self.answer((0.1, [RuntimeError("connection reset")]), (0.2, ["Second"]))
+        self.assertEqual(text, "Second")
+
+    async def test_when_both_fail_the_first_error_goes_to_the_503_retry(self):
+        text, log = await self.answer((0.1, [_503()]), (0.15, [ValueError("second")]), (0, ["Retried"]))
+        self.assertEqual(text, "Retried")
+        self.assertEqual(log["sent"], 3, "two racers, then the 503 retry's request")
+
+    async def test_when_both_fail_otherwise_the_first_error_propagates(self):
+        with self.assertRaises(ValueError) as caught:
+            await self.answer((0.1, [ValueError("first")]), (0.15, [ValueError("second")]))
+        self.assertEqual(str(caught.exception), "first")
+
+    async def test_a_reply_with_no_chunks_is_an_empty_answer(self):
+        text, log = await self.answer((0, []))
+        self.assertEqual((text, log["sent"]), ("", 1))
+
+    async def test_a_turn_spoken_over_mid_race_cancels_both_requests(self):
+        fake, log = _stalls((5, ["a"]), (5, ["b"]))
+        patch.object(ChatGoogleGenerativeAI, "_astream", fake).start()
+
+        async def consume():
+            return [gen async for gen in self.llm._astream([HumanMessage(content="hi")])]
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(self.DEADLINE * 3)
+        self.assertEqual(log["sent"], 2)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(sorted(log["ended"]), [0, 1])
+
+    async def test_off_outside_voice_turns(self):
+        self.on("text")
+        text, log = await self.answer((0.2, ["Slow but sure"]))
+        self.assertEqual((text, log["sent"]), ("Slow but sure", 1))
+
+    async def test_off_when_switched_off(self):
+        with patch.object(llm_retry, "Config", return_value=SimpleNamespace(llm_stall_guard=False)):
+            _, log = await self.answer((0.2, ["Slow"]))
+        self.assertEqual(log["sent"], 1)
+
+    async def test_off_when_a_run_manager_is_passed(self):
+        _, log = await self.answer((0.2, ["Slow"]), run_manager=MagicMock())
+        self.assertEqual(log["sent"], 1, "its callbacks would fire for a racer that may lose")
+
+    async def test_not_after_a_429_on_the_same_call(self):
+        self.trace.event("model_retry", call=1, by="sdk", status=429, wait_s=1.0)  # as _SdkRetries records it
+        _, log = await self.answer((0.2, ["Slow"]))
+        self.assertEqual(log["sent"], 1)
 
 
 if __name__ == "__main__":

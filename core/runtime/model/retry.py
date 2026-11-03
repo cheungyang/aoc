@@ -32,6 +32,16 @@ only at INFO, which nothing shows, so they used to pass as plain latency.
 `_SdkRetries` prints each one too. Every retry, the SDK's and ours, is also a
 `model_retry` event on the voice turn's trace.
 
+The stall guard, on voice turns: a call that has no first chunk by its
+tier's deadline (STALL_DEADLINE_S, well past its usual wait, so thinking
+doesn't set it off) is sent a second time, and whichever of the two streams
+first is used; the other is cancelled. Calls hang now and then -- over 20 s
+for ~1.4% of FLASH's short replies and ~8.7% of PRO's in the month to Nov 2
+-- and a second request usually answers at once. It never makes a call
+slower, and it costs the second request's input tokens, only for calls that
+hang. Not after a 429 on the same call; `LLM_STALL_GUARD=false` turns it
+off. Each one is a `model_hedge` event on the trace.
+
 Every response also passes through here on its way out, so this is where the
 model's `<next_thinking>` pick is read and taken out of the text, streamed or
 not (core/runtime/model/thinking.py).
@@ -42,13 +52,15 @@ import logging
 import random
 import re
 import time
-from typing import Any, AsyncIterator, List, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from google.genai.types import HttpOptions, HttpRetryOptions
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from core.config.models import FLASH, FLASH_LITE, PRO
+from core.config.settings import Config
 from core.runtime.foundation import events
 from core.runtime.foundation.context import try_context
 from core.runtime.model.thinking import MarkerFilter, pick_thinking, resolve_thinking_level, take_marker
@@ -264,6 +276,92 @@ def _traced_call() -> Tuple[Optional[Any], Optional[int]]:
     return (trace, trace.calls) if trace is not None else (None, None)
 
 
+# --- the stall guard ------------------------------------------------------------
+
+# Seconds a call may go without its first chunk before the stall guard sends it
+# again. Well past each tier's usual wait on a voice turn -- the first call's
+# p90 was ~5 s on FLASH and ~12.6 s on PRO (low thinking), FLASH_LITE's short
+# replies came in ~1 s -- so it's a hang that sets it off, not thinking.
+STALL_DEADLINE_S: Dict[str, float] = {FLASH_LITE: 5.0, FLASH: 8.0, PRO: 20.0}
+
+
+def _stall_deadline(model: str) -> Optional[float]:
+    """The stall guard's deadline for a call to `model`, or None where it's off:
+    switched off (LLM_STALL_GUARD), outside a voice turn, or a model with no
+    deadline."""
+    if not Config().llm_stall_guard:
+        return None
+    ctx = try_context()
+    if ctx is None or ctx.get_surface() != "voice":
+        return None
+    return STALL_DEADLINE_S.get(str(model).removeprefix("models/"))
+
+
+def _rate_limited(trace: Optional[Any], call: Optional[int]) -> bool:
+    """True once the SDK has retried this call for a 429 (`_SdkRetries` traced
+    it): a second request would only add to the load it was refused for."""
+    return trace is not None and any(e.get("kind") == "model_retry" and e.get("status") == 429
+                                     and e.get("call") == call for e in trace.events)
+
+
+async def _next(stream: AsyncIterator[ChatGenerationChunk]) -> ChatGenerationChunk:
+    return await stream.__anext__()
+
+
+async def _close(stream: AsyncIterator[ChatGenerationChunk]) -> None:
+    """Closes a racer's stream, and so its request. Best effort: a loser that
+    won't close mustn't fail the turn the winner is answering."""
+    try:
+        await stream.aclose()
+    except Exception:
+        pass
+
+
+async def _first_of(start: Callable[[], AsyncIterator[ChatGenerationChunk]], deadline: float,
+                    may_hedge: Callable[[], bool], hedged: Callable[[], None]
+                    ) -> Tuple[AsyncIterator[ChatGenerationChunk], Optional[ChatGenerationChunk], int]:
+    """The stall guard's race. Starts a stream; if it has no first chunk within
+    `deadline` seconds and `may_hedge()`, calls `hedged()` and starts the same
+    request again, and keeps whichever streams its first chunk first.
+
+    Returns that stream, its first chunk (None when it ended without one) and
+    which request it was (0 the first, 1 the second). The other request is
+    cancelled and closed, as both are if this is cancelled (a turn spoken
+    over). A racer that fails leaves the race to the other; when both fail,
+    the first one's error is raised, for the 503 retry to judge.
+
+    A stream waiting for its first chunk can't be closed while it waits, so
+    each wait runs as a task: cancelled first, then its stream closed.
+    """
+    streams = [start()]
+    waiting: Dict[asyncio.Task, int] = {asyncio.create_task(_next(streams[0])): 0}
+    errors: Dict[int, BaseException] = {}
+    winner: Optional[int] = None
+    try:
+        await asyncio.wait(list(waiting), timeout=deadline)
+        if not any(task.done() for task in waiting) and may_hedge():
+            hedged()
+            streams.append(start())
+            waiting[asyncio.create_task(_next(streams[1]))] = 1
+        while waiting:
+            done, _ = await asyncio.wait(list(waiting), return_when=asyncio.FIRST_COMPLETED)
+            for task in sorted(done, key=waiting.get):  # a tie goes to the first request
+                index = waiting.pop(task)
+                error = task.exception()
+                if error is None or isinstance(error, StopAsyncIteration):
+                    winner = index
+                    return streams[index], (task.result() if error is None else None), index
+                errors[index] = error
+        raise errors[min(errors)]
+    finally:
+        for task in waiting:
+            task.cancel()
+        await asyncio.gather(*waiting, return_exceptions=True)
+        for index, stream in enumerate(streams):
+            if index != winner:
+                await _close(stream)
+
+
 class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI that hides 503s from callers. See module docstring."""
 
@@ -362,6 +460,51 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 trace.model_reply(call, "done")
             return _picked(result)
 
+    def _sdk_stream(self, request: List[BaseMessage], stop: Optional[List[str]], run_manager: Any,
+                    kwargs: dict) -> AsyncIterator[ChatGenerationChunk]:
+        """One request's stream, from the SDK."""
+        return super()._astream(request, stop=stop, run_manager=run_manager, **kwargs)
+
+    async def _guarded(self, request: List[BaseMessage], stop: Optional[List[str]], run_manager: Any,
+                       kwargs: dict, trace: Optional[Any], call: Optional[int]) -> AsyncIterator[ChatGenerationChunk]:
+        """The SDK's stream for `request`, through the stall guard when it's on
+        for this call (`_stall_deadline`, `_first_of`).
+
+        Not when a run manager is passed: the SDK's stream would fire its
+        callbacks for a racer's chunk that may lose. LangChain passes none, and
+        fires them itself on what this yields, so only the winner's text ever
+        reaches the channel or the speech."""
+        deadline = None if run_manager is not None else _stall_deadline(self.model)
+        if deadline is None:
+            async for gen in self._sdk_stream(request, stop, run_manager, kwargs):
+                yield gen
+            return
+
+        sent = False
+
+        def hedged() -> None:
+            nonlocal sent
+            sent = True
+            print(f"[LLMRetry] stall guard: no first chunk after {deadline:g}s agent={_agent_id()} "
+                  f"model={self.model}; sent it again")
+            if trace is not None:
+                trace.event("model_hedge", call=call, phase="sent", after_s=deadline)
+
+        stream, first, which = await _first_of(lambda: self._sdk_stream(request, stop, run_manager, kwargs),
+                                               deadline, lambda: not _rate_limited(trace, call), hedged)
+        if sent:
+            by = "second" if which else "first"
+            print(f"[LLMRetry] stall guard: the {by} request answered first agent={_agent_id()} model={self.model}")
+            if trace is not None:
+                trace.event("model_hedge", call=call, phase="won", by=by)
+        try:
+            if first is not None:
+                yield first
+                async for gen in stream:
+                    yield gen
+        finally:
+            await _close(stream)
+
     async def _astream(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         kwargs = self._with_thinking(self._without_sdk_503_retry(kwargs))
         trace, call = _traced_call()
@@ -374,7 +517,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         while True:
             request = [*messages, AIMessage(content=partial)] if partial else messages
             try:
-                async for gen in super()._astream(request, stop=stop, run_manager=run_manager, **kwargs):
+                async for gen in self._guarded(request, stop, run_manager, kwargs, trace, call):
                     if trace is not None and not replied:
                         trace.model_reply(call, "first_chunk")
                         replied = True
