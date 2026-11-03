@@ -1,7 +1,9 @@
 """Git sync core module for synchronizing PKM Obsidian Vault and Main Codebase.
 
 Provides robust synchronization logic:
-1. PKM Obsidian Vault: Staged add, commit, pull with remote conflict resolution (-X theirs), and push.
+1. PKM Obsidian Vault: Staged add, commit, pull with automatic conflict resolution, and push.
+   Conflicts favor remote content (-X theirs) by default, or local content (-X ours)
+   with prefer="local", for a machine you edit on whose changes must win.
 2. Main Codebase: Pull updates only, resolving conflicts with remote content.
 3. Formatted error messages for scheduling agents if manual resolution is required.
 """
@@ -14,6 +16,11 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
 
 from core.config.settings import Config
+
+# Whose content wins a PKM vault merge conflict (see sync_pkm_vault).
+PREFER_REMOTE = "remote"
+PREFER_LOCAL = "local"
+PREFER_CHOICES = (PREFER_REMOTE, PREFER_LOCAL)
 
 
 class GitSyncError(Exception):
@@ -147,24 +154,28 @@ def get_uncommitted_files(path: str) -> List[str]:
 
 
 def get_unmerged_files(path: str) -> List[str]:
-    """Gets a list of currently conflicted / unmerged files."""
+    """Gets a list of currently conflicted / unmerged files.
+
+    Paths are read NUL-separated (-z) so they come back verbatim. Otherwise git
+    C-quotes non-ASCII names (e.g. the emoji-named TickTick lists), and a quoted
+    name matches nothing when handed back to `git checkout` or `git rm`.
+    """
     # Method 1: diff filter=U
-    res = run_git_cmd(["diff", "--name-only", "--diff-filter=U"], cwd=path)
+    res = run_git_cmd(["diff", "--name-only", "--diff-filter=U", "-z"], cwd=path)
     conflicts = set()
-    if res.returncode == 0 and res.stdout.strip():
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if line:
-                conflicts.add(line)
+    if res.returncode == 0 and res.stdout:
+        for name in res.stdout.split("\0"):
+            if name:
+                conflicts.add(name)
 
     # Method 2: status porcelain checks for conflict codes
-    res_status = run_git_cmd(["status", "--porcelain"], cwd=path)
+    res_status = run_git_cmd(["status", "--porcelain", "-z"], cwd=path)
     if res_status.returncode == 0:
-        for line in res_status.stdout.splitlines():
-            if len(line) >= 3:
-                code = line[:2]
+        for entry in res_status.stdout.split("\0"):
+            if len(entry) >= 3:
+                code = entry[:2]
                 if code in ("UU", "AA", "UD", "DU", "DD", "AU", "UA"):
-                    filename = line[3:].strip()
+                    filename = entry[3:]
                     if filename:
                         conflicts.add(filename)
 
@@ -200,19 +211,84 @@ def resolve_conflicts_with_theirs(path: str, remote_ref: str = "origin/main") ->
     return (len(remaining) == 0), remaining
 
 
+def resolve_conflicts_with_ours(path: str) -> Tuple[bool, List[str]]:
+    """
+    Attempts to automatically resolve merge conflicts favoring local content,
+    the mirror of resolve_conflicts_with_theirs. `-X ours` already settles
+    conflicting hunks; what reaches here are whole-file conflicts (modify/delete).
+    - If file exists locally (HEAD): checkout local version and add.
+    - If file deleted locally: rm file.
+    Returns (success_boolean, remaining_conflicted_files).
+    """
+    unmerged = get_unmerged_files(path)
+    if not unmerged:
+        return True, []
+
+    for file_path in unmerged:
+        # Check if file exists on the local side (HEAD is still the pre-merge commit)
+        cat_res = run_git_cmd(["cat-file", "-e", f"HEAD:{file_path}"], cwd=path)
+        if cat_res.returncode == 0:
+            # Local has the file -> keep local version
+            checkout_res = run_git_cmd(["checkout", "--ours", "--", file_path], cwd=path)
+            if checkout_res.returncode != 0:
+                # Fallback to checkout explicitly from HEAD
+                run_git_cmd(["checkout", "HEAD", "--", file_path], cwd=path)
+            run_git_cmd(["add", "--", file_path], cwd=path)
+        else:
+            # File was deleted locally -> keep it deleted
+            run_git_cmd(["rm", "-f", "--", file_path], cwd=path)
+
+    remaining = get_unmerged_files(path)
+    return (len(remaining) == 0), remaining
+
+
+def get_autocommit_blocker(path: str) -> Tuple[Optional[str], List[str]]:
+    """
+    Says why committing everything (`git add -A` + commit) is unsafe right now.
+    Returns (reason, unmerged_files), or (None, []) when it is safe.
+
+    A vault someone works in can be mid-operation when a scheduled sync fires:
+    - Unmerged paths (a conflicted pull, by hand or by Obsidian Git): staging
+      them would commit, and then push, the conflict markers.
+    - A detached HEAD (a rebase or bisect in progress, an old commit checked
+      out): there is no branch to commit on or push.
+    """
+    # The index's own record of unresolved paths: one command, verbatim (-z) paths.
+    res = run_git_cmd(["ls-files", "--unmerged", "-z"], cwd=path)
+    if res.returncode == 0 and res.stdout:
+        # Entries are "<mode> <object> <stage>\t<path>", one per conflict stage.
+        unmerged = sorted({entry.split("\t", 1)[1] for entry in res.stdout.split("\0") if "\t" in entry})
+        if unmerged:
+            return "it has unresolved merge conflicts", unmerged
+
+    head_res = run_git_cmd(["symbolic-ref", "-q", "HEAD"], cwd=path)
+    if head_res.returncode != 0:
+        return "HEAD is detached (is a rebase or bisect in progress?)", []
+    return None, []
+
+
 def sync_pkm_vault(
     pkm_dir: Optional[str] = None,
     remote_name: Optional[str] = None,
     dry_run: bool = False,
     verbose: bool = False,
+    prefer: str = PREFER_REMOTE,
 ) -> GitSyncResult:
     """
     Synchronizes the PKM Obsidian Vault:
     1. git add -A
     2. git commit all changes
-    3. git pull (resolving conflicts with remote content automatically)
+    3. git pull (resolving conflicts automatically, keeping the `prefer` side)
     4. git push
+
+    `prefer` is whose content wins a conflict: "remote" (default) defers to
+    what other hosts pushed, as the NAS does; "local" keeps this checkout's
+    edits, for the machine you edit on. The losing side stays in the history.
     """
+    if prefer not in PREFER_CHOICES:
+        raise ValueError(f"prefer must be one of {PREFER_CHOICES}, not {prefer!r}")
+    favor_local = prefer == PREFER_LOCAL
+
     target = "PKM Obsidian Vault"
     pkm_path = os.path.abspath(os.path.expanduser(pkm_dir)) if pkm_dir else Config().pkm_dir
     pkm_path = os.path.abspath(os.path.expanduser(pkm_path))
@@ -230,11 +306,24 @@ def sync_pkm_vault(
     remote = remote_name or get_default_remote(pkm_path)
     remote_ref = f"{remote}/{branch}"
 
+    blocker, unmerged = get_autocommit_blocker(pkm_path)
+    if blocker:
+        result.status = "conflict" if unmerged else "error"
+        result.conflicted_files = unmerged
+        result.error = f"Skipped PKM vault sync because {blocker}. Finish or abort that by hand; nothing was committed."
+        if unmerged:
+            result.error += "\nFiles requiring manual resolution:\n" + "\n".join(f"  - {f}" for f in unmerged)
+        result.message = result.error
+        return result
+
     if dry_run:
         uncommitted = get_uncommitted_files(pkm_path)
         result.status = "dry_run"
         result.committed_files = uncommitted
-        result.message = f"[DRY-RUN] Would add and commit {len(uncommitted)} files, pull from {remote_ref}, and push."
+        result.message = (
+            f"[DRY-RUN] Would add and commit {len(uncommitted)} files, "
+            f"pull from {remote_ref} (conflicts favor {prefer}), and push."
+        )
         return result
 
     try:
@@ -278,9 +367,10 @@ def sync_pkm_vault(
             result.message = result.error
             return result
 
-        # Attempt pull / merge favoring remote changes on conflict
+        # Attempt pull / merge favoring the preferred side's changes on conflict
         merge_res = run_git_cmd(
-            ["merge", remote_ref, "-X", "theirs", "-m", "Merge remote changes into PKM vault (favor remote content)"],
+            ["merge", remote_ref, "-X", "ours" if favor_local else "theirs",
+             "-m", f"Merge remote changes into PKM vault (favor {prefer} content)"],
             cwd=pkm_path
         )
 
@@ -288,23 +378,27 @@ def sync_pkm_vault(
             # Merge encountered conflicts or failed
             conflicts = get_unmerged_files(pkm_path)
             if conflicts:
-                # Attempt manual conflict resolution with --theirs
-                resolved_ok, remaining_conflicts = resolve_conflicts_with_theirs(pkm_path, remote_ref)
+                # Attempt manual conflict resolution with --ours / --theirs
+                if favor_local:
+                    resolved_ok, remaining_conflicts = resolve_conflicts_with_ours(pkm_path)
+                else:
+                    resolved_ok, remaining_conflicts = resolve_conflicts_with_theirs(pkm_path, remote_ref)
                 if resolved_ok:
                     # Complete merge commit
-                    fin_commit = run_git_cmd(["commit", "--no-edit", "-m", "Auto-resolved conflicts favoring remote content"], cwd=pkm_path)
+                    resolved_msg = f"Auto-resolved conflicts favoring {prefer} content"
+                    fin_commit = run_git_cmd(["commit", "--no-edit", "-m", resolved_msg], cwd=pkm_path)
                     if fin_commit.returncode != 0:
                         # Fallback commit
-                        run_git_cmd(["commit", "-m", "Auto-resolved conflicts favoring remote content"], cwd=pkm_path)
+                        run_git_cmd(["commit", "-m", resolved_msg], cwd=pkm_path)
                     result.pulled = True
-                    result.pull_details = f"Merged updates from {remote_ref} (conflicts in {len(conflicts)} files auto-resolved with remote)."
+                    result.pull_details = f"Merged updates from {remote_ref} (conflicts in {len(conflicts)} files auto-resolved with {prefer})."
                 else:
                     # Could not resolve automatically!
                     run_git_cmd(["merge", "--abort"], cwd=pkm_path)
                     result.status = "conflict"
                     result.conflicted_files = remaining_conflicts
                     result.error = (
-                        f"Failed to automatically resolve conflicts with remote in PKM Obsidian Vault.\n"
+                        f"Failed to automatically resolve conflicts with {prefer} in PKM Obsidian Vault.\n"
                         f"Files requiring manual resolution:\n" + "\n".join(f"  - {f}" for f in remaining_conflicts)
                     )
                     result.message = result.error
@@ -502,10 +596,12 @@ def sync_all(
     verbose: bool = False,
     skip_pkm: bool = False,
     skip_codebase: bool = False,
+    prefer: str = PREFER_REMOTE,
 ) -> Dict[str, Any]:
     """
     Executes full synchronization for both PKM Obsidian Vault and Main Codebase.
     Returns a dictionary with status, results, and formatted summary or error string.
+    `prefer` decides PKM vault conflicts only; the codebase always takes the remote's content.
     """
     results: Dict[str, GitSyncResult] = {}
     errors: List[str] = []
@@ -513,7 +609,7 @@ def sync_all(
 
     # 1. Sync PKM Obsidian Vault
     if not skip_pkm:
-        pkm_res = sync_pkm_vault(pkm_dir=pkm_dir, dry_run=dry_run, verbose=verbose)
+        pkm_res = sync_pkm_vault(pkm_dir=pkm_dir, dry_run=dry_run, verbose=verbose, prefer=prefer)
         results["pkm_vault"] = pkm_res
         if not pkm_res.is_success:
             errors.append(f"[{pkm_res.target}] {pkm_res.error or pkm_res.message}")

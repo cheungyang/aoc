@@ -192,6 +192,125 @@ class TestGitSync(unittest.TestCase):
             self.assertIn("conflicted_file_2.md", result.conflicted_files)
             self.assertIn("conflicted_file_1.md", result.error)
 
+    # --- prefer="local": the machine you edit on keeps its own edits -----------
+
+    def _git(self, cwd, *args, check=True):
+        return subprocess.run(["git", *args], cwd=cwd, check=check, capture_output=True, text=True)
+
+    def _write(self, repo, rel_path, content):
+        path = os.path.join(repo, rel_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def _read(self, repo, rel_path):
+        with open(os.path.join(repo, rel_path), encoding="utf-8") as f:
+            return f.read()
+
+    def _clone_other(self):
+        """A second clone, standing in for the other host (the NAS)."""
+        other = os.path.join(self.temp_dir, "pkm_other")
+        self._git(self.temp_dir, "clone", "-q", self.remote_dir, other)
+        self._git(other, "config", "user.name", "Other User")
+        self._git(other, "config", "user.email", "other@example.com")
+        return other
+
+    def _commit_and_push(self, repo, message):
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", message)
+        self._git(repo, "push", "-q", "origin", "main")
+
+    def _remote_file(self, rel_path):
+        """The file as the remote's main has it, or None when it is absent there.
+        --git-dir, because git may be set to refuse implicit bare repositories."""
+        res = self._git(self.temp_dir, f"--git-dir={self.remote_dir}", "show", f"main:{rel_path}", check=False)
+        return res.stdout if res.returncode == 0 else None
+
+    def test_prefer_local_keeps_the_local_hunk_and_merges_the_rest(self):
+        """A hunk both sides changed keeps the local edit; the remote's other
+        changes still arrive, and the result is pushed."""
+        other = self._clone_other()
+        self._write(other, "README.md", "# PKM Vault\nRemote edit\n")
+        self._write(other, "remote_only.md", "From the NAS\n")
+        self._commit_and_push(other, "Remote edits")
+
+        self._write(self.pkm_local, "README.md", "# PKM Vault\nLocal edit\n")
+
+        result = sync_pkm_vault(pkm_dir=self.pkm_local, prefer="local")
+        self.assertEqual(result.status, "success", result.error)
+        self.assertTrue(result.pushed)
+        self.assertEqual(self._read(self.pkm_local, "README.md"), "# PKM Vault\nLocal edit\n")
+        self.assertEqual(self._read(self.pkm_local, "remote_only.md"), "From the NAS\n")
+        self.assertEqual(self._remote_file("README.md"), "# PKM Vault\nLocal edit\n")
+
+    def test_prefer_local_keeps_a_local_edit_to_a_file_the_remote_deleted(self):
+        """modify/delete is beyond -X ours, so resolve_conflicts_with_ours settles it.
+        The non-ASCII name checks that conflicted paths reach git verbatim."""
+        name = "ticktick/💪Alva.md"
+        self._write(self.pkm_local, name, "- [ ] task\n")
+        self._commit_and_push(self.pkm_local, "Add list")
+        other = self._clone_other()
+        self._git(other, "rm", "-q", name)
+        self._commit_and_push(other, "Remote deletes the list")
+
+        self._write(self.pkm_local, name, "- [ ] task\n- [ ] added on the Mac\n")
+
+        result = sync_pkm_vault(pkm_dir=self.pkm_local, prefer="local")
+        self.assertEqual(result.status, "success", result.error)
+        self.assertIn("added on the Mac", self._read(self.pkm_local, name))
+        self.assertIn("added on the Mac", self._remote_file(name) or "")
+
+    def test_prefer_local_keeps_a_local_deletion_of_a_file_the_remote_edited(self):
+        other = self._clone_other()
+        self._write(other, "README.md", "# PKM Vault\nRemote edit\n")
+        self._commit_and_push(other, "Remote edit")
+
+        os.remove(os.path.join(self.pkm_local, "README.md"))
+
+        result = sync_pkm_vault(pkm_dir=self.pkm_local, prefer="local")
+        self.assertEqual(result.status, "success", result.error)
+        self.assertFalse(os.path.exists(os.path.join(self.pkm_local, "README.md")))
+        self.assertIsNone(self._remote_file("README.md"))
+
+    def test_sync_leaves_an_unfinished_merge_alone(self):
+        """A conflicted merge left in the vault (by hand, or by Obsidian Git) is not
+        staged: that would commit, and then push, its conflict markers."""
+        other = self._clone_other()
+        self._write(other, "README.md", "# PKM Vault\nRemote edit\n")
+        self._commit_and_push(other, "Remote edit")
+        self._write(self.pkm_local, "README.md", "# PKM Vault\nLocal edit\n")
+        self._git(self.pkm_local, "commit", "-qam", "Local edit")
+        self._git(self.pkm_local, "fetch", "-q", "origin")
+        self._git(self.pkm_local, "merge", "origin/main", check=False)  # stops on the conflict
+        head = self._git(self.pkm_local, "rev-parse", "HEAD").stdout
+
+        for prefer in ("remote", "local"):
+            result = sync_pkm_vault(pkm_dir=self.pkm_local, prefer=prefer)
+            self.assertEqual(result.status, "conflict")
+            self.assertEqual(result.conflicted_files, ["README.md"])
+        self.assertEqual(self._git(self.pkm_local, "rev-parse", "HEAD").stdout, head)
+        self.assertIn("<<<<<<<", self._read(self.pkm_local, "README.md"))
+        self.assertEqual(self._remote_file("README.md"), "# PKM Vault\nRemote edit\n")
+
+    def test_sync_does_not_commit_on_a_detached_head(self):
+        self._git(self.pkm_local, "checkout", "-q", "--detach")
+        self._write(self.pkm_local, "note.md", "Written while detached\n")
+
+        result = sync_pkm_vault(pkm_dir=self.pkm_local)
+        self.assertEqual(result.status, "error")
+        self.assertIn("detached", result.error)
+        self.assertIn("?? note.md", self._git(self.pkm_local, "status", "--porcelain").stdout)
+
+    def test_prefer_rejects_an_unknown_side(self):
+        with self.assertRaises(ValueError):
+            sync_pkm_vault(pkm_dir=self.pkm_local, prefer="newest")
+
+    def test_sync_all_passes_prefer_to_the_vault_sync(self):
+        done = GitSyncResult(target="PKM Obsidian Vault", path=self.pkm_local, status="success")
+        with patch("core.git.sync.sync_pkm_vault", return_value=done) as vault_sync:
+            sync_all(pkm_dir=self.pkm_local, skip_codebase=True, prefer="local")
+        self.assertEqual(vault_sync.call_args.kwargs["prefer"], "local")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,14 +6,15 @@ Tasks:
 1. PKM Obsidian Vault:
    - git add new files
    - git commit all changes
-   - git pull (resolving conflicts with remote automatically via -X theirs / remote checkout)
+   - git pull (resolving conflicts with remote automatically via -X theirs / remote checkout;
+     with --prefer local, conflicts keep this checkout's content via -X ours / local checkout)
    - git push
    - If conflicts cannot be resolved automatically, outputs error listing files needing manual resolution.
 2. Main Codebase:
    - git pull for new updates only and resolve content with remote.
 
 Usage:
-    python3 scripts/git-sync.py [--pkm-dir ~/pkm] [--codebase-dir .] [--dry-run] [--verbose]
+    python3 scripts/sync_git.py [--pkm-dir ~/pkm] [--codebase-dir .] [--prefer remote|local] [--dry-run] [--verbose]
 """
 
 import sys
@@ -26,7 +27,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from core.git.sync import sync_all, GitSyncConflictError, GitSyncError
+from core.git.sync import sync_all, GitSyncConflictError, GitSyncError, PREFER_CHOICES, PREFER_REMOTE
 from core.config.settings import Config
 
 
@@ -72,6 +73,13 @@ def parse_args():
         action="store_true",
         help="Skip syncing the main codebase"
     )
+    parser.add_argument(
+        "--prefer",
+        choices=PREFER_CHOICES,
+        default=PREFER_REMOTE,
+        help="Whose content wins a PKM merge conflict: 'remote' (default, what other hosts "
+             "pushed) or 'local' (this checkout, for a machine you edit on)"
+    )
     return parser.parse_args()
 
 
@@ -93,7 +101,7 @@ def main():
 
     print("=== Starting Git Synchronization ===")
     if not args.skip_pkm:
-        print(f"PKM Vault: {pkm_dir}")
+        print(f"PKM Vault: {pkm_dir} (conflicts favor {args.prefer})")
     if not args.skip_codebase:
         print(f"Codebase:  {codebase_dir}")
     if args.dry_run:
@@ -108,6 +116,7 @@ def main():
             verbose=args.verbose,
             skip_pkm=args.skip_pkm,
             skip_codebase=args.skip_codebase,
+            prefer=args.prefer,
         )
 
         print(sync_output["summary"])
