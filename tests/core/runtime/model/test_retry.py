@@ -147,6 +147,71 @@ class TestRetryingStream(unittest.IsolatedAsyncioTestCase):
         self.assertIn(429, retry.http_status_codes)
 
 
+class TestResumeWithoutPrefill(unittest.IsolatedAsyncioTestCase):
+    """Gemini 3.5 Flash-Lite and 3.6 Flash refuse a request that ends on the
+    model's own turn, so a reply cut off mid-stream used to fail the turn after
+    the backoff ("does not support model prefilling"): 5 of the matrix's 234
+    FLASH and FLASH_LITE runs on Nov 3. The continuation now ends on a user
+    turn asking the model to go on."""
+
+    def setUp(self):
+        self.sleep = patch.object(llm_retry, "_async_sleep", new=AsyncMock()).start()
+        patch.object(llm_retry, "_announce_retry", new=AsyncMock()).start()
+        self.addCleanup(patch.stopall)
+
+    async def _run(self, model, script):
+        llm = RetryingChatGoogleGenerativeAI(model=model, google_api_key="fake", max_retries=6)
+        calls = []
+        patch.object(ChatGoogleGenerativeAI, "_astream", _scripted_stream(script, calls)).start()
+        out = [gen async for gen in llm._astream([HumanMessage(content="hi")])]
+        return "".join(g.text for g in out), calls
+
+    async def test_flash_and_flash_lite_are_asked_to_go_on(self):
+        for model in (FLASH, FLASH_LITE):
+            with self.subTest(model=model):
+                text, calls = await self._run(model, [[_text("The first half, "), _503()],
+                                                      [_text("and the second half.")]])
+                self.assertEqual(text, "The first half, and the second half.")
+                *sent, partial, ask = calls[1]["messages"]
+                self.assertEqual(sent, calls[0]["messages"])
+                self.assertEqual((type(partial), partial.content), (AIMessage, "The first half, "))
+                self.assertEqual((type(ask), ask.content), (HumanMessage, llm_retry.RESUME_ASK))
+
+    async def test_a_continuation_that_repeats_the_end_is_trimmed(self):
+        first = "Preheat the oven to 200C. Then chop the onions finely. "
+        text, _ = await self._run(FLASH, [[_text(first), _503()],
+                                          [_text("Then chop the onions finely. Fry them gently.")]])
+        self.assertEqual(text, first + "Fry them gently.")
+
+    async def test_pro_still_writes_on_from_the_text_itself(self):
+        _, calls = await self._run(PRO, [[_text("The first half, "), _503()], [_text("and the rest.")]])
+        self.assertIsInstance(calls[1]["messages"][-1], AIMessage)
+
+    def test_which_models_take_a_prefill(self):
+        for model in (FLASH, FLASH_LITE, f"models/{FLASH}-001"):
+            with self.subTest(model=model):
+                self.assertTrue(llm_retry._refuses_prefill(model))
+        for model in (PRO, "gemini-2.5-flash", ""):
+            with self.subTest(model=model):
+                self.assertFalse(llm_retry._refuses_prefill(model))
+
+    def test_the_list_is_what_the_client_accepts(self):
+        """The client checks before anything is sent, so each tier can be met
+        here: it accepts its resume, and refuses a prefill only if listed. A
+        change in langchain-google-genai's own (private) list shows up here."""
+        history = [HumanMessage(content="hi")]
+        prefill = [*history, AIMessage(content="The first half, ")]
+        for model in (FLASH, FLASH_LITE, PRO):
+            with self.subTest(model=model):
+                client = ChatGoogleGenerativeAI(model=model, google_api_key="fake")
+                client._prepare_request(llm_retry.resume_request(history, "The first half, ", model))
+                if llm_retry._refuses_prefill(model):
+                    with self.assertRaisesRegex(ValueError, "prefilling"):
+                        client._prepare_request(prefill)
+                else:
+                    client._prepare_request(prefill)
+
+
 class TestRetryingGenerate(unittest.IsolatedAsyncioTestCase):
     async def test_agenerate_retries_503(self):
         llm = RetryingChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key="fake")

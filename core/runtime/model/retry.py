@@ -14,8 +14,11 @@ Behaviour:
 * 503 before anything was streamed -> back off and resend the same request.
 * 503 after text was streamed -> back off and send a *continuation*: the
   original messages plus the partial text as a trailing model turn (a pure
-  prefill). Only the new chunks are yielded, so the aggregated AIMessage and
-  the Discord message read as one uninterrupted answer.
+  prefill). Gemini 3.5 Flash-Lite and 3.6 Flash refuse a request that ends on
+  the model's turn, so for them a user turn follows, asking the model to go on
+  from exactly where it stopped (`resume_request`). Only the new chunks are
+  yielded, so the aggregated AIMessage and the Discord message read as one
+  uninterrupted answer; the ask itself is never kept.
 * 503 after a tool-call or other non-text chunk was streamed -> not resumable,
   the error propagates as it always has.
 * Anything that is not a 503 propagates untouched.
@@ -55,7 +58,7 @@ import time
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 from google.genai.types import HttpOptions, HttpRetryOptions
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -82,6 +85,25 @@ _JITTER = 1.0
 # Minimum length of a repeated tail before it is treated as a seam to trim.
 _MIN_SEAM_OVERLAP = 20
 _MAX_SEAM_SCAN = 500
+
+# What a resume asks, after the text so far, of a model that refuses a request
+# ending on its own turn (`resume_request`).
+RESUME_ASK = ("Your reply above was cut off. Continue it from exactly where it stopped, "
+              "without repeating anything and without a preamble.")
+
+# The tiers that refuse a request ending on their own turn: the client
+# (langchain-google-genai) raises "does not support model prefilling" before
+# sending. Its own list is private; TestResumeWithoutPrefill holds this one to
+# what the client accepts.
+_NO_PREFILL = (FLASH, FLASH_LITE)
+
+
+def _refuses_prefill(model: str) -> bool:
+    """By name prefix ("models/gemini-3.6-flash-001" too): a wrong match only
+    adds the ask, which every model accepts; a missed one fails the resume."""
+    name = (model or "").lower().rsplit("/", 1)[-1]
+    return name.startswith(_NO_PREFILL)
+
 
 # Indirection so tests can skip the real backoff.
 _async_sleep = asyncio.sleep
@@ -191,6 +213,21 @@ def _is_text_only(gen: ChatGenerationChunk) -> bool:
         isinstance(b, str) or (isinstance(b, dict) and b.get("type") == "text")
         for b in content
     )
+
+
+def resume_request(messages: List[BaseMessage], partial: str, model: str) -> List[BaseMessage]:
+    """The request that continues a reply a 503 cut off after `partial`.
+
+    The text so far goes in as the model's own turn. A model that takes a
+    prefill writes on from it as it is. One that refuses a request ending on
+    its own turn (`_NO_PREFILL`) gets a user turn after it, asking it to go on
+    from exactly where it stopped. Either way only the new text is yielded,
+    after the seam is trimmed (`_trim_seam`).
+    """
+    request = [*messages, AIMessage(content=partial)]
+    if _refuses_prefill(model):
+        request.append(HumanMessage(content=RESUME_ASK))
+    return request
 
 
 def _trim_seam(gen: ChatGenerationChunk, partial: str) -> ChatGenerationChunk:
@@ -515,7 +552,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         trim_pending = False
         marker = MarkerFilter()  # the model's <next_thinking> pick, taken out as it streams
         while True:
-            request = [*messages, AIMessage(content=partial)] if partial else messages
+            request = resume_request(messages, partial, self.model) if partial else messages
             try:
                 async for gen in self._guarded(request, stop, run_manager, kwargs, trace, call):
                     if trace is not None and not replied:
