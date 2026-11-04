@@ -237,5 +237,23 @@ class TestNoInlineModelNames(unittest.TestCase):
                 self.assertIn(resolved, models.tiers_for(provider).values())
 
 
+class TestTierAndLevel(unittest.TestCase):
+    """`TIER:LEVEL`, as VOICE_LIGHT_MODEL and the voice dry run's --light name a light model."""
+
+    def test_a_tier_and_a_level_it_takes(self):
+        self.assertEqual(models.tier_and_level("FLASH_LITE:minimal"), ("FLASH_LITE", "minimal"))
+        self.assertEqual(models.tier_and_level(" flash-lite : Minimal "), ("FLASH_LITE", "minimal"))
+        self.assertEqual(models.tier_and_level("PRO:low"), ("PRO", "low"))
+
+    def test_anything_else_is_refused(self):
+        for text, message in [("TURBO:low", "unknown tier 'TURBO'"), ("IMAGE:low", "unknown tier 'IMAGE'"),
+                              ("FLASH", "FLASH doesn't take ''"), ("FLASH:max", "FLASH doesn't take 'max'"),
+                              ("PRO:minimal", "PRO doesn't take 'minimal' thinking: use low, medium, high"),
+                              ("", "unknown tier ''")]:
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
+                    models.tier_and_level(text)
+
+
 if __name__ == "__main__":
     unittest.main()

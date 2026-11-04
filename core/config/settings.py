@@ -310,6 +310,12 @@ class Config:
     # first of the two to answer is used. `LLM_STALL_GUARD`, false turns it off.
     llm_stall_guard = Setting("LLM_STALL_GUARD", True, bool)
 
+    # The light model a voice turn's first model call runs on: it speaks first,
+    # then answers or hands the turn to the agent's own model (graphs/voice).
+    # `TIER:LEVEL`, e.g. FLASH_LITE:minimal; `off` keeps every voice turn on the
+    # agent's own model. `VOICE_LIGHT_MODEL`.
+    voice_light_model = Setting("VOICE_LIGHT_MODEL", "off", strip=True)
+
     # The one cap on concurrent model-driven executions across the system
     # (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1.
     max_concurrency = Setting("AOC_MAX_CONCURRENCY", DEFAULT_MAX_CONCURRENCY, int, minimum=1, warn=True)

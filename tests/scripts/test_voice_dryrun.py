@@ -112,6 +112,14 @@ class TestExpectations:
         failures = check_expectations(case, self.result())
         assert len(failures) == 8, failures
 
+    def test_the_light_first_call_isnt_a_round_trip_of_the_budget(self):
+        """The light first call speaks while the agent's own calls run (graphs/voice)."""
+        case = {"expect": {"max_model_calls": 2}}
+        light = {"thinking": "minimal", "light": True}
+        assert check_expectations(case, self.result(model_calls=[light, {"thinking": "low"}, {"thinking": "low"}])) == []
+        assert check_expectations(case, self.result(model_calls=[light] + [{"thinking": "low"}] * 3)) == [
+            "3 model calls, budget 2"]
+
 
 class TestReport:
 
@@ -560,6 +568,32 @@ class TestCombos:
         assert [c.label for c in replay.rotated(combos, 1)] == ["PRO:low", "prod", "FLASH:low"]
         assert [c.label for c in replay.rotated(combos, 3)] == ["FLASH:low", "PRO:low", "prod"]
 
+    def test_a_light_model_goes_in_the_label(self):
+        """So runs with a light call never resume as, or get judged as, the reference's."""
+        assert replay.parse_light("flash_lite:MINIMAL") == "FLASH_LITE:minimal"
+        assert replay.parse_light("off") is None and replay.parse_light("") is None
+        with pytest.raises(ValueError, match="PRO doesn't take 'minimal'"):
+            replay.parse_light("PRO:minimal")
+        assert replay.Combo(light="FLASH_LITE:minimal").label == "prod+light:FLASH_LITE:minimal"
+        assert replay.Combo("PRO", "low", "FLASH:minimal").label == "PRO:low+light:FLASH:minimal"
+        assert replay.Combo("PRO", "low").label == replay.REFERENCE
+
+    def test_each_combo_goes_with_each_light_model(self):
+        def labels(**kwargs):
+            return [combo.label for combo in replay.combos_from(**kwargs)]
+
+        assert labels(combos=["prod"], lights=["FLASH_LITE:minimal", "FLASH:minimal"]) == [
+            "prod+light:FLASH_LITE:minimal", "prod+light:FLASH:minimal"]
+        assert labels(combos=["PRO:low"], lights=[None, "FLASH_LITE:minimal"]) == [
+            "PRO:low", "PRO:low+light:FLASH_LITE:minimal"]
+        assert labels(lights=[None]) == labels() == ["prod"]
+
+    @pytest.mark.asyncio
+    async def test_a_bad_light_model_is_refused_before_anything_runs(self, tmp_path):
+        with patch.object(replay, "run_case") as run, pytest.raises(SystemExit):
+            await replay.main(["--cases", _cases_file(tmp_path, CASES), "--light", "FLASH_LITE:max"])
+        run.assert_not_called()
+
 
 def _context(agent_id, **kwargs):
     """A context as stream_delegate mints one for the room's agent: no model or level of its own."""
@@ -683,6 +717,26 @@ class TestComboScope:
             "not on prod:medium: home-steward thought at low"]
         assert replay.combo_misses(replay.Combo(), calls) == []
 
+    def test_a_light_call_is_held_to_the_light_model(self):
+        calls = [{"agent": "home-steward", "model": FLASH_LITE, "thinking": "minimal", "light": True},
+                 {"agent": "home-steward", "model": PRO, "thinking": "low"}]
+        assert replay.combo_misses(replay.Combo("PRO", "low", "FLASH_LITE:minimal"), calls) == []
+        assert replay.combo_misses(replay.Combo(light="FLASH_LITE:minimal"), calls) == []
+        assert replay.combo_misses(replay.Combo("PRO", "low"), calls) == [
+            "not on PRO:low: home-steward made a light call"]
+        assert replay.combo_misses(replay.Combo("PRO", "low", "FLASH:minimal"), calls) == [
+            f"not on PRO:low+light:FLASH:minimal: home-steward's light call ran {FLASH_LITE} at minimal"]
+
+    def test_the_light_setting_holds_for_the_run_only(self):
+        from core.config.settings import Config
+
+        with Config().overriding(voice_light_model="FLASH:minimal"):
+            with replay.light_scope("FLASH_LITE:minimal"):
+                assert Config().voice_light_model == "FLASH_LITE:minimal"
+            with replay.light_scope(None):
+                assert Config().voice_light_model == "off"
+            assert Config().voice_light_model == "FLASH:minimal"
+
 
 @pytest.mark.asyncio
 async def test_run_combo_labels_the_run_and_checks_its_calls(tmp_path):
@@ -712,6 +766,37 @@ async def test_run_combo_labels_the_run_and_checks_its_calls(tmp_path):
     assert (held.combo, held.room) == ("FLASH:low", "home-automation")
     assert [(e["call"], e["phase"]) for e in held.model_replies] == [(1, "first_chunk")]
     assert missed.failures == [f"not on PRO:low: home-steward ran {FLASH}"]
+
+
+@pytest.mark.asyncio
+async def test_run_combo_runs_on_its_light_model(tmp_path):
+    from core.config.settings import Config
+    from core.runtime.observability.turn_trace import current_turn_trace
+
+    case = {"id": "lights", "room": "home-automation", "utterance": "Are the lights on?", "expect": {}}
+    raw = "<speech>The kitchen light is on.</speech>The kitchen light is on."
+    seen = []
+
+    async def fake_stream(prompt, session):
+        seen.append(Config().voice_light_model)  # what GraphBuilder reads
+        trace = current_turn_trace()
+        trace.event("model_call", call=1, agent="home-steward", model=FLASH_LITE, thinking="minimal", light=True)
+        yield {"type": "token", "content": raw, "agent_id": "home-steward"}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        loader.return_value.get_agent_config.return_value = {}
+        light = await replay.run_combo(case, 1, replay.Combo(light="FLASH_LITE:minimal"), db, measure_tts=False)
+        off = await replay.run_combo(case, 1, replay.Combo(), db, measure_tts=False)
+
+    assert seen == ["FLASH_LITE:minimal", "off"]
+    assert light.passed and light.combo == "prod+light:FLASH_LITE:minimal", light.failures
+    assert off.failures == ["not on prod: home-steward made a light call"]
 
 
 class TestBenchmarkReport:
@@ -772,6 +857,18 @@ class TestResuming:
             code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--out", str(out)])
         assert code == 0
         assert "| read | 1 | PASS |" in capsys.readouterr().out
+
+    @pytest.mark.asyncio
+    async def test_without_light_the_configured_light_model_is_in_the_label(self, tmp_path):
+        """With VOICE_LIGHT_MODEL set, a plain rerun is that light model's: it finds its stored runs."""
+        from core.config.settings import Config
+
+        out = tmp_path / "results.json"
+        out.write_text(json.dumps([_stored(combo="prod+light:FLASH_LITE:minimal")]))
+        with patch.object(replay, "isolate_sessions", side_effect=AssertionError("nothing to run")), \
+             Config().overriding(voice_light_model="FLASH_LITE:minimal"):
+            code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--out", str(out)])
+        assert code == 0
 
     def test_results_are_saved_whole_or_not_at_all(self, tmp_path):
         path = tmp_path / "bench" / "results.json"
@@ -880,6 +977,8 @@ class TestServiceCheck:
         assert replay.tiers_to_check(combos()) == [], "a plain replay times no combo"
         assert replay.tiers_to_check(combos(combos=["PRO:low,FLASH_LITE:minimal"])) == ["FLASH_LITE", "PRO"]
         assert replay.tiers_to_check(combos(thinking="low")) == list(replay.TIER_ORDER), "prod's agents use any"
+        assert replay.tiers_to_check(combos(combos=["PRO:low"], lights=["FLASH_LITE:minimal"])) == [
+            "FLASH_LITE", "PRO"], "and the light call's"
 
     def test_a_tier_is_slow_when_every_call_is_or_any_one_hangs(self):
         times = {"FLASH_LITE": [8.5, 11.5], "FLASH": [9.0, 1.0], "PRO": [5.0, 5.5]}

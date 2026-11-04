@@ -1,0 +1,9 @@
+{
+  "graph_id": "voice",
+  "name": "voice",
+  "description": "graphs/main for a voice turn whose first model call runs on a light model. GraphBuilder builds it for voice turns; it's never called as a subgraph.",
+  "emoji": "🎙️",
+  "subgraph": false,
+  "tools": {},
+  "skills": []
+}

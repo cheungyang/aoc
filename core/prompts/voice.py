@@ -16,13 +16,23 @@ from typing import Any, Optional, Tuple
 
 from core.prompts.base import Prompt, WorkerPrompt
 
+# Set in the turn's `turn_hints` once a voice turn's light first call has said
+# what the agent will do and handed the turn over (graphs/voice): the agent's
+# model then isn't asked to say it again before its tool calls.
+OPENER_HINT = "voice_opener"
 
+
+@dataclass
 class VoiceModePrompt(Prompt):
     """On a turn the user will hear, appended after the channel block (see
     `get_voice_mode_prompt`). The voice pipeline speaks the <speech> block and
-    posts everything after it to the text channel (core/channel/voice/speech/reply.py)."""
+    posts everything after it to the text channel (core/channel/voice/speech/reply.py).
+    `opener`: the turn's light first call already told the user what's being
+    checked, so the tool calls go without a <speech> block of their own."""
 
     template = "voice/voice_mode"
+
+    opener: bool = False
 
 
 class ScheduledVoiceModePrompt(Prompt):
@@ -61,6 +71,9 @@ def get_voice_mode_prompt() -> str:
 
     A scheduled run gets the scheduled variant inside `scheduled_speech_scope`:
     its post may be heard later, from the channel inbox.
+
+    Once a voice turn's light first call has handed the turn over
+    (`OPENER_HINT`), the block says the user already heard what's being done.
     """
     from core.runtime.foundation.context import try_context
     sess = try_context()
@@ -68,7 +81,7 @@ def get_voice_mode_prompt() -> str:
         return ""
     surface = sess.get_surface()
     if surface == "voice":
-        return VoiceModePrompt().render()
+        return VoiceModePrompt(opener=bool(sess.turn_hints.get(OPENER_HINT))).render()
     if surface == "scheduled" and sess.agent_id and sess.agent_id == _scheduled_speech_agent.get():
         return ScheduledVoiceModePrompt().render()
     return ""

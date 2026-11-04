@@ -55,7 +55,7 @@ import logging
 import random
 import re
 import time
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from google.genai.types import HttpOptions, HttpRetryOptions
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
@@ -402,6 +402,10 @@ async def _first_of(start: Callable[[], AsyncIterator[ChatGenerationChunk]], dea
 class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """ChatGoogleGenerativeAI that hides 503s from callers. See module docstring."""
 
+    # What a subclass adds to its calls' `model_call` events on the voice trace
+    # (the light first call's model says `light`: core/runtime/model/handover.py).
+    trace_fields: ClassVar[Dict[str, Any]] = {}
+
     def _attempts(self) -> int:
         # `max_retries=0` means "SDK default" to the Google client; match that.
         return self.max_retries if self.max_retries and self.max_retries > 0 else _SDK_DEFAULT_ATTEMPTS
@@ -435,7 +439,7 @@ class RetryingChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
                 kwargs = {**kwargs, "thinking_level": level}
         trace = current_turn_trace()
         if trace is not None:
-            trace.model_call(_agent_id(), self.model, level)
+            trace.model_call(_agent_id(), self.model, level, **self.trace_fields)
         return kwargs
 
     def _retry_delay(self, error: Exception, attempt: int, phase: str, chars: int) -> Optional[float]:

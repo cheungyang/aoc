@@ -210,12 +210,16 @@ def drop_repeats(messages: List[Any], ctx: Any) -> List[RemoveMessage]:
     return [RemoveMessage(id=message_id) for message_id in ids]
 
 
-def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, config=None, **kwargs):
-    """Compiles the router in front of the conversational ReAct agent."""
+def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, config=None, model=None, **kwargs):
+    """Compiles the router in front of the conversational ReAct agent.
+
+    `model` replaces `llm` in the ReAct step: graphs/voice passes one that
+    picks per call, `(state, runtime) -> runnable`, with tools bound by itself.
+    """
     agent_config = config or {}
     owner_agent_id = agent_id or agent_config.get("agent_id") or agent_config.get("id") or ""
 
-    concierge_agent = create_react_agent(llm, tools, prompt=prompt)
+    concierge_agent = create_react_agent(model or llm, tools, prompt=prompt)
 
     def _decide(state: MessagesState) -> Dict[str, Any]:
         """Resolves the route and stashes it for the conditional edge. On a

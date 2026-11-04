@@ -5,6 +5,15 @@ from typing import Dict, Any, List, Optional
 from core.loaders.hot_reloader import HotReloader
 from core.prompts.system import SubgraphsListPrompt
 
+
+def _is_subgraph(info: Optional[Dict[str, Any]]) -> bool:
+    """A loaded graph that's a subgraph: not main, nor one with `"subgraph": false`."""
+    if not info:
+        return False
+    config = info.get("config") or {}
+    return config.get("graph_id") != "main" and config.get("subgraph", True) is not False
+
+
 class GraphsLoader:
     _instance = None
     _graphs = None
@@ -135,6 +144,13 @@ class GraphsLoader:
         config = self.get_graph_config(graph_id)
         return config.get("skills", [])
 
+    def is_subgraph(self, graph_id: str) -> bool:
+        """Whether `graph_id` is a subgraph an agent may call (graph_call) or
+        check on (graph_status): not an agent's own flow -- graphs/main, or
+        one whose graph.json says `"subgraph": false` (graphs/voice, which
+        GraphBuilder builds for voice turns)."""
+        return _is_subgraph(self.get_graph(graph_id))
+
     def get_graphs_overview(self, ctx=None) -> str:
         if ctx is not None:
             from core.loaders.tools_loader import ToolsLoader
@@ -143,7 +159,7 @@ class GraphsLoader:
         self.load_graphs()
         lines = []
         for name in sorted(self._graphs.keys()):
-            if name == "main":
+            if not _is_subgraph(self._graphs[name]):
                 continue
             info = self._graphs[name]
             metadata = info.get("metadata", {})

@@ -39,6 +39,24 @@ class TestGraphStatusTool(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No active or paused subgraphs found", result)
         self.assertIn("#general", result)
 
+    @patch('tools.graph_status._coding_queue_status', return_value="")
+    @patch('tools.graph_status.GraphsLoader')
+    @patch('tools.graph_status.JobManager')
+    def test_an_agents_own_graph_is_never_checked(self, mock_job_manager_class, mock_graphs_loader_class,
+                                                  _mock_coding_queue):
+        """graphs/main and graphs/voice are agents' own graphs: built with no arguments, they'd fail."""
+        mock_loader = MagicMock()
+        mock_graphs_loader_class.return_value = mock_loader
+        mock_loader.list_graph_names.return_value = ["main", "content_creation", "voice"]
+        mock_loader.is_subgraph.side_effect = lambda name: name == "content_creation"
+        mock_graph = MagicMock()
+        mock_graph.get_state.return_value = None
+        mock_loader.get_graph.return_value = {"graph": mock_graph}
+        mock_job_manager_class.return_value.get_jobs.return_value = []
+
+        graph_status.func(channel="general")
+        mock_loader.get_graph.assert_called_once_with("content_creation")
+
     @patch('tools.graph_status.GraphsLoader')
     @patch('tools.graph_status.JobManager')
     def test_graph_status_with_interrupted_subgraph(self, mock_job_manager_class, mock_graphs_loader_class):

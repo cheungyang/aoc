@@ -40,6 +40,20 @@ class TestGraphsLoader(unittest.TestCase):
         self.assertIn("coding", overview)
         self.assertIn("</subgraphs_list>", overview)
 
+    def test_an_agents_own_graph_is_no_subgraph(self):
+        """graphs/voice is built by GraphBuilder for voice turns, as graphs/main
+        is for every turn: it loads, but no agent is offered it or may call it."""
+        import asyncio
+        loader = GraphsLoader()
+        self.assertIsNotNone(loader.get_graph("voice"))
+        self.assertTrue(loader.is_subgraph("coding"))
+        self.assertFalse(loader.is_subgraph("main"))
+        self.assertFalse(loader.is_subgraph("voice"))
+        self.assertFalse(loader.is_subgraph("no-such-graph"))
+        self.assertNotIn("id:voice", loader.get_graphs_overview())
+        result = asyncio.run(graph_call.ainvoke({"graph_name": "voice", "query": "hello"}))
+        self.assertIn("'voice' is an agent's own graph, not a subgraph to call", result)
+
     @patch('core.loaders.tools_loader.ToolsLoader.check_permission')
     def test_get_graphs_overview_agent_permission(self, mock_check_permission):
         loader = GraphsLoader()

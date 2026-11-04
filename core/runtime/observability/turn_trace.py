@@ -26,10 +26,13 @@ Repeated events are kept in order as `events`:
 - `cue`: the "heard you" sound was started;
 - `tool_start`, `tool_end`;
 - `model_call`: a model call was sent, numbered (`call`) within the turn,
-  with its model and the thinking level it was sent with; then its
+  with its model and the thinking level it was sent with -- and `light` on
+  the turn's light first call (graphs/voice); then its
   `model_reply` events, with the same number: `first_chunk` when it began to
   stream, `done` when it ended. So each round trip's own latency is there,
   not only the turn's first token;
+- `handover`: the light first call handed the turn to the agent's own model
+  (`agent`, the `depth` it asked for and the level `applied`);
 - `model_retry`: the latest call was tried again, `by` the SDK itself (a
   `status` of 408, 429, 500, 502 or 504, or none for a dropped connection)
   or by the model wrapper (503), with the wait before it (`wait_s`) when known
@@ -144,10 +147,11 @@ class TurnTrace:
             return
         self.events.append({"t": self._ms(), "kind": kind, **data})
 
-    def model_call(self, agent_id: Optional[str], model: str, thinking_level: Optional[str]) -> int:
-        """Records a model call as it's sent; returns its number, for its `model_reply` events."""
+    def model_call(self, agent_id: Optional[str], model: str, thinking_level: Optional[str], **extra: Any) -> int:
+        """Records a model call as it's sent; returns its number, for its `model_reply` events.
+        `extra` is what the model adds about itself (`light`)."""
         self.calls += 1
-        self.event("model_call", call=self.calls, agent=agent_id, model=model, thinking=thinking_level)
+        self.event("model_call", call=self.calls, agent=agent_id, model=model, thinking=thinking_level, **extra)
         return self.calls
 
     def model_reply(self, call: int, phase: str) -> None:

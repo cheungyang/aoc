@@ -29,7 +29,7 @@ depends on where the agent runs, so the tables below are keyed by provider:
 fills the everyday-reasoning slot. That is what makes moving an agent on-device
 a one-key change, with its `model` line untouched.
 """
-from typing import Optional
+from typing import Optional, Tuple
 
 # --- Google / Gemini -----------------------------------------------------
 # Capability tiers.
@@ -186,6 +186,20 @@ def tier_floor(value: Optional[str], floor: str) -> str:
     if key not in TIER_ORDER:
         return value
     return key if TIER_ORDER.index(key) >= TIER_ORDER.index(floor) else floor
+
+
+def tier_and_level(text: str) -> Tuple[str, str]:
+    """`TIER:LEVEL` -- "FLASH_LITE:minimal" -- as (tier, level), checked: an
+    agent tier, and a thinking level that tier takes (PRO has no minimal).
+    Raises ValueError on anything else, e.g. a voice light model
+    (VOICE_LIGHT_MODEL) that would otherwise run on something unintended."""
+    tier, _, level = (text or "").partition(":")
+    tier, level = tier.strip().upper().replace("-", "_"), level.strip().lower()
+    if tier not in TIER_ORDER:
+        raise ValueError(f"unknown tier {tier!r} in {text!r}: use {', '.join(TIER_ORDER)}")
+    if level not in TIER_THINKING_LEVELS[tier]:
+        raise ValueError(f"{tier} doesn't take {level!r} thinking: use {', '.join(TIER_THINKING_LEVELS[tier])}")
+    return tier, level
 
 
 def resolve_model(value: Optional[str], provider: str = "google") -> str:

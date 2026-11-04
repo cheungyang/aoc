@@ -31,7 +31,7 @@ done instead of submitting again. It submits only pairs still unjudged:
 runs added since, or ones whose replies changed. --sync asks directly
 instead, one pair at a time, waiting out a 429.
 
-The bar (decided): a combo passes when its reply wins or ties the
+The bar: a combo passes when its reply wins or ties the
 reference's in at least 90% of the judged pairs, and its first speech token
 arrives within 700 ms at p50. First speech is `first_token`, the turn's
 first model text (replies open with <speech>, so it's what the voice starts

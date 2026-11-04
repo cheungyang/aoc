@@ -61,16 +61,24 @@ def take_marker(text: str) -> Tuple[str, Optional[str]]:
     return _MARKER.sub(drop, text), (levels[-1] if levels else None)
 
 
-class MarkerFilter:
-    """Takes the marker out of a response's text as it streams, even split across chunks.
+class TagFilter:
+    """Takes a tag out of a response's text as it streams, even split across chunks.
 
-    Text goes straight out, except from a `<` that may open the marker: that is
-    held until it does or can't, a few characters at most. `level` is the level
-    the last marker named.
+    Text goes straight out, except from a `<` that may open the tag: that is
+    held until it does or can't, a few characters at most. `pattern` matches
+    a whole tag; `opener` is how it starts, `closer` what ends it, and
+    `longest` the length past which a tag still open isn't one. `found` says
+    whether a tag was taken out, and `value` what the last one held (the
+    pattern's first group, lowercased; None when empty).
     """
 
-    def __init__(self):
-        self.level: Optional[str] = None
+    def __init__(self, pattern, opener: str, closer: str, longest: int):
+        self._pattern = pattern
+        self._opener = opener.lower()
+        self._closer = closer.lower()
+        self._longest = longest
+        self.found = False
+        self.value: Optional[str] = None
         self._held = ""
 
     def feed(self, text: str) -> str:
@@ -84,11 +92,12 @@ class MarkerFilter:
                 break
             out.append(buf[:start])
             buf = buf[start:]
-            match = _MARKER.match(buf)
+            match = self._pattern.match(buf)
             if match:
-                self.level = match.group(1).strip().lower()
+                self.found = True
+                self.value = (match.group(1) or "").strip().lower() or None
                 buf = buf[match.end():]
-            elif _may_open(buf.lower()):
+            elif self._may_open(buf.lower()):
                 self._held = buf
                 break
             else:
@@ -97,16 +106,31 @@ class MarkerFilter:
         return "".join(out)
 
     def flush(self) -> str:
-        """What's still held when the response ends: the start of a marker that never came."""
+        """What's still held when the response ends: the start of a tag that never came."""
         held, self._held = self._held, ""
         return held
 
+    def _may_open(self, lower: str) -> bool:
+        """Whether text starting with `<` could still turn out to be the tag."""
+        if len(lower) <= len(self._opener):
+            return self._opener.startswith(lower)
+        return lower.startswith(self._opener) and self._closer not in lower and len(lower) < self._longest
 
-def _may_open(lower: str) -> bool:
-    """Whether text starting with `<` could still turn out to be a marker."""
-    if len(lower) <= len(MARKER_OPEN):
-        return MARKER_OPEN.startswith(lower)
-    return lower.startswith(MARKER_OPEN) and MARKER_CLOSE not in lower and len(lower) < _MARKER_MAX
+
+class MarkerFilter(TagFilter):
+    """Takes the marker out of a response's text as it streams, even split across chunks.
+
+    Text goes straight out, except from a `<` that may open the marker: that is
+    held until it does or can't, a few characters at most. `level` is the level
+    the last marker named.
+    """
+
+    def __init__(self):
+        super().__init__(_MARKER, MARKER_OPEN, MARKER_CLOSE, _MARKER_MAX)
+
+    @property
+    def level(self) -> Optional[str]:
+        return self.value
 
 
 def pick_thinking(level: str) -> Optional[str]:

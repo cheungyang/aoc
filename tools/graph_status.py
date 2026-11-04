@@ -58,7 +58,7 @@ def graph_status(graph_name: Optional[str] = None, channel: Optional[str] = None
         if graph_name:
             graphs_to_check = [graph_name]
         else:
-            graphs_to_check = [name for name in loader.list_graph_names() if name != "main"]
+            graphs_to_check = [name for name in loader.list_graph_names() if loader.is_subgraph(name)]
 
         active_graphs = []
         inactive_graphs = []

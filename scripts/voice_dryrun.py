@@ -48,16 +48,23 @@ replay never writes an agent memory log. Traces are logged, not stored.
 Without Discord there is no playback, so the reported time to first audio is
 `tts_first_byte`: the moment the first chunk's audio is ready to play.
 
-Model x thinking benchmark, to pick the light model of the voice graph (B1):
+Model x thinking benchmark, to pick the voice graph's light model:
 --combo TIER:LEVEL runs every case on each combo given, with every agent
 model call of the run -- main's and the room's agent's -- on that tier and
 thinking level (`combo_scope`). `prod` is production as configured, and
---matrix is the planned set: FLASH_LITE, FLASH and PRO at minimal, low and
+--matrix is the full set: FLASH_LITE, FLASH and PRO at minimal, low and
 medium (PRO has no minimal), plus prod. Each result records its combo, and
 scripts/voice_judge.py compares every combo's replies with the reference's:
 PRO:low by default, PRO at the voice default level, since the light model's
 bar is set against PRO. Each run of a case goes on every combo back to back,
 so all of them see the same live data.
+--light TIER:LEVEL runs every combo with the voice graph's light first call
+on that model (graphs/voice: the turn's first call on it, then the agent's
+own model), `off` without it; each goes in the label
+(`prod+light:FLASH_LITE:minimal`), so the judge holds the light call's runs
+to PRO:low without it. Without --light, VOICE_LIGHT_MODEL decides. The
+light call is held to its own model and level, and isn't a round trip of the
+case's budget.
 It's safe for the rate limit the live bot shares: one run at a time, --rpm
 caps the model calls a minute (counted from each run's trace), a run the
 API refuses with 429 / RESOURCE_EXHAUSTED waits and runs again, and --out
@@ -76,6 +83,7 @@ Usage:
     python scripts/voice_dryrun.py --out results.json
     python scripts/voice_dryrun.py --combo FLASH_LITE:minimal,FLASH:low --case lights-status
     python scripts/voice_dryrun.py --matrix --runs 3 --rpm 20 --out sessions/voice_bench/results.json
+    python scripts/voice_dryrun.py --combo prod --light FLASH_LITE:minimal,FLASH:minimal --runs 3 --out results.json
 """
 import argparse
 import asyncio
@@ -94,7 +102,8 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Constants only: importing them loads none of the runtime, which waits for isolate_sessions.
-from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS, TIER_ORDER, TIER_THINKING_LEVELS  # noqa: E402
+from core.config.models import (  # noqa: E402
+    THINKING_BY_SURFACE, THINKING_LEVELS, TIER_ORDER, TIER_THINKING_LEVELS, tier_and_level)
 
 CASES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_replay_cases.json")
 REPLAY_SOURCE = "voice_replay"
@@ -211,15 +220,19 @@ MATRIX_LEVELS = ("minimal", "low", "medium")  # voice caps the model's own picks
 @dataclass(frozen=True)
 class Combo:
     """The tier and thinking level every agent model call of a run is held to;
-    None keeps production's choice for that half."""
+    None keeps production's choice for that half. `light` is the voice graph's
+    light first call, `TIER:level` (graphs/voice), or None for none."""
     model: Optional[str] = None
     thinking: Optional[str] = None
+    light: Optional[str] = None
 
     @property
     def label(self) -> str:
         if self.model is None and self.thinking is None:
-            return PROD
-        return f"{self.model or PROD}:{self.thinking or PROD}"
+            base = PROD
+        else:
+            base = f"{self.model or PROD}:{self.thinking or PROD}"
+        return f"{base}+light:{self.light}" if self.light else base
 
 
 def parse_combo(text: str) -> Combo:
@@ -239,22 +252,34 @@ def parse_combo(text: str) -> Combo:
     return Combo(model, thinking)
 
 
+def parse_light(text: Optional[str]) -> Optional[str]:
+    """The voice graph's light model as `TIER:level` (`FLASH_LITE:minimal`),
+    checked as VOICE_LIGHT_MODEL is; None for `off` or nothing."""
+    text = (text or "").strip()
+    if not text or text.lower() == "off":
+        return None
+    return ":".join(tier_and_level(text))
+
+
 def matrix() -> List[Combo]:
-    """The planned matrix: each agent tier at each of MATRIX_LEVELS it takes, then prod."""
+    """The full matrix: each agent tier at each of MATRIX_LEVELS it takes, then prod."""
     return [Combo(tier, level) for tier in TIER_ORDER for level in MATRIX_LEVELS
             if level in TIER_THINKING_LEVELS[tier]] + [Combo()]
 
 
 def combos_from(model: Optional[str] = None, thinking: Optional[str] = None,
-                combos: Optional[List[str]] = None, use_matrix: bool = False) -> List[Combo]:
+                combos: Optional[List[str]] = None, use_matrix: bool = False,
+                lights: Optional[List[Optional[str]]] = None) -> List[Combo]:
     """The combos asked for, in order and each once: --matrix's, every --combo
     (repeated or comma-separated), then --model with --thinking as one more.
-    None asked for: prod."""
+    None asked for: prod. Each goes with every light model in `lights`
+    (`TIER:level`, or None for none); without any, with none."""
     found = matrix() if use_matrix else []
     found += [parse_combo(text) for value in combos or [] for text in value.split(",") if text.strip()]
     if model or thinking:
         found.append(parse_combo(f"{model or PROD}:{thinking or PROD}"))
-    return list(dict.fromkeys(found)) or [Combo()]
+    bases = list(dict.fromkeys(found)) or [Combo()]
+    return list(dict.fromkeys(replace(base, light=light) for base in bases for light in (lights or [None])))
 
 
 # Agents built under each model a combo forces: a compiled graph has its model
@@ -275,7 +300,8 @@ def combo_scope(combo: Combo) -> Iterator[None]:
     (`chat_model`), and the level the model wrapper sends each call at
     (`resolve_thinking_level`; the model's own <next_thinking> pick is still
     taken, but not applied). Stateless workers keep their own model and level,
-    as B1 would. `combo_misses` then checks the trace for a call this missed.
+    as they do on the voice graph. `combo_misses` then checks the trace for a
+    call this missed.
     """
     if combo.model is None and combo.thinking is None:
         yield
@@ -312,26 +338,47 @@ def combo_scope(combo: Combo) -> Iterator[None]:
         graph_builder.chat_model, retry.resolve_thinking_level, loader._agents_cache = build, resolve, agents
 
 
+@contextmanager
+def light_scope(light: Optional[str]) -> Iterator[None]:
+    """Runs the block with the voice graph's light first call on `light`
+    (`TIER:level`), or off for None, whatever VOICE_LIGHT_MODEL says
+    (core/runtime/graph_builder.py)."""
+    from core.config.settings import Config
+
+    with Config().overriding(voice_light_model=light or "off"):
+        yield
+
+
 def combo_misses(combo: Combo, model_calls: List[dict]) -> List[str]:
     """The run's agent model calls that weren't on `combo`, as failures: such a
     run would be mislabeled, so a change to where models are chosen fails
-    loudly here instead of skewing the benchmark."""
-    if combo.model is None and combo.thinking is None:
-        return []
+    loudly here instead of skewing the benchmark. A light first call (`light`
+    on its trace event) is held to the combo's light model instead."""
     from core.config.models import clamp_thinking_level, resolve_model
-    from core.loaders.agents_loader import AgentsLoader
 
-    loader = AgentsLoader()
-    misses = []
-    for call in model_calls:
-        if (loader.get_agent_config(call.get("agent")) or {}).get("stateless"):
-            continue
+    light = tier_and_level(combo.light) if combo.light else None
+
+    def miss(call: dict) -> Optional[str]:
         model = str(call.get("model") or "").removeprefix("models/")
-        if combo.model and model != resolve_model(combo.model):
-            misses.append(f"{call.get('agent')} ran {model}")
+        if call.get("light"):
+            if light is None:
+                return f"{call.get('agent')} made a light call"
+            if (model, call.get("thinking")) != (resolve_model(light[0]), light[1]):
+                return f"{call.get('agent')}'s light call ran {model} at {call.get('thinking')}"
+        elif combo.model and model != resolve_model(combo.model):
+            return f"{call.get('agent')} ran {model}"
         elif combo.thinking and call.get("thinking") != clamp_thinking_level(combo.thinking, model):
-            misses.append(f"{call.get('agent')} thought at {call.get('thinking')}")
-    return [f"not on {combo.label}: {miss}" for miss in dict.fromkeys(misses)]
+            return f"{call.get('agent')} thought at {call.get('thinking')}"
+        return None
+
+    misses = [m for m in map(miss, model_calls) if m]
+    if misses:  # a stateless worker keeps its own model and level: never a miss
+        from core.loaders.agents_loader import AgentsLoader
+
+        loader = AgentsLoader()
+        misses = [m for call in model_calls if (m := miss(call))
+                  and not (loader.get_agent_config(call.get("agent")) or {}).get("stateless")]
+    return [f"not on {combo.label}: {m}" for m in dict.fromkeys(misses)]
 
 
 @dataclass
@@ -412,8 +459,10 @@ def check_expectations(case: dict, result: CaseResult) -> List[str]:
     for pattern in expect.get("spoken_excludes", []):
         if re.search(pattern, spoken, re.IGNORECASE):
             failures.append(f"speech contains /{pattern}/")
-    if "max_model_calls" in expect and len(result.model_calls) > expect["max_model_calls"]:
-        failures.append(f"{len(result.model_calls)} model calls, budget {expect['max_model_calls']}")
+    # The agent's own round trips: the light first call, said while they run, isn't one.
+    calls = [call for call in result.model_calls if not call.get("light")]
+    if "max_model_calls" in expect and len(calls) > expect["max_model_calls"]:
+        failures.append(f"{len(calls)} model calls, budget {expect['max_model_calls']}")
     return failures
 
 
@@ -987,8 +1036,9 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
 # --- the benchmark's runs: combos, pacing, rate limits, resuming ---------------
 
 async def run_combo(case: dict, run: int, combo: Combo, db_path: str, **kwargs) -> CaseResult:
-    """`run_case` with every agent model call held to `combo` (`combo_scope`)."""
-    with combo_scope(combo):
+    """`run_case` with every agent model call held to `combo` (`combo_scope`),
+    and the light first call on the combo's light model, or off (`light_scope`)."""
+    with combo_scope(combo), light_scope(combo.light):
         result = await run_case(case, run, db_path, **kwargs)
     result.combo = combo.label
     result.failures += combo_misses(combo, result.model_calls)
@@ -1107,11 +1157,13 @@ SLOW_SERVICE = 4
 
 
 def tiers_to_check(combos: List[Combo]) -> List[str]:
-    """The tiers a benchmark's combos run on: each one a combo forces, and every
-    agent tier when a combo keeps prod's models. None for a plain replay."""
+    """The tiers a benchmark's combos run on: each one a combo forces or its
+    light first call runs on, and every agent tier when a combo keeps prod's
+    models. None for a plain replay."""
     if combos == [Combo()]:
         return []
     tiers = {combo.model for combo in combos if combo.model}
+    tiers |= {tier_and_level(combo.light)[0] for combo in combos if combo.light}
     if any(combo.model is None for combo in combos):
         tiers |= set(TIER_ORDER)
     return [tier for tier in TIER_ORDER if tier in tiers]
@@ -1223,8 +1275,11 @@ async def main(argv: Optional[List[str]] = None) -> int:
                              f"TIER alone keeps production's thinking, {PROD}:LEVEL each agent's own model, "
                              f"{PROD} both.")
     parser.add_argument("--matrix", action="store_true",
-                        help=f"Run the planned matrix: {', '.join(TIER_ORDER)} at {', '.join(MATRIX_LEVELS)} "
+                        help=f"Run the full matrix: {', '.join(TIER_ORDER)} at {', '.join(MATRIX_LEVELS)} "
                              f"thinking where the tier takes it, plus {PROD}.")
+    parser.add_argument("--light", action="append", metavar="TIER:LEVEL",
+                        help="The voice graph's light first call: run each combo with this light model, e.g. "
+                             "FLASH_LITE:minimal, or off (repeatable, or comma-separated). Default: VOICE_LIGHT_MODEL.")
     parser.add_argument("--rpm", type=int, default=0,
                         help="Keep model calls under this many a minute, counted from each run's trace (0: no cap).")
     parser.add_argument("--out", help="Results JSON: read first, so the same command resumes, "
@@ -1233,7 +1288,13 @@ async def main(argv: Optional[List[str]] = None) -> int:
                         help="Run the combos even when the service check finds the models slow.")
     args = parser.parse_args(argv)
     try:
-        combos = combos_from(args.model, args.thinking, args.combo, args.matrix)
+        if args.light:
+            lights = [parse_light(text) for value in args.light for text in value.split(",") if text.strip()]
+        else:
+            from core.config.settings import Config
+
+            lights = [parse_light(Config().voice_light_model)]
+        combos = combos_from(args.model, args.thinking, args.combo, args.matrix, lights=lights)
     except ValueError as e:
         parser.error(str(e))
     if args.rpm < 0:

@@ -190,12 +190,17 @@ ReAct behaviour, for turns that are the executing agent's own. Async.
 - **Inputs from state:** `messages` (the full list), plus the LangGraph
   `config` passed through as `config_`.
 - **Behavior:** awaits `concierge_agent.ainvoke({"messages": existing}, config_)`
-  where `concierge_agent = create_react_agent(llm, tools, prompt=prompt)` was
+  where `concierge_agent = create_react_agent(model or llm, tools, prompt=prompt)` was
   built once in `create_graph`, then slices off only the messages the inner
   agent produced (`result["messages"][len(existing):]`) so the pre-existing
   history is not re-emitted into the outer state.
 - **Writes to state:** `messages` — only the newly produced messages.
 - **Routes to:** `END`.
+
+`create_graph(..., model=None)` is this graph's one extension point: a `model`
+replaces `llm` in the ReAct step. [graphs/voice](../voice/README.md) passes one
+that picks per call -- a voice turn's first call on a light model, every other
+on the agent's own -- and is otherwise this graph.
 
 ## Routing
 

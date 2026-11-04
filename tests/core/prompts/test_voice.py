@@ -77,6 +77,28 @@ class TestVoiceModePrompt(unittest.TestCase):
         finally:
             current_execution_context.reset(token)
 
+    def test_after_the_light_calls_hand_over_tools_go_without_a_sentence_first(self):
+        """The light first call said what's being checked (graphs/voice), so
+        the agent's model isn't asked to say it again before its tool calls."""
+        from core.runtime.foundation.context import current_execution_context
+        from core.runtime.foundation.sessions import SessionManager
+        from core.prompts.voice import OPENER_HINT
+        turn = SessionManager.get_session(agent_id="day-planner", source="tool", channel="day-planning",
+                                          surface="voice")
+        turn.turn_hints[OPENER_HINT] = True
+        token = current_execution_context.set(turn)
+        try:
+            prompt = get_voice_mode_prompt()
+        finally:
+            current_execution_context.reset(token)
+        self.assertEqual(prompt, VoiceModePrompt(opener=True).render())
+        self.assertNotIn("Before calling tools", prompt)
+        self.assertIn("The user has already heard what you're doing", prompt)
+        self.assertNotIn("already heard what you're doing", VOICE_MODE)
+        self.assertEqual([line for line in prompt.split("\n") if "already heard" not in line],
+                         [line for line in VOICE_MODE.split("\n") if "Before calling tools" not in line],
+                         "only that line differs")
+
     def test_the_formatting_rules_allow_speech_under_voice_mode(self):
         """Otherwise they forbid the very block <voice_mode> asks for."""
         self.assertIn("<speech> when <voice_mode> asks for it", get_formatting_prompt())

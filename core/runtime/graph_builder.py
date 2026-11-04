@@ -1,6 +1,8 @@
 import contextlib
 import os
 import json
+import sys
+from typing import Optional, Tuple
 from langgraph.prebuilt import create_react_agent
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
 from core.loaders.tools_loader import ToolsLoader
@@ -8,6 +10,7 @@ from langchain_core.messages import SystemMessage, convert_to_messages
 from core.loaders.skills_loader import SkillsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.graphs_loader import GraphsLoader
+from core.config.models import tier_and_level
 from core.config.settings import Config
 from core.prompts.system import (
     get_agent_memory_prompt,
@@ -25,6 +28,39 @@ from langgraph.types import interrupt
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context
 from core.runtime.model.chat import chat_model
+
+# The graph a turn with a light first call is built on: graphs/main, plus that call.
+VOICE_GRAPH = "voice"
+
+_warned_light_settings = set()
+
+
+def light_call(ctx, config) -> Optional[Tuple[str, str]]:
+    """The light model a turn's first model call runs on (graphs/voice):
+    (tier, thinking level) from VOICE_LIGHT_MODEL, or None.
+
+    Only a live voice turn of the agent you're talking to gets one: not a typed
+    or scheduled turn, a stateless agent or context, an agent another agent
+    called (`called_by_agent`), a graph step, an agent on a graph of its own,
+    or one off Gemini. A setting that isn't `TIER:LEVEL` is reported once and
+    counts as off. Keys the agent's compiled graphs too (core/runtime/agent.py).
+    """
+    setting = (Config().voice_light_model or "").strip()
+    if not setting or setting.lower() == "off":
+        return None
+    if ctx is None or ctx.get_surface() != "voice" or ctx.is_stateless() or ctx.called_by_agent or ctx.graph_id:
+        return None
+    config = config or {}
+    if config.get("stateless") or config.get("graph", "main") != "main" or config.get("provider", "google") != "google":
+        return None
+    try:
+        return tier_and_level(setting)
+    except ValueError as e:
+        if setting not in _warned_light_settings:
+            _warned_light_settings.add(setting)
+            print(f"[GraphBuilder] VOICE_LIGHT_MODEL={setting!r} is off: {e}", file=sys.stderr)
+        return None
+
 
 class GraphBuilder:
     def __init__(self):
@@ -168,9 +204,17 @@ class GraphBuilder:
 
         prompt = self._get_prompt_template(ctx)
 
-        graph_name = config.get("graph", "main")
+        # A live voice turn's first call may go to a light model: that's
+        # graphs/voice, graphs/main plus the light call.
+        light = light_call(ctx, config)
+        graph_name = VOICE_GRAPH if light else config.get("graph", "main")
         graphs_loader = GraphsLoader()
         graph_info = graphs_loader.get_graph(graph_name)
+        if light and not (graph_info and graph_info.get("create_graph")):
+            print(f"[GraphBuilder] graphs/{VOICE_GRAPH} isn't there: {agent_id}'s voice turns run without the "
+                  f"light call", file=sys.stderr)
+            light, graph_name = None, config.get("graph", "main")
+            graph_info = graphs_loader.get_graph(graph_name)
         if not graph_info or "create_graph" not in graph_info or not graph_info["create_graph"]:
             raise ValueError(f"Graph '{graph_name}' not found or does not export create_graph.")
 
@@ -181,7 +225,8 @@ class GraphBuilder:
             prompt=prompt,
             checkpointer=checkpointer,
             agent_id=agent_id,
-            config=config
+            config=config,
+            **({"light": light} if light else {}),
         )
         # print(f"New Graph '{graph_name}' for {agent_id} built")
         return graph

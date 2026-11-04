@@ -419,5 +419,128 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
           ])
           mock_tool_rules.assert_called_with("main")
 
+
+def _voice_ctx(**kwargs):
+    """A voice turn's context, as the room's agent gets it from the router."""
+    from core.runtime.foundation.sessions import SessionManager
+    return SessionManager.get_session(agent_id="home-steward", source="tool", channel="home-automation",
+                                      surface="voice", **kwargs)
+
+
+def _typed_ctx():
+    """A typed turn's context, as the router hands it to the room's agent: the text surface."""
+    from core.runtime.foundation.sessions import SessionManager
+    return SessionManager.get_session(agent_id="home-steward", source="tool", channel="home-automation",
+                                      surface="text")
+
+
+AGENT = {"channels": ["home-automation"]}
+
+
+class TestLightCall(unittest.TestCase):
+    """Which turns' first model call goes to the light model (graphs/voice)."""
+
+    def light(self, ctx, config=AGENT, setting="FLASH_LITE:minimal"):
+        from core.runtime.graph_builder import light_call
+        with Config().overriding(voice_light_model=setting):
+            return light_call(ctx, config)
+
+    def test_a_voice_turn_of_the_agent_you_talk_to(self):
+        self.assertEqual(self.light(_voice_ctx()), ("FLASH_LITE", "minimal"))
+        self.assertEqual(self.light(_voice_ctx(), setting=" flash:Minimal "), ("FLASH", "minimal"))
+
+    def test_off_unless_set(self):
+        from core.runtime.graph_builder import light_call
+        with patch.dict(os.environ):
+            os.environ.pop("VOICE_LIGHT_MODEL", None)
+            self.assertIsNone(light_call(_voice_ctx(), AGENT))
+        for setting in ("off", "OFF", ""):
+            with self.subTest(setting=setting):
+                self.assertIsNone(self.light(_voice_ctx(), setting=setting))
+
+    def test_no_other_turn_gets_one(self):
+        cases = {
+            "a typed turn": (_typed_ctx(), AGENT),
+            "a stateless context": (_voice_ctx(stateless=True), AGENT),
+            "an agent another agent called": (_voice_ctx(called_by_agent=True), AGENT),
+            "a graph step": (_voice_ctx(graph_id="coding"), AGENT),
+            "a stateless agent": (_voice_ctx(), {**AGENT, "stateless": True}),
+            "an agent on a graph of its own": (_voice_ctx(), {**AGENT, "graph": "coding"}),
+            "an agent off Gemini": (_voice_ctx(), {**AGENT, "provider": "local"}),
+        }
+        for name, (ctx, config) in cases.items():
+            with self.subTest(name):
+                self.assertIsNone(self.light(ctx, config))
+
+    def test_a_setting_that_isnt_tier_level_is_off_and_said_once(self):
+        import io
+        from contextlib import redirect_stderr
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertIsNone(self.light(_voice_ctx(), setting="PRO:minimal"))
+            self.assertIsNone(self.light(_voice_ctx(), setting="PRO:minimal"))
+        self.assertEqual(err.getvalue().count("VOICE_LIGHT_MODEL='PRO:minimal' is off"), 1, err.getvalue())
+
+
+class TestTheVoiceGraphIsBuiltForLightCalls(unittest.IsolatedAsyncioTestCase):
+
+    async def _build(self, ctx, graphs):
+        from core.runtime.graph_builder import GraphBuilder
+        loader = MagicMock()
+        loader.get_graph.side_effect = graphs.get
+        with patch("core.runtime.graph_builder.GraphsLoader", return_value=loader), \
+             patch("core.runtime.graph_builder.ToolsLoader") as tools, \
+             patch("core.runtime.graph_builder.chat_model", return_value="LLM"), \
+             patch("core.runtime.graph_builder.SqliteCheckpointer"), \
+             Config().overriding(voice_light_model="FLASH_LITE:minimal"):
+            tools.return_value.get_tools.return_value = []
+            return await GraphBuilder().build_graph(ctx, AGENT)
+
+    def _graphs(self, voice=True):
+        graphs = {"main": {"create_graph": MagicMock(return_value="main graph")}}
+        if voice:
+            graphs["voice"] = {"create_graph": MagicMock(return_value="voice graph")}
+        return graphs
+
+    async def test_a_light_call_builds_graphs_voice_with_the_light_model(self):
+        graphs = self._graphs()
+        self.assertEqual(await self._build(_voice_ctx(), graphs), "voice graph")
+        self.assertEqual(graphs["voice"]["create_graph"].call_args.kwargs["light"], ("FLASH_LITE", "minimal"))
+        graphs["main"]["create_graph"].assert_not_called()
+
+    async def test_any_other_turn_builds_graphs_main_as_before(self):
+        graphs = self._graphs()
+        self.assertEqual(await self._build(_typed_ctx(), graphs), "main graph")
+        self.assertNotIn("light", graphs["main"]["create_graph"].call_args.kwargs)
+
+    async def test_without_graphs_voice_the_turn_runs_on_main(self):
+        import io
+        from contextlib import redirect_stderr
+        graphs, err = self._graphs(voice=False), io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(await self._build(_voice_ctx(), graphs), "main graph")
+        self.assertNotIn("light", graphs["main"]["create_graph"].call_args.kwargs)
+        self.assertIn("graphs/voice isn't there: home-steward's voice turns run without the light call", err.getvalue())
+
+    async def test_a_light_call_turn_has_a_compiled_graph_of_its_own(self):
+        from core.runtime.agent import Agent
+        agent, built = Agent("home-steward", AGENT), []
+
+        async def build(builder, ctx, config):
+            built.append(ctx.get_surface())
+            return object()
+
+        with patch("core.runtime.agent.GraphBuilder.build_graph", build), \
+             Config().overriding(voice_light_model="FLASH_LITE:minimal"):
+            voice = await agent._get_graph(_voice_ctx())
+            self.assertIs(await agent._get_graph(_voice_ctx()), voice, "built once")
+            typed = await agent._get_graph(_typed_ctx())
+            with Config().overriding(voice_light_model="FLASH:minimal"):
+                other = await agent._get_graph(_voice_ctx())
+        self.assertIsNot(voice, typed)
+        self.assertIsNot(voice, other, "another light model, another graph")
+        self.assertEqual(built, ["voice", "text", "voice"])
+
+
 if __name__ == "__main__":
     unittest.main()

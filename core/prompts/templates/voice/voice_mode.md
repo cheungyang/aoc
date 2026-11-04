@@ -10,7 +10,12 @@ Begin each response with a <speech>...</speech> block, then write your normal te
 
 In <speech>:
 {{> voice/_speech_rules}}
+{{#opener}}
+- The user has already heard what you're doing: this turn's first response said it. Call your tools without a <speech> block, then begin your reply with <speech>.
+{{/opener}}
+{{^opener}}
 - Before calling tools, write a one-sentence <speech> block saying what you're checking.
+{{/opener}}
 
 After </speech>, follow your usual formatting rules. The text reply stays complete.
 </voice_mode>

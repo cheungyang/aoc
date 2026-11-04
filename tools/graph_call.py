@@ -28,6 +28,9 @@ async def graph_call(graph_name: str = None, query: str = "", caller: Optional[s
         graph_info = loader.get_graph(target_graph)
         if not graph_info:
             return format_tool_response("graph_call", payload="", errors=f"Error: Graph '{target_graph}' not found.")
+        if not loader.is_subgraph(target_graph):
+            return format_tool_response("graph_call", payload="", errors=(
+                f"Error: '{target_graph}' is an agent's own graph, not a subgraph to call."))
             
         graph = graph_info.get("graph")
         if graph is None and graph_info.get("create_graph") is not None:
