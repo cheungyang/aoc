@@ -14,10 +14,13 @@ an `is_current` check, so a turn that was interrupted or superseded goes
 quiet.
 
 The text lane writes into a `TextOutput` the voice room is handed (the
-Discord runner's stream buffer): voice never renders a channel itself.
+Discord runner's stream buffer): voice never renders a channel itself. Your
+words go above the reply, once: a turn that carries words a turn cut short
+already posted edits that post (`_TranscriptPost`).
 """
 import asyncio
 import os
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
 import discord
@@ -108,6 +111,32 @@ class TurnSpeech:
             finish()
 
 
+@dataclass(eq=False)
+class _TranscriptPost:
+    """Your words as a turn posted them above its reply ("🎤 Sam (Voice): …")."""
+    channel: Any
+    author: str
+    words: str
+    speech: Optional[TurnSpeech] = None  # the turn's: whether its answer was heard
+    task: Optional[asyncio.Task] = None  # posting them
+    message: Any = None                  # the post, once Discord has it
+    answered: bool = False               # the turn posted more than your words, or finished
+
+    @property
+    def line(self) -> str:
+        return f"🎤 **{self.author} (Voice):** {self.words}"
+
+    def carried_into(self, later: "_TranscriptPost") -> bool:
+        """Whether `later` is these words again, with more said since. A turn
+        cut short before any of its answer was heard leaves its words to the
+        next turn, first (the floor keeps them; core/channel/voice/turn.py
+        merges them with a space) -- and this one posted nothing after them."""
+        heard = self.speech is not None and self.speech.heard
+        return (self.message is not None and not self.answered and not heard
+                and later.channel == self.channel and later.author == self.author
+                and (later.words == self.words or later.words.startswith(self.words + " ")))
+
+
 class ReplyStreamer:
     def __init__(self, agent_id: str, config: dict, audio, connection, text_output: TextOutputFactory):
         self.agent_id = agent_id
@@ -116,6 +145,7 @@ class ReplyStreamer:
         self.connection = connection
         self.text_output = text_output
         self.tts = TTSEngine()
+        self._transcript: Optional[_TranscriptPost] = None  # the last turn's post of your words
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -184,6 +214,11 @@ class ReplyStreamer:
         agent handed you to a teammate (<switch to="..."/>): the room moves to
         the teammate's channel, and the teammate greets you.
 
+        Your words go to the channel above the reply. When they're words a turn
+        cut short already posted, with more said since, that post is edited to
+        hold them all instead -- if the turn posted nothing after them -- so the
+        channel shows what you said once.
+
         Returns whether the agent answered: False if a newer turn took over
         first, leaving the words unanswered. `on_final` gets what the user
         hears: the reply's speech, or its text when it came without any.
@@ -191,9 +226,11 @@ class ReplyStreamer:
         # Mirror the user's words to the shared text channel without holding
         # up the agent: only the text lane waits for it, so the transcript
         # still lands above the reply.
-        mirror_task = None
+        earlier, post = self._transcript, None
         if self.config.get("post_transcript_to_chat", True) and channel:
-            mirror_task = asyncio.create_task(self._post(channel, f"🎤 **{author} (Voice):** {transcript}"))
+            post = _TranscriptPost(channel, author, transcript, speech)
+            post.task = asyncio.create_task(self._post_transcript(post, earlier))
+        self._transcript = post
 
         trace = speech.trace
         router = SpeechTextRouter()
@@ -209,7 +246,7 @@ class ReplyStreamer:
 
         # Ensure audio queue is started
         self.audio.start()
-        text_task = asyncio.create_task(self._run_text_lane(channel, text_buffer, text_lane, mirror_task))
+        text_task = asyncio.create_task(self._run_text_lane(channel, text_buffer, text_lane, post))
         speech_task = asyncio.create_task(self._run_speech_lane(speech_lane, speech, is_current))
         you_asked = speaker or self.agent_id  # the agent you're talking to
         speaker = you_asked  # whose reply is heard: a delegate's, once it streams
@@ -281,6 +318,8 @@ class ReplyStreamer:
             if isinstance(switch_to, str) and switch_to and on_switch is not None and is_current():
                 trace.event("switch", agent=switch_to)
                 await on_switch(switch_to)
+            if post is not None:
+                post.answered = True
             return True
         finally:
             for task in (text_task, speech_task):
@@ -297,25 +336,47 @@ class ReplyStreamer:
         return missing
 
     async def _post(self, channel, text: str):
-        """Posts a line of the pipeline's own (the transcript, a note) to the channel."""
+        """Posts a line of the pipeline's own (the transcript, a note) to the
+        channel. Returns the message, or None if it couldn't be posted."""
         try:
-            await channel.send(text)
+            return await channel.send(text)
         except Exception as e:
             self._log(f"Error posting to the channel: {e}")
+            return None
 
-    async def _run_text_lane(self, channel, buffer, lane: asyncio.Queue, mirror_task):
+    async def _post_transcript(self, post: _TranscriptPost, earlier: Optional[_TranscriptPost]):
+        """Posts your words above the reply -- or, when they're words a turn cut
+        short already posted with more said since, edits that post to hold them
+        all, so the channel shows what you said once."""
+        if earlier is not None and earlier.task is not None:
+            await asyncio.wait([earlier.task])  # that post first; waiting never cancels it
+        if earlier is not None and earlier.carried_into(post):
+            try:
+                if post.words != earlier.words:
+                    await earlier.message.edit(content=post.line)
+                post.message = earlier.message
+                return
+            except Exception as e:
+                self._log(f"Couldn't edit the post of your words, so posting them again: {e}")
+        post.message = await self._post(post.channel, post.line)
+
+    async def _run_text_lane(self, channel, buffer, lane: asyncio.Queue, post: Optional[_TranscriptPost]):
         """Writes the agent's reply to the text channel as it streams, then any
         note under it. After a hand-off, that is the named agent's channel."""
-        if mirror_task is not None:
+        if post is not None:
             # The transcript goes above the reply; only this lane waits for it.
+            # Shielded: a turn cut short still finishes posting it, so the next
+            # turn can find the post.
             try:
-                await mirror_task
+                await asyncio.shield(post.task)
             except Exception:
                 pass
         while True:
             item = await lane.get()
             if item is None:
                 return
+            if post is not None:
+                post.answered = True  # something goes under your words
             kind, payload = item
             if kind == "token":
                 await buffer.append_token(payload)

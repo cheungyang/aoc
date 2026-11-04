@@ -11,7 +11,7 @@ from core.runtime.observability.turn_trace import Outcome
 from core.channel.voice.foundation import settings as voice_settings
 from core.channel.voice.foundation.utterance import Transcript, Utterance
 from core.channel.voice.speech.missing_speech import alert
-from core.channel.voice.speech.reply import ERROR_LINE
+from core.channel.voice.speech.reply import ERROR_LINE, _TranscriptPost
 from core.channel.voice.turn import DIDNT_CATCH
 from core.channel.voice.voice_manager import VoiceManager
 from tests.core.channel.voice.voice_room import (
@@ -564,7 +564,7 @@ def _mirrored(text_channel):
 async def test_a_split_utterance_keeps_both_halves(mock_bot_runner, tmp_path):
     """The user pauses long enough to end the turn, then goes on. The first half
     used to be dropped; now its turn is abandoned unheard, and the next turn
-    answers both halves as one request."""
+    answers both halves as one request, under one post of them."""
     vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
     prompts = _scripted_agent(agent, [None, "Added milk and eggs."])
     with patch("core.channel.voice.voice_manager.AgentsLoader") as mock_loader, \
@@ -577,8 +577,167 @@ async def test_a_split_utterance_keeps_both_halves(mock_bot_runner, tmp_path):
         await vm._current_task
 
     assert prompts == ["Add milk to the shopping list.", "Add milk to the shopping list. And eggs."]
-    assert "🎤 **Sam (Voice):** Add milk to the shopping list. And eggs." in _mirrored(text_channel)
+    # The first half's post now holds both: the channel shows what you said once.
+    assert _mirrored(text_channel) == ["🎤 **Sam (Voice):** Add milk to the shopping list."]
+    text_channel.send.return_value.edit.assert_any_await(
+        content="🎤 **Sam (Voice):** Add milk to the shopping list. And eggs.")
     assert vm.floor.unanswered() == []
+
+
+@pytest.mark.asyncio
+async def test_every_addition_goes_into_the_one_post(mock_bot_runner, tmp_path):
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    prompts = _scripted_agent(agent, [None, None, "Added milk, eggs and bread."])
+    with patch("core.channel.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.channel.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        _say(vm, "Add milk to the shopping list.")
+        await _until(lambda: len(prompts) == 1)
+        vm.floor.utterance_finished(_talk_over(vm, "And eggs."))
+        await _until(lambda: len(prompts) == 2)
+        vm.floor.utterance_finished(_talk_over(vm, "And bread."))
+        await vm._current_task
+
+    assert prompts[-1] == "Add milk to the shopping list. And eggs. And bread."
+    assert _mirrored(text_channel) == ["🎤 **Sam (Voice):** Add milk to the shopping list."]
+    text_channel.send.return_value.edit.assert_any_await(
+        content="🎤 **Sam (Voice):** Add milk to the shopping list. And eggs. And bread.")
+
+
+def _sent(text_channel):
+    return [c.args[0] for c in text_channel.send.call_args_list if c.args]
+
+
+async def _split(vm, agent, ready):
+    """The user says "Add milk to the shopping list.", then "And eggs." over the
+    agent still working on it, once `ready()`; the restarted turn runs to its end."""
+    with patch("core.channel.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.channel.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        _say(vm, "Add milk to the shopping list.")
+        await _until(ready)
+        vm.floor.utterance_finished(_talk_over(vm, "And eggs."))
+        await vm._current_task
+
+
+SPLIT_POSTS = ["🎤 **Sam (Voice):** Add milk to the shopping list.",
+               "🎤 **Sam (Voice):** Add milk to the shopping list. And eggs."]
+
+
+@pytest.mark.asyncio
+async def test_words_still_being_posted_when_their_turn_is_cut_short_are_posted_once(mock_bot_runner, tmp_path):
+    """Discord is slow: the first half's post is still on its way when the
+    second half restarts the turn. It isn't abandoned with its turn, and the
+    restarted turn waits for it, then edits it."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    prompts = _scripted_agent(agent, [None, "Added milk and eggs."])
+    message, landed = text_channel.send.return_value, asyncio.Event()
+
+    async def send(text, **_kwargs):
+        if text.startswith("🎤"):
+            await landed.wait()
+        return message
+
+    text_channel.send.side_effect = send
+    with patch("core.channel.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.channel.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        _say(vm, "Add milk to the shopping list.")
+        await _until(lambda: prompts)
+        vm.floor.utterance_finished(_talk_over(vm, "And eggs."))
+        await _until(lambda: len(prompts) == 2)  # the restarted turn is answering
+        landed.set()
+        await vm._current_task
+
+    assert _mirrored(text_channel) == SPLIT_POSTS[:1]
+    message.edit.assert_any_await(content=SPLIT_POSTS[1])
+
+
+@pytest.mark.asyncio
+async def test_words_with_part_of_a_reply_under_them_are_posted_again(mock_bot_runner, tmp_path):
+    """The cut-short turn had already put part of its reply under your words:
+    an edit would set the restarted question above an answer to the old one."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    replies = [[{"type": "token", "content": "Checking the shopping list."}, None],
+               [{"type": "token", "content": _spoken_reply("Added milk and eggs.")},
+                _final(_spoken_reply("Added milk and eggs."))]]
+
+    async def stream(prompt, session=None):
+        for event in replies.pop(0):
+            if event is None:
+                await asyncio.Event().wait()  # still working when the second half comes
+            yield event
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+    await _split(vm, agent, ready=lambda: "Checking the shopping list." in _sent(text_channel))
+
+    assert _mirrored(text_channel) == SPLIT_POSTS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", [
+    [{"type": "token", "content": _spoken_reply("Added milk.")}, _final(_spoken_reply("Added milk."))],
+    [{"type": "error", "content": "The model is overloaded."}],  # nothing written: the error line is the answer
+], ids=["answered", "failed"])
+async def test_words_said_again_after_their_turn_ended_are_posted_again(mock_bot_runner, tmp_path, first):
+    """A turn that ended answered its words, even with nothing of it under
+    them. The same words again, with more, are a new request of their own."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    replies = [first, [{"type": "token", "content": _spoken_reply("Added eggs.")}, _final(_spoken_reply("Added eggs."))]]
+
+    async def stream(prompt, session=None):
+        for event in replies.pop(0):
+            yield event
+
+    agent.execute_stream = MagicMock(side_effect=stream)
+    with patch("core.channel.voice.voice_manager.AgentsLoader") as mock_loader, \
+         patch("core.channel.voice.speech.blurp_generator.BlurpGenerator.get_blurp_audio", return_value=None):
+        mock_loader.return_value.get_agent.return_value = agent
+        _say(vm, "Add milk to the shopping list.")
+        await vm._current_task
+        _say(vm, "Add milk to the shopping list. And eggs.")
+        await vm._current_task
+
+    assert _mirrored(text_channel) == SPLIT_POSTS
+
+
+@pytest.mark.asyncio
+async def test_words_whose_post_cant_be_edited_are_posted_again(mock_bot_runner, tmp_path):
+    """Someone deleted the cut-short turn's post: the words are posted again."""
+    vm, agent, text_channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")
+    _scripted_agent(agent, [None, "Added milk and eggs."])
+
+    async def edit(content=None, **_kwargs):
+        if content and content.startswith("🎤"):
+            raise RuntimeError("404 Not Found (error code: 10008): Unknown Message")
+
+    text_channel.send.return_value.edit.side_effect = edit
+    await _split(vm, agent, ready=lambda: _mirrored(text_channel))
+
+    assert _mirrored(text_channel) == SPLIT_POSTS
+
+
+@pytest.mark.parametrize("words, author, channel, carried", [
+    ("Remind me to call mom Tomorrow.", "Sam", "general", True),
+    ("Remind me to call mom", "Sam", "general", True),               # the same words, nothing new
+    ("Remind me to call mommy's doctor.", "Sam", "general", False),  # not where an utterance ends
+    ("Tomorrow.", "Sam", "general", False),                          # the earlier words weren't kept
+    ("Remind me to call mom Tomorrow.", "Alex", "general", False),   # someone else is talking
+    ("Remind me to call mom Tomorrow.", "Sam", "day-planning", False),  # another conversation
+])
+def test_a_post_is_carried_into_a_turn_that_answers_its_words_again(words, author, channel, carried):
+    earlier = _TranscriptPost("general", "Sam", "Remind me to call mom", message=MagicMock())
+    assert earlier.carried_into(_TranscriptPost(channel, author, words)) is carried
+
+
+@pytest.mark.parametrize("state", [
+    {"message": None},                  # it never got posted
+    {"answered": True},                 # its turn wrote under it, or ended
+    {"speech": MagicMock(heard=True)},  # its answer was heard: the floor let the words go
+], ids=["unposted", "answered", "heard"])
+def test_a_post_whose_words_were_answered_or_never_posted_is_not_carried(state):
+    earlier = _TranscriptPost("general", "Sam", "Remind me to call mom", **{"message": MagicMock(), **state})
+    assert not earlier.carried_into(_TranscriptPost("general", "Sam", "Remind me to call mom Tomorrow."))
 
 
 @pytest.mark.asyncio
