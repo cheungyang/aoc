@@ -18,12 +18,14 @@ from graphs.coding.utils.manifest import (
     MANIFEST_VERSION,
     acquire_lease,
     bump_attempt,
+    clear_tick_error,
     lease_is_active,
     load_manifest,
     locked_manifest,
     migrate_manifest,
     persist_task,
     reclaim_expired_leases,
+    record_tick_error,
     release_lease,
     save_manifest,
     stage_at_or_past,
@@ -246,6 +248,58 @@ class TestYieldTask(ManifestTestCase):
     def test_an_explicit_status_still_wins(self):
         yield_task(self.path, "A", status="blocked")
         self.assertEqual(self.read()["queue"][0]["status"], "blocked")
+
+
+class TestTickError(ManifestTestCase):
+    """A failure before any task is claimed has nowhere to live but the manifest's top level."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(_manifest([{"task_id": "A", "status": "queued", "stage": "queued"}]))
+
+    def test_a_failure_is_recorded_with_when_it_started(self):
+        self.assertTrue(record_tick_error(self.path, "preflight", "the bot can't push", now=100.0))
+
+        self.assertEqual(self.read()["tick_error"],
+                         {"stage": "preflight", "message": "the bot can't push", "at": 100.0})
+
+    def test_the_same_failure_again_keeps_its_first_time(self):
+        """A failure that repeats every tick must not look new every tick."""
+        record_tick_error(self.path, "preflight", "the bot can't push", now=100.0)
+
+        self.assertFalse(record_tick_error(self.path, "preflight", "the bot can't push", now=400.0))
+        self.assertEqual(self.read()["tick_error"]["at"], 100.0)
+
+    def test_a_different_failure_replaces_it(self):
+        record_tick_error(self.path, "preflight", "the bot can't push", now=100.0)
+
+        self.assertTrue(record_tick_error(self.path, "repo", "could not clone owner/repo", now=400.0))
+        self.assertEqual(self.read()["tick_error"],
+                         {"stage": "repo", "message": "could not clone owner/repo", "at": 400.0})
+
+    def test_clearing_removes_only_the_error(self):
+        record_tick_error(self.path, "repo", "could not clone owner/repo", now=100.0)
+
+        self.assertTrue(clear_tick_error(self.path))
+
+        data = self.read()
+        self.assertNotIn("tick_error", data)
+        self.assertEqual(data["repo"], {"slug": "owner/repo"})
+        self.assertEqual(data["queue"][0]["task_id"], "A")
+
+    def test_clearing_a_clean_manifest_writes_nothing(self):
+        before = os.path.getmtime(self.path)
+        os.utime(self.path, (before - 60, before - 60))
+
+        self.assertFalse(clear_tick_error(self.path))
+        self.assertEqual(os.path.getmtime(self.path), before - 60)
+
+    def test_the_error_survives_task_writes(self):
+        record_tick_error(self.path, "preflight", "the bot can't push", now=100.0)
+
+        persist_task(self.path, "A", status="active")
+
+        self.assertEqual(self.read()["tick_error"]["message"], "the bot can't push")
 
 
 class TestStageHelpers(unittest.TestCase):

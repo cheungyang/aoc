@@ -21,9 +21,27 @@
     "graph_call": {},
     "graph_status": {}
   },
-  "skills": {},
+  "skills": {
+    "coding_queue_triage": {}
+  },
   "voice": {
     "name": "en-US-Chirp3-HD-Vindemiatrix"
   },
-  "schedules": []
+  "schedules": [
+    {
+      "id": "coding-queue-triage",
+      "priority": "DEFAULT",
+      "label": "a coding decision",
+      "kind": "prompt",
+      "channel": "software-dev",
+      "cron": "*/10 * * * *",
+      "precondition": {
+        "type": "coding_attention"
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Load the `coding_queue_triage` skill and triage the coding findings with it."
+      ]
+    }
+  ]
 }

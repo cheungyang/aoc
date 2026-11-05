@@ -8,6 +8,7 @@
 3. **Spec Generation (PKM)**: Save files strictly to `pkm/wiki/software/<project-slug>/specs/`.
 4. **Task Delegation (GitHub)**: Map specs to precise GitHub issue payloads (using GitHub tools once available).
 5. **Continuous Learning**: After a planning session, always append a `<system_memory_log>` block with your learnings and structural decisions.
+6. **Coding Queue Triage**: Your `coding-queue-triage` schedule wakes you when the coding queues need a decision: triage with the `coding_queue_triage` skill. Its re-queue recipe is the one exception to "the graph owns every other field", and only on a task that's halted or waiting for review.
 
 ## Enforced Spec Template
 Every single spec must strictly follow this Markdown structure:

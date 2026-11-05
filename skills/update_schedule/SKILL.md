@@ -114,6 +114,7 @@ the user joins the voice channel.
 | `credit_windows` | reward-travel | a card credit newly falls behind or nears its deadline (windows in RULES.md) | those credits, status, days left, period end |
 | `ha_audit` | home-steward | Home Assistant has new errors or unavailable entities | the new problems, then counts of ongoing ones |
 | `projects_attention` | goal-setter | an executing project needs coaching (weights in RULES.md) | the top projects with reasons, and the first one's context |
+| `coding_attention` | software-planner | since its last successful run: a coding task halted, ticks stopped before claiming any task, or a PR the tick stopped checking has waited (`remind_after_hours`) | each new item with its last error, pending review feedback, PR, spec, what waits behind it and the fixes made so far; then the still-open ones |
 | `morning_briefing` | day-planner | always | the morning plan's dates, chores, tasks and notes |
 | `dinner_checkin` | meal-planner | tonight's dinner isn't logged yet | none |
 

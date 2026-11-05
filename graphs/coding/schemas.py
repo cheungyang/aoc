@@ -46,6 +46,29 @@ class TaskError(TypedDict, total=False):
     at: float
 
 
+class TickError(TypedDict, total=False):
+    """The manifest's top-level `tick_error`: why ticks stop before claiming any task.
+
+    Written by the scheduler (utils/manifest.record_tick_error) when preflight
+    or the repository fails, and removed once a tick gets past both. Only a
+    change of stage or message rewrites it, so `at` is when the failure started.
+    """
+    stage: str                       # "preflight" | "repo"
+    message: str
+    at: float
+
+
+class PlannerFixes(TypedDict, total=False):
+    """A task's `planner_fixes`: software-planner's record of re-queuing it after a halt.
+
+    Written by software-planner, never by the graph, in the same edit that
+    re-queues the task. Its coding_attention scan counts it against
+    `max_fixes_per_task`, so a task can't bounce between planner and tick forever.
+    """
+    count: int
+    log: List[str]                   # one dated line per fix
+
+
 class TaskEnvelope(TypedDict, total=False):
     task_id: str
     project_name: str
@@ -100,6 +123,8 @@ class TaskEnvelope(TypedDict, total=False):
     # task; otherwise the tick exits without touching the network.
     poll_until: Optional[float]
     last_error: Optional[TaskError]
+    # software-planner's fixes after halts. The graph neither writes nor clears it.
+    planner_fixes: Optional[PlannerFixes]
     updated_at: float
 
 

@@ -93,7 +93,7 @@ def _router(allowed):
 ```
 
 `route` is a **persistent LangGraph channel**, declared on `CodingState`
-([schemas.py:L163-L166](schemas.py#L163-L166)). Because it is
+([schemas.py:L188-L191](schemas.py#L188-L191)). Because it is
 a channel it survives until a node overwrites it, so every router reads it as an **explicit
 instruction** rather than inferring the next step. If the value is not one of that router's own
 options — including a route nobody set, or a node's `"done"` sentinel — the tick **ends**. A node
@@ -120,7 +120,7 @@ that forgets to set a route stops the tick instead of re-running whatever the la
   (`tick_handled` guarantees one tick cannot work the same task twice).
 
 **What a subsequent tick resumes from:** the task's recorded `stage` in the manifest.
-[`select_task()`](nodes/scheduler.py#L44-L86) maps stage →
+[`select_task()`](nodes/scheduler.py#L48-L90) maps stage →
 route so work already done is not redone: `awaiting_review`/`published` → `sync_review`,
 `verified`/`audited` → `publish`, `pushed` → `verify`, `implemented` → `push`, anything else →
 `implement`. Every node additionally opens with a `stage_at_or_past(...)` guard backed by evidence,
@@ -133,7 +133,7 @@ the same verdict.
 
 ## State
 
-### `CodingState` ([schemas.py:L116-L187](schemas.py#L116-L187))
+### `CodingState` ([schemas.py:L141-L212](schemas.py#L141-L212))
 
 `total=False` TypedDict. Grouped as in the source.
 
@@ -190,7 +190,7 @@ the same verdict.
 | `tick_report` | `List[str]` | Lines the runner posts. Accumulated across the whole tick. |
 | `tick_handled` | `List[str]` | Task ids already touched — one tick cannot work the same task twice. |
 
-### `TaskEnvelope` ([schemas.py:L49-L103](schemas.py#L49-L103))
+### `TaskEnvelope` ([schemas.py:L72-L128](schemas.py#L72-L128))
 
 One queue entry in the manifest.
 
@@ -226,6 +226,7 @@ One queue entry in the manifest.
 | `review_feedback` | `Optional[List[str]]` | Reviewer comments harvested but not yet acted on. Durable so feedback survives a hand-off through the scheduler (e.g. re-provisioning on another host); cleared once implement consumes it. |
 | `poll_until` | `Optional[float]` | Review polling window; outside it the task is dormant. |
 | `last_error` | `Optional[TaskError]` | Classified last failure. |
+| `planner_fixes` | `Optional[PlannerFixes]` | software-planner's record of re-queuing this task after halts. The graph never writes or clears it. |
 | `updated_at` | `float` | Set on every manifest write. |
 
 ### `TaskError` ([schemas.py:L37-L46](schemas.py#L37-L46))
@@ -237,7 +238,32 @@ One queue entry in the manifest.
 | `message` | `str` | Human-readable detail. |
 | `at` | `float` | Epoch timestamp. |
 
-### `RepoDescriptor` ([schemas.py:L106-L113](schemas.py#L106-L113))
+### `TickError` ([schemas.py:L49-L58](schemas.py#L49-L58))
+
+The manifest's top-level `tick_error`: why ticks stop before claiming any task. A failed preflight
+or a repository that can't be resolved happens before there is a task to carry it, so the
+scheduler records it here (`record_tick_error`). It removes it once a tick gets past both checks
+(`clear_tick_error`). Only a change of stage or message rewrites it, so `at` is when the failure
+started.
+
+| Field | Type | Description |
+|---|---|---|
+| `stage` | `str` | `preflight` \| `repo`. |
+| `message` | `str` | The tick's own message for the failure. |
+| `at` | `float` | Epoch timestamp of the first tick that hit it. |
+
+### `PlannerFixes` ([schemas.py:L61-L69](schemas.py#L61-L69))
+
+A task's `planner_fixes`. software-planner writes it, in the same edit that re-queues a halted
+task. Its `coding_attention` scan counts it against `max_fixes_per_task`, so a task can't bounce
+between the planner and the tick forever. `reset` leaves it alone.
+
+| Field | Type | Description |
+|---|---|---|
+| `count` | `int` | How many times software-planner re-queued the task. |
+| `log` | `List[str]` | One dated line per fix: what it changed. |
+
+### `RepoDescriptor` ([schemas.py:L131-L138](schemas.py#L131-L138))
 
 | Field | Type | Description |
 |---|---|---|
@@ -264,9 +290,9 @@ One queue entry in the manifest.
 
 ### scheduler
 
-[scheduler.py:L89-L282](nodes/scheduler.py#L89-L282) ·
-[`select_task()`](nodes/scheduler.py#L44-L86) ·
-[`_resolve_base_ref()`](nodes/scheduler.py#L286-L299)
+[scheduler.py:L93-L297](nodes/scheduler.py#L93-L297) ·
+[`select_task()`](nodes/scheduler.py#L48-L90) ·
+[`_resolve_base_ref()`](nodes/scheduler.py#L301-L314)
 
 **Responsibility.** The entry node of every tick. It decides *what* to advance, in a fixed order:
 reclaim dead leases, respect the concurrency bound, pick one task, preflight before any token is
@@ -295,7 +321,9 @@ previous task in the same tick cannot stand in for this one's commit), `lease_ow
 | `done` | No `build_request_path`; concurrency bound reached; nothing runnable; preflight failed; repo unavailable; lease lost to another tick; worktree provisioning failed; setup command failed. Ends the tick. |
 
 **Side effects.** Manifest: `reclaim_expired_leases`, `acquire_lease`, `persist_task` (status,
-stage, `run_id`, `branch_name`, `setup_done`, `impl_digest` reset, halts with `last_error`). Git:
+stage, `run_id`, `branch_name`, `setup_done`, `impl_digest` reset, halts with `last_error`),
+`record_tick_error` when preflight or the repository fails before any task is claimed, and
+`clear_tick_error` once a tick gets past both (the top-level [`tick_error`](#tickerror-schemaspyl49-l58)). Git:
 [`provision_worktree`](../../core/git/ops.py#L146-L208) (idempotent and
 **remote-aware**: if `origin/<branch>` exists it is checked out with `worktree add -B`, so a task
 that pushed on another host resumes from its commits; otherwise it starts from the base. Skipped
@@ -674,7 +702,7 @@ on the host it ran on.
 | Module | Purpose |
 |---|---|
 | [dag.py](utils/dag.py) | Manifest path resolution (one per project under `pkm/wiki/software/<slug>/`), project-slug normalisation, manifest discovery, and topological selection of runnable tasks. |
-| [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, and the `stage_at_or_past` guard every node opens with. |
+| [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, the project-level `tick_error`, and the `stage_at_or_past` guard every node opens with. |
 | [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L30-L48); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
 | [host.py](utils/host.py) | Which host is ticking: host-tagged lease owners, the local pause file, `CODING_TICK_ENABLED`, and an immediate pkm sync. See [Moving between hosts](#moving-between-hosts-nas--dev-box). |
 | [repo.py](utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection (where the clones live), and the `existing`/`create` repository modes. |

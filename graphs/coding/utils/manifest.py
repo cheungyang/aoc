@@ -304,6 +304,43 @@ def reclaim_expired_leases(manifest_path: str, now: Optional[float] = None) -> L
     return reclaimed
 
 
+def record_tick_error(manifest_path: str, stage: str, message: str, now: Optional[float] = None) -> bool:
+    """Records a failure no task can carry: the manifest's top-level `tick_error`.
+
+    A failed preflight or a repository that can't be resolved stops a tick
+    before it claims any task, so without this the failure lives only in the
+    tick's report. Written only when the stage or message changes: a failure
+    that repeats every tick neither rewrites the manifest nor moves `at`, which
+    keeps the moment it started. Returns whether it wrote.
+    """
+    if _same_tick_error(load_manifest(manifest_path).get("tick_error"), stage, message):
+        return False
+
+    written = False
+    with locked_manifest(manifest_path) as manifest:
+        if not _same_tick_error(manifest.get("tick_error"), stage, message):
+            manifest["tick_error"] = {
+                "stage": stage,
+                "message": message,
+                "at": now if now is not None else time.time(),
+            }
+            written = True
+    return written
+
+
+def clear_tick_error(manifest_path: str) -> bool:
+    """Removes `tick_error` once a tick gets past preflight and the repository. Returns whether it did."""
+    if "tick_error" not in load_manifest(manifest_path):
+        return False
+    with locked_manifest(manifest_path) as manifest:
+        manifest.pop("tick_error", None)
+    return True
+
+
+def _same_tick_error(current: Any, stage: str, message: str) -> bool:
+    return isinstance(current, dict) and current.get("stage") == stage and current.get("message") == message
+
+
 def stage_at_or_past(task: Dict[str, Any], stage: str) -> bool:
     """True when the task already reached `stage`. The guard every node opens with."""
     current = task.get("stage") or "queued"

@@ -304,6 +304,45 @@ class TestSchedulerNode(ManifestFixture):
 
         self.assertIsNone(self.stored().get("lease_owner"))
 
+    async def test_a_failed_preflight_is_recorded_in_the_manifest(self):
+        """No task is claimed yet, so the failure lands at the manifest's top level."""
+        self.write_manifest([_task()])
+        self.mock_preflight.return_value = (False, "Preflight failed: bot token expired", None)
+
+        await scheduler_node(self.tick_state())
+
+        error = manifest_store.load_manifest(self.manifest_path)["tick_error"]
+        self.assertEqual((error["stage"], error["message"]), ("preflight", "Preflight failed: bot token expired"))
+        self.assertIsNone(self.stored().get("last_error"))
+
+    async def test_a_preflight_that_keeps_failing_keeps_its_first_time(self):
+        self.write_manifest([_task()], tick_error={
+            "stage": "preflight", "message": "Preflight failed: bot token expired", "at": 100.0})
+        self.mock_preflight.return_value = (False, "Preflight failed: bot token expired", None)
+
+        await scheduler_node(self.tick_state())
+
+        self.assertEqual(manifest_store.load_manifest(self.manifest_path)["tick_error"]["at"], 100.0)
+
+    async def test_an_unreachable_repo_is_recorded_in_the_manifest(self):
+        self.write_manifest([_task()])
+
+        with patch("graphs.coding.nodes.scheduler.ensure_repo_available",
+                   AsyncMock(return_value=("", "Could not clone `owner/repo`: denied"))):
+            await scheduler_node(self.tick_state())
+
+        error = manifest_store.load_manifest(self.manifest_path)["tick_error"]
+        self.assertEqual(error["stage"], "repo")
+        self.assertIn("denied", error["message"])
+
+    async def test_getting_past_preflight_and_the_repo_clears_the_error(self):
+        self.write_manifest([_task()], tick_error={"stage": "repo", "message": "no network", "at": 100.0})
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+        self.assertNotIn("tick_error", manifest_store.load_manifest(self.manifest_path))
+
 
 class TestSetupCommand(TestSchedulerNode):
     """Scaffolding and dependency install belong to the worktree, not to the

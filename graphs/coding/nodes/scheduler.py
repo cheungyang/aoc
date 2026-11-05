@@ -10,7 +10,9 @@ node decides *what* to advance:
 5. route by the task's recorded stage, so work already done is not redone.
 
 Everything it writes goes through the manifest, because the manifest is the API:
-hand-editing it and running another tick is a supported operation.
+hand-editing it and running another tick is a supported operation. That includes
+a failure before any task is claimed (preflight, the repository): it's recorded
+as the manifest's top-level `tick_error` until a tick gets past it.
 """
 import os
 import time
@@ -169,6 +171,8 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     )
     if not ok:
         report.append(f"⚠️ {message}")
+        # No task is claimed yet, so no task can carry this failure: the manifest does.
+        manifest_store.record_tick_error(manifest_path, "preflight", message, now)
         return _idle(error_message=message)
 
     # 4. Resolve the repository the mode asks for: a managed clone of its slug,
@@ -176,7 +180,11 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     repo_root, repo_error = await ensure_repo_available(repo_descriptor, push_identity)
     if repo_error:
         report.append(f"⚠️ {repo_error}")
+        manifest_store.record_tick_error(manifest_path, "repo", repo_error, now)
         return _idle(error_message=repo_error)
+
+    # Past preflight and the repository: whatever stopped earlier ticks is over.
+    manifest_store.clear_tick_error(manifest_path)
 
     task_id = task["task_id"]
 

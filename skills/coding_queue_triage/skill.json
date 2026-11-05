@@ -1,0 +1,13 @@
+{
+  "skill_id": "coding_queue_triage",
+  "name": "Coding Queue Triage",
+  "description": "Triages what the coding queues need from you, from the coding_attention findings: a halted task, ticks that stop before claiming any task, or a PR the tick stopped checking. Prepares the fix that is yours to make, posts it with the one decision that is the user's, and applies it when they say go.",
+  "emoji": "🩺",
+  "tools": {
+    "filesystem": {
+      "pkm/wiki/software": ["@write"]
+    },
+    "spec_validator": {},
+    "graph_status": {}
+  }
+}
