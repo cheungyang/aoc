@@ -9,7 +9,8 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from core.config.models import FLASH, FLASH_LITE
-from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, HandoverFilter, LightChatModel, take_handover
+from core.runtime.model.handover import (DEFAULT_DEPTH, HANDOVER, MISSING, HandoverFilter, LightChatModel, opener_only,
+                                         take_handover)
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
 from core.runtime.observability.turn_trace import start_turn_trace
 
@@ -59,6 +60,24 @@ class TestTheMarker(unittest.TestCase):
         self.assertFalse(marker.found)
 
 
+class TestALoneOpener(unittest.TestCase):
+    """A light reply that's only its opener, the marker left off, hands over too."""
+
+    def test_only_its_opener(self):
+        for text in ("<speech>Let me check the lights.</speech>", "\n <speech>On it.</speech>\n",
+                     "<SPEECH>On it.</SPEECH>", "<speech>Let me check\nthe lights.</speech>"):
+            with self.subTest(text=text):
+                self.assertTrue(opener_only(text))
+
+    def test_an_answer_or_anything_else_is_not(self):
+        for text in ("<speech>It's 4 pm.</speech>It's 4 pm.",          # an answer: its text reply follows
+                     "It's 4 pm.", "", "<speech>Let me check.",         # no block, nothing, never closed
+                     "<speech>One.</speech> and <speech>Two.</speech>",
+                     "Sure. <speech>Let me check.</speech>"):
+            with self.subTest(text=text):
+                self.assertFalse(opener_only(text))
+
+
 class TestLightChatModel(unittest.IsolatedAsyncioTestCase):
 
     async def _stream(self, *texts):
@@ -86,6 +105,14 @@ class TestLightChatModel(unittest.IsolatedAsyncioTestCase):
         _, reply = await self._stream("<speech>On it.</speech><hand", "over/>")
         self.assertEqual([c["args"] for c in reply.tool_calls], [{"depth": DEFAULT_DEPTH}])
 
+    async def test_a_lone_opener_hands_over_at_the_voice_default(self):
+        """It said what it would do and left the marker off: the agent's model does it."""
+        chunks, reply = await self._stream("<speech>Let me check the ", "lights.</speech>\n")
+        self.assertEqual("".join(c.content for c in chunks if isinstance(c.content, str)),
+                         "<speech>Let me check the lights.</speech>\n", "heard as it was said")
+        self.assertEqual([(c["name"], c["args"]) for c in reply.tool_calls],
+                         [(HANDOVER, {"depth": DEFAULT_DEPTH, "marker": MISSING})])
+
     async def test_a_reply_not_streamed(self):
         async def generate(self, messages, stop=None, run_manager=None, **kwargs):
             return ChatResult(generations=[ChatGeneration(
@@ -96,6 +123,26 @@ class TestLightChatModel(unittest.IsolatedAsyncioTestCase):
         message = result.generations[0].message
         self.assertEqual(message.content, "<speech>Checking.</speech>")
         self.assertEqual([(c["name"], c["args"]) for c in message.tool_calls], [(HANDOVER, {"depth": "low"})])
+
+    async def _not_streamed(self, content):
+        async def generate(self, messages, stop=None, run_manager=None, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+
+        with patch.object(ChatGoogleGenerativeAI, "_agenerate", generate):
+            result = await _light()._agenerate([HumanMessage("Are the lights on?")])
+        return result.generations[0].message
+
+    async def test_a_lone_opener_not_streamed(self):
+        """Its thinking isn't text: the reply is still only its opener."""
+        message = await self._not_streamed([{"type": "thinking", "thinking": "The lights: check them."},
+                                            {"type": "text", "text": "<speech>Checking.</speech>"}])
+        self.assertEqual([(c["name"], c["args"]) for c in message.tool_calls],
+                         [(HANDOVER, {"depth": DEFAULT_DEPTH, "marker": MISSING})])
+
+    async def test_an_answer_not_streamed_has_no_call(self):
+        message = await self._not_streamed("<speech>The kitchen light is on.</speech>Kitchen: on.")
+        self.assertEqual((message.content, message.tool_calls),
+                         ("<speech>The kitchen light is on.</speech>Kitchen: on.", []))
 
     def test_its_calls_say_light_on_the_voice_trace(self):
         def calls(llm):

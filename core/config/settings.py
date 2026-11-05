@@ -312,9 +312,9 @@ class Config:
 
     # The light model a voice turn's first model call runs on: it speaks first,
     # then answers or hands the turn to the agent's own model (graphs/voice).
-    # `TIER:LEVEL`, e.g. FLASH_LITE:minimal; `off` keeps every voice turn on the
-    # agent's own model. `VOICE_LIGHT_MODEL`.
-    voice_light_model = Setting("VOICE_LIGHT_MODEL", "off", strip=True)
+    # `TIER:LEVEL`, FLASH_LITE:minimal by default; `off` keeps every voice turn
+    # on the agent's own model. `VOICE_LIGHT_MODEL`.
+    voice_light_model = Setting("VOICE_LIGHT_MODEL", "FLASH_LITE:minimal", strip=True)
 
     # The one cap on concurrent model-driven executions across the system
     # (scheduled runs, dream fan-out, ...). `AOC_MAX_CONCURRENCY`, min 1.

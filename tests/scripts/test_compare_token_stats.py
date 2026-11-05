@@ -1,11 +1,15 @@
 """The voice baseline and agent health reports in scripts/compare_token_stats.py."""
+import io
 import os
 import tempfile
+import time
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 from core.storage.sessions import SessionStore
-from scripts.compare_token_stats import _agent_for_table, _percentile, get_health_stats, get_stats, get_voice_stats
+from scripts.compare_token_stats import (MISSING_MARKER, _agent_for_table, _percentile, get_health_stats, get_stats,
+                                         get_voice_stats, main, print_voice_stats)
 
 
 class TestVoiceStats(unittest.TestCase):
@@ -50,6 +54,47 @@ class TestVoiceStats(unittest.TestCase):
 
         self.assertEqual(before["stages"]["first_token"], [1800])
         self.assertEqual(during["stages"]["first_token"], [2600])
+
+    LIGHT, AGENT = {"kind": "model_call", "light": True}, {"kind": "model_call"}
+    LIGHT_TURNS = [
+        [LIGHT, {"kind": "handover", "depth": "low", "marker": "found"}, AGENT, AGENT],
+        [LIGHT, {"kind": "handover", "depth": "low", "marker": MISSING_MARKER}, AGENT],
+        [LIGHT, {"kind": "handover", "depth": "medium"}, AGENT],   # traced before hand-overs noted their marker
+        [LIGHT],                                                    # answered on the light call
+        [AGENT],                                                    # on the agent's own model only
+        [],                                                         # a voice hook: no model call
+    ]
+
+    def _light_turns_db(self, tmp):
+        db = os.path.join(tmp, "memory.db")
+        store = SessionStore(db)
+        for events in self.LIGHT_TURNS:
+            store.append_turn_trace("main:discord:general", {"ttfa_ms": 900, "deltas": {}, "events": events})
+        return db
+
+    def test_light_first_calls_and_how_they_handed_over(self):
+        """Whether the light first call is live: the turns that made one, and their hand-overs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = get_voice_stats(db_path=self._light_turns_db(tmp))
+
+        self.assertEqual(stats["light_turns"], 4)
+        self.assertEqual(dict(stats["handovers"]), {"low": 2, "medium": 1})
+        self.assertEqual(stats["missing_markers"], 1)
+        self.assertEqual(sorted(stats["model_calls"]), [0, 1, 1, 2, 2, 3])
+
+    def test_the_report_says_whether_the_light_call_is_live(self):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, redirect_stdout(out):
+            print_voice_stats(db_path=self._light_turns_db(tmp))
+
+        printed = out.getvalue()
+        self.assertRegex(printed, r"Light first calls +\| +4   of 5 voice turns that called a model\n")
+        self.assertRegex(printed, r"Handed over +\| +3   by depth \{'low': 2, 'medium': 1\}, marker missing 1\n")
+
+    def test_the_missing_marker_is_the_hand_overs(self):
+        """Copied, not imported: core/runtime/model/handover.py loads the model stack."""
+        from core.runtime.model.handover import MISSING
+        self.assertEqual(MISSING_MARKER, MISSING)
 
     def test_health_counts_round_trips_and_dead_ends(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,6 +167,34 @@ class TestVoiceStats(unittest.TestCase):
         self.assertEqual(_agent_for_table("ctx_day_planner_tool_day_planning", ["day-planner", "main"]), "day-planner")
         self.assertEqual(_percentile([5, 1, 3], 50), 3)
         self.assertIsNone(_percentile([], 90))
+
+
+class TestTheCommandLine(unittest.TestCase):
+
+    def test_days_looks_back_for_the_voice_report_too(self):
+        """`!python compare_token_stats.py --voice --days 1`: the last day's voice turns."""
+        with mock.patch("scripts.compare_token_stats.print_voice_stats") as voice:
+            self.assertEqual(main(["--voice", "--days", "1"]), 0)
+        self.assertAlmostEqual(voice.call_args.kwargs["since_ts"], time.time() - 86400, delta=60)
+        self.assertIsNone(voice.call_args.kwargs["until_ts"])
+
+    def test_otherwise_the_voice_report_reads_all_of_it_or_since_until(self):
+        """--since wins over --days."""
+        with mock.patch("scripts.compare_token_stats.print_voice_stats") as voice:
+            main(["--voice"])
+            main(["--voice", "--since", "1000", "--until", "2000"])
+            main(["--voice", "--since", "1000", "--days", "1"])
+        self.assertEqual([c.kwargs for c in voice.call_args_list], [{"since_ts": 0, "until_ts": None},
+                                                                    {"since_ts": 1000, "until_ts": 2000},
+                                                                    {"since_ts": 1000, "until_ts": None}])
+
+    def test_the_health_report_still_looks_back_a_week(self):
+        with mock.patch("scripts.compare_token_stats.print_health_stats") as health:
+            self.assertEqual(main(["--health"]), 0)
+            main(["--health", "--days", "2"])
+        week, two_days = (c.kwargs["since_ts"] for c in health.call_args_list)
+        self.assertAlmostEqual(week, time.time() - 7 * 86400, delta=60)
+        self.assertAlmostEqual(two_days, time.time() - 2 * 86400, delta=60)
 
 
 if __name__ == "__main__":

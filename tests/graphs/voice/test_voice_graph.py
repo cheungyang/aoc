@@ -16,7 +16,7 @@ from core.config.models import FLASH, FLASH_LITE
 from core.prompts.voice import OPENER_HINT, get_voice_mode_prompt
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
-from core.runtime.model.handover import HANDOVER
+from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, MISSING
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
 from core.runtime.model.thinking import PICK_KEY
 from core.runtime.observability.turn_trace import start_turn_trace
@@ -77,6 +77,7 @@ HANDS_OVER = [[_text("<speech>Let me check the "), _text("downstairs lights.</sp
               [_call("get_lights", {"area": "downstairs"}, "g1")],
               [_text("<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")]]
 ANSWERS = [[_text("<speech>You're welcome!</speech>"), _text("You're welcome!")]]
+OPENER_ONLY = [[_text("<speech>Let me check the "), _text("downstairs lights.</speech>")], *HANDS_OVER[1:]]
 
 
 class TestTheLightCall(unittest.TestCase):
@@ -105,10 +106,10 @@ class TestTheLightCall(unittest.TestCase):
 
 class TestTheHandover(unittest.IsolatedAsyncioTestCase):
 
-    async def _hand_over(self, depth):
+    async def _hand_over(self, depth, **more):
         out = io.StringIO()
         with _voice_turn() as (ctx, trace), redirect_stdout(out):
-            result = await handover.ainvoke({"depth": depth})
+            result = await handover.ainvoke({"depth": depth, **more})
         return result, ctx, trace, out.getvalue()
 
     async def test_the_depth_goes_to_the_next_call_and_the_opener_is_noted(self):
@@ -116,9 +117,20 @@ class TestTheHandover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, HANDED_OVER)
         self.assertEqual(ctx.turn_hints[PICK_KEY], "medium")
         self.assertTrue(ctx.turn_hints[OPENER_HINT])
-        self.assertIn("[Handover] agent=home-test depth=medium applied=medium", printed)
+        self.assertIn("[Handover] agent=home-test depth=medium applied=medium\n", printed)
         (event,) = [e for e in trace.events if e["kind"] == HANDOVER]
-        self.assertEqual((event["agent"], event["depth"], event["applied"]), ("home-test", "medium", "medium"))
+        self.assertEqual((event["agent"], event["depth"], event["applied"], event["marker"]),
+                         ("home-test", "medium", "medium", "found"))
+
+    async def test_a_missing_marker_is_logged_and_traced(self):
+        """The light call said its line and left the marker off: it hands over all the same."""
+        result, ctx, trace, printed = await self._hand_over(DEFAULT_DEPTH, marker=MISSING)
+        self.assertEqual(result, HANDED_OVER)
+        self.assertTrue(ctx.turn_hints[OPENER_HINT])
+        self.assertIn(f"[Handover] agent=home-test depth={DEFAULT_DEPTH} applied={DEFAULT_DEPTH} marker=missing\n",
+                      printed)
+        (event,) = [e for e in trace.events if e["kind"] == HANDOVER]
+        self.assertEqual((event["depth"], event["marker"]), (DEFAULT_DEPTH, MISSING))
 
     async def test_voice_caps_the_depth(self):
         _, ctx, _, printed = await self._hand_over("high")
@@ -182,7 +194,30 @@ class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((handed.name, handed.content), (HANDOVER, HANDED_OVER))
         model_calls = [e for e in trace.events if e["kind"] == "model_call"]
         self.assertEqual([e.get("light", False) for e in model_calls], [True, False, False])
-        self.assertEqual([e["depth"] for e in trace.events if e["kind"] == HANDOVER], ["medium"])
+        self.assertEqual([(e["depth"], e["marker"]) for e in trace.events if e["kind"] == HANDOVER],
+                         [("medium", "found")])
+
+    async def test_an_opener_without_its_marker_still_hands_over(self):
+        """The light call said what it would do and left the marker off: the
+        agent's model does it, at the voice default, and the log says so."""
+        calls, out = [], io.StringIO()
+        thread = {"configurable": {"thread_id": "home-test:tool:home-test"}}
+        with redirect_stdout(out):
+            state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Any lights on downstairs?",
+                                                      OPENER_ONLY, calls, thread)
+
+        self.assertEqual([(call["model"], call["tools"]) for call in calls],
+                         [(FLASH_LITE, []), (FLASH, ["get_lights"]), (FLASH, ["get_lights"])])
+        self.assertEqual(calls[1]["thinking"], DEFAULT_DEPTH)
+        self.assertEqual(streamed, "<speech>Let me check the downstairs lights.</speech>"
+                                   "<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")
+        opener, handed = state["messages"][1:3]
+        self.assertEqual([(c["name"], c["args"]) for c in opener.tool_calls],
+                         [(HANDOVER, {"depth": DEFAULT_DEPTH, "marker": MISSING})])
+        self.assertEqual((handed.name, handed.content), (HANDOVER, HANDED_OVER))
+        self.assertEqual([(e["depth"], e["marker"]) for e in trace.events if e["kind"] == HANDOVER],
+                         [(DEFAULT_DEPTH, MISSING)])
+        self.assertIn("marker=missing", out.getvalue())
 
     async def test_an_answer_ends_the_turn_on_the_light_call(self):
         calls = []

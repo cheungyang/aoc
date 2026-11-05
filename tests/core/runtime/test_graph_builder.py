@@ -449,11 +449,11 @@ class TestLightCall(unittest.TestCase):
         self.assertEqual(self.light(_voice_ctx()), ("FLASH_LITE", "minimal"))
         self.assertEqual(self.light(_voice_ctx(), setting=" flash:Minimal "), ("FLASH", "minimal"))
 
-    def test_off_unless_set(self):
+    def test_on_by_default_and_off_when_set_off(self):
         from core.runtime.graph_builder import light_call
         with patch.dict(os.environ):
             os.environ.pop("VOICE_LIGHT_MODEL", None)
-            self.assertIsNone(light_call(_voice_ctx(), AGENT))
+            self.assertEqual(light_call(_voice_ctx(), AGENT), ("FLASH_LITE", "minimal"))
         for setting in ("off", "OFF", ""):
             with self.subTest(setting=setting):
                 self.assertIsNone(self.light(_voice_ctx(), setting=setting))

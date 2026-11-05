@@ -6,9 +6,8 @@ The light model speaks first -- in about a second, where the agent's own model
 takes several -- then either answers, or hands the turn to the agent's own
 model with a one-line opener the user hears while the real work runs.
 
-It's **off** by default (`VOICE_LIGHT_MODEL=off`): every voice turn runs on
-graphs/main. `VOICE_LIGHT_MODEL=FLASH_LITE:minimal` (any `TIER:LEVEL`) turns
-it on.
+It's **on** by default, on FLASH_LITE at minimal thinking (`VOICE_LIGHT_MODEL`,
+any `TIER:LEVEL`). `VOICE_LIGHT_MODEL=off` runs every voice turn on graphs/main.
 
 ## When it's built
 

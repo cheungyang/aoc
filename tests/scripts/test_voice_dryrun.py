@@ -846,7 +846,8 @@ class TestResuming:
         with patch.object(replay, "run_case", fake_run_case), patch.object(replay, "guard_writes"), \
              patch("core.channel.voice.engines.tts.TTSEngine"):
             code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--state-dir", str(tmp_path / "s"),
-                                      "--out", str(out), "--combo", "FLASH:low,PRO:low", "--runs", "2"])
+                                      "--out", str(out), "--combo", "FLASH:low,PRO:low", "--light", "off",
+                                      "--runs", "2"])
 
         assert code == 0
         assert seen == [("read", 1, 1), ("read", 2, 2), ("read", 2, 3)], "each run sees the one before it saved"
@@ -857,12 +858,13 @@ class TestResuming:
 
     @pytest.mark.asyncio
     async def test_a_finished_replay_only_reports_and_old_runs_count_as_prod(self, tmp_path, capsys):
+        """Runs stored before combos ran without a light call: a rerun without one finds them."""
         out = tmp_path / "results.json"
         old = _stored()
         del old["combo"]  # written before combos
         out.write_text(json.dumps([old]))
         with patch.object(replay, "isolate_sessions", side_effect=AssertionError("nothing to run")):
-            code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--out", str(out)])
+            code = await replay.main(["--cases", _cases_file(tmp_path, CASES), "--out", str(out), "--light", "off"])
         assert code == 0
         assert "| read | 1 | PASS |" in capsys.readouterr().out
 
@@ -1034,10 +1036,21 @@ class TestServiceCheck:
 
     @pytest.mark.asyncio
     async def test_a_plain_replay_is_not_checked(self, tmp_path, service):
+        """A plain replay is production as configured, light first call included: not timed, so not checked."""
+        from core.config.settings import Config
+
         run = self.runs()
-        assert await self._main(tmp_path, run) == 0
+        with Config().overriding(voice_light_model="FLASH_LITE:minimal"):
+            assert await self._main(tmp_path, run) == 0
         assert service.asked == []
         run.assert_awaited_once()
+        (stored,) = json.loads((tmp_path / "results.json").read_text())
+        assert stored["combo"] == "prod+light:FLASH_LITE:minimal"
+
+    @pytest.mark.asyncio
+    async def test_a_light_model_asked_for_is_checked(self, tmp_path, service):
+        assert await self._main(tmp_path, self.runs(), "--light", "FLASH_LITE:minimal") == 0
+        assert "FLASH_LITE" in service.asked
 
     @pytest.mark.asyncio
     async def test_a_check_call_is_the_tiers_model_at_its_lowest_thinking(self, monkeypatch):

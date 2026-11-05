@@ -13,7 +13,8 @@ which has two speeds:
      answer is already in the conversation it answers, and the turn ends.
   2. Otherwise it says in one sentence what the agent will do and ends with
      `<handover depth="low"/>`, which its model turns into a `handover` call
-     as it streams (core/runtime/model/handover.py).
+     as it streams (core/runtime/model/handover.py). A reply that's only that
+     sentence, with the marker left off, hands over too (`opener_only`).
   3. The `handover` tool runs here: the depth goes to the agent's next call
      (`pick_thinking`, capped on voice), the voice block stops asking for a
      sentence before tool calls (core/prompts/voice.py `OPENER_HINT`), and
@@ -33,7 +34,7 @@ from core.config.models import resolve_model
 from core.config.settings import Config
 from core.prompts.voice import OPENER_HINT
 from core.runtime.foundation.context import try_context
-from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, LightChatModel
+from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, MISSING, LightChatModel
 from core.runtime.model.thinking import pick_thinking
 from core.runtime.observability.turn_trace import current_turn_trace
 from graphs.main.graph import create_graph as create_main_graph
@@ -41,17 +42,20 @@ from graphs.voice.prompts import HandedOverPrompt, LightCallPrompt
 
 
 @tool(HANDOVER)
-async def handover(depth: str = DEFAULT_DEPTH) -> str:
-    """Hands a voice turn from its light first call to the agent's own model, at `depth` thinking."""
+async def handover(depth: str = DEFAULT_DEPTH, marker: str = "found") -> str:
+    """Hands a voice turn from its light first call to the agent's own model, at
+    `depth` thinking. `marker` is "missing" when the light call said its line
+    and left the marker off."""
     ctx = try_context()
     applied = pick_thinking(depth)
     agent = ctx.agent_id if ctx is not None else None
     if ctx is not None:
         ctx.turn_hints[OPENER_HINT] = True
-    print(f"[Handover] agent={agent} depth={depth} applied={applied}")
+    missing = f" marker={MISSING}" if marker == MISSING else ""
+    print(f"[Handover] agent={agent} depth={depth} applied={applied}{missing}")
     trace = current_turn_trace()
     if trace is not None:
-        trace.event("handover", agent=agent, depth=depth, applied=applied)
+        trace.event("handover", agent=agent, depth=depth, applied=applied, marker=marker)
     # What the agent's model reads as the hand-over's result (prompts/handed_over.md).
     return HandedOverPrompt().render()
 

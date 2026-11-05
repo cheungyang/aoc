@@ -156,6 +156,12 @@ def _agent_for_table(table, agent_ids):
     return raw.split("_")[0]
 
 
+# What a `handover` event's marker says when the light first call's reply was
+# only its opener, the marker left off: core/runtime/model/handover.py
+# `MISSING`, not imported, as that module loads the model stack.
+MISSING_MARKER = "missing"
+
+
 def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
     """Token use of voice turns and the latency of each pipeline stage, since `since_ts`
     (and before `until_ts`, if given: a before/after comparison, such as the first_token check
@@ -163,7 +169,9 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
 
     Token rows are tagged `surface='voice'` (including the agents a voice turn
     delegates to); latency comes from the `turn_trace` rows VoiceManager writes
-    beside them (see core/runtime/observability/turn_trace.py).
+    beside them (see core/runtime/observability/turn_trace.py). The traces also
+    say which turns made their first call on the light model (graphs/voice),
+    and how those handed over to the agent's own model.
     """
     import json
 
@@ -171,6 +179,7 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
         "calls": 0, "in_tokens": 0, "out_tokens": 0,
         "agents": defaultdict(lambda: [0, 0, 0]),   # calls, in, out
         "turns": 0, "outcomes": defaultdict(int), "ttfa": [], "stages": defaultdict(list), "model_calls": [],
+        "light_turns": 0, "handovers": defaultdict(int), "missing_markers": 0,   # handovers: by depth
     }
     store = SessionStore(db_path)
     if not store.exists():
@@ -211,7 +220,16 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
                     stats["ttfa"].append(trace["ttfa_ms"])
                 for stage, delta in (trace.get("deltas") or {}).items():
                     stats["stages"][stage].append(delta)
-                stats["model_calls"].append(sum(1 for e in trace.get("events", []) if e.get("kind") == "model_call"))
+                events = trace.get("events") or []
+                calls = [e for e in events if e.get("kind") == "model_call"]
+                stats["model_calls"].append(len(calls))
+                if any(e.get("light") for e in calls):
+                    stats["light_turns"] += 1
+                for e in events:
+                    if e.get("kind") == "handover":
+                        stats["handovers"][e.get("depth") or "?"] += 1
+                        if e.get("marker") == MISSING_MARKER:
+                            stats["missing_markers"] += 1
     return stats
 
 
@@ -235,6 +253,11 @@ def print_voice_stats(since_ts=0, db_path=None, until_ts=None):
     print(f"{'Voice turns traced':<30} | {stats['turns']:>12,d}   {dict(stats['outcomes'])}")
     if stats["model_calls"]:
         print(f"{'Model calls / turn p50, p90':<30} | {_percentile(stats['model_calls'], 50):>12} , {_percentile(stats['model_calls'], 90)}")
+    # Whether the light first call is live, and how its turns went on.
+    asked = sum(1 for n in stats["model_calls"] if n)
+    print(f"{'Light first calls':<30} | {stats['light_turns']:>12,d}   of {asked:,d} voice turns that called a model")
+    print(f"{'Handed over':<30} | {sum(stats['handovers'].values()):>12,d}   by depth "
+          f"{dict(sorted(stats['handovers'].items()))}, marker missing {stats['missing_markers']:,d}")
     print(f"{'Time to first audio p50, p90':<30} | {sec(_percentile(stats['ttfa'], 50)):>12} , {sec(_percentile(stats['ttfa'], 90))}")
     if stats["stages"]:
         print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'p95':>8} | {'n':>5}")
@@ -325,25 +348,28 @@ def print_health_stats(since_ts=0, db_path=None):
             print(f"  {agent}: {len(samples)}  e.g. {samples[-1]}")
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Compare historical vs current token usage and latency.")
     parser.add_argument("--cutoff", type=int, default=DEFAULT_CUTOFF_TS, help="Unix timestamp dividing historical from current.")
     parser.add_argument("--archive-all", action="store_true", help="Archive all active sessions now so all future runs start in fresh tables.")
     parser.add_argument("--voice", action="store_true", help="Report the voice baseline: voice token use and per-stage latency from turn traces.")
-    parser.add_argument("--since", type=int, default=0, help="With --voice: only rows after this Unix timestamp.")
+    parser.add_argument("--since", type=int, default=0, help="With --voice: only rows after this Unix timestamp; it wins over --days.")
     parser.add_argument("--until", type=int, default=0, help="With --voice: only rows before this Unix timestamp.")
     parser.add_argument("--health", action="store_true",
                         help="Report model calls per user turn by agent, denied tool permissions and failed load_skill calls.")
-    parser.add_argument("--days", type=float, default=7, help="With --health: look back this many days (default 7).")
-    args = parser.parse_args()
+    parser.add_argument("--days", type=float, default=None,
+                        help="With --voice or --health: look back this many days (--health's default is 7, --voice's all).")
+    args = parser.parse_args(argv)
+    now = datetime.datetime.now().timestamp()
 
     if args.voice:
-        print_voice_stats(since_ts=args.since, until_ts=args.until or None)
-        sys.exit(0)
+        since = args.since or (now - args.days * 86400 if args.days else 0)
+        print_voice_stats(since_ts=since, until_ts=args.until or None)
+        return 0
 
     if args.health:
-        print_health_stats(since_ts=datetime.datetime.now().timestamp() - args.days * 86400)
-        sys.exit(0)
+        print_health_stats(since_ts=now - (args.days or 7) * 86400)
+        return 0
 
     if args.archive_all:
         store = SessionStore()
@@ -352,3 +378,8 @@ if __name__ == "__main__":
         print(res)
 
     print_comparison(cutoff_ts=args.cutoff)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -62,7 +62,8 @@ so all of them see the same live data.
 on that model (graphs/voice: the turn's first call on it, then the agent's
 own model), `off` without it; each goes in the label
 (`prod+light:FLASH_LITE:minimal`), so the judge holds the light call's runs
-to PRO:low without it. Without --light, VOICE_LIGHT_MODEL decides. The
+to PRO:low without it. Without --light, VOICE_LIGHT_MODEL decides: FLASH_LITE
+at minimal unless it's set, so `--light off` is how to run without it. The
 light call is held to its own model and level, and isn't a round trip of the
 case's budget.
 It's safe for the rate limit the live bot shares: one run at a time, --rpm
@@ -1329,7 +1330,10 @@ async def main(argv: Optional[List[str]] = None) -> int:
         if not args.allow_mutations:
             guard_writes()
 
-        tiers = tiers_to_check(combos)
+        # A plain replay, with no combo or light asked for, is production as
+        # configured, light first call included: a quality run, not timed.
+        plain = not (args.combo or args.matrix or args.model or args.thinking or args.light)
+        tiers = [] if plain else tiers_to_check(combos)
         if tiers:
             times = await check_service(tiers)
             for line in check_lines(times):
