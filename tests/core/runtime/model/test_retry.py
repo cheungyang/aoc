@@ -18,6 +18,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
 from core.config.models import FLASH, FLASH_LITE, PRO
+from core.prompts.model import ResumeAskPrompt
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.model import retry as llm_retry
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI, is_503_error, backoff_delay
@@ -175,7 +176,8 @@ class TestResumeWithoutPrefill(unittest.IsolatedAsyncioTestCase):
                 *sent, partial, ask = calls[1]["messages"]
                 self.assertEqual(sent, calls[0]["messages"])
                 self.assertEqual((type(partial), partial.content), (AIMessage, "The first half, "))
-                self.assertEqual((type(ask), ask.content), (HumanMessage, llm_retry.RESUME_ASK))
+                self.assertEqual((type(ask), ask.content), (HumanMessage, ResumeAskPrompt().render()))
+                self.assertIn("Continue it from exactly where it stopped", ask.content)
 
     async def test_a_continuation_that_repeats_the_end_is_trimmed(self):
         first = "Preheat the oven to 200C. Then chop the onions finely. "

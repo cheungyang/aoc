@@ -258,6 +258,14 @@ class TestSpeechContract:
         failures, notes = check_speech(self.result(speech="Mount Tam is close; the details are in the channel."))
         assert failures == [] and notes == ["speech missed: 45 (it defers to the channel)"]
 
+    def test_the_speech_rules_let_numbers_defer_in_words_the_check_takes(self):
+        """The voice rules let speech leave a run of numbers to the channel: the
+        words they ask for must be what this check takes as deferring."""
+        from core.prompts.base import load_template
+        rules = load_template("voice/_speech_rules").replace("\n  ", " ").split("\n")
+        (numbers,) = [rule for rule in rules if rule.startswith("- Numbers")]
+        assert replay.DEFERS_RE.search(numbers), numbers
+
 
 class TestIsolation:
 

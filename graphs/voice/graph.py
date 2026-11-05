@@ -37,11 +37,7 @@ from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, LightChatModel
 from core.runtime.model.thinking import pick_thinking
 from core.runtime.observability.turn_trace import current_turn_trace
 from graphs.main.graph import create_graph as create_main_graph
-from graphs.voice.prompts import LightCallPrompt
-
-# What the agent's model reads as the hand-over's result.
-HANDED_OVER = ("Handed over: the user has heard your first line, so don't say it again. "
-               "Use your tools if the answer needs them, then give the full answer.")
+from graphs.voice.prompts import HandedOverPrompt, LightCallPrompt
 
 
 @tool(HANDOVER)
@@ -56,7 +52,8 @@ async def handover(depth: str = DEFAULT_DEPTH) -> str:
     trace = current_turn_trace()
     if trace is not None:
         trace.event("handover", agent=agent, depth=depth, applied=applied)
-    return HANDED_OVER
+    # What the agent's model reads as the hand-over's result (prompts/handed_over.md).
+    return HandedOverPrompt().render()
 
 
 def first_call(state: Any) -> bool:

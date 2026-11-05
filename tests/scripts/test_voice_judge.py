@@ -112,6 +112,24 @@ class TestPairs:
                      "Tools used: home_assistant\n", "Said aloud:", "Posted in the channel:"):
             assert part in pair.prompt
 
+    def test_the_runtimes_own_tools_are_not_shown(self):
+        """The voice graph's light first call hands over through a `handover` call the
+        runtime runs: shown, it would only tell the judge which reply had the light call."""
+        light = "prod+light:FLASH_LITE:minimal"
+        runs = [stored("lights", "PRO:low"), {**stored("lights", light), "tools": ["handover", "home_assistant"]},
+                stored("chat", "PRO:low", reply="Hi."), {**stored("chat", light, reply="Hello."), "tools": ["handover"]}]
+        lights, chat = judge.make_pairs(runs, "PRO:low")
+        assert "handover" not in lights.prompt and lights.prompt.count("Tools used: home_assistant\n") == 2
+        assert "handover" not in chat.prompt and "Tools used: none\n" in chat.prompt
+
+    def test_the_runtimes_own_tools_are_the_hand_over(self):
+        from core.runtime.model.handover import HANDOVER
+        assert judge.RUNTIME_TOOLS == (HANDOVER,)
+
+    def test_the_judge_takes_an_opener_said_at_once_for_what_it_is(self):
+        """A light first call's line is said while the answer is worked out: judged on accuracy, not as filler."""
+        assert "Judge that line only on whether it's accurate" in judge.judge_config()["system_instruction"]
+
     def test_verdicts_map_back_to_the_combo_and_are_read_strictly(self):
         assert (judge.outcome("A", combo_first=True), judge.outcome("A", combo_first=False)) == ("win", "loss")
         assert (judge.outcome("B", combo_first=False), judge.outcome("tie", combo_first=True)) == ("win", "tie")
@@ -247,8 +265,9 @@ class TestReport:
         assert judge.first_call_reply({**run, "model_replies": []}) is None, "results from before the reply events"
 
     def test_the_bar_needs_both_the_win_rate_and_the_first_token(self):
-        assert judge.bar(0.90, 700) == "PASS"
-        assert judge.bar(26 / 29, 650) == "FAIL: wins or ties 89.7%"
+        assert judge.bar(0.72, 700) == "PASS"
+        assert judge.bar(26 / 36, 700) == "PASS", "what PRO:medium scored against PRO:low: as good as the reference"
+        assert judge.bar(23 / 32, 650) == "FAIL: wins or ties 71.9%"
         assert judge.bar(1.0, 701) == "FAIL: first token 701 ms"
         assert judge.bar(0.5, None) == "FAIL: wins or ties 50.0%, no first token"
 
@@ -257,7 +276,7 @@ class TestReport:
         for i in range(10):
             runs.append(stored(f"c{i}", "PRO:low", reply=f"Answer {i}.", first_token=3400))
             runs.append(stored(f"c{i}", "FLASH:low", reply=f"Answer {i}, {'bad' if i == 9 else 'good'}."))
-            runs.append(stored(f"c{i}", "FLASH_LITE:minimal", reply=f"Answer {i}, bad." if i < 2 else f"Answer {i}!"))
+            runs.append(stored(f"c{i}", "FLASH_LITE:minimal", reply=f"Answer {i}, bad." if i < 3 else f"Answer {i}!"))
             runs.append(stored(f"c{i}", "PRO:medium", reply=f"Answer {i}, good.", first_token=2000))
         runs += [stored("fixed", combo, calls=0, reply="Who's it for?")
                  for combo in ("PRO:low", "FLASH:low", "FLASH_LITE:minimal", "PRO:medium")]
@@ -273,7 +292,7 @@ class TestReport:
         report = capsys.readouterr().out
         assert _row(report, "FLASH:low").startswith("| FLASH:low | 10 | 9 / 0 / 1 | 90% |")
         assert _row(report, "FLASH:low").endswith("| PASS |")
-        assert _row(report, "FLASH_LITE:minimal").endswith("| FAIL: wins or ties 80.0% |")
+        assert _row(report, "FLASH_LITE:minimal").endswith("| FAIL: wins or ties 70.0% |")
         assert _row(report, "PRO:medium").endswith("| FAIL: first token 1600 ms |")
         assert _row(report, "PRO:low").startswith("| PRO:low (reference) | - | - | - | 3.00 / 3.00 s |")
         assert _row(report, "PRO:low").endswith("| 11/11 | reference |")

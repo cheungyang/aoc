@@ -14,6 +14,7 @@ engine and the two base classes:
     memory.py     the context pruner's summary, the nightly dream and compaction
     browser.py    the rules added to the browser agent's own system prompt
     scheduler.py  a scan's findings, appended to its scheduled run's prompt
+    model.py      what the model wrapper adds to a request: a cut-off reply's resume ask
 
 A graph's own prompts stay in the graph, like an agent's tools: in
 graphs/<id>/prompts/, each a Prompt whose `templates_dir` is that folder, so

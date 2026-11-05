@@ -20,11 +20,12 @@ from core.runtime.model.handover import HANDOVER
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
 from core.runtime.model.thinking import PICK_KEY
 from core.runtime.observability.turn_trace import start_turn_trace
-from graphs.voice.graph import HANDED_OVER, create_graph, first_call, handover, with_light_rules
-from graphs.voice.prompts import LightCallPrompt
+from graphs.voice.graph import create_graph, first_call, handover, with_light_rules
+from graphs.voice.prompts import HandedOverPrompt, LightCallPrompt
 
 PRE_TOOL_LINE = "Before calling tools, write a one-sentence <speech> block"
 CONFIG = {"agent_id": "home-test", "channels": ["home-test"], "tools": {}}
+HANDED_OVER = HandedOverPrompt().render()
 
 
 @contextmanager
@@ -129,6 +130,9 @@ class TestTheHandover(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, HANDED_OVER)
         self.assertNotIn(PICK_KEY, ctx.turn_hints, "the agent's usual level")
         self.assertTrue(ctx.turn_hints[OPENER_HINT])
+
+    def test_its_result_tells_the_agents_model_the_line_was_heard(self):
+        self.assertIn("the user has heard your first line, so don't say it again", HANDED_OVER)
 
 
 class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):

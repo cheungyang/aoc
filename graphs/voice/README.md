@@ -75,6 +75,7 @@ run holds it to the light model (`scripts/voice_dryrun.py --light`).
 | [graph.py](graph.py) | `create_graph`: graphs/main's, with the two-speed model and the `handover` tool |
 | [graph.json](graph.json) | The graph's config: `"subgraph": false`, no tools or skills of its own |
 | [prompts/light_call.md](prompts/light_call.md) | The light call's rules, on that call only; [light_call_prompt.py](prompts/light_call_prompt.py) renders them |
+| [prompts/handed_over.md](prompts/handed_over.md) | The `handover` call's result, what the agent's model reads; [handed_over_prompt.py](prompts/handed_over_prompt.py) renders it |
 | [core/runtime/model/handover.py](../../core/runtime/model/handover.py) | The marker, and the light call's model |
 
 Tests: [tests/graphs/voice/test_voice_graph.py](../../tests/graphs/voice/test_voice_graph.py) (whole turns on

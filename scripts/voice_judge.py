@@ -31,9 +31,14 @@ done instead of submitting again. It submits only pairs still unjudged:
 runs added since, or ones whose replies changed. --sync asks directly
 instead, one pair at a time, waiting out a 429.
 
-The bar: a combo passes when its reply wins or ties the
-reference's in at least 90% of the judged pairs, and its first speech token
-arrives within 700 ms at p50. First speech is `first_token`, the turn's
+The bar: a combo passes when its reply wins or ties the reference's in at
+least 72% of the judged pairs, and its first speech token arrives within
+700 ms at p50. 72% is what PRO:medium, at least as good as PRO:low, scored
+against it: run-to-run variation alone loses about a quarter of the pairs,
+so a higher bar would fail a combo as good as the reference. To ask what a
+change does, judge it against the same setup without it: `--reference prod`
+for runs with the voice graph's light first call (`prod+light:...`).
+First speech is `first_token`, the turn's
 first model text (replies open with <speech>, so it's what the voice starts
 on), timed from the start of the turn's first model call: what the model
 costs, not the runtime before it, which is the same for every combo and
@@ -66,8 +71,14 @@ from scripts.voice_dryrun import (  # noqa: E402
 READ_ONLY = True
 
 JUDGE_MODEL = PRO
-WIN_OR_TIE_BAR = 0.90     # of the judged pairs
+WIN_OR_TIE_BAR = 0.72     # of the judged pairs: what PRO:medium scored against PRO:low
 FIRST_TOKEN_BAR_MS = 700  # p50, from the start of the turn's first model call
+
+# Tools the runtime runs itself, not the agent: left out of the tools the judge
+# sees, since they'd only tell it which setup a reply came from. `handover` is
+# the voice graph's light first call handing the turn over
+# (core/runtime/model/handover.py `HANDOVER`).
+RUNTIME_TOOLS = ("handover",)
 
 JUDGE_INSTRUCTIONS = """You compare two replies of a voice assistant to the same spoken request.
 The user heard what each reply said aloud; the rest went to their chat channel as text. Both
@@ -79,6 +90,9 @@ Decide which reply serves the user better, in this order:
 2. Heard well: what was said aloud is clear, natural to listen to and enough to act on, and it
    leaves long details to the channel.
 3. The channel text: accurate, and useful beyond the speech.
+
+A reply may open with one short line said at once, while the rest was still being worked out
+("Let me check the lights."). Judge that line only on whether it's accurate, not as filler.
 
 Length isn't quality, and the order the replies are shown in means nothing. When neither is
 clearly better, it's a tie: small differences in wording are a tie.
@@ -153,8 +167,9 @@ def _reply(name: str, run: dict, said: str) -> str:
     lines = [f'<reply id="{name}">']
     if run.get("transcript") and run["transcript"] != said:  # with --stt live, each run heard for itself
         lines.append(f'Heard as: "{run["transcript"]}"')
+    tools = [tool for tool in dict.fromkeys(run.get("tools") or []) if tool not in RUNTIME_TOOLS]
     lines += [f"Answered by: {', '.join(run.get('agents') or []) or 'nobody'}",
-              f"Tools used: {', '.join(dict.fromkeys(run.get('tools') or [])) or 'none'}",
+              f"Tools used: {', '.join(tools) or 'none'}",
               "Said aloud:", _spoken(run) or "(nothing)",
               "Posted in the channel:", _text(run) or "(nothing)",
               "</reply>"]

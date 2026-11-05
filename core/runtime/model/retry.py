@@ -64,6 +64,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from core.config.models import FLASH, FLASH_LITE, PRO
 from core.config.settings import Config
+from core.prompts.model import ResumeAskPrompt
 from core.runtime.foundation import events
 from core.runtime.foundation.context import try_context
 from core.runtime.model.thinking import MarkerFilter, pick_thinking, resolve_thinking_level, take_marker
@@ -85,11 +86,6 @@ _JITTER = 1.0
 # Minimum length of a repeated tail before it is treated as a seam to trim.
 _MIN_SEAM_OVERLAP = 20
 _MAX_SEAM_SCAN = 500
-
-# What a resume asks, after the text so far, of a model that refuses a request
-# ending on its own turn (`resume_request`).
-RESUME_ASK = ("Your reply above was cut off. Continue it from exactly where it stopped, "
-              "without repeating anything and without a preamble.")
 
 # The tiers that refuse a request ending on their own turn: the client
 # (langchain-google-genai) raises "does not support model prefilling" before
@@ -226,7 +222,7 @@ def resume_request(messages: List[BaseMessage], partial: str, model: str) -> Lis
     """
     request = [*messages, AIMessage(content=partial)]
     if _refuses_prefill(model):
-        request.append(HumanMessage(content=RESUME_ASK))
+        request.append(HumanMessage(content=ResumeAskPrompt().render()))
     return request
 
 
