@@ -756,7 +756,10 @@ credential — the deploy runs in the target repository's own CI.
 > Actions job that names `environment: production` and set
 > `"deploy": {"backend": "github_deployment", "environment": "production"}`. A driver that runs
 > `flyctl deploy` itself would return a `handle` from its first call; the node stores it and passes
-> it back on every later call, which is what keeps starting a deploy idempotent per commit.
+> it back on every later call, which is what keeps starting a deploy idempotent per commit. If the
+> repository has to be prepared for a backend (as Pages does), that half goes in
+> [`scripts/coding_deploy_setup.py`](../../scripts/coding_deploy_setup.py)'s `SETUPS`, keyed the
+> same way.
 
 ## Durable State
 
@@ -920,6 +923,14 @@ both that `graph.checkpointer is None` and that a supplied `MemorySaver` is refu
   a real sandbox probe (skip with `--offline`), and with `--project NAME [--verify CMD]` the same
   run a task's verify does. Run it before a host starts ticking, and whenever verify halts as
   `config`.
+- **Deploy setup:** [scripts/coding_deploy_setup.py](../../scripts/coding_deploy_setup.py)
+  `--project NAME` makes a repository deploy itself, through the user's own `gh` login (the bot's
+  token can't switch Pages on or commit workflows). For `github_pages` it switches Pages on with
+  Actions as the source, commits `.github/workflows/pages.yml` (one job, reporting to
+  `github-pages`; a Vite app is built with `--base=/<repo>/`, so the app isn't edited), adds the
+  manifest's `deploy` block, and waits for the first deployment through the same watcher the
+  deploy node uses. Every step looks first, so a re-run changes nothing; `--dry-run` only looks.
+  The workflow carries a digest of itself: re-runs refresh it until it's edited by hand.
 
 ### Moving between hosts (NAS ↔ dev box)
 

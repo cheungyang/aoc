@@ -31,6 +31,8 @@ COVERED_MODULES = [
     "scripts/_bootstrap.py",
     "scripts/coding_admin.py",
     "scripts/coding_bot_setup.py",
+    "scripts/coding_deploy_setup.py",
+    "scripts/coding_e2b_check.py",
     "scripts/coding_tick.py",
     "scripts/wiki_scanner.py",
 ]

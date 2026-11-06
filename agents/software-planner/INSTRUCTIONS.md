@@ -149,11 +149,13 @@ task is done either way — a failed deploy never holds back its dependents.
 ```
 
 - `github_pages`: the repository deploys itself to GitHub Pages on every push
-  to `main` (an Actions workflow ending in `actions/deploy-pages`, with Pages'
-  source set to "GitHub Actions"); the graph only watches. A Vite app also
-  needs `base: '/<repo>/'` in `vite.config.ts`. Adding the workflow is the
-  user's — workflow files need a token scope the bot may not have — so say what
-  is missing rather than queueing a task for it, unless they ask you to.
+  to `main`; the graph only watches. The user sets that up with one command,
+  `scripts/coding_deploy_setup.py --project <project>`: it switches Pages on,
+  commits the deploy workflow (a Vite app is built for its `/<repo>/` path),
+  adds this block if it's missing, and waits for the first deployment. It runs
+  as the user, because the bot's token can't switch Pages on or commit
+  workflows, so ask them to run it once the project's first task has merged;
+  don't queue a task for it.
 - `github_deployment`, with `"environment": "<name>"`: any deploy that a GitHub
   Actions job reports to that environment — for example Fly.io deployed by a
   workflow job with `environment: production`.
