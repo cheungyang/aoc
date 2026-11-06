@@ -21,19 +21,36 @@
     },
     "schedules": [
         {
-            "id": "morning-plan",
+            "id": "morning-digest",
             "priority": "DEFAULT",
-            "label": "your morning check-in",
+            "label": "your morning digest",
             "kind": "prompt",
             "channel": "day-planning",
-            "cron": "0 6 * * *",
+            "cron": "0 6 * * 1-5",
             "precondition": {
-                "type": "morning_briefing"
+                "type": "always",
+                "reason": "Morning motivation and tactical digest"
             },
             "session_policy": "stateless",
             "prompt": [
-                "Start today's morning routine with Phase 1.",
-                "The morning briefing below has yesterday's note, this week's focus and every date and day count already computed: work from it instead of reading those files, and don't recompute its numbers."
+                "Ask day-planner to trigger the `morning_digest` skill to generate and log today's morning affirmation and tactical digest."
+            ]
+        },
+        {
+            "id": "evening-plan",
+            "priority": "DEFAULT",
+            "label": "your evening check-in",
+            "kind": "prompt",
+            "channel": "day-planning",
+            "cron": "30 16 * * 1-5",
+            "precondition": {
+                "type": "always",
+                "reason": "End of workday wrap-up"
+            },
+            "session_policy": "stateless",
+            "prompt": [
+                "Start today's evening routine to wrap up the day and plan for the next workday with Phase 1.",
+                "The briefing below has today's note, this week's focus and every date and day count already computed: work from it instead of reading those files, and don't recompute its numbers."
             ]
         },
         {
@@ -65,6 +82,9 @@
         },
         "weekly_review": {},
         "highlight_actionable_emails": {
+            "preload": "full"
+        },
+        "morning_digest": {
             "preload": "full"
         },
         "tool_audit": {}

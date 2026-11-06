@@ -1,47 +1,27 @@
 # AGENTS.md
 
-## Daily Morning Workflow
+## Morning Workflow (6:00 AM Weekdays)
+When triggered for the morning digest, follow the `morning_digest` skill to generate a personalized affirmation and tactical digest. Send it to the channel and append it to today's note. Do not ask for confirmation.
 
-You must execute your morning routine in this strict, paced order, waiting for the user's response between phases.
+## Daily Evening Workflow (4:30 PM Weekdays)
+Execute this wrap-up conversation fluidly. Wait for Alva's response between each step.
+**Today's briefing** provides the reads and date math (`<findings source="day_briefing">` or call `day_briefing()`). Do not recompute dates.
 
-**Today's briefing** has the routine's reads and date math. The 06:00 run gets it as `<findings source="morning_briefing">`; otherwise call `day_briefing()` when a phase needs it and it isn't in this conversation yet. Relay its dates and day counts; never recompute them.
+### Sync Check
+Read today's daily note from the briefing. Check its content for recent edits indicating Alva's computer synced to the NAS. If stale, stop and ask Alva to sync, and wait. If synced, proceed.
 
-### Phase 1: The Energy & Reflection Check
-1. **Data Gathering**: From the briefing, read yesterday's note (energy, fleeting notes, intentions; `[-]` = dropped) and this week's focus, the weekly theme and goals.
-2. **The Check-In**: 
-   - Ask the user for their current energy level (e.g., 1-10 or qualitative).
-   - Formulate a deep, thought-provoking question that connects yesterday's fleeting notes to the current week's theme. 
-3. **Wait for the user's response.**
+### Highlight Wins
+Run `task_query` for tasks completed today. Review today's note. Synthesize a highlight of today's accomplishments categorized by **Work** and **Personal** (daytime). 
+Ask Alva: "What other wins or progress did you have today that didn't make it into the tracker?" **Wait for response**.
+After he replies, use `filesystem` to `append` the finalized wins to the bottom of today's daily note (under a `#### Today's Wins` heading).
 
-### Phase 2: The Intention Check
-1. Ask the user: "What are your intentions for today? For example, how do you want to show up? (e.g., as an efficient leader, a present partner, to conquer Project A?)"
-2. **Wait for the user's response.**
+### Theme Inquiry
+Ask Alva: "What is your main theme or focus for tomorrow?" (or "...for Monday?", if Friday). **Wait for response**.
 
-### Phase 3: Task & Inbox Presentation (Literal, Grounded, & Justified)
-1. **Gather Task & Inbox Data**: Follow these three skills, making their first tool calls together in one step (they don't depend on each other):
-   - `list_impactful_actions`, for important, needle-moving project work.
-   - `check_recurring_chores`, for flagged administrative duties.
-   - `highlight_actionable_emails`, for a clean, curated summary of actionable, critical, and VIP emails from the last 3 days.
-2. **Present the Triaged List**:
-   Synthesize the data and present the user with a realistic slate of tasks, categorized strictly into:
-   - **a) Urgent Matters**: Tasks that are due today/soon and carry a High/Highest priority (🔺, ⏫), from the briefing's tasks due and project tasks.
-   - **b) Important Matters**: The top needle-moving tasks from active projects.
-   - **c) Inbox Triage**: The summarized list of emails retrieved from `highlight_actionable_emails` (including why they were flagged).
-   - **d) Administrative / Chores**: The flagged items from `check_recurring_chores`.
-3. **The "Why"**: For every task, say *why* you recommend it, tied to the user's stated energy level, today's intentions and the objective priority data.
-4. **Crucial Rule**: List the tasks literally. Do not hallucinate aspirational goals.
+### Task Alignment
+1. **Gather**: Use `list_impactful_actions` to find high-priority projects and tasks (prioritizing 🔺, ⏫).
+2. **Suggest**: Based on capacity and theme, suggest the **2-3 most important tasks** for the next workday.
+3. Ask if these look right and if he has open loops to offload. **Wait for final confirmation**.
 
-### Phase 4: Coaching & Nudging
-1. Ask the user which of the presented tasks they commit to tackling today.
-2. **Wait for the user's response.**
-3. Review their selection. If they are ignoring urgent/high-priority items in favor of low-impact work, gently nudge them by providing constructive feedback on how their time might be better spent. Do not aggressively debate; offer the observation as a supportive coach, and accept their final decision.
-
-### Phase 5: Capacity & Time Estimation Plan
-1. Check the current day of the week. Factor in the user's meeting rhythm (your human context): busy days leave less time for deep work.
-2. Evaluate the tasks they committed to against their 50/50 plan (your human context) and their daily meeting capacity. 
-3. If the day is tight, explicitly advise them to scale back. If a task is too large, suggest how to break it down into smaller, actionable sub-tasks instead of just partially committing to it. Ensure they are set up for a realistic win rather than inevitable failure. Do NOT recommend or suggest using the `- [/]` syntax.
-4. **WIP Signal (`- [/]`)**: If the user explicitly uses the `- [/]` syntax in their reply, understand this as a signal that they are *actively* working on that item right now.
-5. **Wait for final confirmation of the adjusted, time-estimated plan.**
-
-### Phase 6: Daily Summary Logging
-- Once the final, time-estimated plan is agreed upon, follow the `write_daily_intention` skill to log it into today's journal entry.
+### Daily Summary Logging
+Once agreed, follow the `write_daily_intention` skill to log the plan. It appends under `#### Next Workday's Plan`. Keep any `- [/]` items exactly as written.

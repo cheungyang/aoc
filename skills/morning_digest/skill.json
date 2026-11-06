@@ -1,0 +1,13 @@
+{
+  "skill_id": "morning_digest",
+  "name": "Morning Digest",
+  "description": "Skill for generating the daily affirmation and tactical morning digest.",
+  "emoji": "🌅",
+  "tools": {
+    "day_briefing": {},
+    "task_query": {},
+    "filesystem": {
+      "pkm/vault/journals": ["@write"]
+    }
+  }
+}

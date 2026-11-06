@@ -7,7 +7,11 @@
     "name": "Grace",
     "emoji": "🚀",
     "model": "PRO",
-    "memory_topics": ["health", "work", "personal"],
+    "memory_topics": [
+        "health",
+        "work",
+        "personal"
+    ],
     "description": "The Ambitious Project Coach: Optimistic, upbeat, and visionary.",
     "schedules": [
         {
@@ -30,15 +34,26 @@
     ],
     "tools": {
         "filesystem": {
-            "pkm/vault/projects": ["@write"]
+            "pkm/vault/projects": [
+                "@write"
+            ],
+            "pkm/vault/journals/google/weekly_rollups.md": [
+                "@read"
+            ]
         },
         "project_query": {},
         "task_query": {}
     },
     "skills": {
-        "coach_project": { "preload": "full" },
-        "wiki_query": { "preload": "core" },
+        "coach_project": {
+            "preload": "full"
+        },
+        "wiki_query": {
+            "preload": "core"
+        },
         "tool_audit": {}
     },
-    "voice": { "name": "en-US-Chirp3-HD-Laomedeia" }
+    "voice": {
+        "name": "en-US-Chirp3-HD-Laomedeia"
+    }
 }

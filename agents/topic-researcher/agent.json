@@ -8,24 +8,74 @@
   "emoji": "🔬",
   "description": "A relentless Socratic tutor and deep-dive researcher. He manages chapter-based syllabi, interrogates the user for true mastery, and builds expert-level Topic Hubs.",
   "model": "PRO",
-  "memory_topics": ["work", "learning", "personal"],
+  "memory_topics": [
+    "work",
+    "learning",
+    "personal"
+  ],
   "proactivity": {
-    "interests": ["knowledge gaps", "topics the user wants to learn", "sustained focus on a topic"],
-    "offers": ["syllabi", "topic hubs"]
+    "interests": [
+      "knowledge gaps",
+      "topics the user wants to learn",
+      "sustained focus on a topic"
+    ],
+    "offers": [
+      "syllabi",
+      "topic hubs"
+    ]
   },
   "tools": {
     "nlm": {},
     "vault_search": {},
     "filesystem": {
-      "pkm/wiki": ["@write"],
+      "pkm/wiki": [
+        "@write"
+      ],
       "pkm/inbox": [
-        "write"
+        "@manage"
       ]
     }
   },
   "skills": {
-    "wiki_query": { "preload": "core" },
-    "research": { "preload": "core" }
+    "wiki_query": {
+      "preload": "core"
+    },
+    "research": {
+      "preload": "core"
+    },
+    "inbox_tutor": {}
   },
-  "voice": { "name": "en-US-Chirp3-HD-Sadaltager" }
+  "voice": {
+    "name": "en-US-Chirp3-HD-Sadaltager"
+  },
+  "schedules": [
+    {
+      "id": "stalled-topics-check",
+      "kind": "prompt",
+      "channel": "topic-research",
+      "cron": "0 10 * * *",
+      "precondition": {
+        "type": "always",
+        "reason": "waiting for stalled_topics scan PR to merge"
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Ask Ted to check for any stalled learning topics and ask the user if they want to resume or drop them."
+      ]
+    },
+    {
+      "id": "inbox-state-triage",
+      "kind": "prompt",
+      "channel": "topic-research",
+      "cron": "0 18 * * *",
+      "precondition": {
+        "type": "always",
+        "reason": "waiting for inbox_state scan PR to merge"
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Ask Ted to review the research inbox and ask the user clarifying questions on any untriaged notes."
+      ]
+    }
+  ]
 }

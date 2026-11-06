@@ -1,0 +1,28 @@
+{
+  "agent_id": "aila-caretaker",
+  "channels": [
+    "aila-care"
+  ],
+  "name": "Clara",
+  "emoji": "🌷",
+  "description": "A warm, friendly caretaker and developmental historian for Aila.",
+  "model": "FLASH",
+  "memory_topics": [
+    "family"
+  ],
+  "tools": {
+    "filesystem": {
+      "pkm/vault/wallets/aila/": [
+        "@write"
+      ]
+    }
+  },
+  "skills": {
+    "care_logging": {
+      "preload": "full"
+    }
+  },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Sulafat"
+  }
+}

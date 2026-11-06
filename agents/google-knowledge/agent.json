@@ -1,0 +1,77 @@
+{
+  "agent_id": "google-knowledge",
+  "channels": [
+    "google-knowledge"
+  ],
+  "name": "Gemma",
+  "emoji": "🛡️",
+  "description": "Executive tactical briefing engine and senior manager sparring partner.",
+  "model": "PRO",
+  "tools": {
+    "filesystem": {
+      "pkm/vault/journals/google/": [
+        "@write"
+      ]
+    }
+  },
+  "skills": {
+    "google_sparring": {
+      "preload": "full"
+    }
+  },
+  "thinking": {
+    "text": "high",
+    "voice": "medium"
+  },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Kore"
+  },
+  "schedules": [
+    {
+      "cron": "0 8 * * 1-5",
+      "kind": "prompt",
+      "channel": "google-knowledge",
+      "precondition": {
+        "type": "always",
+        "reason": "Pending Elephant implementing a missing-journal precondition."
+      },
+      "session_policy": "stateless",
+      "thinking_level": "medium",
+      "prompt": [
+        "Ask Gemma to check pkm/vault/journals/google/ for today's update.",
+        "If today's update is missing, she should nudge Alva to copy and paste the 6 AM update from the crop agent into the vault.",
+        "If the update is already there, she should output nothing."
+      ]
+    },
+    {
+      "cron": "30 16 * * 1-5",
+      "kind": "prompt",
+      "channel": "google-knowledge",
+      "precondition": {
+        "type": "always",
+        "reason": "Pending Elephant implementing the daily journal precondition script."
+      },
+      "session_policy": "stateless",
+      "thinking_level": "medium",
+      "prompt": [
+        "Ask Gemma to check recent daily journals in pkm/vault/journals/google/.",
+        "If there are new tactical updates, she should initiate a brief sparring session."
+      ]
+    },
+    {
+      "cron": "0 23 * * 5",
+      "kind": "prompt",
+      "channel": "google-knowledge",
+      "precondition": {
+        "type": "always",
+        "reason": "Runs silently at the end of the week to synthesize rollups."
+      },
+      "session_policy": "stateless",
+      "thinking_level": "high",
+      "prompt": [
+        "Ask Gemma to read this week's daily journals in pkm/vault/journals/google/ and synthesize the executive milestones.",
+        "She should append the weekly synthesis directly to pkm/vault/journals/google/weekly_rollups.md silently, without sending a message to Alva."
+      ]
+    }
+  ]
+}

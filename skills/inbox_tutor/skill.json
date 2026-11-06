@@ -1,0 +1,10 @@
+{
+  "name": "inbox_tutor",
+  "description": "Guides the user through understanding an inbox item via Socratic questioning before filing it.",
+  "tools": {
+    "filesystem": {
+      "pkm/wiki": ["@write"],
+      "pkm/inbox": ["@manage"]
+    }
+  }
+}

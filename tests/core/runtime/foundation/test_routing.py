@@ -166,16 +166,17 @@ class TestLiveRoutingTable(unittest.TestCase):
 
     EXPECTED = {
         "agent-management": "agent-designer",  # Aki: an ordinary specialist, no bot of his own
+        "aila-care": "aila-caretaker",
         "content-creation": "content-creator",  # Coco: starts content runs, as Elephant starts coding
         "day-planning": "day-planner",
         "fitness-coach": "fitness-coach",
         "general": None,  # nearly every agent lists it: the fixed line
+        "google-knowledge": "google-knowledge",
         "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
         "market-scout": "market-scout",
         "meal-planning": "meal-planner",
         "note-taking": "note-taker",
-        "pkm-wiki": "wiki-gardener",
         "project-planning": "goal-setter",
         "real-estate": "property-scout",
         "receipts": "receipt-processor",
