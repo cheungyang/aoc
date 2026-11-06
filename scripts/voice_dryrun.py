@@ -42,8 +42,23 @@ round trip worth knowing about. --allow-mutations lifts the guard and also runs
 the cases marked `"mutates": true`.
 Conversation state is isolated: the run points every session store at a
 throwaway database (delegated agents otherwise share production's `tool`
-sessions), starts each case with no history, and uses record_memory=False, so a
-replay never writes an agent memory log. Traces are logged, not stored.
+sessions), starts each case with no history (a live case with its own, below),
+and uses record_memory=False, so a replay never writes an agent memory log.
+Traces are logged, not stored. Nor is history pruned: each case is one turn,
+and a prune runs after a turn, in the background, where it could rewrite the
+next case's history.
+
+Your own conversations: --live NAMES (agent ids or names, comma-separated:
+--live Ted,Aki) makes the cases from each agent's conversation in
+production's memory.db instead of the case file: the last --live-turns turns
+you spoke there that it answered (`live_cases`). Each runs on the
+conversation as it stood just before your words: the agent's thread in its
+home channel, where the voice focus takes you to it, cut there and put in
+the throwaway database. Single turns with no history can't show how a model
+does deep in a conversation; these can. The production file is only read,
+before the stores are pointed away from it. A live case expects only that
+its agent answers, and the judge (scripts/voice_judge.py) sees the last of
+the conversation before your words.
 
 Without Discord there is no playback, so the reported time to first audio is
 `tts_first_byte`: the moment the first chunk's audio is ready to play.
@@ -59,13 +74,14 @@ PRO:low by default, PRO at the voice default level, since the light model's
 bar is set against PRO. Each run of a case goes on every combo back to back,
 so all of them see the same live data.
 --light TIER:LEVEL runs every combo with the voice graph's light first call
-on that model (graphs/voice: the turn's first call on it, then the agent's
+on that model (graphs/voice: the turn's first line on it, then the agent's
 own model), `off` without it; each goes in the label
 (`prod+light:FLASH_LITE:minimal`), so the judge holds the light call's runs
 to PRO:low without it. Without --light, VOICE_LIGHT_MODEL decides: FLASH_LITE
 at minimal unless it's set, so `--light off` is how to run without it. The
 light call is held to its own model and level, and isn't a round trip of the
-case's budget.
+case's budget. It only says the first line, so a run where the agent's own
+model didn't follow it fails (`light_misses`).
 It's safe for the rate limit the live bot shares: one run at a time, --rpm
 caps the model calls a minute (counted from each run's trace), a run the
 API refuses with 429 / RESOURCE_EXHAUSTED waits and runs again, and --out
@@ -85,9 +101,11 @@ Usage:
     python scripts/voice_dryrun.py --combo FLASH_LITE:minimal,FLASH:low --case lights-status
     python scripts/voice_dryrun.py --matrix --runs 3 --rpm 20 --out sessions/voice_bench/results.json
     python scripts/voice_dryrun.py --combo prod --light FLASH_LITE:minimal,FLASH:minimal --runs 3 --out results.json
+    python scripts/voice_dryrun.py --live Ted,Aki --light off,FLASH_LITE:minimal --runs 2 --out live.json
 """
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -382,6 +400,23 @@ def combo_misses(combo: Combo, model_calls: List[dict]) -> List[str]:
     return [f"not on {combo.label}: {m}" for m in dict.fromkeys(misses)]
 
 
+def light_misses(model_calls: List[dict]) -> List[str]:
+    """Light calls that no call on the agent's own model followed, as failures.
+    The light model only says a turn's first line, so the answer is the
+    agent's model's: without it the turn ended on that line. A light call
+    that fell back is followed by the same call on the agent's model."""
+    misses = [f"{call.get('agent')}'s own model never ran after its light call"
+              for at, call in enumerate(model_calls)
+              if call.get("light") and not any(not later.get("light") and later.get("agent") == call.get("agent")
+                                               for later in model_calls[at + 1:])]
+    return list(dict.fromkeys(misses))
+
+
+# The light call's events on a run's trace (core/runtime/model/handover.py,
+# graphs/voice): it handed over, fell back to the agent's model, or broke off.
+LIGHT_EVENTS = ("handover", "light_fallback", "light_cut")
+
+
 @dataclass
 class CaseResult:
     case_id: str
@@ -391,12 +426,14 @@ class CaseResult:
     room: str = ""
     reply: str = ""
     transcript: str = ""
+    context: str = ""           # a live case's conversation before the words, for the judge
     spoken: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list)
     agents: List[str] = field(default_factory=list)
     model_calls: List[dict] = field(default_factory=list)
     model_replies: List[dict] = field(default_factory=list)   # each call's first streamed chunk and end
     thinking_picks: List[dict] = field(default_factory=list)  # the model's <next_thinking> picks: level, applied
+    light_events: List[dict] = field(default_factory=list)    # LIGHT_EVENTS, as traced
     tokens: Dict[str, int] = field(default_factory=dict)
     blocked_writes: List[str] = field(default_factory=list)
     speech: str = ""            # the <speech> text the router heard
@@ -779,11 +816,12 @@ def render_report(results: List[CaseResult]) -> str:
              "|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         calls = ", ".join(str(c.get("thinking") or "default") for c in r.model_calls) or "-"
+        notes = r.failures + r.notes + [f"refused write: {w}" for w in r.blocked_writes] + _picks(r) + _light_notes(r)
         lines.append(
             f"| {r.case_id} | {r.run} | {'PASS' if r.passed else 'FAIL'} "
             f"| {_ms(r.marks.get('first_token'))} | {_ms(r.marks.get('first_chunk'))} | {_ms(r.marks.get('tts_first_byte'))} "
             f"| {len(r.model_calls)} ({calls}) | {r.tokens.get('input', 0)}/{r.tokens.get('output', 0)} "
-            f"| {'; '.join(r.failures + r.notes + [f'refused write: {w}' for w in r.blocked_writes] + _picks(r))} |"
+            f"| {'; '.join(notes)} |"
         )
     lines += ["", "| Stage | p50 | p90 | n |", "|---|---|---|---|"]
     for stage, p50, p90, n in stage_table(results):
@@ -795,6 +833,9 @@ def render_report(results: List[CaseResult]) -> str:
     if len(held) < len(results):
         speech_line += f" ({len(results) - len(held)} failed runs aren't counted.)"
     lines += ["", f"Quality: {passed}/{len(results)} runs passed.", speech_line]
+    light = _light_line(results)
+    if light:
+        lines.append(light)
     return "\n".join(lines)
 
 
@@ -811,11 +852,31 @@ def render_combos(results: List[CaseResult], combos: Optional[List[str]] = None)
 
 def _picks(r: CaseResult) -> List[str]:
     """The model's <next_thinking> picks: the level applied, and what it asked for when capped.
-    A combo that sets the level overrides them, so there they're only what it asked for."""
-    if r.combo != PROD and not r.combo.endswith(f":{PROD}"):
+    A combo that sets the level overrides them, so there they're only what it asked for.
+    A light first call doesn't set it: `prod+light:...` keeps production's levels."""
+    base = r.combo.split("+light:")[0]
+    if base != PROD and not base.endswith(f":{PROD}"):
         return [f"asked {p['level']} (the combo's level held)" for p in r.thinking_picks]
     return [f"picked {p['applied']}" + (f" (asked {p['level']})" if p["level"] != p["applied"] else "")
             for p in r.thinking_picks]
+
+
+def _light_notes(r: CaseResult) -> List[str]:
+    """The run's light call, when it didn't end as it should, handing over."""
+    return [f"light call fell back: {e.get('reason')}" if e.get("kind") == "light_fallback" else "light call broke off"
+            for e in r.light_events if e.get("kind") in ("light_fallback", "light_cut")]
+
+
+def _light_line(results: List[CaseResult]) -> Optional[str]:
+    """How the runs' light calls ended; None when no run made one."""
+    events = [e for r in results for e in r.light_events]
+    if not events:
+        return None
+    kinds = Counter(e.get("kind") for e in events)
+    reasons = Counter(str(e.get("reason")) for e in events if e.get("kind") == "light_fallback")
+    why = f" ({', '.join(f'{reason}: {n}' for reason, n in reasons.most_common())})" if reasons else ""
+    return (f"Light calls: {kinds['handover']} handed over, {kinds['light_fallback']} fell back{why}, "
+            f"{kinds['light_cut']} broke off.")
 
 
 def _ms(value) -> str:
@@ -863,6 +924,224 @@ def replay_tokens(since: float, db_path: str) -> Dict[str, int]:
         return totals
     totals["input"], totals["output"] = store.token_sums(since)
     return totals
+
+
+@contextmanager
+def without_pruning() -> Iterator[None]:
+    """Runs the block with no history prune (core/runtime/hooks.py PruneHook).
+    A turn starts one after it, in the background, and the next case's turn
+    comes at once: the prune could save its rewrite of the last case's
+    history over the history the next case was just given."""
+    from core.runtime.hooks import PruneHook, set_turn_hooks, turn_hooks
+
+    hooks = turn_hooks()
+    set_turn_hooks([hook for hook in hooks if not isinstance(hook, PruneHook)])
+    try:
+        yield
+    finally:
+        set_turn_hooks(hooks)
+
+
+# --- live cases: your own conversations, from production's memory.db ----------
+
+# Turns per conversation that --live makes cases of: the latest ones.
+LIVE_TURNS = 8
+# What the judge sees of the conversation before a live case's words: the last
+# LIVE_CONTEXT_MESSAGES of your messages and the agent's replies, each cut to
+# LIVE_CONTEXT_CHARS.
+LIVE_CONTEXT_MESSAGES = 8
+LIVE_CONTEXT_CHARS = 500
+# Who passed your words on to a delegated agent (core/runtime/delegation.py
+# `with_caller`): it's in the agent's stored messages, not in what you said.
+CALLER_RE = re.compile(r"<caller>.*?</caller>", re.DOTALL)
+
+
+def _text(content) -> str:
+    """A stored message's text: its content, or the text parts of a list of them."""
+    if isinstance(content, str):
+        return content
+    return "".join(part if isinstance(part, str) else part.get("text") or "" for part in content or []
+                   if isinstance(part, str) or (isinstance(part, dict) and part.get("type") == "text"))
+
+
+def user_words(content) -> str:
+    """Your words in a delegated agent's stored message or transcript row: on
+    one line, without the time stamps and the <caller> tag the runtime adds."""
+    from core.prompts.system import TIME_STAMP
+
+    return " ".join(TIME_STAMP.sub(" ", CALLER_RE.sub(" ", _text(content))).split())
+
+
+def agent_words(content) -> str:
+    """What a stored reply said aloud and posted, on one line: its <speech>,
+    then its text. The parser takes out what no one heard or saw (the memory
+    log; the <next_thinking> marker never reaches the stored reply)."""
+    from core.channel.response_parser import AgentResponse
+
+    response = AgentResponse.from_string(_text(content))
+    return " ".join(" ".join(part for part in (response.speech, response.text) if part).split())
+
+
+def _cut(text: str, limit: int = LIVE_CONTEXT_CHARS) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def render_context(messages: list, agent_name: str, limit: int = LIVE_CONTEXT_MESSAGES) -> str:
+    """The conversation in `messages`, for the judge: the last `limit` of your
+    messages and the agent's replies with words, oldest first, one a line.
+    Tool calls and results, and the runtime's summaries, are left out."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    lines = []
+    for message in messages:
+        if isinstance(message, HumanMessage):
+            who, words = "User", user_words(message.content)
+        elif isinstance(message, AIMessage):
+            who, words = agent_name, agent_words(message.content)
+        else:
+            continue
+        if words:
+            lines.append(f"{who}: {_cut(words)}")
+    return "\n".join(lines[-limit:])
+
+
+def answered(messages: list, at: int) -> bool:
+    """Whether a reply with words came after the HumanMessage at `at`, before the next one."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    for message in messages[at + 1:]:
+        if isinstance(message, HumanMessage):
+            return False
+        if isinstance(message, AIMessage) and agent_words(message.content):
+            return True
+    return False
+
+
+def voice_words(conn, table: str) -> Set[str]:
+    """Your words (`user_words`) of each turn in session table `table` that
+    came by voice: its transcript row from `user`, then the turn's first token
+    row, on the voice surface. Every model call writes a token row, and the
+    turn's first also writes your words before it
+    (core/runtime/observability/transcript.py)."""
+    from core.storage.util import ident
+
+    words, pending = set(), None
+    for row in conn.execute(f"SELECT entry_type, from_role, message, surface FROM {ident(table)} "
+                            f"WHERE entry_type IN ('message', 'token') ORDER BY id"):
+        if row["entry_type"] == "message":
+            if row["from_role"] == "user":
+                pending = row["message"]
+        elif pending is not None:
+            if row["surface"] == "voice":
+                words.add(user_words(pending))
+            pending = None
+    return words
+
+
+def read_conversation(db_path: str, thread_id: str) -> Tuple[Optional[dict], Set[str]]:
+    """The newest checkpoint of `thread_id` in the memory.db at `db_path`, as
+    its saver stored it ({"checkpoint", "metadata", "new_versions", ...}), or
+    None; and the words of its voice turns (`voice_words`). Read over a
+    connection that can't write: production's file is never opened for writing."""
+    from core.knowledge.memory.sqlite_checkpointer import read_blob
+    from core.storage.sessions import SessionStore, sanitize_table_name
+    from core.storage.util import ident, table_exists
+
+    table = sanitize_table_name(thread_id)
+    with SessionStore(db_path).read_only() as conn:
+        if not table_exists(conn, table):
+            return None, set()
+        row = conn.execute(f"SELECT data FROM {ident(table)} WHERE entry_type = 'checkpoint' "
+                           f"ORDER BY step DESC, id DESC LIMIT 1").fetchone()
+        return (read_blob(row["data"]) if row else None), voice_words(conn, table)
+
+
+def live_cases(names: List[str], turns: int = LIVE_TURNS, db_path: Optional[str] = None,
+               only: Optional[List[str]] = None) -> List[dict]:
+    """Cases from your conversations with these agents (ids or names): the
+    last `turns` turns of each that you spoke and the agent answered, from the
+    memory.db at `db_path` -- production's by default, so this comes before
+    `isolate_sessions`.
+
+    An agent's conversation is its thread in its home channel, where the
+    voice focus takes you to it (core/runtime/foundation/routing.py
+    `home_channel`): `<agent>:tool:<channel>`, the session a turn routed to it
+    runs on. Its newest checkpoint holds the history the agent saw. A case
+    keeps that history cut just before its words, for `seed_history`, and the
+    last of it as text for the judge. It holds message objects, so cases are
+    never written out; their results are.
+    """
+    from langchain_core.messages import HumanMessage
+
+    from core.channel.handoff import agent_named
+    from core.config.settings import Config
+    from core.loaders.agents_loader import AgentsLoader
+    from core.runtime.foundation.routing import home_channel
+
+    db_path = db_path or Config().memory_db_path
+    if not os.path.isfile(db_path):
+        raise ValueError(f"there's no memory.db at {db_path} to take conversations from")
+    loader = AgentsLoader()
+    cases: Dict[str, dict] = {}
+    for name in (name.strip() for name in names):
+        agent = agent_named(name, loader)
+        if agent is None:
+            raise ValueError(f"no agent has the id or name {name!r}")
+        room = home_channel(agent, loader)
+        if room is None:
+            raise ValueError(f"{agent} answers no channel of its own, so it has no conversation to take")
+        thread = f"{agent}:tool:{room}"
+        stored, voiced = read_conversation(db_path, thread)
+        checkpoint = (stored or {}).get("checkpoint") or {}
+        messages = list((checkpoint.get("channel_values") or {}).get("messages") or [])
+        agent_name = (loader.get_agent_config(agent) or {}).get("name") or agent
+        picked = []
+        for at in reversed(range(len(messages))):
+            if len(picked) == turns:
+                break
+            message = messages[at]
+            if not (isinstance(message, HumanMessage) and user_words(message.content) in voiced
+                    and answered(messages, at)):
+                continue
+            context = render_context(messages[:at], agent_name)
+            if context:  # a turn with no conversation before it is what the case file has
+                picked.append((at, context))
+        print(f"[live] {agent}: {len(picked)} turns you spoke, from {thread}", file=sys.stderr)
+        for at, context in reversed(picked):
+            digest = hashlib.sha1(f"{thread}\n{_text(messages[at].content)}".encode()).hexdigest()[:8]
+            case_id = f"live-{agent}-{digest}"
+            cases[case_id] = {
+                "id": case_id, "room": room, "utterance": user_words(messages[at].content),
+                "expect": {"agent": agent}, "context": context,
+                "history": {
+                    "thread_id": thread,
+                    "checkpoint": {**checkpoint, "channel_values": {**checkpoint["channel_values"],
+                                                                    "messages": messages[:at]}},
+                    # The keys a saver's metadata always has, all JSON.
+                    "metadata": {key: value for key, value in (stored.get("metadata") or {}).items()
+                                 if key in ("source", "step", "parents")},
+                    "new_versions": stored.get("new_versions") or {},
+                },
+            }
+    if only:
+        missing = [case_id for case_id in only if case_id not in cases]
+        if missing:
+            raise ValueError(f"unknown case id(s): {missing}")
+        return [cases[case_id] for case_id in only]
+    return list(cases.values())
+
+
+def seed_history(case: dict, db_path: str) -> None:
+    """Puts a live case's conversation in the throwaway database as its
+    thread's newest checkpoint, so the turn runs on the history it had; a case
+    without one runs on none. Comes after `reset_history`, which clears them."""
+    history = case.get("history")
+    if not history:
+        return
+    from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+
+    config = {"configurable": {"thread_id": history["thread_id"], "checkpoint_ns": ""}}
+    SqliteCheckpointer(db_path).put(config, history["checkpoint"], history["metadata"], history["new_versions"])
 
 
 @dataclass
@@ -922,9 +1201,11 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     from core.channel.voice.speech.voice_stream import VoiceStream
 
     reset_history(db_path)
+    seed_history(case, db_path)
     BLOCKED_WRITES.clear()
     heard = await hear(case["utterance"]) if hear is not None else None
-    result = CaseResult(case_id=case["id"], run=run, marks={}, room=case.get("room", ""))
+    result = CaseResult(case_id=case["id"], run=run, marks={}, room=case.get("room", ""),
+                        context=case.get("context", ""))
     if hear is not None and heard is None:
         result.transcript = ""
         result.failures.append("STT heard nothing")
@@ -1021,6 +1302,7 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
     result.model_calls = [e for e in summary["events"] if e["kind"] == "model_call"]
     result.model_replies = [e for e in summary["events"] if e["kind"] == "model_reply"]
     result.thinking_picks = [e for e in summary["events"] if e["kind"] == "thinking_pick"]
+    result.light_events = [e for e in summary["events"] if e["kind"] in LIGHT_EVENTS]
     result.tokens = replay_tokens(started, db_path)
     result.blocked_writes = [f"{tool}.{action} {target or ''}".strip() for tool, action, target in BLOCKED_WRITES]
     result.failures += check_expectations(case, result)
@@ -1038,11 +1320,14 @@ async def run_case(case: dict, run: int, db_path: str, voice_bot: str = "main", 
 
 async def run_combo(case: dict, run: int, combo: Combo, db_path: str, **kwargs) -> CaseResult:
     """`run_case` with every agent model call held to `combo` (`combo_scope`),
-    and the light first call on the combo's light model, or off (`light_scope`)."""
+    and the light first call on the combo's light model, or off (`light_scope`).
+    A run whose light call the agent's own model didn't follow fails too."""
     with combo_scope(combo), light_scope(combo.light):
         result = await run_case(case, run, db_path, **kwargs)
     result.combo = combo.label
     result.failures += combo_misses(combo, result.model_calls)
+    if not result.errored:  # a run that failed stopped where it failed
+        result.failures += light_misses(result.model_calls)
     return result
 
 
@@ -1287,6 +1572,12 @@ async def main(argv: Optional[List[str]] = None) -> int:
                                       "and rewritten after every run.")
     parser.add_argument("--anyway", action="store_true",
                         help="Run the combos even when the service check finds the models slow.")
+    parser.add_argument("--live", metavar="NAMES",
+                        help="Take the cases from these agents' conversations in production's memory.db (ids or "
+                             "names, comma-separated, e.g. Ted,Aki) instead of --cases: each turn you spoke, "
+                             "replayed on the conversation before it.")
+    parser.add_argument("--live-turns", type=int, default=LIVE_TURNS, metavar="N",
+                        help=f"How many of each conversation's latest turns --live takes (default {LIVE_TURNS}).")
     args = parser.parse_args(argv)
     try:
         if args.light:
@@ -1300,8 +1591,17 @@ async def main(argv: Optional[List[str]] = None) -> int:
         parser.error(str(e))
     if args.rpm < 0:
         parser.error("--rpm can't be negative")
+    if args.live_turns < 1:
+        parser.error("--live-turns must be at least 1")
 
-    cases = load_cases(args.cases, args.only, args.allow_mutations)
+    if args.live:
+        try:  # production's memory.db, read before isolate_sessions points every store away from it
+            cases = live_cases([name.strip() for name in args.live.split(",") if name.strip()], args.live_turns,
+                               only=args.only)
+        except ValueError as e:
+            parser.error(str(e))
+    else:
+        cases = load_cases(args.cases, args.only, args.allow_mutations)
     if not cases:
         print("No cases to run.")
         return 1
@@ -1348,7 +1648,7 @@ async def main(argv: Optional[List[str]] = None) -> int:
                 print(f"[check] Slow ({', '.join(slow)}), but running anyway, as asked.", file=sys.stderr)
 
         pacer = Pacer(args.rpm)
-        with surface_scope("voice"):
+        with surface_scope("voice"), without_pruning():
             for case, run, combo in todo:
                 print(f"[replay] {case['id']} run {run} on {combo.label}: {case['utterance']!r}", file=sys.stderr)
                 result = await run_paced(case, run, combo, db_path, pacer, voice_bot=args.voice_bot, hear=hear,

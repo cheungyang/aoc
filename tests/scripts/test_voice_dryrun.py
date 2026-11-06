@@ -301,6 +301,263 @@ class TestIsolation:
         reset_history(db)
         assert not os.path.exists(os.path.dirname(db))
 
+    def test_the_replay_runs_without_pruning_and_puts_it_back(self):
+        from core.runtime.hooks import PruneHook, turn_hooks
+
+        before = list(turn_hooks())
+        with replay.without_pruning():
+            assert not any(isinstance(hook, PruneHook) for hook in turn_hooks())
+            assert len(turn_hooks()) == len(before) - 1
+        assert turn_hooks() == before
+
+
+THREAD = "agent-designer:tool:agent-management"
+
+
+def _said(stamp, words):
+    """A turn's words as the delegated agent stores them: stamped, with the caller, around main's stamped words."""
+    return f"[Thu {stamp}] <caller>main</caller>\n[Thu {stamp}] {words}"
+
+
+def _prod_db(tmp_path):
+    """A production memory.db with one conversation: Aki's, in its home channel.
+
+    Its newest checkpoint holds a summary, then turns: two spoken and answered,
+    one typed, one cut off by the next, whose answer made a tool call first.
+    The transcript rows say which came by voice, as the runtime logs them."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+    from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+    from core.storage.sessions import SessionStore
+
+    path = str(tmp_path / "prod" / "memory.db")
+    messages = [
+        SystemMessage("Summary of the conversation so far."),
+        HumanMessage(_said("09:00", "Morning, Aki.")),
+        AIMessage("<speech>Morning!</speech>Good morning."),
+        HumanMessage(_said("09:01", "Draft the plan for the new agent.")),
+        AIMessage("<speech>Drafting it.</speech>Here's the plan."),
+        HumanMessage(_said("09:02", "Which agent handles meals?")),
+        AIMessage("", tool_calls=[{"name": "agent_list", "args": {}, "id": "t1"}]),
+        ToolMessage("meal-planner", tool_call_id="t1"),
+        AIMessage([{"type": "text", "text": "<speech>Mia does.</speech>Mia, the meal planner."
+                                            "<system_memory_log>Asked about meals.</system_memory_log>"}]),
+        HumanMessage(_said("09:03", "And who")),
+        HumanMessage(_said("09:03", "And who plans my day?")),
+        AIMessage("<speech>Daisy plans your day.</speech>Daisy."),
+        HumanMessage(_said("09:04", "Is the plan saved?")),  # spoken, then cut off after a tool call
+        AIMessage("", tool_calls=[{"name": "file_read", "args": {}, "id": "t2"}]),
+        ToolMessage("saved", tool_call_id="t2"),
+    ]
+    checkpoint = {"v": 4, "id": "cp-1", "ts": "2026-11-05T17:03:00+00:00",
+                  "channel_values": {"messages": messages, "route": "agent-designer"},
+                  "channel_versions": {"messages": 9}, "versions_seen": {}, "updated_channels": ["messages"]}
+    saver = SqliteCheckpointer(path)
+    older = {**checkpoint, "id": "cp-0", "channel_values": {"messages": messages[:6]}}
+    saver.put({"configurable": {"thread_id": THREAD}}, older, {"source": "loop", "step": 5, "parents": {}}, {})
+    saver.put({"configurable": {"thread_id": THREAD}}, checkpoint,
+              {"source": "loop", "step": 7, "parents": {}, "run_id": "r-7"}, {"messages": 9})
+    store = SessionStore(path)
+    for stamp, words, surface in (("09:00", "Morning, Aki.", "voice"),
+                                  ("09:01", "Draft the plan for the new agent.", "text"),
+                                  ("09:02", "Which agent handles meals?", "voice"),
+                                  ("09:03", "And who", None),  # cut off before its call ended: no token row
+                                  ("09:03", "And who plans my day?", "voice"),
+                                  ("09:04", "Is the plan saved?", "voice")):
+        store.append_message(THREAD, "user", f"<caller>main</caller>\n[Thu {stamp}] {words}")
+        store.append_message(THREAD, "ai", "...")
+        if surface:
+            store.append_token_usage(THREAD, "gemini", 100, 10, 0.0, surface=surface)
+            store.append_token_usage(THREAD, "gemini", 100, 10, 0.0, surface="tool")  # a later call of the turn
+    return path, messages
+
+
+@contextmanager
+def _agents(home="agent-management"):
+    """The loader as live_cases asks it: Aki, by id or name, at home in `home`."""
+    configs = {"agent-designer": {"name": "Aki", "channels": ["agent-management"]}}
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader, \
+         patch("core.runtime.foundation.routing.home_channel", return_value=home):
+        loader.return_value.get_agent_config.side_effect = configs.get
+        loader.return_value.list_agent_ids.return_value = list(configs)
+        yield loader
+
+
+class TestLiveCases:
+
+    def test_the_turns_you_spoke_and_it_answered_become_cases(self, tmp_path):
+        path, messages = _prod_db(tmp_path)
+        with _agents():
+            cases = replay.live_cases(["aki"], db_path=path)
+
+        # The first spoken turn has no conversation before it, and the typed
+        # and the cut-off ones weren't spoken and answered.
+        assert [case["utterance"] for case in cases] == ["Which agent handles meals?", "And who plans my day?"]
+        meals, day = cases
+        assert meals["room"] == "agent-management" and meals["expect"] == {"agent": "agent-designer"}
+        assert meals["id"].startswith("live-agent-designer-") and meals["id"] != day["id"]
+        assert meals["context"] == ("User: Morning, Aki.\nAki: Morning! Good morning.\n"
+                                    "User: Draft the plan for the new agent.\nAki: Drafting it. Here's the plan.")
+        assert day["context"].splitlines() == [
+            "User: Morning, Aki.", "Aki: Morning! Good morning.", "User: Draft the plan for the new agent.",
+            "Aki: Drafting it. Here's the plan.", "User: Which agent handles meals?",
+            "Aki: Mia does. Mia, the meal planner.", "User: And who"], \
+            "no tool call, no memory log, and the history as the agent had it"
+
+        history = meals["history"]
+        assert history["thread_id"] == THREAD
+        assert history["checkpoint"]["channel_values"]["messages"] == messages[:5], "cut just before the words"
+        assert history["checkpoint"]["channel_values"]["route"] == "agent-designer"
+        assert history["metadata"] == {"source": "loop", "step": 7, "parents": {}}
+        assert history["new_versions"] == {"messages": 9}
+        assert len(day["history"]["checkpoint"]["channel_values"]["messages"]) == 10
+
+    def test_the_latest_turns_and_the_ids_asked_for(self, tmp_path):
+        path, _ = _prod_db(tmp_path)
+        with _agents():
+            every = replay.live_cases(["agent-designer"], db_path=path)
+            assert replay.live_cases(["Aki"], turns=1, db_path=path) == every[1:]
+            assert replay.live_cases(["Aki"], db_path=path, only=[every[1]["id"]]) == every[1:]
+            assert replay.live_cases(["Aki"], db_path=path) == every, "the same conversation, the same ids"
+            with pytest.raises(ValueError, match="unknown case id"):
+                replay.live_cases(["Aki"], db_path=path, only=["live-agent-designer-0000"])
+
+    def test_production_is_only_read(self, tmp_path):
+        import hashlib
+
+        path, _ = _prod_db(tmp_path)
+        before = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        with _agents(), patch("core.storage.sessions.SessionStore.connect",
+                              side_effect=AssertionError("opened for writing")):
+            assert len(replay.live_cases(["Aki"], db_path=path)) == 2
+        assert hashlib.sha256(open(path, "rb").read()).hexdigest() == before
+
+    def test_names_and_places_it_cant_take_a_conversation_from(self, tmp_path, capsys):
+        path, _ = _prod_db(tmp_path)
+        with _agents():
+            with pytest.raises(ValueError, match="no agent has the id or name 'Zed'"):
+                replay.live_cases(["Zed"], db_path=path)
+            with pytest.raises(ValueError, match="no memory.db at"):
+                replay.live_cases(["Aki"], db_path=str(tmp_path / "nowhere" / "memory.db"))
+        with _agents(home=None), pytest.raises(ValueError, match="answers no channel of its own"):
+            replay.live_cases(["Aki"], db_path=path)
+        with _agents(home="elsewhere"):
+            assert replay.live_cases(["Aki"], db_path=path) == []
+        assert "agent-designer: 0 turns you spoke, from agent-designer:tool:elsewhere" in capsys.readouterr().err
+
+    def test_a_case_runs_on_its_conversation_and_none_on_none(self, tmp_path):
+        from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+        from core.storage.sessions import SessionStore
+
+        path, messages = _prod_db(tmp_path)
+        with _agents():
+            (meals, _) = replay.live_cases(["Aki"], db_path=path)
+        db = isolate_sessions(str(tmp_path / "replay"))
+        reset_history(db)
+        replay.seed_history(meals, db)
+        stored = SqliteCheckpointer(db).get_tuple({"configurable": {"thread_id": THREAD, "checkpoint_ns": ""}})
+        assert [m.content for m in stored.checkpoint["channel_values"]["messages"]] == [
+            m.content for m in messages[:5]]
+        assert stored.metadata["step"] == 7
+        assert len(meals["history"]["checkpoint"]["channel_values"]["messages"]) == 5, "the case's own is kept"
+
+        reset_history(db)
+        replay.seed_history({"id": "read", "room": "home-automation", "utterance": "Lights?"}, db)
+        assert SessionStore(db).checkpoint("ctx_agent_designer_tool_agent_management") == (None, [])
+
+    def test_stored_words_read_as_said(self):
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        assert replay.user_words(_said("09:03", "And who plans my day?")) == "And who plans my day?"
+        assert replay.user_words([{"type": "text", "text": "[Thu 09:03] "}, "Lights?"]) == "Lights?"
+        assert replay.agent_words("<speech>On it.</speech>Done.<system_memory_log>Noted.</system_memory_log>") \
+            == "On it. Done."
+        assert replay.agent_words("<speech>Add one.</speech>End each reply with a <system_memory_log> block.") \
+            == "Add one. End each reply with a <system_memory_log> block.", "a tag named in passing is text"
+        assert replay.agent_words("") == ""
+        context = replay.render_context([HumanMessage("word " * 200)], "Aki")
+        assert len(context) == len("User: ") + replay.LIVE_CONTEXT_CHARS and context.endswith("…")
+        turns = [message for n in range(6) for message in (HumanMessage(f"Q{n}"), AIMessage(f"A{n}"))]
+        lines = replay.render_context(turns, "Aki").splitlines()
+        assert len(lines) == replay.LIVE_CONTEXT_MESSAGES and lines[-1] == "Aki: A5" and lines[0] == "User: Q2"
+
+
+@pytest.mark.asyncio
+async def test_run_case_starts_a_live_case_on_its_conversation(tmp_path):
+    """The turn finds its history where the agent's graph reads it, and the
+    result carries the conversation for the judge."""
+    from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
+
+    path, _ = _prod_db(tmp_path)
+    with _agents():
+        (meals, _) = replay.live_cases(["Aki"], db_path=path)
+    found = []
+    raw = "<speech>Mia handles meals.</speech>Mia, the meal planner."
+
+    async def fake_stream(prompt, session):
+        stored = SqliteCheckpointer().get_tuple({"configurable": {"thread_id": THREAD, "checkpoint_ns": ""}})
+        found.append(len(stored.checkpoint["channel_values"]["messages"]))
+        yield {"type": "token", "content": raw, "agent_id": "agent-designer"}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        loader.return_value.get_agent_config.return_value = {}
+        result = await run_case(meals, 1, db, measure_tts=False)
+
+    assert found == [5]
+    assert result.passed, result.failures
+    assert result.context == meals["context"] and result.transcript == "Which agent handles meals?"
+
+
+class TestLiveReplay:
+
+    @pytest.mark.asyncio
+    async def test_production_is_read_before_the_stores_point_away_and_pruning_is_off(self, tmp_path, monkeypatch):
+        from core.runtime.hooks import PruneHook, turn_hooks
+
+        monkeypatch.setenv("MEMORY_DB_PATH", str(tmp_path / "prod" / "memory.db"))
+        asked, hooks = [], []
+        case = {"id": "live-agent-designer-1", "room": "agent-management", "utterance": "Who plans my day?",
+                "expect": {"agent": "agent-designer"}, "context": "User: Hi.\nAki: Hi!"}
+
+        def fake_live_cases(names, turns, only=None):
+            asked.append((names, turns, only, os.environ["MEMORY_DB_PATH"]))
+            return [case]
+
+        async def fake_run_case(case, run, db_path, **kwargs):
+            hooks.append([type(hook) for hook in turn_hooks()])
+            return CaseResult(case_id=case["id"], run=run, marks={}, context=case["context"])
+
+        out = tmp_path / "live.json"
+        with patch.object(replay, "live_cases", fake_live_cases), patch.object(replay, "run_case", fake_run_case), \
+             patch.object(replay, "guard_writes"), patch("core.channel.voice.engines.tts.TTSEngine"):
+            code = await replay.main(["--live", "Ted, Aki", "--live-turns", "3", "--light", "off",
+                                      "--state-dir", str(tmp_path / "s"), "--out", str(out)])
+
+        assert code == 0
+        assert asked == [(["Ted", "Aki"], 3, None, str(tmp_path / "prod" / "memory.db"))]
+        assert hooks and PruneHook not in hooks[0]
+        assert any(isinstance(hook, PruneHook) for hook in turn_hooks()), "put back once the replay is done"
+        assert json.loads(out.read_text())[0]["context"] == "User: Hi.\nAki: Hi!"
+
+    @pytest.mark.asyncio
+    async def test_a_name_it_cant_take_or_no_turns_run_nothing(self, tmp_path):
+        with patch.object(replay, "run_case") as run:
+            with patch.object(replay, "live_cases", side_effect=ValueError("no agent has the id or name 'Zed'")), \
+                 pytest.raises(SystemExit):
+                await replay.main(["--live", "Zed"])
+            with patch.object(replay, "live_cases") as live, pytest.raises(SystemExit):
+                await replay.main(["--live", "Aki", "--live-turns", "0"])
+            live.assert_not_called()
+            with patch.object(replay, "live_cases", return_value=[]):
+                assert await replay.main(["--live", "Aki"]) == 1
+        run.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_run_case_traces_and_checks_a_turn(tmp_path):
@@ -789,6 +1046,8 @@ async def test_run_combo_runs_on_its_light_model(tmp_path):
         seen.append(Config().voice_light_model)  # what GraphBuilder reads
         trace = current_turn_trace()
         trace.event("model_call", call=1, agent="home-steward", model=FLASH_LITE, thinking="minimal", light=True)
+        trace.event("handover", agent="home-steward")
+        trace.event("model_call", call=2, agent="home-steward", model=FLASH, thinking="low")
         yield {"type": "token", "content": raw, "agent_id": "home-steward"}
         response = AgentResponse.from_string(raw)
         yield {"type": "final_response", "text": response.text, "response": response}
@@ -804,7 +1063,59 @@ async def test_run_combo_runs_on_its_light_model(tmp_path):
 
     assert seen == ["FLASH_LITE:minimal", "off"]
     assert light.passed and light.combo == "prod+light:FLASH_LITE:minimal", light.failures
+    assert [(e["kind"], e["agent"]) for e in light.light_events] == [("handover", "home-steward")]
     assert off.failures == ["not on prod: home-steward made a light call"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_light_call_nothing_followed_fails(tmp_path):
+    """The light call only says the first line: the answer is the agent's model's."""
+    from core.runtime.observability.turn_trace import current_turn_trace
+
+    case = {"id": "thanks", "room": "home-automation", "utterance": "Thanks!", "expect": {}}
+    raw = "<speech>You're welcome!</speech>"
+
+    async def fake_stream(prompt, session):
+        current_turn_trace().event("model_call", call=1, agent="home-steward", model=FLASH_LITE,
+                                   thinking="minimal", light=True)
+        yield {"type": "token", "content": raw, "agent_id": "home-steward"}
+        response = AgentResponse.from_string(raw)
+        yield {"type": "final_response", "text": response.text, "response": response}
+
+    agent = MagicMock()
+    agent.execute_stream = MagicMock(side_effect=fake_stream)
+    db = isolate_sessions(str(tmp_path / "replay"))
+    with patch("core.loaders.agents_loader.AgentsLoader") as loader:
+        loader.return_value.get_agent.return_value = agent
+        loader.return_value.get_agent_config.return_value = {}
+        result = await replay.run_combo(case, 1, replay.Combo(light="FLASH_LITE:minimal"), db, measure_tts=False)
+
+    assert result.failures == ["home-steward's own model never ran after its light call"]
+
+
+class TestLightMisses:
+
+    LIGHT = {"agent": "home-steward", "model": FLASH_LITE, "thinking": "minimal", "light": True}
+    OWN = {"agent": "home-steward", "model": FLASH, "thinking": "low"}
+
+    def test_a_light_call_needs_the_agents_own_model_after_it(self):
+        assert replay.light_misses([self.LIGHT, self.OWN]) == []
+        assert replay.light_misses([self.LIGHT]) == ["home-steward's own model never ran after its light call"]
+        assert replay.light_misses([self.OWN, self.LIGHT]) == [
+            "home-steward's own model never ran after its light call"], "a call before it doesn't count"
+        assert replay.light_misses([self.OWN]) == [] and replay.light_misses([]) == []
+
+    def test_it_must_be_the_same_agents_model(self):
+        main = {"agent": "main", "model": FLASH, "thinking": "low"}
+        assert replay.light_misses([self.LIGHT, main]) == [
+            "home-steward's own model never ran after its light call"]
+        main_light = {**self.LIGHT, "agent": "main"}
+        assert replay.light_misses([main_light, self.LIGHT, self.OWN]) == [
+            "main's own model never ran after its light call"]
+
+    def test_each_agent_is_named_once(self):
+        assert replay.light_misses([self.LIGHT, self.LIGHT]) == [
+            "home-steward's own model never ran after its light call"]
 
 
 class TestBenchmarkReport:
@@ -824,6 +1135,34 @@ class TestBenchmarkReport:
             == ["asked high (the combo's level held)"]
         assert replay._picks(CaseResult(case_id="a", run=1, marks={}, combo="FLASH:prod", thinking_picks=[pick])) \
             == ["picked medium (asked high)"]
+
+    def test_a_light_first_call_doesnt_set_the_level(self):
+        pick = {"kind": "thinking_pick", "level": "high", "applied": "medium"}
+
+        def picks(combo):
+            return replay._picks(CaseResult(case_id="a", run=1, marks={}, combo=combo, thinking_picks=[pick]))
+
+        assert picks("prod+light:FLASH_LITE:minimal") == ["picked medium (asked high)"]
+        assert picks("FLASH:low+light:FLASH_LITE:minimal") == ["asked high (the combo's level held)"]
+
+    def test_how_the_light_calls_ended_is_noted_and_summed_up(self):
+        handover = {"kind": "handover", "agent": "home-steward"}
+        results = [
+            CaseResult(case_id="a", run=1, marks={}, light_events=[handover]),
+            CaseResult(case_id="a", run=2, marks={}, light_events=[
+                {"kind": "light_fallback", "agent": "home-steward", "reason": "deadline", "ms": 1500}]),
+            CaseResult(case_id="b", run=1, marks={}, light_events=[
+                {"kind": "light_cut", "agent": "home-steward", "reason": "error"}, handover]),
+            CaseResult(case_id="b", run=2, marks={}, light_events=[
+                {"kind": "light_fallback", "agent": "home-steward", "reason": "refused", "ms": 200}]),
+        ]
+        report = render_report(results)
+        rows = [line for line in report.splitlines() if line.startswith(("| a |", "| b |"))]
+        assert rows[0].endswith("|  |"), "a hand-over is how a light call should end: no note"
+        assert "light call fell back: deadline" in rows[1]
+        assert "light call broke off" in rows[2]
+        assert "Light calls: 2 handed over, 2 fell back (deadline: 1, refused: 1), 1 broke off." in report
+        assert "Light calls" not in render_report([CaseResult(case_id="a", run=1, marks={})])
 
 
 def _stored(case_id="read", run=1, combo="prod", **kwargs):

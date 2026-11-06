@@ -210,6 +210,24 @@ def _sanitize_checkpoint_messages(checkpoint: Any) -> Any:
     return checkpoint
 
 
+def read_blob(blob: bytes) -> Any:
+    """A checkpoint or write row's `data` as the object saved: unpickled, after
+    zlib if it was compressed (older rows weren't). For a reader with no saver,
+    such as a read-only look at another memory.db."""
+    if not blob:
+        return None
+    try:
+        raw = zlib.decompress(blob)
+    except zlib.error:
+        # Legacy uncompressed blob: the pickle stream was stored directly.
+        raw = blob
+    # Deliberately not guarded. A pickle failure here is a real problem with
+    # the stored object; retrying it against the still-compressed bytes only
+    # ever yields "invalid load key, 'x'" (0x78 being the zlib header), which
+    # hides the actual cause.
+    return pickle.loads(raw)
+
+
 
 class SqliteCheckpointer(BaseCheckpointSaver):
     def __init__(self, path: Optional[str] = None):
@@ -227,18 +245,7 @@ class SqliteCheckpointer(BaseCheckpointSaver):
 
     def _deserialize_blob(self, blob: bytes) -> Any:
         """Decompresses and deserializes a Python object, supporting backwards-compatible uncompressed blobs."""
-        if not blob:
-            return None
-        try:
-            raw = zlib.decompress(blob)
-        except zlib.error:
-            # Legacy uncompressed blob: the pickle stream was stored directly.
-            raw = blob
-        # Deliberately not guarded. A pickle failure here is a real problem with
-        # the stored object; retrying it against the still-compressed bytes only
-        # ever yields "invalid load key, 'x'" (0x78 being the zlib header), which
-        # hides the actual cause.
-        return pickle.loads(raw)
+        return read_blob(blob)
 
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         thread_id = config["configurable"].get("thread_id")

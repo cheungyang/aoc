@@ -14,9 +14,11 @@ default, PRO at the voice default level, since the bar is set against PRO;
 Pairwise, not scored: the judge sees the user's words and both replies --
 what was said aloud, what the channel showed, who answered and with which
 tools -- and says which serves the user better, or that it's a tie, with a
-one-line reason. Which reply is shown first is drawn per pair from --seed,
-so a lean toward either position cancels out over the pairs, and a rerun
-draws the same. Some pairs need no judge:
+one-line reason. For a case from one of your conversations (voice_dryrun.py
+--live), it sees the end of the conversation before the words too, and
+judges each reply as its next turn. Which reply is shown first is drawn per
+pair from --seed, so a lean toward either position cancels out over the
+pairs, and a rerun draws the same. Some pairs need no judge:
 - a run that failed loses to one that didn't;
 - identical replies tie;
 - a case no model answered on either side (the fixed line) isn't counted,
@@ -94,6 +96,10 @@ Decide which reply serves the user better, in this order:
 A reply may open with one short line said at once, while the rest was still being worked out
 ("Let me check the lights."). Judge that line only on whether it's accurate, not as filler.
 
+When the conversation before the request is shown, judge each reply as its next turn: it follows
+from what was said, keeps the facts and ideas in it straight, and speaks as the same assistant,
+to the user.
+
 Length isn't quality, and the order the replies are shown in means nothing. When neither is
 clearly better, it's a tie: small differences in wording are a tie.
 
@@ -157,10 +163,14 @@ def make_pairs(results: List[dict], reference: str, seed: int = 0) -> List[Pair]
 
 
 def judge_prompt(request: dict, first: dict, second: dict) -> str:
-    """The question about one pair: what the user said, then reply A and reply B."""
+    """The question about one pair: the conversation before, for a case from
+    one (voice_dryrun.py --live: both runs had the same), what the user said,
+    then reply A and reply B."""
     said = request.get("transcript") or ""
-    return "\n\n".join([f"Room: {request.get('room') or 'unknown'}", f'The user said: "{said}"',
-                        _reply("A", first, said), _reply("B", second, said)])
+    parts = [f"Room: {request.get('room') or 'unknown'}"]
+    if request.get("context"):
+        parts.append("The conversation before it, oldest first:\n" + request["context"])
+    return "\n\n".join(parts + [f'The user said: "{said}"', _reply("A", first, said), _reply("B", second, said)])
 
 
 def _reply(name: str, run: dict, said: str) -> str:

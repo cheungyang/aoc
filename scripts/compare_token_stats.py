@@ -156,12 +156,6 @@ def _agent_for_table(table, agent_ids):
     return raw.split("_")[0]
 
 
-# What a `handover` event's marker says when the light first call's reply was
-# only its opener, the marker left off: core/runtime/model/handover.py
-# `MISSING`, not imported, as that module loads the model stack.
-MISSING_MARKER = "missing"
-
-
 def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
     """Token use of voice turns and the latency of each pipeline stage, since `since_ts`
     (and before `until_ts`, if given: a before/after comparison, such as the first_token check
@@ -170,8 +164,9 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
     Token rows are tagged `surface='voice'` (including the agents a voice turn
     delegates to); latency comes from the `turn_trace` rows VoiceManager writes
     beside them (see core/runtime/observability/turn_trace.py). The traces also
-    say which turns made their first call on the light model (graphs/voice),
-    and how those handed over to the agent's own model.
+    say which turns said their first line on the light model (graphs/voice):
+    each then hands over to the agent's own model, or, when the light call
+    fails, the agent's model makes the call instead (`light_fallback`).
     """
     import json
 
@@ -179,7 +174,7 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
         "calls": 0, "in_tokens": 0, "out_tokens": 0,
         "agents": defaultdict(lambda: [0, 0, 0]),   # calls, in, out
         "turns": 0, "outcomes": defaultdict(int), "ttfa": [], "stages": defaultdict(list), "model_calls": [],
-        "light_turns": 0, "handovers": defaultdict(int), "missing_markers": 0,   # handovers: by depth
+        "light_turns": 0, "handovers": 0, "fallbacks": defaultdict(int),   # fallbacks: by reason
     }
     store = SessionStore(db_path)
     if not store.exists():
@@ -227,9 +222,9 @@ def get_voice_stats(db_path=None, since_ts=0, until_ts=None):
                     stats["light_turns"] += 1
                 for e in events:
                     if e.get("kind") == "handover":
-                        stats["handovers"][e.get("depth") or "?"] += 1
-                        if e.get("marker") == MISSING_MARKER:
-                            stats["missing_markers"] += 1
+                        stats["handovers"] += 1
+                    elif e.get("kind") == "light_fallback":
+                        stats["fallbacks"][e.get("reason") or "?"] += 1
     return stats
 
 
@@ -256,8 +251,8 @@ def print_voice_stats(since_ts=0, db_path=None, until_ts=None):
     # Whether the light first call is live, and how its turns went on.
     asked = sum(1 for n in stats["model_calls"] if n)
     print(f"{'Light first calls':<30} | {stats['light_turns']:>12,d}   of {asked:,d} voice turns that called a model")
-    print(f"{'Handed over':<30} | {sum(stats['handovers'].values()):>12,d}   by depth "
-          f"{dict(sorted(stats['handovers'].items()))}, marker missing {stats['missing_markers']:,d}")
+    print(f"{'Handed over':<30} | {stats['handovers']:>12,d}   fell back {sum(stats['fallbacks'].values()):,d} "
+          f"{dict(sorted(stats['fallbacks'].items()))}")
     print(f"{'Time to first audio p50, p90':<30} | {sec(_percentile(stats['ttfa'], 50)):>12} , {sec(_percentile(stats['ttfa'], 90))}")
     if stats["stages"]:
         print(f"\n{'Stage (time since previous)':<30} | {'p50':>8} | {'p90':>8} | {'p95':>8} | {'n':>5}")

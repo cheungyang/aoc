@@ -8,8 +8,8 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from core.storage.sessions import SessionStore
-from scripts.compare_token_stats import (MISSING_MARKER, _agent_for_table, _percentile, get_health_stats, get_stats,
-                                         get_voice_stats, main, print_voice_stats)
+from scripts.compare_token_stats import (_agent_for_table, _percentile, get_health_stats, get_stats, get_voice_stats,
+                                         main, print_voice_stats)
 
 
 class TestVoiceStats(unittest.TestCase):
@@ -57,10 +57,12 @@ class TestVoiceStats(unittest.TestCase):
 
     LIGHT, AGENT = {"kind": "model_call", "light": True}, {"kind": "model_call"}
     LIGHT_TURNS = [
-        [LIGHT, {"kind": "handover", "depth": "low", "marker": "found"}, AGENT, AGENT],
-        [LIGHT, {"kind": "handover", "depth": "low", "marker": MISSING_MARKER}, AGENT],
-        [LIGHT, {"kind": "handover", "depth": "medium"}, AGENT],   # traced before hand-overs noted their marker
-        [LIGHT],                                                    # answered on the light call
+        [LIGHT, {"kind": "handover", "agent": "main"}, AGENT, AGENT],
+        [LIGHT, {"kind": "handover", "depth": "low", "marker": "found"}, AGENT],   # traced before the light call
+                                                                                   # only said the first line
+        [LIGHT, {"kind": "light_fallback", "reason": "deadline", "ms": 1500}, AGENT],
+        [LIGHT, {"kind": "light_fallback", "reason": "refused", "ms": 80}, AGENT, AGENT],
+        [LIGHT],                                                    # answered on the light call, before it couldn't
         [AGENT],                                                    # on the agent's own model only
         [],                                                         # a voice hook: no model call
     ]
@@ -72,15 +74,16 @@ class TestVoiceStats(unittest.TestCase):
             store.append_turn_trace("main:discord:general", {"ttfa_ms": 900, "deltas": {}, "events": events})
         return db
 
-    def test_light_first_calls_and_how_they_handed_over(self):
-        """Whether the light first call is live: the turns that made one, and their hand-overs."""
+    def test_light_first_calls_their_hand_overs_and_fallbacks(self):
+        """Whether the light first call is live: the turns that made one, how many
+        handed over, and how many fell back to the agent's model, and why."""
         with tempfile.TemporaryDirectory() as tmp:
             stats = get_voice_stats(db_path=self._light_turns_db(tmp))
 
-        self.assertEqual(stats["light_turns"], 4)
-        self.assertEqual(dict(stats["handovers"]), {"low": 2, "medium": 1})
-        self.assertEqual(stats["missing_markers"], 1)
-        self.assertEqual(sorted(stats["model_calls"]), [0, 1, 1, 2, 2, 3])
+        self.assertEqual(stats["light_turns"], 5)
+        self.assertEqual(stats["handovers"], 2)
+        self.assertEqual(dict(stats["fallbacks"]), {"deadline": 1, "refused": 1})
+        self.assertEqual(sorted(stats["model_calls"]), [0, 1, 1, 2, 2, 3, 3])
 
     def test_the_report_says_whether_the_light_call_is_live(self):
         out = io.StringIO()
@@ -88,13 +91,8 @@ class TestVoiceStats(unittest.TestCase):
             print_voice_stats(db_path=self._light_turns_db(tmp))
 
         printed = out.getvalue()
-        self.assertRegex(printed, r"Light first calls +\| +4   of 5 voice turns that called a model\n")
-        self.assertRegex(printed, r"Handed over +\| +3   by depth \{'low': 2, 'medium': 1\}, marker missing 1\n")
-
-    def test_the_missing_marker_is_the_hand_overs(self):
-        """Copied, not imported: core/runtime/model/handover.py loads the model stack."""
-        from core.runtime.model.handover import MISSING
-        self.assertEqual(MISSING_MARKER, MISSING)
+        self.assertRegex(printed, r"Light first calls +\| +5   of 6 voice turns that called a model\n")
+        self.assertRegex(printed, r"Handed over +\| +2   fell back 2 \{'deadline': 1, 'refused': 1\}\n")
 
     def test_health_counts_round_trips_and_dead_ends(self):
         with tempfile.TemporaryDirectory() as tmp:

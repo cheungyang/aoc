@@ -222,6 +222,27 @@ class TestSqliteCheckpointer(unittest.TestCase):
         legacy_recovered = self.checkpointer._deserialize_blob(legacy_blob)
         self.assertEqual(legacy_recovered, data)
 
+    def test_a_row_reads_back_without_a_saver(self):
+        """read_blob: how a script reads another memory.db's rows over a
+        read-only connection, where a saver would open the file read-write."""
+        import pickle
+
+        from core.knowledge.memory.sqlite_checkpointer import read_blob
+
+        config = {"configurable": {"thread_id": "ro_thread"}}
+        self.checkpointer.put(config, {"id": "cp1", "channel_values": {"messages": ["hi"]}}, {"step": 3}, {})
+        table = sanitize_table_name("ro_thread")
+        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        try:
+            (blob,) = conn.execute(f'SELECT data FROM "{table}" WHERE entry_type = \'checkpoint\'').fetchone()
+        finally:
+            conn.close()
+        stored = read_blob(blob)
+        self.assertEqual(stored["checkpoint"]["channel_values"], {"messages": ["hi"]})
+        self.assertEqual(stored["metadata"], {"step": 3})
+        self.assertEqual(read_blob(pickle.dumps({"k": "v"})), {"k": "v"})
+        self.assertIsNone(read_blob(b""))
+
     def test_checkpoint_pruning(self):
         config = {"configurable": {"thread_id": "prune_thread"}}
         

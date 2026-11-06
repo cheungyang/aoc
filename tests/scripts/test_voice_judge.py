@@ -130,6 +130,23 @@ class TestPairs:
         """A light first call's line is said while the answer is worked out: judged on accuracy, not as filler."""
         assert "Judge that line only on whether it's accurate" in judge.judge_config()["system_instruction"]
 
+    def test_a_reply_in_a_conversation_is_judged_as_its_next_turn(self):
+        """voice_dryrun.py --live: both runs went on the same conversation, shown before the words."""
+        context = "User: Which agent handles meals?\nAki: Mia does."
+        runs = [{**stored("live", "prod"), "context": context},
+                {**stored("live", "prod+light:FLASH_LITE:minimal"), "context": context}]
+        (pair,) = judge.make_pairs(runs, "prod")
+        assert pair.prompt.index("Room: home-automation") < pair.prompt.index(
+            "The conversation before it, oldest first:\n" + context) < pair.prompt.index("The user said:")
+        assert "judge each reply as its next turn" in judge.judge_config()["system_instruction"]
+
+    def test_a_pair_without_a_conversation_reads_as_before(self):
+        """So the verdicts stored for it keep their fingerprints."""
+        theirs, mine = stored("lights", "PRO:low"), stored("lights", "FLASH:low")
+        prompt = judge.judge_prompt(theirs, mine, theirs)
+        assert prompt.startswith('Room: home-automation\n\nThe user said: "Are the lights on?"\n\n<reply id="A">')
+        assert judge.judge_prompt({**theirs, "context": ""}, mine, theirs) == prompt
+
     def test_verdicts_map_back_to_the_combo_and_are_read_strictly(self):
         assert (judge.outcome("A", combo_first=True), judge.outcome("A", combo_first=False)) == ("win", "loss")
         assert (judge.outcome("B", combo_first=False), judge.outcome("tie", combo_first=True)) == ("win", "tie")

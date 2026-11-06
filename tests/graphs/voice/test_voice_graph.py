@@ -1,5 +1,5 @@
-"""graphs/voice: graphs/main, with a voice turn's first model call on a light
-model that speaks first and then answers or hands over."""
+"""graphs/voice: graphs/main, with a voice turn's first line said by a light model
+while the agent's own model, which always runs, works out the answer."""
 import io
 import json
 import unittest
@@ -16,7 +16,7 @@ from core.config.models import FLASH, FLASH_LITE
 from core.prompts.voice import OPENER_HINT, get_voice_mode_prompt
 from core.runtime.foundation.context import current_execution_context
 from core.runtime.foundation.sessions import SessionManager
-from core.runtime.model.handover import DEFAULT_DEPTH, HANDOVER, MISSING
+from core.runtime.model.handover import HANDOVER, NO_SPEECH, REFUSED
 from core.runtime.model.retry import RetryingChatGoogleGenerativeAI
 from core.runtime.model.thinking import PICK_KEY
 from core.runtime.observability.turn_trace import start_turn_trace
@@ -26,6 +26,7 @@ from graphs.voice.prompts import HandedOverPrompt, LightCallPrompt
 PRE_TOOL_LINE = "Before calling tools, write a one-sentence <speech> block"
 CONFIG = {"agent_id": "home-test", "channels": ["home-test"], "tools": {}}
 HANDED_OVER = HandedOverPrompt().render()
+OVERLOADED = "503 UNAVAILABLE: The model is overloaded. Please try again later."
 
 
 @contextmanager
@@ -49,13 +50,16 @@ def _call(name, args, call_id):
 
 
 def _scripted(script, calls):
-    """Each model request takes the next list of `script`; `calls` gets what it was sent.
-    It streams copies: langchain stamps a streamed chunk with its run's message id,
-    so a chunk streamed again would carry an earlier reply's id, and replace it."""
+    """Each model request takes the next list of `script`, raising an exception
+    where it holds one; `calls` gets what each was sent. It streams copies:
+    langchain stamps a streamed chunk with its run's message id, so a chunk
+    streamed again would carry an earlier reply's id, and replace it."""
     async def fake(self, messages, stop=None, run_manager=None, **kwargs):
         calls.append({"model": self.model, "thinking": kwargs.get("thinking_level"), "messages": list(messages),
                       "tools": [t["function"]["name"] for t in kwargs.get("tools") or []]})
         for item in script[len(calls) - 1]:
+            if isinstance(item, BaseException):
+                raise item
             yield item.model_copy(deep=True)
     return fake
 
@@ -72,12 +76,13 @@ def _prompt(state):
             *state["messages"]]
 
 
-HANDS_OVER = [[_text("<speech>Let me check the "), _text("downstairs lights.</speech><hand"),
-               _text('over depth="medium"/>')],
+ANSWER = [_text("<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")]
+HANDS_OVER = [[_text("<speech>Let me check the "), _text("downstairs lights.</speech>")],
               [_call("get_lights", {"area": "downstairs"}, "g1")],
-              [_text("<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")]]
-ANSWERS = [[_text("<speech>You're welcome!</speech>"), _text("You're welcome!")]]
-OPENER_ONLY = [[_text("<speech>Let me check the "), _text("downstairs lights.</speech>")], *HANDS_OVER[1:]]
+              ANSWER]
+# The light call answers anyway: only its first line is kept, and the agent's model still runs.
+THANKS = [[_text("<speech>You're welcome!</speech>"), _text("You're welcome! Anything else on your mind?")],
+          [_text("<speech>Anytime.</speech>Anytime.")]]
 
 
 class TestTheLightCall(unittest.TestCase):
@@ -99,56 +104,46 @@ class TestTheLightCall(unittest.TestCase):
 
     def test_its_rules(self):
         rules = LightCallPrompt().render()
-        self.assertIn('end your response with <handover depth="low"/>', rules)
-        self.assertIn("Never a fact, number or status you haven't seen here", rules)
-        self.assertIn("When in doubt, hand over", rules)
+        self.assertIn("Write only a <speech> block with one short sentence that starts your reply", rules)
+        self.assertIn("You write the full answer right after it", rules)
+        self.assertIn("Speak as yourself, to the user, in the first person", rules)
+        self.assertIn("The <caller> line only names who passed the user's words on", rules)
+        self.assertIn("Say nothing your answer depends on", rules)
+        self.assertNotIn("<handover", rules, "it never decides whether to hand over: every turn does")
 
 
 class TestTheHandover(unittest.IsolatedAsyncioTestCase):
 
-    async def _hand_over(self, depth, **more):
+    async def _hand_over(self, **hints):
         out = io.StringIO()
         with _voice_turn() as (ctx, trace), redirect_stdout(out):
-            result = await handover.ainvoke({"depth": depth, **more})
+            ctx.turn_hints.update(hints)
+            result = await handover.ainvoke({})
         return result, ctx, trace, out.getvalue()
 
-    async def test_the_depth_goes_to_the_next_call_and_the_opener_is_noted(self):
-        result, ctx, trace, printed = await self._hand_over("medium")
+    async def test_the_opener_is_noted_logged_and_traced(self):
+        result, ctx, trace, printed = await self._hand_over()
         self.assertEqual(result, HANDED_OVER)
-        self.assertEqual(ctx.turn_hints[PICK_KEY], "medium")
         self.assertTrue(ctx.turn_hints[OPENER_HINT])
-        self.assertIn("[Handover] agent=home-test depth=medium applied=medium\n", printed)
+        self.assertIn("[Handover] agent=home-test\n", printed)
         (event,) = [e for e in trace.events if e["kind"] == HANDOVER]
-        self.assertEqual((event["agent"], event["depth"], event["applied"], event["marker"]),
-                         ("home-test", "medium", "medium", "found"))
+        self.assertEqual(event["agent"], "home-test")
 
-    async def test_a_missing_marker_is_logged_and_traced(self):
-        """The light call said its line and left the marker off: it hands over all the same."""
-        result, ctx, trace, printed = await self._hand_over(DEFAULT_DEPTH, marker=MISSING)
-        self.assertEqual(result, HANDED_OVER)
-        self.assertTrue(ctx.turn_hints[OPENER_HINT])
-        self.assertIn(f"[Handover] agent=home-test depth={DEFAULT_DEPTH} applied={DEFAULT_DEPTH} marker=missing\n",
-                      printed)
-        (event,) = [e for e in trace.events if e["kind"] == HANDOVER]
-        self.assertEqual((event["depth"], event["marker"]), (DEFAULT_DEPTH, MISSING))
-
-    async def test_voice_caps_the_depth(self):
-        _, ctx, _, printed = await self._hand_over("high")
-        self.assertEqual(ctx.turn_hints[PICK_KEY], "medium")
-        self.assertIn("depth=high applied=medium", printed)
-
-    async def test_a_depth_that_isnt_one_still_hands_over(self):
-        result, ctx, _, _ = await self._hand_over("deep")
-        self.assertEqual(result, HANDED_OVER)
-        self.assertNotIn(PICK_KEY, ctx.turn_hints, "the agent's usual level")
-        self.assertTrue(ctx.turn_hints[OPENER_HINT])
+    async def test_the_agents_model_thinks_at_its_usual_level(self):
+        """A <next_thinking> pick the light call wrote doesn't carry over."""
+        _, ctx, _, _ = await self._hand_over(**{PICK_KEY: "minimal"})
+        self.assertNotIn(PICK_KEY, ctx.turn_hints)
 
     def test_its_result_tells_the_agents_model_the_line_was_heard(self):
         self.assertIn("the user has heard your first line, so don't say it again", HANDED_OVER)
+        self.assertIn("If that line already said all there is (a thanks, a greeting), keep the rest to a few words",
+                      HANDED_OVER)
 
 
 class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
     """Whole turns through the compiled graph, on scripted model streams."""
+
+    THREAD = {"configurable": {"thread_id": "home-test:tool:home-test"}}
 
     def _graph(self, checkpointer=None):
         agent = RetryingChatGoogleGenerativeAI(model=FLASH, google_api_key="fake")
@@ -167,16 +162,15 @@ class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_hand_over(self):
         calls = []
-        thread = {"configurable": {"thread_id": "home-test:tool:home-test"}}
         with redirect_stdout(io.StringIO()):
             state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Any lights on downstairs?",
-                                                      HANDS_OVER, calls, thread)
+                                                      HANDS_OVER, calls, self.THREAD)
 
         light, tool_call, answer = calls
         self.assertEqual((light["model"], light["thinking"], light["tools"]), (FLASH_LITE, "minimal", []))
-        self.assertEqual((tool_call["model"], tool_call["thinking"], tool_call["tools"]), (FLASH, "medium", ["get_lights"]),
-                         "the agent's own model, at the depth asked for, and never with `handover` declared")
-        self.assertEqual(answer["thinking"], "low", "then the agent's usual level")
+        self.assertEqual((tool_call["model"], tool_call["thinking"], tool_call["tools"]), (FLASH, "low", ["get_lights"]),
+                         "the agent's own model, at its usual level, and never with `handover` declared")
+        self.assertEqual(answer["thinking"], "low")
         systems = [[m.content for m in call["messages"] if isinstance(m, SystemMessage)] for call in calls]
         self.assertTrue(any("<light_call>" in s for s in systems[0]))
         self.assertFalse(any("<light_call>" in s for s in systems[1] + systems[2]), "the light call's rules only")
@@ -190,55 +184,57 @@ class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kinds, ["HumanMessage", "AIMessage", "ToolMessage", "AIMessage", "ToolMessage", "AIMessage"])
         opener, handed = state["messages"][1:3]
         self.assertEqual(opener.content, "<speech>Let me check the downstairs lights.</speech>")
-        self.assertEqual([(c["name"], c["args"]) for c in opener.tool_calls], [(HANDOVER, {"depth": "medium"})])
+        self.assertEqual([(c["name"], c["args"]) for c in opener.tool_calls], [(HANDOVER, {})])
         self.assertEqual((handed.name, handed.content), (HANDOVER, HANDED_OVER))
         model_calls = [e for e in trace.events if e["kind"] == "model_call"]
         self.assertEqual([e.get("light", False) for e in model_calls], [True, False, False])
-        self.assertEqual([(e["depth"], e["marker"]) for e in trace.events if e["kind"] == HANDOVER],
-                         [("medium", "found")])
+        self.assertEqual(len([e for e in trace.events if e["kind"] == HANDOVER]), 1)
 
-    async def test_an_opener_without_its_marker_still_hands_over(self):
-        """The light call said what it would do and left the marker off: the
-        agent's model does it, at the voice default, and the log says so."""
-        calls, out = [], io.StringIO()
-        thread = {"configurable": {"thread_id": "home-test:tool:home-test"}}
-        with redirect_stdout(out):
-            state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Any lights on downstairs?",
-                                                      OPENER_ONLY, calls, thread)
-
-        self.assertEqual([(call["model"], call["tools"]) for call in calls],
-                         [(FLASH_LITE, []), (FLASH, ["get_lights"]), (FLASH, ["get_lights"])])
-        self.assertEqual(calls[1]["thinking"], DEFAULT_DEPTH)
-        self.assertEqual(streamed, "<speech>Let me check the downstairs lights.</speech>"
-                                   "<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")
-        opener, handed = state["messages"][1:3]
-        self.assertEqual([(c["name"], c["args"]) for c in opener.tool_calls],
-                         [(HANDOVER, {"depth": DEFAULT_DEPTH, "marker": MISSING})])
-        self.assertEqual((handed.name, handed.content), (HANDOVER, HANDED_OVER))
-        self.assertEqual([(e["depth"], e["marker"]) for e in trace.events if e["kind"] == HANDOVER],
-                         [(DEFAULT_DEPTH, MISSING)])
-        self.assertIn("marker=missing", out.getvalue())
-
-    async def test_an_answer_ends_the_turn_on_the_light_call(self):
+    async def test_the_agents_model_answers_even_what_the_light_call_answered(self):
+        """It says only its first line: what it wrote after it is dropped, and the
+        agent's own model gives the reply."""
         calls = []
-        thread = {"configurable": {"thread_id": "home-test:tool:home-test"}}
-        state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Thanks!", ANSWERS, calls, thread)
+        with redirect_stdout(io.StringIO()):
+            state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Thanks!", THANKS, calls,
+                                                      self.THREAD)
 
-        self.assertEqual([call["model"] for call in calls], [FLASH_LITE])
-        self.assertEqual(streamed, "<speech>You're welcome!</speech>You're welcome!")
-        self.assertEqual([m.content for m in state["messages"]], ["Thanks!", "<speech>You're welcome!</speech>"
-                                                                            "You're welcome!"])
-        self.assertFalse([e for e in trace.events if e["kind"] == HANDOVER])
+        self.assertEqual([call["model"] for call in calls], [FLASH_LITE, FLASH])
+        self.assertEqual(streamed, "<speech>You're welcome!</speech><speech>Anytime.</speech>Anytime.")
+        self.assertEqual([m.content for m in state["messages"]],
+                         ["Thanks!", "<speech>You're welcome!</speech>", HANDED_OVER,
+                          "<speech>Anytime.</speech>Anytime."])
+
+    async def test_a_light_call_that_fails_leaves_the_turn_to_the_agents_model(self):
+        """Refused, or with nothing to say: the agent's model makes the call
+        instead, as with no light call, asked for its own first sentence."""
+        for first, reason in (([Exception(OVERLOADED)], REFUSED), ([_text("The kitchen light is on.")], NO_SPEECH)):
+            with self.subTest(reason=reason):
+                calls = []
+                with redirect_stdout(io.StringIO()):
+                    state, streamed, trace = await self._turn(self._graph(InMemorySaver()), "Any lights on downstairs?",
+                                                              [first, *HANDS_OVER[1:]], calls, self.THREAD)
+
+                self.assertEqual([(call["model"], call["tools"]) for call in calls],
+                                 [(FLASH_LITE, []), (FLASH, ["get_lights"]), (FLASH, ["get_lights"])])
+                fallback = calls[1]
+                systems = [m.content for m in fallback["messages"] if isinstance(m, SystemMessage)]
+                self.assertFalse(any("<light_call>" in s for s in systems))
+                self.assertIn(PRE_TOOL_LINE, systems[1], "nobody spoke yet: it's asked for the first sentence")
+                self.assertEqual(streamed, "<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")
+                self.assertEqual([type(m).__name__ for m in state["messages"]],
+                                 ["HumanMessage", "AIMessage", "ToolMessage", "AIMessage"])
+                self.assertFalse([e for e in trace.events if e["kind"] == HANDOVER])
+                self.assertEqual([e["reason"] for e in trace.events if e["kind"] == "light_fallback"], [reason])
 
     async def test_the_next_turn_starts_on_the_light_model_again(self):
         """On a history holding the last turn's hand-over: the light call reads it, with no tools."""
-        graph, thread = self._graph(InMemorySaver()), {"configurable": {"thread_id": "home-test:tool:home-test"}}
-        with redirect_stdout(io.StringIO()):
-            await self._turn(graph, "Any lights on downstairs?", HANDS_OVER, [], thread)
+        graph = self._graph(InMemorySaver())
         calls = []
-        await self._turn(graph, "Thanks!", ANSWERS, calls, thread)
+        with redirect_stdout(io.StringIO()):
+            await self._turn(graph, "Any lights on downstairs?", HANDS_OVER, [], self.THREAD)
+            await self._turn(graph, "Thanks!", THANKS, calls, self.THREAD)
 
-        (light,) = calls
+        light = calls[0]
         self.assertEqual((light["model"], light["tools"]), (FLASH_LITE, []))
         read = [m for m in light["messages"] if not isinstance(m, SystemMessage)]
         self.assertEqual([type(m).__name__ for m in read],
@@ -246,13 +242,13 @@ class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
                           "HumanMessage"])
 
     async def test_a_second_hand_over_goes_after_the_first(self):
-        """Most voice turns hand over: the next one's opener, hand-over and answer
+        """Every voice turn hands over: the next one's opener, hand-over and answer
         follow the last turn's, which stay as they were."""
-        graph, thread = self._graph(InMemorySaver()), {"configurable": {"thread_id": "home-test:tool:home-test"}}
+        graph = self._graph(InMemorySaver())
         calls = []
         with redirect_stdout(io.StringIO()):
-            first, _, _ = await self._turn(graph, "Any lights on downstairs?", HANDS_OVER, [], thread)
-            state, streamed, trace = await self._turn(graph, "And upstairs?", HANDS_OVER, calls, thread)
+            first, _, _ = await self._turn(graph, "Any lights on downstairs?", HANDS_OVER, [], self.THREAD)
+            state, streamed, trace = await self._turn(graph, "And upstairs?", HANDS_OVER, calls, self.THREAD)
 
         self.assertEqual([(call["model"], call["tools"]) for call in calls],
                          [(FLASH_LITE, []), (FLASH, ["get_lights"]), (FLASH, ["get_lights"])])
@@ -264,7 +260,7 @@ class TestVoiceTurns(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((messages[8].name, messages[8].content), (HANDOVER, HANDED_OVER))
         self.assertEqual(streamed, "<speech>Let me check the downstairs lights.</speech>"
                                    "<speech>The kitchen light is on.</speech>Kitchen: on; hallway: off.")
-        self.assertEqual([e["depth"] for e in trace.events if e["kind"] == HANDOVER], ["medium"])
+        self.assertEqual(len([e for e in trace.events if e["kind"] == HANDOVER]), 1)
 
     def test_without_a_light_model_it_is_graphs_mains_own(self):
         llm = MagicMock()
