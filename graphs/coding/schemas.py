@@ -82,6 +82,9 @@ class TaskEnvelope(TypedDict, total=False):
     # re-run on every verify. Falls back to the manifest-level `setup_command`.
     setup_command: Optional[str]
     setup_done: bool                 # Reset whenever the worktree is re-created
+    # Overrides the manifest's `environment` block (the verify backend) for this
+    # task, e.g. {"backend": "local"} for a bootstrap task that scaffolds.
+    environment: Optional[Dict[str, Any]]
     verification_command: str        # CLI test command
     acceptance_criteria: str         # Given-When-Then criteria
     status: TaskStatus
@@ -138,6 +141,40 @@ class RepoDescriptor(TypedDict, total=False):
     push_identity_email: Optional[str]
 
 
+class DeployConfig(TypedDict, total=False):
+    """The manifest's `deploy` block: where the project's default branch goes live.
+
+    Written by the planner or by hand; read by the deploy node through
+    utils/deploy (deploy_factory.BACKENDS).
+    """
+    backend: str                     # "github_pages" | "github_deployment" | "none"
+    environment: str                 # GitHub environment to watch (github_pages: "github-pages")
+    url: str                         # shown when the deployment reports no URL of its own
+    timeout_minutes: int             # how long a commit may take to go live before it counts as failed
+
+
+class DeploymentState(TypedDict, total=False):
+    """The manifest's top-level `deployment`: where the default branch has got to.
+
+    Written only by the graph (utils/manifest.request_deploy and
+    persist_deployment). One per project: deployment follows the branch, not a
+    task, so a merged task is `done` whatever its deploy does.
+    """
+    status: Literal["pending", "live", "failed"]
+    backend: str
+    target_sha: Optional[str]        # the commit that should go live; None: the branch's head
+    requested_at: float              # when it was asked for; the timeout counts from here
+    checks: int                      # how many ticks have asked the backend about it
+    handle: Optional[str]            # a driver's id for the deploy it started (watchers: none)
+    detail: Optional[str]            # the backend's latest word on it
+    deployed_sha: Optional[str]      # the last commit confirmed live
+    url: Optional[str]               # where that commit can be opened
+    log_url: Optional[str]           # where to look: the workflow run, the deployment log
+    live_at: Optional[float]
+    last_error: Optional[TaskError]  # stage "deploy"; kind "deploy" | "infra" | "config"
+    updated_at: float
+
+
 class CodingState(TypedDict, total=False):
     # 1. Queue & Manifest Context
     build_request_path: str
@@ -188,7 +225,7 @@ class CodingState(TypedDict, total=False):
     # These are channels, not decoration: LangGraph carries only what the schema
     # declares, so an undeclared `route` would be dropped between nodes and every
     # conditional edge would fall through to END.
-    route: str                       # "implement"|"push"|"verify"|"audit"|"publish"|"sync_review"|"scheduler"|"done"
+    route: str                       # "implement"|"push"|"verify"|"audit"|"publish"|"sync_review"|"deploy"|"scheduler"|"done"
     stage: TaskStage
     graph_id: str
     required_tools: List[str]        # derived from graph.json's `tools` grant
@@ -210,4 +247,7 @@ class CodingState(TypedDict, total=False):
     # has already touched, so one tick cannot work the same task twice.
     tick_report: List[str]
     tick_handled: List[str]
+    # The deploy node ran this tick. The scheduler routes a pending deployment
+    # to it only while this is unset, so deploy → scheduler cannot loop.
+    deploy_checked: bool
 

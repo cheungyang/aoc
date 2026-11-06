@@ -250,7 +250,7 @@ class TestVerifyBackend(ManifestFixture):
         self.assertEqual(steps[0].command, task["verification_command"])
         self.assertEqual(runner.run.call_args.kwargs["workspace_path"], self.workspace)
 
-    async def test_a_misconfigured_backend_halts_as_environment_not_verification(self):
+    async def test_a_misconfigured_backend_halts_as_config_not_verification(self):
         """A typo in the backend name must not cost the worker an attempt."""
         import os
         from graphs.coding.utils.sandbox import BACKEND_ENV_VAR
@@ -262,8 +262,29 @@ class TestVerifyBackend(ManifestFixture):
             result = await verify_node(self.base_state(task, impl_digest="d1"))
 
         self.assertEqual(result["route"], "done")
-        self.assertEqual(self.stored()["last_error"]["kind"], "environment")
-        self.assertIn("misconfigured", result["error_message"])
+        self.assertEqual(self.stored()["status"], "halted")
+        self.assertEqual(self.stored()["last_error"]["kind"], "config")
+        self.assertIn("nope", result["error_message"])
+        self.assertEqual(self.stored().get("attempts", {}).get("implement", 0), 0)
+
+    async def test_a_host_without_e2b_set_up_halts_and_names_the_check_script(self):
+        """E2B is the default, so a host that was never given a key reports it
+        as configuration — not as a project whose dependencies are missing."""
+        task = _task(attempts={"implement": 1})
+        self.write_manifest([task])
+        missing_key = RunResult(126, "", "E2B backend misconfigured: No E2B API key",
+                                backend="e2b", config_error="No E2B API key")
+
+        with patch("graphs.coding.nodes.verify._run", AsyncMock(return_value=missing_key)):
+            result = await verify_node(self.base_state(task, impl_digest="d1"))
+
+        stored = self.stored()
+        self.assertEqual(result["route"], "done")
+        self.assertEqual((stored["status"], stored["last_error"]["kind"]), ("halted", "config"))
+        self.assertEqual(stored["attempts"], {"implement": 1})
+        self.assertIsNone(stored["lease_owner"])
+        self.assertIn("coding_e2b_check.py", result["error_message"])
+        self.assertNotIn("dependencies", result["error_message"])
 
     def _runner(self, result, runs_setup):
         runner = AsyncMock()

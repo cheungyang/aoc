@@ -19,14 +19,17 @@ from graphs.coding.utils.manifest import (
     acquire_lease,
     bump_attempt,
     clear_tick_error,
+    deployment_pending,
     lease_is_active,
     load_manifest,
     locked_manifest,
     migrate_manifest,
+    persist_deployment,
     persist_task,
     reclaim_expired_leases,
     record_tick_error,
     release_lease,
+    request_deploy,
     save_manifest,
     stage_at_or_past,
     yield_task,
@@ -300,6 +303,76 @@ class TestTickError(ManifestTestCase):
         persist_task(self.path, "A", status="active")
 
         self.assertEqual(self.read()["tick_error"]["message"], "the bot can't push")
+
+
+class TestDeployment(ManifestTestCase):
+    """One deployment per project at the top level, written only by the graph."""
+
+    SHA = "abc1234def5678"
+    PAGES = {"backend": "github_pages"}
+
+    def setUp(self):
+        super().setUp()
+        self.write({**_manifest([{"task_id": "A", "status": "done", "stage": "done"}]),
+                    "deploy": self.PAGES})
+
+    def test_a_request_marks_the_deployment_pending(self):
+        request_deploy(self.path, sha=self.SHA, backend="github_pages", now=100.0)
+
+        manifest = load_manifest(self.path)
+        self.assertTrue(deployment_pending(manifest))
+        self.assertEqual((manifest["deployment"]["target_sha"], manifest["deployment"]["requested_at"],
+                          manifest["deployment"]["checks"]), (self.SHA, 100.0, 0))
+
+    def test_a_newer_request_replaces_a_pending_one_and_keeps_what_was_live(self):
+        self.write({**self.read(), "deployment": {
+            "status": "failed", "deployed_sha": "old0000", "url": "https://org.github.io/site/",
+            "handle": "run-1", "last_error": {"kind": "deploy"}}})
+
+        request_deploy(self.path, sha=self.SHA, backend="github_pages")
+
+        deployment = self.read()["deployment"]
+        self.assertEqual((deployment["status"], deployment["target_sha"]), ("pending", self.SHA))
+        self.assertEqual((deployment["deployed_sha"], deployment["url"]),
+                         ("old0000", "https://org.github.io/site/"))
+        self.assertIsNone(deployment["last_error"])
+        self.assertIsNone(deployment["handle"], "a driver's handle belongs to the deploy it started")
+
+    def test_an_update_for_a_commit_no_longer_targeted_is_skipped(self):
+        self.write({**self.read(), "deployment": {"status": "pending", "target_sha": "newer000"}})
+
+        result = persist_deployment(self.path, expect_target=self.SHA, status="live")
+
+        self.assertIsNone(result)
+        self.assertEqual(self.read()["deployment"]["status"], "pending")
+
+    def test_an_update_lands_while_no_commit_is_named_yet(self):
+        """A `redeploy` without a SHA targets the branch head, which the deploy node resolves."""
+        request_deploy(self.path, sha=None, backend="github_pages")
+
+        result = persist_deployment(self.path, expect_target=self.SHA, target_sha=self.SHA, checks=1)
+
+        self.assertEqual((result["target_sha"], result["checks"]), (self.SHA, 1))
+
+    def test_the_rest_of_the_manifest_is_untouched(self):
+        request_deploy(self.path, sha=self.SHA, backend="github_pages")
+
+        data = self.read()
+        self.assertEqual(data["deploy"], self.PAGES)
+        self.assertEqual(data["queue"][0]["task_id"], "A")
+
+    def test_the_deployment_survives_task_writes(self):
+        request_deploy(self.path, sha=self.SHA, backend="github_pages")
+
+        persist_task(self.path, "A", commit_url="https://github.com/owner/repo/commit/abc1234")
+
+        self.assertEqual(self.read()["deployment"]["target_sha"], self.SHA)
+
+    def test_pending_only_reads(self):
+        for manifest in ({}, {"deployment": None}, {"deployment": {"status": "live"}}, None):
+            with self.subTest(manifest=manifest):
+                self.assertFalse(deployment_pending(manifest))
+        self.assertTrue(deployment_pending({"deployment": {"status": "pending"}}))
 
 
 class TestStageHelpers(unittest.TestCase):

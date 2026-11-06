@@ -3,7 +3,8 @@
 The coding graph records every outcome in the project's manifest
 (pkm/wiki/software/<project>/build_request.json): each task's status, stage
 and last error, and at the top level a `tick_error` for a failure that stops
-ticks before they claim any task. The scan (preconditions/coding_attention.py)
+ticks before they claim any task and a `deployment` for where the project's
+default branch has got to. The scan (preconditions/coding_attention.py)
 loads each manifest and hands it here: pure functions over the loaded data,
 with the time passed in.
 
@@ -16,6 +17,8 @@ and briefs him on the others as still open.
                     arrived after the implement budget was spent
     tick_error      ticks stop before they claim any task: preflight, or the
                     repository
+    deploy_failed   the project's deployment failed: the deploy itself, its
+                    backend's configuration, or no answer before the timeout
     review_dormant  a PR awaiting review that the tick stopped checking
                     `remind_after_hours` ago or more; due again every
                     `remind_after_hours`
@@ -24,7 +27,8 @@ A halted task's item also says how many fixes Elephant has made to it
 (`planner_fixes`) against `max_fixes_per_task`.
 
 Left out: done tasks, tasks the user failed or skipped (status `failed` or
-`blocked`), and work still in flight, which the graph retries itself.
+`blocked`), work still in flight, which the graph retries itself, and a
+deployment still pending or live.
 """
 from dataclasses import dataclass
 from typing import Any, List, Mapping, Optional, Sequence, Tuple
@@ -32,8 +36,9 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 HALT = "halt"
 REVIEW_BUDGET = "review_budget"
 TICK_ERROR = "tick_error"
+DEPLOY_FAILED = "deploy_failed"
 REVIEW_DORMANT = "review_dormant"
-KINDS = (HALT, REVIEW_BUDGET, TICK_ERROR, REVIEW_DORMANT)
+KINDS = (HALT, REVIEW_BUDGET, TICK_ERROR, DEPLOY_FAILED, REVIEW_DORMANT)
 
 # The statuses a task waits in until its dependencies are done (graphs/coding/utils/dag.py).
 RUNNABLE_STATUSES = ("queued", "pending")
@@ -54,8 +59,8 @@ class Item:
     project: str
     kind: str
     event_at: float                      # when it happened, epoch seconds
-    task_id: str = ""                    # empty for a tick error: it belongs to the project
-    stage: str = ""                      # the task's stage; for a tick error, where the tick stopped
+    task_id: str = ""                    # empty for a tick error or a deploy: it belongs to the project
+    stage: str = ""                      # the task's stage; a tick error's step; a deploy's backend
     attempts: str = ""                   # "implement 3, push 1"
     error: str = ""                      # the last error's kind and stage: "llm at implement"
     message: str = ""                    # the error's message, clipped
@@ -67,10 +72,11 @@ class Item:
     max_fixes: int = 0                   # `max_fixes_per_task`
     polling_stopped_at: Optional[float] = None  # a waiting PR's poll_until
     reopen_until: Optional[float] = None        # the poll_until that would reopen its check
+    log_url: str = ""                    # a failed deploy's log: the workflow run, the deployment
 
     @property
     def name(self) -> str:
-        """`project/task`, or the project alone for a tick error."""
+        """`project/task`, or the project alone for a tick error or a deploy."""
         return f"{self.project}/{self.task_id}" if self.task_id else self.project
 
     @property
@@ -83,7 +89,7 @@ class Item:
 
     def summary(self, now: float) -> str:
         """The item in one line, for the still-open list."""
-        if self.kind == TICK_ERROR:
+        if self.kind in (TICK_ERROR, DEPLOY_FAILED):
             first = (self.message.splitlines() or [""])[0]
             return f"{self.name} · {self.kind} · since {ago(now - self.event_at)} ago ({self.stage}): {_clip(first, 120)}"
         if self.kind == REVIEW_DORMANT:
@@ -99,6 +105,11 @@ class Item:
             lines = [f"ticks stop at {self.stage or 'an unknown step'} before claiming any task, "
                      f"since {ago(now - self.event_at)} ago:"]
             return lines + self.message.splitlines()
+        if self.kind == DEPLOY_FAILED:
+            kind = f" ({self.error})" if self.error else ""
+            lines = [f"the deployment to {self.stage or 'its backend'} failed {ago(now - self.event_at)} ago{kind}:"]
+            lines += self.message.splitlines()
+            return lines + ([f"log: {self.log_url}"] if self.log_url else [])
         if self.kind == REVIEW_DORMANT:
             lines = [f"awaiting review; the tick stopped checking it {ago(now - self._stopped)} ago"]
         else:
@@ -132,14 +143,14 @@ class Item:
 
 
 def queue_items(manifest: Mapping[str, Any], project: str, now: float, rules: Mapping[str, Any]) -> List[Item]:
-    """What in one project's manifest needs Elephant: its tick error first, then its tasks in queue order.
+    """What in one project's manifest needs Elephant: its tick error and failed deploy first, then its tasks in queue order.
 
     `rules` holds `remind_after_hours` and `max_fixes_per_task` (lib/rules.py).
     """
     items: List[Item] = []
-    tick_error = _tick_error(manifest, project)
-    if tick_error is not None:
-        items.append(tick_error)
+    for project_item in (_tick_error(manifest, project), _deploy_failed(manifest, project)):
+        if project_item is not None:
+            items.append(project_item)
     queue = tasks(manifest)
     for task in queue:
         status = task.get("status")
@@ -232,6 +243,24 @@ def _tick_error(manifest: Mapping[str, Any], project: str) -> Optional[Item]:
         return None
     return Item(project=project, kind=TICK_ERROR, event_at=_number(error.get("at")) or 0.0,
                 stage=str(error.get("stage") or ""), message=_clip(message, MESSAGE_CHARS))
+
+
+def _deploy_failed(manifest: Mapping[str, Any], project: str) -> Optional[Item]:
+    """The project's deployment, when it failed; it stays failed until a merge or `redeploy` asks again."""
+    deployment = manifest.get("deployment") if isinstance(manifest, Mapping) else None
+    if not isinstance(deployment, Mapping) or deployment.get("status") != "failed":
+        return None
+    error = deployment.get("last_error")
+    error = error if isinstance(error, Mapping) else {}
+    return Item(
+        project=project,
+        kind=DEPLOY_FAILED,
+        event_at=_number(error.get("at")) or _number(deployment.get("updated_at")) or 0.0,
+        stage=str(deployment.get("backend") or ""),
+        error=str(error.get("kind") or ""),
+        message=_clip(str(error.get("message") or "no reason recorded").strip(), MESSAGE_CHARS),
+        log_url=str(deployment.get("log_url") or ""),
+    )
 
 
 def _halted(task: Mapping[str, Any], project: str, queue: Sequence[Mapping[str, Any]], max_fixes: int) -> Item:

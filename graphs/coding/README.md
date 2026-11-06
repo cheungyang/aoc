@@ -3,7 +3,9 @@
 The coding graph is **one reconciliation tick** over a single project's build manifest. A tick
 reclaims dead leases, picks exactly one task, advances it as far as it safely can — provision,
 implement, push, verify, audit, publish, or sync a review decision off GitHub — and then returns.
-There is no in-graph waiting and no human-in-the-loop interrupt: *"retry" is simply another tick*.
+A project with a `deploy` block also has its deployment advanced: a merge requests one, and each
+tick checks it once until it is live. There is no in-graph waiting and no human-in-the-loop
+interrupt: *"retry" is simply another tick*.
 The previous interrupt-driven topology was removed because its durable state lived in a LangGraph
 checkpoint keyed to the caller's session, so a halted run could not be resumed from anywhere else.
 Durable state now lives where it can be inspected and hand-edited: the manifest on disk,
@@ -26,8 +28,10 @@ flowchart TD
     audit{{audit}}
     publish{{publish}}
     sync_review{{sync_review}}
+    deploy{{deploy}}
     END([END])
 
+    scheduler -->|"route = deploy (deployment pending)"| deploy
     scheduler -->|"route = implement"| implement
     scheduler -->|"route = push"| push
     scheduler -->|"route = verify"| verify
@@ -54,35 +58,46 @@ flowchart TD
 
     sync_review -->|"route = implement"| implement
     sync_review -->|"route = publish"| publish
+    sync_review -->|"route = deploy (merged, deploy block)"| deploy
     sync_review -->|"route = scheduler"| scheduler
     sync_review -->|"route = done (or unset)"| END
+
+    deploy -->|"route = scheduler"| scheduler
+    deploy -->|"route = done (or unset)"| END
 ```
 
 Topology and allowed route sets are declared in
-[create_graph()](graph.py#L23-L95).
+[create_graph()](graph.py#L24-L107).
 
-Four rationale notes are embedded in the edges themselves:
+Six rationale notes are embedded in the edges themselves:
 
+- **A pending deployment is checked before any task, once per tick.** It belongs to no task, so a
+  busy queue must not starve it; `deploy_checked` stops deploy → scheduler from looping
+  ([graph.py:L55-L60](graph.py#L55-L60)).
 - **`implement` can only go to `push`.** A worker that produced nothing ends the tick rather than
   testing an unchanged tree; the next tick retries within the implement budget
-  ([graph.py:L58-L62](graph.py#L58-L62)).
+  ([graph.py:L62-L66](graph.py#L62-L66)).
 - **Every attempt is checked for personal data, then pushed, then tested.** Verification runs
   against the commit on GitHub, not this host's worktree, and the remote branch is what lets
   another host resume — so a branch on GitHub is public before verify ever runs. A privacy hit is
   never pushed; like a failed test it goes back to the worker, within the implement budget. A
   failed push ends the tick and is retried on the next one, within the push budget
-  ([graph.py:L64-L72](graph.py#L64-L72)).
+  ([graph.py:L68-L76](graph.py#L68-L76)).
 - **`audit` has no path back to the worker.** The audit is advisory, so its verdict rides along to
   the PR and the tick carries on to publish
-  ([graph.py:L78-L82](graph.py#L78-L82)).
+  ([graph.py:L82-L86](graph.py#L82-L86)).
 - **`publish` never loops in-process.** A transient failure is retried by the *next* tick, so one
   tick cannot spin on a GitHub outage
-  ([graph.py:L84-L88](graph.py#L84-L88)).
+  ([graph.py:L88-L92](graph.py#L88-L92)).
+- **`deploy` never waits in-process.** A merge goes straight to it so the deployment is requested
+  and first checked in the tick that merged it; a deployment still building is asked again on the
+  next tick, and the scheduler carries on with the queue meanwhile
+  ([graph.py:L94-L105](graph.py#L94-L105)).
 
 ## The Tick Model
 
 Routing is done by a single router factory,
-[`_router(allowed)`](graph.py#L47-L51):
+[`_router(allowed)`](graph.py#L49-L53):
 
 ```python
 def _router(allowed):
@@ -93,7 +108,7 @@ def _router(allowed):
 ```
 
 `route` is a **persistent LangGraph channel**, declared on `CodingState`
-([schemas.py:L188-L191](schemas.py#L188-L191)). Because it is
+([schemas.py:L225-L228](schemas.py#L225-L228)). Because it is
 a channel it survives until a node overwrites it, so every router reads it as an **explicit
 instruction** rather than inferring the next step. If the value is not one of that router's own
 options — including a route nobody set, or a node's `"done"` sentinel — the tick **ends**. A node
@@ -103,7 +118,7 @@ that forgets to set a route stops the tick instead of re-running whatever the la
 > `route` must be declared as a channel or LangGraph drops it between nodes and *every* conditional
 > edge falls through to `END`. This is precisely what the end-to-end tests in
 > [test_graph.py](../../tests/graphs/coding/test_graph.py#L99-L106) exist to catch;
-> unit tests calling nodes directly cannot.
+> unit tests calling nodes directly cannot. The same holds for `deploy_checked`.
 
 **What ends a tick:**
 
@@ -114,13 +129,14 @@ that forgets to set a route stops the tick instead of re-running whatever the la
 - any node that halts or yields a task (`route: "done"`): exhausted implement budget, a worker that
   modified no files, a push failure or a push refused for the default branch, a push the privacy
   check stopped with the implement budget spent, notes the privacy check can't find, a missing
-  `verification_command`, a missing `head_sha`, an environment-class verification failure, an
-  unverified `head_sha` at publish, a PR failure;
-- `publish` and `sync_review` routing back to `scheduler`, which then finds no *unhandled* task
-  (`tick_handled` guarantees one tick cannot work the same task twice).
+  `verification_command`, a missing `head_sha`, a verify backend this host isn't set up for, an
+  environment-class verification failure, an unverified `head_sha` at publish, a PR failure;
+- `publish`, `sync_review` and `deploy` routing back to `scheduler`, which then finds no *unhandled*
+  task (`tick_handled` guarantees one tick cannot work the same task twice, and `deploy_checked`
+  that it checks a deployment once).
 
 **What a subsequent tick resumes from:** the task's recorded `stage` in the manifest.
-[`select_task()`](nodes/scheduler.py#L48-L90) maps stage →
+[`select_task()`](nodes/scheduler.py#L52-L94) maps stage →
 route so work already done is not redone: `awaiting_review`/`published` → `sync_review`,
 `verified`/`audited` → `publish`, `pushed` → `verify`, `implemented` → `push`, anything else →
 `implement`. Every node additionally opens with a `stage_at_or_past(...)` guard backed by evidence,
@@ -133,7 +149,7 @@ the same verdict.
 
 ## State
 
-### `CodingState` ([schemas.py:L141-L212](schemas.py#L141-L212))
+### `CodingState` ([schemas.py:L178-L252](schemas.py#L178-L252))
 
 `total=False` TypedDict. Grouped as in the source.
 
@@ -172,7 +188,7 @@ the same verdict.
 | `commit_url` | `str` | Merge commit URL once the PR lands. |
 | `error_message` | `str` | Fatal-for-this-tick message; `format_output` renders it with 🛑. |
 | `messages` | `List[AnyMessage]` | Seeded with the incoming query as a `HumanMessage`. |
-| `route` | `str` | The tick channel: `implement`/`push`/`verify`/`audit`/`publish`/`sync_review`/`scheduler`/`done`. |
+| `route` | `str` | The tick channel: `implement`/`push`/`verify`/`audit`/`publish`/`sync_review`/`deploy`/`scheduler`/`done`. |
 | `stage` | `TaskStage` | Stage reached by `current_task` during this tick. |
 | `graph_id` | `str` | `"coding"`, read from `graph.json`; the authority field for the worker's tool roster. |
 | `required_tools` | `List[str]` | Derived from `graph.json`'s `tools` grant — the grant *is* the requirement. |
@@ -189,8 +205,9 @@ the same verdict.
 | `repo_root` | `str` | Checkout the tick works against: the managed clone of `repo.slug`. |
 | `tick_report` | `List[str]` | Lines the runner posts. Accumulated across the whole tick. |
 | `tick_handled` | `List[str]` | Task ids already touched — one tick cannot work the same task twice. |
+| `deploy_checked` | `bool` | The deploy node ran this tick. The scheduler routes a pending deployment to it only while this is unset, so deploy → scheduler cannot loop. |
 
-### `TaskEnvelope` ([schemas.py:L72-L128](schemas.py#L72-L128))
+### `TaskEnvelope` ([schemas.py:L72-L131](schemas.py#L72-L131))
 
 One queue entry in the manifest.
 
@@ -204,6 +221,7 @@ One queue entry in the manifest.
 | `allowed_files` | `List[str]` | Strict filesystem whitelist handed to the worker. |
 | `setup_command` | `Optional[str]` | Run once per worktree before any code is written. Falls back to the manifest-level `setup_command`. |
 | `setup_done` | `bool` | Reset whenever the worktree is re-created. |
+| `environment` | `Optional[dict]` | Overrides the manifest's `environment` block for this task — e.g. `{"backend": "local"}` for a bootstrap task that scaffolds and commits what a sandbox setup can't generate. |
 | `verification_command` | `str` | The CLI test command. Absence halts the task as a config error. |
 | `acceptance_criteria` | `str` | Given-When-Then criteria. |
 | `status` | `TaskStatus` | v3 vocabulary, legacy values still readable. |
@@ -233,8 +251,8 @@ One queue entry in the manifest.
 
 | Field | Type | Description |
 |---|---|---|
-| `stage` | `str` | Where it failed (`provision`, `setup`, `implement`, `push`, `verify`, `publish`, `merge`, `control`, …). |
-| `kind` | `str` | `llm` \| `verification` \| `git` \| `github` \| `config` \| `environment` \| `operator` \| `privacy` \| `unknown`. Infrastructure failures must not consume the LLM budget. `privacy` is a push the privacy check stopped: nothing was pushed, and the message lists the lines. |
+| `stage` | `str` | Where it failed (`provision`, `setup`, `implement`, `push`, `verify`, `publish`, `merge`, `control`, …). The project-level `deployment` uses `deploy`. |
+| `kind` | `str` | `llm` \| `verification` \| `git` \| `github` \| `config` \| `environment` \| `infra` \| `operator` \| `privacy` \| `deploy` \| `unknown`. Infrastructure failures must not consume the LLM budget. `privacy` is a push the privacy check stopped: nothing was pushed, and the message lists the lines. `infra` is a runner (or deploy check) that broke rather than a verdict; `config` includes a verify backend this host isn't set up for. |
 | `message` | `str` | Human-readable detail. |
 | `at` | `float` | Epoch timestamp. |
 
@@ -263,7 +281,7 @@ between the planner and the tick forever. `reset` leaves it alone.
 | `count` | `int` | How many times software-planner re-queued the task. |
 | `log` | `List[str]` | One dated line per fix: what it changed. |
 
-### `RepoDescriptor` ([schemas.py:L131-L138](schemas.py#L131-L138))
+### `RepoDescriptor` ([schemas.py:L134-L141](schemas.py#L134-L141))
 
 | Field | Type | Description |
 |---|---|---|
@@ -273,6 +291,41 @@ between the planner and the tick forever. `reset` leaves it alone.
 | `visibility` | `"private" \| "public"` | Used by `gh repo create`. |
 | `push_identity` | `Optional[str]` | GitHub login of the machine user, if any. The token itself is read from a file outside the repo. |
 | `push_identity_email` | `Optional[str]` | Commit author email for that identity. |
+
+### `DeployConfig` ([schemas.py:L144-L153](schemas.py#L144-L153))
+
+The manifest's `deploy` block: where the project's default branch goes live. Configuration —
+written by the planner or by hand, never by the graph. No block (or `backend: "none"`) means the
+project isn't deployed, and a merge routes to the scheduler as before.
+
+| Field | Type | Description |
+|---|---|---|
+| `backend` | `str` | A key of [`BACKENDS`](utils/deploy/deploy_factory.py#L23-L26): `github_pages` or `github_deployment`. An unknown name fails the deployment as `config` rather than doing nothing. |
+| `environment` | `str` | The GitHub deployment environment to watch. Required for `github_deployment` (e.g. `production`); `github_pages` uses `github-pages`. |
+| `url` | `str` | Shown when the deployment reports no URL of its own. `github_pages` falls back to `https://<owner>.github.io/<repo>/`. |
+| `timeout_minutes` | `int` | How long a commit may take to go live before it counts as failed. Default 30. |
+
+### `DeploymentState` ([schemas.py:L156-L175](schemas.py#L156-L175))
+
+The manifest's top-level `deployment`: where the default branch has got to. One per project,
+written only by the graph — `request_deploy` when a merge lands or an operator runs `redeploy`,
+`persist_deployment` from the deploy node.
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | `"pending" \| "live" \| "failed"` | `pending` keeps ticks coming (`has_work`) and routes the scheduler to deploy once per tick. |
+| `backend` | `str` | The backend it was requested with. |
+| `target_sha` | `Optional[str]` | The commit that should go live; `None` means the default branch's head. A newer request replaces a pending one. |
+| `requested_at` | `float` | When it was asked for; the timeout counts from here. |
+| `checks` | `int` | How many ticks have asked the backend about it. The 🚚 line is posted on the first only. |
+| `handle` | `Optional[str]` | A driver's id for the deploy it started, passed back on every later check. Watchers leave it empty. |
+| `detail` | `Optional[str]` | The backend's latest word on it. |
+| `deployed_sha` | `Optional[str]` | The last commit confirmed live — kept when a newer deploy fails. |
+| `url` | `Optional[str]` | Where that commit can be opened. |
+| `log_url` | `Optional[str]` | Where to look: the workflow run or deployment log. |
+| `live_at` | `Optional[float]` | When `deployed_sha` was confirmed live. |
+| `last_error` | `Optional[TaskError]` | Stage `deploy`; kind `deploy` (it failed), `infra` (no answer before the timeout) or `config`. Read by software-planner's scan as `deploy_failed`. |
+| `updated_at` | `float` | Set on every write. |
 
 ### Literals and constants
 
@@ -290,17 +343,18 @@ between the planner and the tick forever. `reset` leaves it alone.
 
 ### scheduler
 
-[scheduler.py:L93-L297](nodes/scheduler.py#L93-L297) ·
-[`select_task()`](nodes/scheduler.py#L48-L90) ·
-[`_resolve_base_ref()`](nodes/scheduler.py#L301-L314)
+[scheduler.py:L97-L309](nodes/scheduler.py#L97-L309) ·
+[`select_task()`](nodes/scheduler.py#L52-L94) ·
+[`_resolve_base_ref()`](nodes/scheduler.py#L313-L326)
 
 **Responsibility.** The entry node of every tick. It decides *what* to advance, in a fixed order:
-reclaim dead leases, respect the concurrency bound, pick one task, preflight before any token is
-spent, resolve the repository, claim the task with a lease, provision and set up its worktree, and
-route by the task's recorded stage.
+reclaim dead leases, check a pending deployment (once per tick), respect the concurrency bound,
+pick one task, preflight before any token is spent, resolve the repository, claim the task with a
+lease, provision and set up its worktree, and route by the task's recorded stage.
 
 **Reads:** `build_request_path`, `lease_owner`, `tick_handled`, `tick_report`, `project_name`,
-`repo`, `max_concurrency`, `graph_id`, `required_tools`, `base_branch`/`base_ref`, `error_message`.
+`repo`, `max_concurrency`, `graph_id`, `required_tools`, `base_branch`/`base_ref`, `error_message`,
+`deploy_checked`.
 
 **Writes:** `build_request_path` (resolved), `project_name`, `repo`, `repo_root`, `queue`,
 `current_task`, `route`, `stage`, `run_id`, `branch_name`, `workspace_path`, `spec_path`, `pr_url`,
@@ -313,6 +367,7 @@ previous task in the same tick cannot stand in for this one's commit), `lease_ow
 
 | Route | Meaning |
 |---|---|
+| `deploy` | The manifest's `deployment` is `pending` and the deploy node hasn't run this tick (`deploy_checked` unset). Checked before the concurrency bound and before any task: it belongs to no task, costs one API call, and a busy queue must not starve it. |
 | `sync_review` | An `awaiting_review` task inside its polling window, or a runnable task whose stage is `awaiting_review`/`published`. Reviews go first: they are cheap, they unblock dependents, and a merge may make another task runnable in the same tick. |
 | `publish` | A runnable task already at stage `verified` or `audited` — no LLM needed. |
 | `verify` | A runnable task at stage `pushed` — it only needs testing. |
@@ -330,8 +385,9 @@ that pushed on another host resumes from its commits; otherwise it starts from t
 for `sync_review` — a review that needs the worker and finds no worktree hands the task back, and
 the next tick provisions it). Network: `preflight_tick` (tool-roster check, push-identity resolution, push access),
 `ensure_repo_available` (clone/fetch/`gh repo create`). Shell: the task's `setup_command`, once per
-worktree — **only with the `local` verify backend**. With a remote backend (`e2b`) the sandbox runs
-setup itself, so this host never executes a project's install scripts.
+worktree — **only when the `local` verify backend was chosen** (by the task, the project, or
+`$CODING_VERIFY_BACKEND`). By default (`e2b`) the sandbox runs setup itself, so this host never
+executes a project's install scripts.
 
 > [!NOTE]
 > Preflight runs only *after* a task has been selected. Running it earlier would make an empty
@@ -448,13 +504,14 @@ a hit; halts with `last_error`).
 
 ### verify
 
-[verify.py:L96-L310](nodes/verify.py#L96-L310) ·
-[`classify_failure()`](nodes/verify.py#L63-L93) ·
-[`_run()`](nodes/verify.py#L324-L348)
+[verify.py:L100-L339](nodes/verify.py#L100-L339) ·
+[`classify_failure()`](nodes/verify.py#L67-L97) ·
+[`_run()`](nodes/verify.py#L353-L377)
 
 **Responsibility.** The only **blocking** quality gate. Runs the task's `verification_command`
-against the pushed `head_sha` with a 600-second timeout, through the runner the manifest's
-`environment` block selects (`environment.backend`, else `$CODING_VERIFY_BACKEND`, else `local`).
+against the pushed `head_sha` with a 600-second timeout, through the runner the `environment`
+block selects — the task's own, else the manifest's (`environment.backend`, else
+`$CODING_VERIFY_BACKEND`, else **`e2b`**). Running on the host (`local`) has to be asked for.
 The runner gets `meta={task_id, head_sha, repo, push_identity}` so a remote backend can fetch that
 exact commit from GitHub. A backend that starts from nothing (`runs_setup`, i.e. `e2b`) also gets
 the project's `setup_command` as a first step. A pass is recorded against the commit as
@@ -473,12 +530,19 @@ and `setup_command`, `repo`, `workspace_path`, `tick_report`.
 |---|---|
 | `audit` | The command exited 0 (persists `verified_sha = head_sha` and clears the `infra` counter), or this exact commit already passed (stage at or past `verified` and `verified_sha == head_sha`). |
 | `implement` | A genuine test failure with implement budget left — the output is handed back to the worker. Writes the *cleared* digest and real attempt count into `current_task`. |
-| `done` | No `task_id`; no `verification_command` (halt, `config`); no `head_sha` (yield at stage `implemented`, so the next tick re-pushes); workspace missing (yield keeping the stage — the code is on the remote, and the next tick re-provisions from `origin/<branch>`); the **runner** failed (`infra_error`: sandbox did not start, source download failed — `infra` counter bumped, yield at stage `pushed`, halt after `MAX_INFRA_ATTEMPTS = 3`, implement budget untouched); setup failed in the sandbox, or changed tracked files (halt, `environment`); the failure was classified `environment` (halt, implementation left alone); budget exhausted (halt). |
+| `done` | No `task_id`; no `verification_command` (halt, `config`); no `head_sha` (yield at stage `implemented`, so the next tick re-pushes); workspace missing (yield keeping the stage — the code is on the remote, and the next tick re-provisions from `origin/<branch>`); the **runner** failed (`infra_error`: sandbox did not start, source download failed — `infra` counter bumped, yield at stage `pushed`, halt after `MAX_INFRA_ATTEMPTS = 3`, implement budget untouched); the backend **can't run on this host at all** (`config_error`: no E2B key, no SDK, an unknown backend name — halt, `config`, nothing tested, and the message says to run `scripts/coding_e2b_check.py`); setup failed in the sandbox, or changed tracked files (halt, `environment`); the failure was classified `environment` (halt, implementation left alone); budget exhausted (halt). |
 
 **Side effects.** The verification command via the
 [sandbox](utils/sandbox/__init__.py) runner from
-`get_runner(environment)`: a host subprocess for `local`, a throwaway E2B sandbox for `e2b`.
-Manifest: `persist_task` / `yield_task` / `bump_attempt` (`infra`).
+`get_runner(environment)`: a throwaway E2B sandbox for `e2b` (the default), a host subprocess for
+`local`. Manifest: `persist_task` / `yield_task` / `bump_attempt` (`infra`).
+
+> [!IMPORTANT]
+> In a sandbox, `setup_command` runs on a fresh copy of the commit and must leave every tracked
+> file as it found it — install into ignored paths (`npm ci`, `pip install -r …`), never scaffold
+> or add packages. A setup that rewrites `package.json` fails every run as `environment`: the
+> tests would otherwise pass against files the commit doesn't have. Generated files are committed
+> once, by a bootstrap task with a task-level `"environment": {"backend": "local"}`.
 
 > [!NOTE]
 > Two things this node deliberately does *not* do: it does not require a PR to exist — gating local
@@ -585,10 +649,10 @@ words, which go only there, never onto GitHub. Titles and the rest of the body a
 
 ### sync_review
 
-[sync_review.py:L159-L260](nodes/sync_review.py#L159-L260) ·
-[`evaluate_signals()`](nodes/sync_review.py#L56-L116) ·
-[`harvest_comments()`](nodes/sync_review.py#L119-L156) ·
-[`_finish()`](nodes/sync_review.py#L263-L318)
+[sync_review.py:L161-L262](nodes/sync_review.py#L161-L262) ·
+[`evaluate_signals()`](nodes/sync_review.py#L58-L118) ·
+[`harvest_comments()`](nodes/sync_review.py#L121-L158) ·
+[`_finish()`](nodes/sync_review.py#L265-L332)
 
 **Responsibility.** Read the human decision off GitHub and act on it. **GitHub is the only approval
 surface**: there is no interrupt, no chat approval and no keyword classification.
@@ -618,16 +682,19 @@ added after a "request changes" does not override it. A `CLOSED` PR is an abort.
 |---|---|
 | `publish` | There is no PR URL to sync against; fall back to publish, which adopts an existing PR for the branch if there is one. |
 | `implement` | Changes requested, or new unresolved reviewer comments, and the worktree exists on this host. Task returns to stage `provisioned`, digest cleared, `review_cursor` advanced, comments persisted as `review_feedback`. |
-| `scheduler` | Terminal or no-op outcomes: merged/approved-and-merged (task `done`, worktree torn down), aborted (task `failed`, worktree removed), an approval whose merge failed (stays `awaiting_review`, retried in 15 minutes), or nothing new (lease released so the next tick can look again). Also changes requested / new comments when the worktree **does not exist on this host**: the task is yielded at stage `provisioned` (cursor advanced, `review_feedback` persisted, lease released) so the next tick re-provisions from `origin/<branch>` and implement reads the comments off the manifest. |
+| `deploy` | Merged (approved and merged here, or merged by hand) in a project whose `deploy` block names a backend. The task is `done` exactly as on the `scheduler` route; a deployment of the merge commit has been requested, and the deploy node checks it in this same tick. |
+| `scheduler` | Terminal or no-op outcomes: merged/approved-and-merged in a project without a `deploy` block (task `done`, worktree torn down), aborted (task `failed`, worktree removed), an approval whose merge failed (stays `awaiting_review`, retried in 15 minutes), or nothing new (lease released so the next tick can look again). Also changes requested / new comments when the worktree **does not exist on this host**: the task is yielded at stage `provisioned` (cursor advanced, `review_feedback` persisted, lease released) so the next tick re-provisions from `origin/<branch>` and implement reads the comments off the manifest. |
 | `done` | Only when `current_task` has no `task_id`. |
 
 **Side effects.** GitHub: `get_pull_request_status`, `get_unresolved_review_threads`,
 `merge_pull_request` (squash, delete branch). Git: `teardown_worktree`. Manifest: `persist_task`
 (status `done`/`failed`/`active`, stage, `review_cursor`, `review_feedback`, `poll_until`,
-`commit_url`), `yield_task` (missing worktree), `release_lease`.
+`commit_url`), `yield_task` (missing worktree), `release_lease`, and on a merge with a `deploy`
+block `request_deploy(sha=<merge commit>)` — the SHA parsed from the commit URL, or none, in which
+case the deploy node takes the default branch's head.
 
 > [!NOTE]
-> [`first_line_command()`](nodes/sync_review.py#L36-L46)
+> [`first_line_command()`](nodes/sync_review.py#L38-L48)
 > matches the first line **exactly**. Prose cannot trigger it, a quoted `/approve` cannot, and a
 > code block mentioning it cannot — this is the direct fix for the gate that read "ok" inside
 > "looks broken" and defaulted to *approved* when it found nothing. Comment harvesting
@@ -635,6 +702,61 @@ added after a "request changes" does not override it. A `CLOSED` PR is an abort.
 > ignores ids at or below `review_cursor`, so a resume does not re-action a comment already
 > addressed. Inline review threads live in a different API from issue comments and are fetched
 > separately; a review written entirely on the lines would otherwise look like silence.
+
+### deploy
+
+[deploy.py:L48-L140](nodes/deploy.py#L48-L140) ·
+[utils/deploy/](utils/deploy/__init__.py) ·
+[`request_deploy()`](utils/manifest.py#L367-L396) ·
+[`persist_deployment()`](utils/manifest.py#L399-L418)
+
+**Responsibility.** Put what was merged where it can be opened. Deployment belongs to the project:
+it follows the default branch, so this node advances the manifest's top-level `deployment`, never a
+task. It asks the project's deployer (`deploy.backend`) where the commit that should be live has
+got to, records the answer and hands back to the scheduler. Like every node it never waits — a
+deploy still building is asked again on the next tick. No LLM and no push: nothing here can change
+the code.
+
+**Reads:** `build_request_path`, `tick_report`; from the manifest, the `deploy` block, the
+`deployment`, the `repo` slug and default branch, and the push identity.
+
+**Writes:** `deploy_checked` (always `True`), `route`, `tick_report`, `error_message` (always
+empty: a failed deploy is reported, not fatal to the tick).
+
+**Routes:**
+
+| Route | Meaning |
+|---|---|
+| `scheduler` | Always. The scheduler carries on with the queue, and `deploy_checked` stops it routing here again this tick. |
+
+**Outcomes.** Every write goes through `persist_deployment(expect_target=sha)`, so a slow answer
+about an older commit never marks a newer request live or failed.
+
+| The deployer says | Recorded | Reported |
+|---|---|---|
+| `live` — GitHub `success`, or `inactive` (superseded by something newer) | `status: live`, `deployed_sha`, `url`, `live_at` | 🌐 once, with the URL |
+| `failed` — GitHub `failure` / `error` | `status: failed`, `last_error` kind `deploy`, `log_url` | ⚠️ with the log link; the planner's scan wakes on `deploy_failed` |
+| `pending`, or it couldn't find out (`infra_error`) | stays `pending`: `checks` bumped, latest `detail` / `log_url` | 🚚 on the first check only |
+| still not live after `deploy.timeout_minutes` (default 30) | `status: failed`, kind `deploy` (`infra` if no answer ever came) | ⚠️ |
+| an unknown backend, or no `repo.slug` | `status: failed`, kind `config` | ⚠️ |
+
+With no `target_sha` — an operator's `redeploy` without a SHA, or a merge GitHub named no commit
+for — the node deploys whatever the default branch points at now.
+
+**Side effects.** GitHub, read-only, through the watcher: the deployments of the commit in the
+environment, then the newest one's latest status (`repos/{repo}/commits/{branch}` first when no
+commit is named). Manifest: `persist_deployment`. The graph triggers no deploy and holds no hosting
+credential — the deploy runs in the target repository's own CI.
+
+> [!NOTE]
+> **Adding a destination.** A backend is one class with a `name` and an `async advance(target)`
+> ([deploy_types.py](utils/deploy/deploy_types.py)) plus one line in
+> [`BACKENDS`](utils/deploy/deploy_factory.py#L23-L26); the node, the manifest state, the operator
+> commands and the planner's scan don't change. Fly.io needs no new class: deploy it from an
+> Actions job that names `environment: production` and set
+> `"deploy": {"backend": "github_deployment", "environment": "production"}`. A driver that runs
+> `flyctl deploy` itself would return a `handle` from its first call; the node stores it and passes
+> it back on every later call, which is what keeps starting a deploy idempotent per commit.
 
 ## Durable State
 
@@ -657,6 +779,14 @@ The manifest **is the API**: hand-editing the JSON and running another tick is a
 operation, and that is exactly what
 [utils/control.py](utils/control.py) does — nothing in the
 control plane runs the pipeline, it only makes a task runnable and lets the next tick pick it up.
+
+**Deployment is project state, not task state.** The manifest's `deploy` block
+([`DeployConfig`](#deployconfig-schemaspyl144-l153)) is configuration, written by the planner or by
+hand; the top-level `deployment` ([`DeploymentState`](#deploymentstate-schemaspyl156-l175)) is
+written only by the graph. It follows the default branch: a newer merge replaces a request still
+pending, what was last live stays recorded, and a task is `done` when it is merged, so a deploy
+that fails never holds its dependents back. A failed deployment stays failed until the next merge
+or a `redeploy` — retrying it would fail the same way.
 
 **The git repo — [utils/repo.py](utils/repo.py)** holds the
 actual work. The worktree under `workspaces/runs/<run_id>` carries an attempt only between
@@ -687,7 +817,9 @@ fallback — a run that was never told which project it was for used to find *a*
 
 **How a new tick rebuilds context.** It is handed only a `build_request_path`. From there:
 `reclaim_expired_leases` frees anything a dead process held; `load_manifest` (migrating v1/v2 to v3
-in memory) restores the queue, repo descriptor, reviewers and concurrency bound; `select_task`
+in memory) restores the queue, repo descriptor, reviewers and concurrency bound; a `deployment`
+still `pending` is asked about again (its `target_sha`, `requested_at` and `handle` are all the
+deploy node needs); `select_task`
 picks one task and reads its `stage` as the resume point; `ensure_repo_available` and the
 remote-aware provisioning guard restore or reuse the worktree from `origin/<branch>`; past
 `pushed`, `head_sha` against `verified_sha` / `audited_sha` proves whether the previous tick's test
@@ -702,13 +834,14 @@ on the host it ran on.
 | Module | Purpose |
 |---|---|
 | [dag.py](utils/dag.py) | Manifest path resolution (one per project under `pkm/wiki/software/<slug>/`), project-slug normalisation, manifest discovery, and topological selection of runnable tasks. |
-| [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, the project-level `tick_error`, and the `stage_at_or_past` guard every node opens with. |
-| [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L30-L48); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. |
+| [manifest.py](utils/manifest.py) | Durable persistence: atomic writes, `flock`-protected read-modify-write, v1/v2→v3 migration, per-stage attempt counters, leases and their reclamation, the project-level `tick_error`, the project-level `deployment` ([`deployment_pending`](utils/manifest.py#L361-L364), [`request_deploy`](utils/manifest.py#L367-L396), [`persist_deployment`](utils/manifest.py#L399-L418)), and the `stage_at_or_past` guard every node opens with. |
+| [control.py](utils/control.py) | Operator control plane — `status_report`, `retry`, `reset`, `skip`, `abort`, `unblock`, `redeploy`, and the host switch `handoff` / `resume`. Every task operation is a manifest write; `reset` is the only destructive one. `reset` clears `head_sha`/`verified_sha`/`audited_sha`/`review_feedback` with the rest of [`RESET_FIELDS`](utils/control.py#L29-L49); `retry` with a `from_stage` clears `verified_sha`/`audited_sha` (and the digests) so the guards cannot skip the work being redone. `status_report` adds a deployment line when the project has one; `redeploy` marks it pending again (a given SHA, else the default branch's head). |
 | [host.py](utils/host.py) | Which host is ticking: host-tagged lease owners, the local pause file, `CODING_TICK_ENABLED`, and an immediate pkm sync. See [Moving between hosts](#moving-between-hosts-nas--dev-box). |
 | [repo.py](utils/repo.py) | Repository descriptor defaults, machine-user (`push_identity`) resolution, project-root detection (where the clones live), and the `existing`/`create` repository modes. |
 | [worker.py](utils/worker.py) | The single place the graph reaches `graph-worker`, so the call always carries this graph's binding. `graph_id` is the authority field that decides the worker's tool roster. |
 | [shell.py](utils/shell.py) | One implementation of "run a command in a worktree", returning `(exit_code, stdout, stderr)` and never raising. Shared by setup and verify so they cannot disagree on what a failure means. |
-| [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failure (`infra_error`); `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY` or `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`); `get_runner()` picks the backend from the manifest's `environment.backend` or `CODING_VERIFY_BACKEND` (default `local`), and raises on an unknown name rather than falling back to the host. |
+| [sandbox/](utils/sandbox/__init__.py) | Verification runners. `VerifyRunner` / `RunResult` keep a command's verdict separate from a runner's own failures: `infra_error` (it broke this time — retried) and `config_error` (this host can't run it at all — halted as `config`). `LocalRunner` wraps `shell.py`; [`E2BRunner`](utils/sandbox/e2b_runner.py) creates a sandbox, downloads `head_sha` via a short-lived codeload URL (the only credential the sandbox sees), runs setup + verify under `bash -o pipefail`, fails a setup that edits tracked files, and always kills the sandbox (key: `$E2B_API_KEY`, else `$CODING_E2B_KEY_FILE`, else `./e2b_api_key`; template: `environment.template` / `$CODING_E2B_TEMPLATE`). [`get_runner()`](utils/sandbox/runner_factory.py#L37-L48) picks the backend from the manifest's `environment.backend`, else `CODING_VERIFY_BACKEND`, else **`e2b`** ([`resolve_backend()`](utils/sandbox/runner_factory.py#L30-L34)), and raises on an unknown name rather than falling back to the host. `local` must be asked for. |
+| [deploy/](utils/deploy/__init__.py) | Deployers. [`Deployer`](utils/deploy/deploy_types.py#L54-L66) is one `async advance(target) -> DeployStatus` that never waits and never raises: `pending` / `live` / `failed`, plus `infra_error` when it couldn't find out. Watchers ([github_deployments.py](utils/deploy/github_deployments.py)) read GitHub's Deployments API — `github_pages` watches the `github-pages` environment, `github_deployment` any environment named in `deploy.environment` (how a Fly.io, Cloud Run or Render deploy run from Actions shows up). A driver that runs the deploy itself returns a `handle` the node stores and passes back. [`get_deployer()`](utils/deploy/deploy_factory.py#L47-L55) picks from `BACKENDS` by `deploy.backend` and raises on an unknown name. |
 | [digest.py](utils/digest.py) | SHA-256 over `git diff HEAD` plus sorted `git status --porcelain`, so "already implemented" is a claim with evidence. Only meaningful between implement and push — once committed, the diff is empty; past `pushed`, the commit SHA is the evidence. `None` means *no evidence* and must be treated as a cache miss. |
 | [preflight.py](utils/preflight.py) | Checks, before any token is spent, that the worker really receives the tools `graph.json` grants it and that the push identity can push. Resolves the roster through the same `worker_session` factory the real call uses. |
 | [outgoing.py](utils/outgoing.py) | What a push would send, checked before it leaves. Finds what GitHub already has (the task branch, else where it left the default branch), folds commits GitHub doesn't have back into the worktree so the one pushed commit is exactly what was checked, and runs the privacy guard — [core/git/privacy.py](../../core/git/privacy.py), the same checks as [tests/test_repo_privacy.py](../../tests/test_repo_privacy.py) — over every file the push changes. Raises `NotesMissing` rather than passing when the notes aren't there, and reports a git failure rather than guessing. |
@@ -754,7 +887,7 @@ Renders `error_message` as `🛑 Coding tick error: …` if set, otherwise joins
 
 ### `create_graph(checkpointer=None, **kwargs)`
 
-[graph.py:L23-L95](graph.py#L23-L95)
+[graph.py:L24-L107](graph.py#L24-L107)
 
 The loader hands every graph a checkpointer
 ([graph_builder.py:L190-L209](../../core/runtime/graph_builder.py#L190-L209)), so
@@ -771,12 +904,22 @@ both that `graph.checkpointer is None` and that a supplied `MemorySaver` is refu
   the `script-executor` cron every five minutes. It discovers every project manifest, calls
   `create_graph().ainvoke(prepare_input(...))` once per `--max-tasks`, and prints only the tick
   report — the runtime's own chatter is captured and discarded so it does not become the message.
+  Its `has_work` precondition spawns a tick only when some project has a runnable task, a review
+  to poll, an expired lease to reclaim, or a **pending deployment** — the last checked before the
+  concurrency bound, since a deployment belongs to no task.
 - **Interactive:** [tools/graph_call.py](../../tools/graph_call.py) invokes the
   graph through the loader's registered `prepare_input`. The `coding` graph belongs to
-  `software-planner` ([agents/main/AGENTS.md](../../agents/main/AGENTS.md#L31)).
+  `software-planner` ([its `graph_call` / `graph_status` tools](../../agents/software-planner/agent.json#L20-L22)).
 - **Operator:** [scripts/coding_admin.py](../../scripts/coding_admin.py) and
   [tools/graph_status.py](../../tools/graph_status.py) go through
   `utils/control.py` — manifest writes only, never an execution path of their own.
+  `coding_admin.py redeploy [SHA]` asks for the project's deployment to be checked again
+  ([`redeploy()`](utils/control.py#L330-L348)); the next tick's deploy node does the asking.
+- **Host setup:** [scripts/coding_e2b_check.py](../../scripts/coding_e2b_check.py) checks, in
+  under a minute, that this host can verify on E2B — SDK and key, each manifest's `setup_command`,
+  a real sandbox probe (skip with `--offline`), and with `--project NAME [--verify CMD]` the same
+  run a task's verify does. Run it before a host starts ticking, and whenever verify halts as
+  `config`.
 
 ### Moving between hosts (NAS ↔ dev box)
 
@@ -814,20 +957,22 @@ the scheduler does not even spawn it; `--dry-run` still works for checking a han
 
 | Path | Description |
 |---|---|
-| [graph.py](graph.py) | The topology: seven nodes, the `_router` factory, and `create_graph()` compiling without a checkpointer. |
-| [schemas.py](schemas.py) | `CodingState`, `TaskEnvelope`, `TaskError`, `RepoDescriptor`, and the status/stage vocabularies. |
+| [graph.py](graph.py) | The topology: eight nodes, the `_router` factory, and `create_graph()` compiling without a checkpointer. |
+| [schemas.py](schemas.py) | `CodingState`, `TaskEnvelope`, `TaskError`, `RepoDescriptor`, `DeployConfig`, `DeploymentState`, and the status/stage vocabularies. |
 | [adapters.py](adapters.py) | `prepare_input()`, `format_tick_report()`, `format_output()`, and the `graph.json`/manifest settings readers. |
 | [graph.json](graph.json) | Graph id, description, and the `tools` grant (`bash` and `filesystem`, scoped to `workspaces/runs` and `pkm/wiki/software`) that preflight asserts against. |
 | [__init__.py](__init__.py) | Package marker. |
-| [nodes/](nodes/__init__.py) | The seven stages of a tick, re-exported in execution order. |
-| [nodes/scheduler.py](nodes/scheduler.py) | Reclaim, preflight, select, claim, provision (remote-aware), set up, and route by stage. |
+| [nodes/](nodes/__init__.py) | The eight nodes of a tick, re-exported in execution order. |
+| [nodes/scheduler.py](nodes/scheduler.py) | Reclaim, check a pending deployment, preflight, select, claim, provision (remote-aware), set up (`local` backend only), and route by stage. |
 | [nodes/implement.py](nodes/implement.py) | The only node that calls the LLM to write code. |
 | [nodes/push.py](nodes/push.py) | Checks each attempt for personal data, then commits it and pushes it to the task branch; records `head_sha`. No LLM. |
-| [nodes/verify.py](nodes/verify.py) | Runs the verification command against `head_sha`; classifies environment vs. verification failure. |
+| [nodes/verify.py](nodes/verify.py) | Runs the verification command against `head_sha` (on E2B by default); classifies environment vs. verification failure, and halts a backend this host isn't set up for as `config`. |
 | [nodes/audit.py](nodes/audit.py) | Advisory anti-pattern review of the branch diff; always continues to publish. |
 | [nodes/publish.py](nodes/publish.py) | PR upsert + review-context comment, only for a verified `head_sha`, with the LLM-written text privacy-checked first. Deterministic, idempotent, no LLM. |
-| [nodes/sync_review.py](nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down. |
+| [nodes/sync_review.py](nodes/sync_review.py) | Reads the decision off GitHub, merges or sends work back, tears down, and requests a deployment when the project has a `deploy` block. |
+| [nodes/deploy.py](nodes/deploy.py) | Asks the project's deployer where the commit that should be live has got to, once per tick; reports only changes. No LLM, no push. |
 | [utils/](utils/__init__.py) | Support modules — see [Utilities](#utilities). |
+| [utils/deploy/](utils/deploy/__init__.py) | The `Deployer` interface, the GitHub Pages / GitHub deployment watchers, and the backend registry. |
 | [prompts/](prompts/__init__.py) | The Goldfish workers' prompts: each a `core.prompts.Prompt` class, with its text in the `.md` beside it. |
 | [prompts/coder_prompt.py](prompts/coder_prompt.py), [coder.md](prompts/coder.md) | Coder worker prompt: execution boundary, allowed files, acceptance criteria, the made-up test data rule, plus targeted retry blocks for test output, critic feedback, human feedback and privacy findings. |
 | [prompts/critic_prompt.py](prompts/critic_prompt.py), [critic.md](prompts/critic.md) | Critic prompt: spec + diff against the four-item anti-pattern checklist. |
@@ -839,4 +984,10 @@ node and per utility, plus
 *compiled* graph end to end. Only a compiled run catches a route that no declared channel carries,
 and it also enforces that no node both calls the LLM and mutates a remote, and that only `push`
 pushes. [test_outgoing.py](../../tests/graphs/coding/test_outgoing.py) runs the privacy check
-against real git and a local bare remote.
+against real git and a local bare remote. [test_deploy.py](../../tests/graphs/coding/test_deploy.py)
+covers the deploy node's state machine, including a Fly.io-style driver registered in `BACKENDS`
+whose `handle` comes back on the next check;
+[test_github_deployments.py](../../tests/graphs/coding/test_github_deployments.py) runs the
+watchers against canned GitHub answers;
+[test_coding_e2b_check.py](../../tests/scripts/test_coding_e2b_check.py) covers the E2B setup check
+with a fake sandbox.

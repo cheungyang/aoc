@@ -16,12 +16,16 @@ What needs Elephant, by kind:
 - `tick_error`: ticks stop before they claim any task: a preflight that
   fails, a repository that can't be resolved. The coding scheduler records it
   at the manifest's top level.
+- `deploy_failed`: the project's deployment failed — the deploy itself, its
+  `deploy` block, or no answer before its timeout. The deploy node records it
+  at the manifest's top level, in `deployment`, until a merge or a `redeploy`
+  asks again.
 - `review_dormant`: a PR awaiting review that the tick stopped checking. A
   reminder falls due `remind_after_hours` after the tick stopped, then one
   every `remind_after_hours` (0: never).
 
-Done tasks, tasks you failed or skipped yourself, and work the graph is still
-retrying never wake him.
+Done tasks, tasks you failed or skipped yourself, work the graph is still
+retrying, and a deployment that is pending or live never wake him.
 
 Each item has an event time: when it happened. It's new when that's later
 than Elephant's last successful check. The scan fires only for new items, so a
@@ -63,6 +67,22 @@ A tick error is read from the manifest's top level:
 ...             "queue": []}
 >>> [(item.kind, item.stage, item.event_at) for item in queue_items(manifest, "recipe-box", now=8200.0, rules=rules)]
 [('tick_error', 'preflight', 2000.0)]
+```
+
+So is a failed deployment. Its stage is the backend, and the finding carries
+the log to read first:
+
+```python
+>>> manifest = {"deployment": {"status": "failed", "backend": "github_pages",
+...                            "log_url": "https://github.com/example/recipe-box/actions/runs/42",
+...                            "last_error": {"stage": "deploy", "kind": "deploy", "at": 3000.0,
+...                                           "message": "deploying `4f2a9c1` to GitHub Pages failed: build failed."}},
+...             "queue": []}
+>>> [deploy] = queue_items(manifest, "recipe-box", now=8200.0, rules=rules)
+>>> deploy.kind, deploy.stage, deploy.event_at
+('deploy_failed', 'github_pages', 3000.0)
+>>> deploy.details(now=8200.0)[-1]
+'log: https://github.com/example/recipe-box/actions/runs/42'
 ```
 
 The tick stopped checking a PR at hour 0. With `remind_after_hours` 24,

@@ -1,4 +1,4 @@
-"""Operator control plane: status, retry, reset, skip, abort.
+"""Operator control plane: status, retry, reset, skip, abort, redeploy.
 
 The manifest is the API. Every operation here is a manifest write, which means
 hand-editing the JSON and running a tick does exactly what these do — these just
@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from graphs.coding.utils import manifest as manifest_store
+from graphs.coding.utils.deploy import deploy_backend, deploy_configured
 from graphs.coding.utils.repo import (
     get_push_identity,
     get_repo_descriptor,
@@ -79,14 +80,39 @@ def status_report(manifest_path: str, task_id: Optional[str] = None) -> str:
     if task_id:
         return _task_detail(_require_task(manifest, task_id))
 
+    deployment = _deployment_summary(manifest)
     if not queue:
-        return "The queue is empty."
+        return "\n".join(filter(None, ["The queue is empty.", deployment]))
 
     lines = [f"**{manifest.get('project_name') or 'coding'}** — {len(queue)} task(s)"]
     now = time.time()
     for task in queue:
         lines.append(_task_summary(task, now))
+    if deployment:
+        lines.append(deployment)
     return "\n".join(lines)
+
+
+DEPLOYMENT_ICONS = {"pending": "🚚", "live": "🌐", "failed": "⚠️"}
+
+
+def _deployment_summary(manifest: Dict[str, Any]) -> str:
+    """One line on where the project's default branch has got to, or "" with no deploy."""
+    config = manifest.get("deploy") or {}
+    deployment = manifest.get("deployment") or {}
+    if not deploy_configured(config) and not deployment:
+        return ""
+    status = deployment.get("status") or "never requested"
+    parts = [f"{DEPLOYMENT_ICONS.get(status, '•')} deployment ({deploy_backend(config) or 'none'}): {status}"]
+    if status == "pending":
+        target = deployment.get("target_sha") or ""
+        parts.append(f"`{target[:7]}`" if target else "the branch head")
+    if deployment.get("deployed_sha"):
+        parts.append(f"live `{deployment['deployed_sha'][:7]}`" + (f" at {deployment['url']}" if deployment.get("url") else ""))
+    error = deployment.get("last_error") or {}
+    if status == "failed" and error.get("message"):
+        parts.append(f"— {str(error['message'])[:160]}")
+    return " · ".join(parts)
 
 
 def _task_summary(task: Dict[str, Any], now: float) -> str:
@@ -299,6 +325,27 @@ def unblock(manifest_path: str, task_id: str) -> str:
 
     manifest_store.yield_task(manifest_path, task_id)
     return f"`{task_id}` is queued again."
+
+
+def redeploy(manifest_path: str, sha: Optional[str] = None) -> str:
+    """Asks the next tick to check the project's deployment again.
+
+    For after a failed deploy was fixed on the hosting side — a re-run
+    workflow, Pages switched on — or to deploy a merge the graph didn't make.
+    Like `retry` it runs nothing: it marks the deployment pending, of `sha` or
+    of whatever the default branch points at, and the next tick asks the backend.
+    """
+    manifest = manifest_store.load_manifest(manifest_path)
+    config = manifest.get("deploy")
+    if not deploy_configured(config):
+        raise ControlError(
+            "This project has no `deploy` block (or its backend is `none`), so there is "
+            "nothing to deploy. Add one to the manifest, e.g. "
+            '`"deploy": {"backend": "github_pages"}`.'
+        )
+    manifest_store.request_deploy(manifest_path, sha=sha or None, backend=deploy_backend(config))
+    target = f"`{sha[:7]}`" if sha else "the default branch's head"
+    return f"Deployment of {target} requested; the next tick checks it ({deploy_backend(config)})."
 
 
 # --- Host switch -------------------------------------------------------------

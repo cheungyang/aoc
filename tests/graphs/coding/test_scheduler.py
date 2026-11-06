@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from graphs.coding.nodes.scheduler import (
+    ROUTE_DEPLOY,
     ROUTE_DONE,
     ROUTE_IMPLEMENT,
     ROUTE_PUBLISH,
@@ -343,10 +344,41 @@ class TestSchedulerNode(ManifestFixture):
         self.assertEqual(result["route"], ROUTE_IMPLEMENT)
         self.assertNotIn("tick_error", manifest_store.load_manifest(self.manifest_path))
 
+    async def test_a_pending_deployment_is_checked_before_any_task(self):
+        """It belongs to no task, so a busy queue must not starve it."""
+        self.write_manifest([_task()], deployment={"status": "pending", "target_sha": "abc1234"})
+
+        result = await scheduler_node(self.tick_state())
+
+        self.assertEqual(result["route"], ROUTE_DEPLOY)
+        self.assertIsNone(result["current_task"])
+        # Nothing claimed and no network yet: the task waits for the next visit.
+        self.mock_preflight.assert_not_called()
+        self.assertIsNone(self.stored().get("lease_owner"))
+
+    async def test_once_checked_this_tick_the_queue_carries_on(self):
+        """deploy hands back to the scheduler; without the flag that would loop."""
+        self.write_manifest([_task()], deployment={"status": "pending", "target_sha": "abc1234"})
+
+        result = await scheduler_node(self.tick_state(deploy_checked=True))
+
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+
+    async def test_a_live_or_failed_deployment_needs_no_check(self):
+        for status in ("live", "failed"):
+            with self.subTest(status=status):
+                self.write_manifest([], deployment={"status": status, "target_sha": "abc1234"})
+                result = await scheduler_node(self.tick_state())
+                self.assertEqual(result["route"], ROUTE_DONE)
+
 
 class TestSetupCommand(TestSchedulerNode):
     """Scaffolding and dependency install belong to the worktree, not to the
-    test command: run once, and a failure is the environment's fault."""
+    test command: run once, and a failure is the environment's fault.
+
+    Setup only runs on this host for the `local` backend, which a project has
+    to opt into — E2B is the default and runs setup in the sandbox — so these
+    manifests declare it unless a test says otherwise."""
 
     def setUp(self):
         super().setUp()
@@ -356,6 +388,10 @@ class TestSetupCommand(TestSchedulerNode):
         )
         self.mock_run = self.run.start()
         self.addCleanup(self.run.stop)
+
+    def write_manifest(self, tasks, **manifest_fields):
+        manifest_fields.setdefault("environment", {"backend": "local"})
+        super().write_manifest(tasks, **manifest_fields)
 
     async def test_a_fresh_worktree_is_set_up_before_any_code_is_written(self):
         self.write_manifest([_task()], setup_command="npm install")
@@ -454,6 +490,18 @@ class TestSetupCommand(TestSchedulerNode):
                             environment={"backend": "e2b"})
 
         result = await scheduler_node(self.tick_state())
+
+        self.mock_run.assert_not_awaited()
+        self.assertEqual(result["route"], ROUTE_IMPLEMENT)
+
+    async def test_with_no_backend_configured_installs_stay_off_this_host(self):
+        """E2B is the default: a manifest that names no backend never runs its
+        install scripts here."""
+        self.write_manifest([_task()], setup_command="npm install", environment=None)
+
+        with patch.dict(os.environ, {}, clear=False) as env:
+            env.pop("CODING_VERIFY_BACKEND", None)
+            result = await scheduler_node(self.tick_state())
 
         self.mock_run.assert_not_awaited()
         self.assertEqual(result["route"], ROUTE_IMPLEMENT)

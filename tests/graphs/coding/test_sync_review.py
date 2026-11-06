@@ -16,6 +16,7 @@ from graphs.coding.nodes.sync_review import (
     harvest_comments,
     sync_review_node,
 )
+from graphs.coding.utils import manifest as manifest_store
 from tests.graphs.coding.fixtures import ManifestFixture, _task
 
 
@@ -242,6 +243,52 @@ class TestSyncReviewNode(ManifestFixture):
         mock_merge.assert_not_called()
         self.assertEqual(result["commit_url"], "https://github.com/org/repo/commit/abc123")
         self.assertEqual(self.stored()["status"], "done")
+
+    async def test_without_a_deploy_block_a_merge_just_returns_to_the_scheduler(self):
+        task = _task(status="awaiting_review", stage="awaiting_review",
+                     pr_url="https://github.com/org/repo/pull/7")
+        self.write_manifest([task])
+        status = {"state": "MERGED", "mergeCommit": {"oid": "abc1234"}}
+
+        with patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value=status)):
+            result = await sync_review_node(self.review_state(task))
+
+        self.assertEqual(result["route"], "scheduler")
+        self.assertNotIn("deployment", manifest_store.load_manifest(self.manifest_path))
+
+    async def test_a_merge_requests_a_deployment_of_the_merge_commit(self):
+        task = _task(status="awaiting_review", stage="awaiting_review",
+                     pr_url="https://github.com/org/repo/pull/7")
+        self.write_manifest([task], deploy={"backend": "github_pages"})
+        status = {"state": "OPEN", "labels": [{"name": "approved"}]}
+
+        with patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value=status)), \
+             patch("graphs.coding.nodes.sync_review.git_ops.merge_pull_request",
+                   AsyncMock(return_value=(True, "https://github.com/org/repo/commit/0123abcd", "merged"))):
+            result = await sync_review_node(self.review_state(task))
+
+        self.assertEqual(result["route"], "deploy")
+        # Done is done: the deploy follows the branch and never holds the task.
+        self.assertEqual(self.stored()["status"], "done")
+        deployment = manifest_store.load_manifest(self.manifest_path)["deployment"]
+        self.assertEqual((deployment["status"], deployment["target_sha"], deployment["backend"]),
+                         ("pending", "0123abcd", "github_pages"))
+
+    async def test_a_merge_github_named_no_commit_for_deploys_the_branch_head(self):
+        task = _task(status="awaiting_review", stage="awaiting_review",
+                     pr_url="https://github.com/org/repo/pull/7")
+        self.write_manifest([task], deploy={"backend": "github_pages"})
+        status = {"state": "OPEN", "labels": [{"name": "approved"}]}
+
+        with patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value=status)), \
+             patch("graphs.coding.nodes.sync_review.git_ops.merge_pull_request",
+                   AsyncMock(return_value=(True, "https://github.com/org/repo/commit/latest_merged", "merged"))):
+            await sync_review_node(self.review_state(task))
+
+        self.assertIsNone(manifest_store.load_manifest(self.manifest_path)["deployment"]["target_sha"])
 
     async def test_review_comments_send_the_task_back_to_the_worker(self):
         task = _task(status="awaiting_review", stage="awaiting_review",

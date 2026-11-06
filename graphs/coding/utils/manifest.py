@@ -348,3 +348,71 @@ def stage_at_or_past(task: Dict[str, Any], stage: str) -> bool:
         return STAGE_ORDER.index(current) >= STAGE_ORDER.index(stage)
     except ValueError:
         return False
+
+
+# --- Deployment ----------------------------------------------------------------
+#
+# One per project, at the manifest's top level next to the `deploy` block that
+# configures it, and written only by the graph: `request_deploy` when a merge
+# lands (or an operator asks), `persist_deployment` from the deploy node.
+# Deployment follows the default branch, not a task, so a task is `done` when
+# it is merged and a deploy that fails never holds its dependents back.
+
+def deployment_pending(manifest: Dict[str, Any]) -> bool:
+    """True while a requested deployment hasn't gone live or failed. Reads only."""
+    deployment = manifest.get("deployment") if isinstance(manifest, dict) else None
+    return isinstance(deployment, dict) and deployment.get("status") == "pending"
+
+
+def request_deploy(
+    manifest_path: str,
+    sha: Optional[str] = None,
+    backend: str = "",
+    now: Optional[float] = None
+) -> Dict[str, Any]:
+    """Asks the next deploy check to put `sha` live (None: whatever the default branch points at).
+
+    A newer request replaces one still pending — deployment follows the branch,
+    so only its latest commit matters — and what was last live stays recorded.
+    Returns the new deployment state.
+    """
+    moment = now if now is not None else time.time()
+    with locked_manifest(manifest_path) as manifest:
+        deployment = dict(manifest.get("deployment") or {})
+        deployment.update({
+            "status": "pending",
+            "backend": backend,
+            "target_sha": sha or None,
+            "requested_at": moment,
+            "checks": 0,
+            "handle": None,
+            "detail": None,
+            "log_url": None,
+            "last_error": None,
+            "updated_at": moment,
+        })
+        manifest["deployment"] = deployment
+        requested = dict(deployment)
+    return requested
+
+
+def persist_deployment(
+    manifest_path: str,
+    expect_target: Optional[str] = None,
+    **fields: Any
+) -> Optional[Dict[str, Any]]:
+    """Updates the deployment under lock, leaving every other key untouched.
+
+    With `expect_target`, only while the deployment still targets that commit
+    (or no commit yet): a slow answer about an older commit must not mark a
+    newer request live or failed. Returns the updated state, or None if skipped.
+    """
+    updated: Optional[Dict[str, Any]] = None
+    with locked_manifest(manifest_path) as manifest:
+        deployment = dict(manifest.get("deployment") or {})
+        if expect_target is None or deployment.get("target_sha") in (None, expect_target):
+            deployment.update(fields)
+            deployment["updated_at"] = time.time()
+            manifest["deployment"] = deployment
+            updated = dict(deployment)
+    return updated

@@ -27,7 +27,7 @@ class TestGraphTopology(unittest.TestCase):
         # Exact set, not a superset: this is also what keeps the interrupt-driven
         # topology (`hitl_gate`, `worker_node`, `git_handoff`) from coming back.
         self.assertEqual(
-            {"scheduler", "implement", "push", "verify", "audit", "publish", "sync_review"},
+            {"scheduler", "implement", "push", "verify", "audit", "publish", "sync_review", "deploy"},
             set(graph.nodes) - {"__start__"},
         )
 
@@ -67,7 +67,7 @@ class TestNodeSeparation(unittest.TestCase):
 
         node_dir = pathlib.Path("graphs/coding/nodes")
         v2_nodes = ["scheduler.py", "implement.py", "push.py", "verify.py",
-                    "audit.py", "publish.py", "sync_review.py"]
+                    "audit.py", "publish.py", "sync_review.py", "deploy.py"]
 
         offenders = []
         for name in v2_nodes:
@@ -315,6 +315,87 @@ class TestTickEndToEnd(ManifestFixture):
         self.assertIn("tests/test_demo.py:3: 8 words in a row from the user's notes", second)
         self.assertNotIn("stand in for", second)
         self.assertIn("🔒", "\n".join(state["tick_report"]))
+
+
+class TestDeployEndToEnd(TestTickEndToEnd):
+    """Deployment through the compiled graph: the `deploy_checked` channel and the
+    deploy routes only exist across node boundaries, so only a real run proves
+    a pending deployment is asked about once per tick and never loops."""
+
+    DEPLOY = {"backend": "github_pages"}
+
+    def setUp(self):
+        super().setUp()
+        from graphs.coding.utils.deploy import DeployStatus
+
+        self.DeployStatus = DeployStatus
+        self.deployer = AsyncMock()
+        self.deployer.advance = AsyncMock(return_value=DeployStatus("pending", detail="building"))
+        patch("graphs.coding.nodes.deploy.get_deployer", return_value=self.deployer).start()
+        patch("graphs.coding.nodes.deploy.get_push_identity", return_value=None).start()
+
+    def deployment(self):
+        from graphs.coding.utils.manifest import load_manifest
+        return load_manifest(self.manifest_path).get("deployment") or {}
+
+    async def test_a_merge_requests_a_deployment_and_checks_it_in_the_same_tick(self):
+        self.write_manifest([_task(
+            status="awaiting_review", stage="awaiting_review",
+            pr_url="https://github.com/org/repo/pull/7", poll_until=time.time() + 600
+        )], deploy=self.DEPLOY, repo={"slug": "org/repo", "default_branch": "main"})
+        status = {"state": "OPEN", "labels": [{"name": "approved"}]}
+
+        with patch("graphs.coding.nodes.sync_review.get_push_identity", return_value=None), \
+             patch("graphs.coding.nodes.sync_review._teardown", AsyncMock()), \
+             patch("graphs.coding.nodes.sync_review.git_ops.get_pull_request_status",
+                   AsyncMock(return_value=status)), \
+             patch("graphs.coding.nodes.sync_review.git_ops.merge_pull_request",
+                   AsyncMock(return_value=(True, "https://github.com/org/repo/commit/abc1234def", "merged"))):
+            state = await self.run_tick()
+
+        self.assertEqual(self.stored()["status"], "done", "merged is done, whatever the deploy does")
+        self.assertEqual(self.deployer.advance.await_count, 1)
+        self.assertEqual(self.deployer.advance.await_args.args[0].sha, "abc1234def")
+        self.assertEqual((self.deployment()["status"], self.deployment()["target_sha"]),
+                         ("pending", "abc1234def"))
+        report = "\n".join(state["tick_report"])
+        self.assertIn("merged", report)
+        self.assertIn("deploying `abc1234` to GitHub Pages", report)
+
+    async def test_a_pending_deployment_is_checked_once_per_tick_and_never_blocks_the_queue(self):
+        self.write_manifest(
+            [_task(stage="queued")], deploy=self.DEPLOY,
+            repo={"slug": "org/repo", "default_branch": "main"},
+            deployment={"status": "pending", "backend": "github_pages", "target_sha": "abc1234def",
+                        "requested_at": time.time(), "checks": 1},
+        )
+
+        with patch("graphs.coding.nodes.publish.git_ops.create_pull_request",
+                   AsyncMock(return_value=(True, "https://github.com/org/repo/pull/8", 8))):
+            state = await self.run_tick()
+
+        # Asked once, then the tick carried on with the task — no loop, no starvation.
+        self.assertEqual(self.deployer.advance.await_count, 1)
+        self.assertEqual(self.stored()["status"], "awaiting_review")
+        # Still building on its second check: not news, so nothing about it is reported.
+        self.assertNotIn("deploy", "\n".join(state["tick_report"]))
+
+    async def test_a_live_deployment_is_reported_once_and_not_checked_again(self):
+        self.write_manifest(
+            [], deploy=self.DEPLOY, repo={"slug": "org/repo", "default_branch": "main"},
+            deployment={"status": "pending", "backend": "github_pages", "target_sha": "abc1234def",
+                        "requested_at": time.time(), "checks": 2},
+        )
+        self.deployer.advance.return_value = self.DeployStatus(
+            "live", url="https://org.github.io/repo/")
+
+        first = await self.run_tick()
+        second = await self.run_tick()
+
+        self.assertEqual(self.deployer.advance.await_count, 1)
+        self.assertIn("is live at `abc1234`: https://org.github.io/repo/", "\n".join(first["tick_report"]))
+        self.assertEqual(second["tick_report"], [])
+        self.assertEqual(self.deployment()["deployed_sha"], "abc1234def")
 
 
 class TestTheImplementVerifyLoopTerminates(TestTickEndToEnd):

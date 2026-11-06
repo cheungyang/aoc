@@ -16,6 +16,7 @@ from graphs.coding.nodes.verify import verify_node
 from graphs.coding.nodes.audit import audit_node
 from graphs.coding.nodes.publish import publish_node
 from graphs.coding.nodes.sync_review import sync_review_node
+from graphs.coding.nodes.deploy import deploy_node
 
 from graphs.coding.adapters import prepare_input, format_output
 
@@ -37,6 +38,7 @@ def create_graph(checkpointer=None, **kwargs):
     workflow.add_node("audit", audit_node)
     workflow.add_node("publish", publish_node)
     workflow.add_node("sync_review", sync_review_node)
+    workflow.add_node("deploy", deploy_node)
 
     workflow.add_edge(START, "scheduler")
 
@@ -50,9 +52,11 @@ def create_graph(checkpointer=None, **kwargs):
             return value if value in allowed else END
         return route
 
+    # A pending deployment is checked before any task, once per tick
+    # (`deploy_checked`), so a busy queue cannot starve it.
     workflow.add_conditional_edges(
-        "scheduler", _router({"implement", "push", "verify", "publish", "sync_review"}),
-        ["implement", "push", "verify", "publish", "sync_review", END]
+        "scheduler", _router({"implement", "push", "verify", "publish", "sync_review", "deploy"}),
+        ["implement", "push", "verify", "publish", "sync_review", "deploy", END]
     )
 
     # A worker that produced nothing ends the tick rather than testing an
@@ -87,9 +91,17 @@ def create_graph(checkpointer=None, **kwargs):
         "publish", _router({"scheduler"}), ["scheduler", END]
     )
 
+    # A merge in a project with a `deploy` block goes straight to deploy, so the
+    # deployment is requested and first checked in the tick that merged it.
     workflow.add_conditional_edges(
-        "sync_review", _router({"implement", "publish", "scheduler"}),
-        ["implement", "publish", "scheduler", END]
+        "sync_review", _router({"implement", "publish", "scheduler", "deploy"}),
+        ["implement", "publish", "scheduler", "deploy", END]
+    )
+
+    # deploy never waits in-process: a deployment still building is asked again
+    # on the next tick, and the scheduler carries on with the queue meanwhile.
+    workflow.add_conditional_edges(
+        "deploy", _router({"scheduler"}), ["scheduler", END]
     )
 
     return workflow.compile(checkpointer=None)

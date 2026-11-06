@@ -106,6 +106,20 @@ class TestDryRun(TickScriptTestCase):
 
         mock_print.assert_not_called()
 
+    def test_dry_run_names_a_pending_deployment(self):
+        with open(self.manifest_path, "w", encoding="utf-8") as f:
+            json.dump({"version": "3.0", "project_name": "demo", "queue": [],
+                       "deploy": {"backend": "github_pages"},
+                       "deployment": {"status": "pending", "backend": "github_pages",
+                                      "target_sha": "abc1234def"}}, f)
+
+        with patch("builtins.print") as mock_print:
+            self.run_main("--dry-run")
+
+        printed = mock_print.call_args[0][0]
+        self.assertIn("deployment of `abc1234`", printed)
+        self.assertIn("github_pages", printed)
+
     def test_dry_run_writes_nothing(self):
         self.write([{
             "task_id": "T1", "status": "pending", "stage": "queued",
@@ -472,6 +486,27 @@ class TestHasWork(TickScriptTestCase):
         with open(self.manifest_path, "w", encoding="utf-8") as f:
             f.write("{not json")
         self.assertTrue(self.has_work([self.manifest_path]))
+
+    def write_deployment(self, status, queue=()):
+        with open(self.manifest_path, "w", encoding="utf-8") as f:
+            json.dump({"version": "3.0", "project_name": "demo", "queue": list(queue),
+                       "deploy": {"backend": "github_pages"},
+                       "deployment": {"status": status, "target_sha": "abc1234"}}, f)
+
+    def test_a_pending_deployment_is_work_even_at_the_concurrency_bound(self):
+        """It belongs to no task, so a live lease elsewhere doesn't stop its check."""
+        import time
+        self.write_deployment("pending", queue=[{
+            "task_id": "T1", "status": "active", "stage": "implemented", "dependencies": [],
+            "lease_owner": "host:tick_live", "lease_expires_at": time.time() + 1800.0,
+        }])
+        self.assertTrue(self.has_work([self.manifest_path]))
+
+    def test_a_settled_deployment_is_not_work(self):
+        for status in ("live", "failed"):
+            with self.subTest(status=status):
+                self.write_deployment(status)
+                self.assertFalse(self.has_work([self.manifest_path]))
 
     def test_import_does_not_change_directory(self):
         cwd = os.getcwd()

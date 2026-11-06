@@ -122,6 +122,62 @@ class TestStatusReport(ControlTestCase):
         self.assertIn("A", str(ctx.exception))
         self.assertIn("B", str(ctx.exception))
 
+    def test_a_projects_deployment_is_shown_with_the_queue(self):
+        self.write([_task("A", status="done")], deploy={"backend": "github_pages"},
+                   deployment={"status": "live", "deployed_sha": "abc1234def",
+                               "url": "https://owner.github.io/repo/"})
+
+        report = status_report(self.path)
+
+        self.assertIn("deployment (github_pages): live", report)
+        self.assertIn("live `abc1234` at https://owner.github.io/repo/", report)
+
+    def test_a_failed_deployment_shows_why(self):
+        self.write([], deploy={"backend": "github_pages"},
+                   deployment={"status": "failed",
+                               "last_error": {"kind": "deploy", "message": "the Pages workflow failed"}})
+
+        report = status_report(self.path)
+
+        self.assertIn("The queue is empty.", report)
+        self.assertIn("the Pages workflow failed", report)
+
+    def test_a_project_without_a_deploy_block_shows_no_deployment(self):
+        self.write([_task("A")])
+
+        self.assertNotIn("deployment", status_report(self.path))
+
+
+class TestRedeploy(ControlTestCase):
+    def test_redeploy_asks_the_next_tick_to_check_the_branch_head(self):
+        self.write([], deploy={"backend": "github_pages"},
+                   deployment={"status": "failed", "deployed_sha": "old0000",
+                               "last_error": {"kind": "deploy", "message": "boom"}})
+
+        message = control.redeploy(self.path)
+
+        deployment = load_manifest(self.path)["deployment"]
+        self.assertEqual((deployment["status"], deployment["target_sha"]), ("pending", None))
+        self.assertIsNone(deployment["last_error"])
+        self.assertEqual(deployment["deployed_sha"], "old0000")
+        self.assertIn("default branch", message)
+
+    def test_redeploy_can_name_a_commit(self):
+        self.write([], deploy={"backend": "github_pages"})
+
+        control.redeploy(self.path, sha="abc1234def")
+
+        self.assertEqual(load_manifest(self.path)["deployment"]["target_sha"], "abc1234def")
+
+    def test_a_project_without_a_deploy_block_is_refused_with_an_example(self):
+        for deploy in (None, {"backend": "none"}):
+            with self.subTest(deploy=deploy):
+                self.write([], deploy=deploy)
+                with self.assertRaises(ControlError) as ctx:
+                    control.redeploy(self.path)
+                self.assertIn('"backend": "github_pages"', str(ctx.exception))
+                self.assertNotIn("deployment", load_manifest(self.path))
+
 
 class TestRetry(ControlTestCase):
     def test_retry_clears_the_attempt_counters_that_caused_the_halt(self):

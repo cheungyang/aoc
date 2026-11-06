@@ -135,6 +135,24 @@ class TestMutatingCommands(CodingAdminTestCase):
 
         self.assertEqual(self.read()["queue"][0]["last_error"]["message"], "spec was wrong")
 
+    def test_redeploy_requests_the_named_commit(self):
+        self.write([])
+        manifest = self.read()
+        manifest["deploy"] = {"backend": "github_pages"}
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+
+        self.assertEqual(self.run_cli("redeploy", "abc1234def"), 0)
+        self.assertEqual(self.read()["deployment"]["status"], "pending")
+        self.assertEqual(self.read()["deployment"]["target_sha"], "abc1234def")
+        self.assertIn("`abc1234`", self.out())
+
+    def test_redeploy_without_a_deploy_block_is_an_operator_error(self):
+        self.write([])
+
+        self.assertEqual(self.run_cli("redeploy"), 2)
+        self.assertIn("deploy", self.err())
+
 
 class TestResetConfirmation(CodingAdminTestCase):
     def test_reset_refuses_without_yes_when_there_is_no_terminal(self):

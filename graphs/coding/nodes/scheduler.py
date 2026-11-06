@@ -9,6 +9,9 @@ node decides *what* to advance:
 4. claim it with a lease and make sure its worktree exists,
 5. route by the task's recorded stage, so work already done is not redone.
 
+Between 1 and 2, a project deployment that is still pending gets its one check
+of the tick (the deploy node), before any task, so a busy queue cannot starve it.
+
 Everything it writes goes through the manifest, because the manifest is the API:
 hand-editing it and running another tick is a supported operation. That includes
 a failure before any task is claimed (preflight, the repository): it's recorded
@@ -35,6 +38,7 @@ ROUTE_PUSH = "push"
 ROUTE_VERIFY = "verify"
 ROUTE_PUBLISH = "publish"
 ROUTE_SYNC = "sync_review"
+ROUTE_DEPLOY = "deploy"
 ROUTE_DONE = "done"
 
 
@@ -143,6 +147,13 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
         base.update(extra)
         return base
 
+    # A deployment waiting on its backend is looked at once per tick, before
+    # any task: it costs one API call, belongs to no task (so neither leases
+    # nor the concurrency bound apply), and a busy queue must not starve it.
+    # The deploy node sets `deploy_checked` and hands back here.
+    if manifest_store.deployment_pending(manifest) and not state.get("deploy_checked"):
+        return _idle(route=ROUTE_DEPLOY)
+
     # 2. Respect the concurrency bound before picking anything up. Counting live
     #    leases is what makes the bound real across processes — a per-process
     #    counter would let two ticks each believe they were the only one.
@@ -249,8 +260,9 @@ async def scheduler_node(state: CodingState) -> Dict[str, Any]:
     # 7. Set the worktree up once: scaffold, install dependencies. This is an
     #    environment concern, so a failure here halts as `environment` and never
     #    touches the implement budget — the code is not what went wrong.
-    #    With a remote verify backend the sandbox runs setup itself, and this
-    #    host never executes the project's install scripts.
+    #    Only for the `local` backend, which a project has to opt into: by
+    #    default (E2B) the sandbox runs setup itself, and this host never
+    #    executes the project's install scripts.
     setup_command = task.get("setup_command") or manifest.get("setup_command")
     runs_setup_here = resolve_backend(task.get("environment") or manifest.get("environment")) == "local"
     if route != ROUTE_SYNC and setup_command and runs_setup_here and not task.get("setup_done"):

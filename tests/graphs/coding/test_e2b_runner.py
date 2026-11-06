@@ -207,6 +207,7 @@ class TestConfiguration(E2BCase):
 
         self.assertEqual(result.exit_code, 126)
         self.assertIsNone(result.infra_error)
+        self.assertIn("repo", result.config_error)
 
     async def test_missing_api_key_is_unrunnable(self):
         import os
@@ -218,6 +219,10 @@ class TestConfiguration(E2BCase):
 
         self.assertEqual(result.exit_code, 126)
         self.assertIn("No E2B API key", result.stderr)
+        # Configuration, not a broken runner: retrying cannot fix it.
+        self.assertIn("No E2B API key", result.config_error)
+        self.assertIsNone(result.infra_error)
+        self.assertFalse(result.passed)
 
     async def test_api_key_file_is_read(self):
         import os
@@ -240,7 +245,10 @@ class TestSetupPurity(E2BCase):
         result = await self.run_steps(runner, steps=self.STEPS)
 
         self.assertEqual(result.failed_step, "setup")
-        self.assertIn("scaffold_command", result.stderr)
+        # Says what to do instead, and names no option that does not exist.
+        self.assertIn("npm ci", result.stderr)
+        self.assertIn("commit", result.stderr)
+        self.assertNotIn("scaffold_command", result.stderr)
         self.assertIn("src/App.tsx", result.stderr)
         self.assertFalse(any("npm test" in c["cmd"] for c in self.sbx.calls))
 

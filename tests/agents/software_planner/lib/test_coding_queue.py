@@ -6,6 +6,7 @@ memory: the repo is public, so nothing here comes from a real queue.
 import unittest
 
 from agents.software_planner.lib.coding_queue import (
+    DEPLOY_FAILED,
     HALT,
     KINDS,
     REVIEW_BUDGET,
@@ -179,7 +180,51 @@ class TestFindings(unittest.TestCase):
                                         "recipe-box/feat_03 halt and 2 more")
 
     def test_the_kinds(self):
-        self.assertEqual(KINDS, (HALT, REVIEW_BUDGET, TICK_ERROR, REVIEW_DORMANT))
+        self.assertEqual(KINDS, (HALT, REVIEW_BUDGET, TICK_ERROR, DEPLOY_FAILED, REVIEW_DORMANT))
+
+
+class TestDeployFailed(unittest.TestCase):
+
+    def failed(self, **fields):
+        deployment = {"status": "failed", "backend": "github_pages", "target_sha": "4f2a9c1e",
+                      "log_url": "https://github.com/example/recipe-box/actions/runs/42",
+                      "last_error": {"stage": "deploy", "kind": "deploy", "at": 3 * HOUR,
+                                     "message": "deploying `4f2a9c1` to GitHub Pages failed: build failed."}}
+        deployment.update(fields)
+        return deployment
+
+    def test_a_failed_deployment_is_raised_after_the_tick_error_and_before_tasks(self):
+        found = items(halted(), deployment=self.failed(),
+                      tick_error={"stage": "repo", "message": "could not clone", "at": 500.0})
+        self.assertEqual([item.kind for item in found], [TICK_ERROR, DEPLOY_FAILED, HALT])
+        deploy = found[1]
+        self.assertEqual((deploy.name, deploy.stage, deploy.error, deploy.event_at),
+                         ("recipe-box", "github_pages", "deploy", 3 * HOUR))
+
+    def test_a_pending_or_live_deployment_needs_nothing(self):
+        for status in ("pending", "live"):
+            with self.subTest(status=status):
+                self.assertEqual(items(deployment=self.failed(status=status)), [])
+
+    def test_a_malformed_deployment_is_ignored(self):
+        for deployment in (None, "broken", ["failed"]):
+            with self.subTest(deployment=deployment):
+                self.assertEqual(items(deployment=deployment), [])
+
+    def test_a_failure_without_an_error_still_says_so(self):
+        [item] = items(deployment={"status": "failed", "backend": "github_pages", "updated_at": 2000.0})
+        self.assertEqual((item.event_at, item.message), (2000.0, "no reason recorded"))
+
+    def test_its_findings_name_the_backend_the_error_and_the_log(self):
+        [item] = items(deployment=self.failed())
+        self.assertEqual(item.details(now=5 * HOUR), [
+            "the deployment to github_pages failed 2 h ago (deploy):",
+            "deploying `4f2a9c1` to GitHub Pages failed: build failed.",
+            "log: https://github.com/example/recipe-box/actions/runs/42",
+        ])
+        self.assertEqual(item.summary(now=5 * HOUR),
+                         "recipe-box · deploy_failed · since 2 h ago (github_pages): "
+                         "deploying `4f2a9c1` to GitHub Pages failed: build failed.")
 
 
 class TestAgo(unittest.TestCase):

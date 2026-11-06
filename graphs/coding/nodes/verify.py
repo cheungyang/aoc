@@ -15,8 +15,10 @@ was never wrong. The same goes for the runner itself: a sandbox that would not
 start (`infra`) is retried on a later tick without touching the code.
 
 Where the command runs is the backend's business (`environment.backend` in the
-manifest, else `$CODING_VERIFY_BACKEND`). A remote backend starts from nothing,
-so it also runs the project's `setup_command` before the tests.
+manifest, else `$CODING_VERIFY_BACKEND`, else E2B). A remote backend starts
+from nothing, so it also runs the project's `setup_command` before the tests.
+A backend this host isn't set up for (no E2B key, an unknown name) halts the
+task as `config`: nothing was tested, and no retry can fix it.
 """
 import os
 import re
@@ -27,7 +29,9 @@ from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
-from graphs.coding.utils.sandbox import RunResult, Step, UnknownBackendError, get_runner
+from graphs.coding.utils.sandbox import (
+    RunResult, Step, UnknownBackendError, get_runner, resolve_backend,
+)
 from graphs.coding.utils.token_opt import sanitize_traceback
 
 # Ten minutes. The old 120s assumed the command was only a test run, but a
@@ -200,6 +204,31 @@ async def verify_node(state: CodingState) -> Dict[str, Any]:
                 "test_stdout": stdout, "test_stderr": stderr, "tick_report": report,
                 "error_message": message}
 
+    if result.config_error:
+        # This host can't run the backend at all (no E2B key, no SDK, a typo in
+        # the backend name). Nothing was tested and the code is not in question,
+        # and unlike `infra` no retry fixes it: halt, and say how to find out
+        # what is missing. Since E2B became the default, this is what a host
+        # that was never set up for it reports.
+        backend = result.backend or resolve_backend(environment)
+        message = (
+            f"`{task_id}`: the `{backend}` verify backend isn't set up on this host "
+            f"({result.config_error[:300]}). Nothing was tested and the code is untouched. "
+            f"Run `scripts/coding_e2b_check.py` and fix what it reports, then `retry {task_id}` "
+            f"(or set `environment.backend` to `local` for this project)."
+        )
+        stored = manifest_store.persist_task(
+            manifest_path, task_id,
+            status="halted",
+            last_error={"stage": "verify", "kind": "config",
+                        "message": message, "at": time.time()},
+            lease_owner=None, lease_expires_at=None
+        )
+        report.append(f"⚠️ {message}")
+        return {"current_task": stored or current_task, "route": "done", "test_run_passed": False,
+                "test_stdout": stdout, "test_stderr": stderr, "tick_report": report,
+                "error_message": message}
+
     if passed:
         # The infra budget counts runner failures since the last run that got
         # through, so old blips do not add up to a halt weeks later.
@@ -333,13 +362,13 @@ async def _run(
     A backend that starts from nothing (`runs_setup`) gets the project's
     `setup_command` as its first step; locally the scheduler already ran it in
     the worktree. A misconfigured backend is reported as exit 126 ("could not
-    run"), which `classify_failure` treats as an environment problem: the task
-    halts with the configuration message instead of spending an implement attempt.
+    run") with `config_error` set: the task halts as `config` with the
+    configuration message instead of spending an implement attempt.
     """
     try:
         runner = get_runner(environment)
     except UnknownBackendError as e:
-        return RunResult(126, "", f"Verify backend misconfigured: {e}")
+        return RunResult(126, "", f"Verify backend misconfigured: {e}", config_error=str(e))
     steps = [Step("verify", command)]
     if setup_command and getattr(runner, "runs_setup", False) is True:
         steps.insert(0, Step("setup", str(setup_command)))

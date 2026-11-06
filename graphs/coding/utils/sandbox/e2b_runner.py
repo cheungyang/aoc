@@ -18,9 +18,11 @@ The host never executes the code under test. Per run:
   configuration problem and is reported as exit 126 ("could not run"), which
   halts instead of retrying something that cannot succeed.
 - **Setup must not edit tracked files.** After `setup`, the sandbox's tree is
-  compared against the commit; a setup that generated tracked files (a
-  scaffold) fails with a message to move it to `scaffold_command`. Otherwise the
-  result would depend on files that are not in the commit being verified.
+  compared against the commit; a setup that generated or changed files (a
+  scaffold, an `npm install <pkg>` that rewrites `package.json`) fails, because
+  the result would depend on files that are not in the commit being verified.
+  Generated files belong in the repository, committed once; setup only
+  installs into ignored paths.
 - **The sandbox is always killed**, whatever happened. E2B also expires it on
   its own `timeout`, set just above the verify budget, as a backstop.
 """
@@ -269,10 +271,12 @@ class E2BRunner:
                 if dirty:
                     return RunResult(
                         1, _tail("".join(stdout_parts)),
-                        "`setup_command` changed tracked files, so the tests would not be testing "
-                        "the pushed commit. Move whatever generates them to `scaffold_command` "
-                        "(run once, committed) and keep setup to ignored paths such as "
-                        f"`node_modules/` or `.venv/`:\n{dirty}",
+                        "`setup_command` changed or created files that are not ignored, so the tests "
+                        "would not be testing the pushed commit. Keep setup to installs into ignored "
+                        "paths such as `node_modules/` or `.venv/` (e.g. `npm ci`), and commit anything "
+                        "generated (a scaffold, a lockfile) to the repository once — a brand-new "
+                        "project's first task can scaffold with `environment.backend: \"local\"`:\n"
+                        f"{dirty}",
                         failed_step="setup", backend=self.name,
                     )
 
@@ -308,7 +312,7 @@ class E2BRunner:
 
     def _config(self, message: str) -> RunResult:
         return RunResult(_CONFIG_EXIT_CODE, "", f"E2B backend misconfigured: {message}",
-                         backend=self.name)
+                         backend=self.name, config_error=message)
 
 
 def _exit_exception():

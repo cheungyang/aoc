@@ -18,12 +18,14 @@ Rejections are symmetric: CHANGES_REQUESTED, `/reject` (back to implement) and
 `/abort` (fail the task and tear down).
 """
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from graphs.coding.schemas import CodingState
 from graphs.coding.utils import manifest as manifest_store
 from graphs.coding.utils.dag import resolve_manifest_path
+from graphs.coding.utils.deploy import deploy_backend, deploy_configured
 from graphs.coding.utils.repo import get_push_identity, get_repo_descriptor
 from core.git import ops as git_ops
 
@@ -272,7 +274,7 @@ async def _finish(
     evidence: str,
     report: List[str]
 ) -> Dict[str, Any]:
-    """Merges if needed, tears down, and marks the task done."""
+    """Merges if needed, tears down, marks the task done, and asks for a deployment if the project has one."""
     task_id = current_task["task_id"]
     commit_url = ""
 
@@ -309,13 +311,34 @@ async def _finish(
         lease_owner=None, lease_expires_at=None
     )
     report.append(f"🎉 `{task_id}` merged ({evidence}) → {commit_url or pr_url}")
+
+    # The merge is what ships. The task is done either way — deployment
+    # follows the default branch, so a deploy that fails never holds the
+    # task's dependents back — but the deploy node checks it in this tick.
+    route = "scheduler"
+    deploy_config = manifest_store.load_manifest(manifest_path).get("deploy")
+    if deploy_configured(deploy_config):
+        manifest_store.request_deploy(
+            manifest_path, sha=_commit_sha(commit_url), backend=deploy_backend(deploy_config)
+        )
+        route = "deploy"
+
     return {
         "stage": "done",
         "commit_url": commit_url,
-        "route": "scheduler",
+        "route": route,
         "tick_report": report,
         "error_message": ""
     }
+
+
+def _commit_sha(commit_url: str) -> Optional[str]:
+    """The merge commit's SHA from its URL; None when GitHub didn't name one.
+
+    The deploy node then deploys whatever the default branch points at.
+    """
+    match = re.search(r"/commit/([0-9a-f]{7,40})$", commit_url or "")
+    return match.group(1) if match else None
 
 
 def _merge_commit_url(pr_status: Dict[str, Any], pr_url: str) -> str:

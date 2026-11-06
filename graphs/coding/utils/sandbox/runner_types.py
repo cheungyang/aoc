@@ -35,10 +35,15 @@ class RunResult:
     # Name of the step that failed (e.g. "setup", "verify"); None on success.
     failed_step: Optional[str] = None
     backend: str = ""
+    # Set when the runner is not set up on this host (no API key, no SDK, an
+    # unknown backend name). Unlike `infra_error` a retry cannot fix it, and
+    # unlike a failed command it says nothing about the project either: the
+    # host needs configuring. The exit code is 126 ("could not run").
+    config_error: Optional[str] = None
 
     @property
     def passed(self) -> bool:
-        return self.infra_error is None and self.exit_code == 0
+        return self.infra_error is None and self.config_error is None and self.exit_code == 0
 
     def as_tuple(self) -> Tuple[int, str, str]:
         """The `(exit_code, stdout, stderr)` shape `run_in_worktree` returns."""

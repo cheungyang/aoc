@@ -1,13 +1,17 @@
 """Picks the verification backend.
 
-One switch, `CODING_VERIFY_BACKEND`, defaulting to `local` so that merging the
-runner abstraction changes nothing. A per-project override from the manifest's
-`environment.backend` takes precedence, so a single project can be moved to a
-remote backend without flipping the whole system.
+One switch, `CODING_VERIFY_BACKEND`, defaulting to `e2b`: the code under test
+was written by an LLM, so by default it runs in a throwaway sandbox and never
+on the host the bot and its credentials live on. A per-project override from
+the manifest's `environment.backend` takes precedence, so `local` is an
+explicit opt-out — for one project whose tests can't run in a sandbox yet, or
+for a whole host via the env var.
 
 An unknown backend is a configuration error and raises: silently falling back
 to `local` would run untrusted code on the host precisely when someone asked
-for it not to be.
+for it not to be. A host where E2B isn't set up halts the task with a
+configuration error too (`scripts/coding_e2b_check.py` says what is missing),
+rather than quietly testing on the host.
 """
 import os
 from typing import Any, Dict, Optional
@@ -16,7 +20,7 @@ from graphs.coding.utils.sandbox.local_runner import LocalRunner
 from graphs.coding.utils.sandbox.runner_types import VerifyRunner
 
 BACKEND_ENV_VAR = "CODING_VERIFY_BACKEND"
-DEFAULT_BACKEND = "local"
+DEFAULT_BACKEND = "e2b"
 
 
 class UnknownBackendError(ValueError):

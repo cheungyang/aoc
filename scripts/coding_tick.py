@@ -44,9 +44,11 @@ project_root = _project_root()
 def has_work(ctx) -> bool:
     """Scheduler gate: is there anything a tick could advance?
 
-    True when any project's queue has a runnable task or a review to sync, or
-    holds an expired lease the tick would reclaim. A manifest that cannot be
-    read also counts, so the tick runs and reports it rather than going quiet.
+    True when any project's queue has a runnable task or a review to sync,
+    holds an expired lease the tick would reclaim, or has a deployment still
+    pending (it is checked once per tick until it is live, fails or times out).
+    A manifest that cannot be read also counts, so the tick runs and reports it
+    rather than going quiet.
     """
     from graphs.coding.nodes.scheduler import select_task
     from graphs.coding.utils import manifest as manifest_store
@@ -66,6 +68,9 @@ def has_work(ctx) -> bool:
             queue = manifest.get("queue") or []
             max_concurrency = int(manifest.get("max_concurrency") or 1)
         except Exception:
+            return True
+        # A deployment belongs to no task, so the concurrency bound doesn't apply.
+        if manifest_store.deployment_pending(manifest):
             return True
         for task in queue:
             if task.get("lease_owner") and not manifest_store.lease_is_active(
@@ -190,13 +195,19 @@ def describe_pending(manifest_path: str) -> str:
     import time
 
     from graphs.coding.nodes.scheduler import select_task
-    from graphs.coding.utils.manifest import load_manifest
+    from graphs.coding.utils.manifest import deployment_pending, load_manifest
 
-    queue = load_manifest(manifest_path).get("queue") or []
-    task, route = select_task(queue, handled=[], now=time.time())
-    if task is None:
-        return ""
-    return f"Next tick would run `{task['task_id']}` → {route}."
+    manifest = load_manifest(manifest_path)
+    lines = []
+    if deployment_pending(manifest):
+        deployment = manifest.get("deployment") or {}
+        target = (deployment.get("target_sha") or "")[:7] or "the default branch's head"
+        lines.append(f"Next tick would check the deployment of `{target}` "
+                     f"({deployment.get('backend') or 'deploy'}).")
+    task, route = select_task(manifest.get("queue") or [], handled=[], now=time.time())
+    if task is not None:
+        lines.append(f"Next tick would run `{task['task_id']}` → {route}.")
+    return "\n".join(lines)
 
 
 def get_cache_file_path() -> str:

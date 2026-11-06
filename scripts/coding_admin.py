@@ -7,6 +7,7 @@
     scripts/coding_admin.py [--project NAME] skip TASK_ID
     scripts/coding_admin.py [--project NAME] unblock TASK_ID
     scripts/coding_admin.py [--project NAME] abort TASK_ID [--reason TEXT]
+    scripts/coding_admin.py [--project NAME] redeploy [SHA]
     scripts/coding_admin.py handoff
     scripts/coding_admin.py resume [--force]
 
@@ -106,6 +107,12 @@ def parse_args(argv=None):
     p_abort.add_argument("task_id")
     p_abort.add_argument("--reason", default="")
 
+    p_redeploy = sub.add_parser(
+        "redeploy",
+        help="Check the project's deployment again (of SHA, or of the default branch's head)."
+    )
+    p_redeploy.add_argument("sha", nargs="?", default="")
+
     sub.add_parser(
         "handoff",
         help="Give the queue up: pause ticking here, push unpushed work, sync pkm."
@@ -178,6 +185,9 @@ def main(argv=None) -> int:
 
         elif args.command == "abort":
             print(control.abort(manifest_path, args.task_id, reason=args.reason))
+
+        elif args.command == "redeploy":
+            print(control.redeploy(manifest_path, sha=args.sha or None))
 
     except control.ControlError as e:
         # An operator mistake: say what is wrong, do not print a traceback.

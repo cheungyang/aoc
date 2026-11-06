@@ -1,6 +1,6 @@
 ---
 name: coding_queue_triage
-description: Triages what the coding queues need from you, from the coding_attention findings: a halted task, ticks that stop before claiming any task, or a PR the tick stopped checking. Prepares the fix that is yours to make, posts it with the one decision that is the user's, and applies it when they say go.
+description: Triages what the coding queues need from you, from the coding_attention findings: a halted task, ticks that stop before claiming any task, a failed deployment, or a PR the tick stopped checking. Prepares the fix that is yours to make, posts it with the one decision that is the user's, and applies it when they say go.
 ---
 ## When to Use
 Your `coding-queue-triage` schedule runs with `<findings source="coding_attention">`: the items new since your last successful check, then the ones still open. Also when the user replies to one of those posts, or asks what happened to a coding task.
@@ -17,11 +17,12 @@ Your `coding-queue-triage` schedule runs with `<findings source="coding_attentio
 | `review_budget` | Fold the pending review feedback into a new spec version, then re-queue the task | the feedback conflicts with what the spec is for |
 | `halt` · `verification` (its tests failed 3 times; the output is in the last error) | In a new spec version: tighten the acceptance criteria, add the `dependencies` the code imports from (the most common cause), fix `allowed_files`, or split the task. Then re-queue | the failure shows the design itself is wrong |
 | `halt` · `llm` (its budget ran out, no feedback) | Same as `verification`. The reason may have been overwritten, so read the PR or branch first | same as `verification` |
-| `halt` · `environment` | Fix `setup_command` or `verification_command`, then re-queue. `setup_command` stays idempotent and non-interactive; `verification_command` stays a pure test run, with no install in it. Never change the spec: the code isn't what failed | it needs secrets, system packages or a sandbox template |
-| `halt` · `config` | Fix the manifest field, such as a missing `verification_command`, then re-queue | it needs a tool or permission grant, the notes are missing, or it pushed to the default branch |
+| `halt` · `environment` | Fix `setup_command` or `verification_command`, then re-queue. `setup_command` stays idempotent, non-interactive and install-only: a setup that "changed or created files that are not ignored" in the E2B sandbox scaffolds or rewrites `package.json`, so make it `npm ci` (or the project's equivalent) and commit what it generated. `verification_command` stays a pure test run, with no install in it. Never change the spec: the code isn't what failed | it needs secrets, system packages, more memory (exit 137) or a sandbox template |
+| `halt` · `config` | Fix the manifest field, such as a missing `verification_command`, then re-queue | it needs a tool or permission grant, the notes are missing, it pushed to the default branch, or "the `e2b` verify backend isn't set up on this host" (the host needs its E2B key: `scripts/coding_e2b_check.py` says what's missing) |
 | `halt` · `privacy` | A new spec version that requires made-up data only, then re-queue once | it's the task's second privacy halt |
 | `halt` · `git`, `github`, `infra` | Re-queue once, if it reads as transient | otherwise always: you can't fix infrastructure |
 | `tick_error` | Nothing you can fix: name the cause in one line (credentials, repository access, the tool roster) | always |
+| `deploy_failed` (the project's deployment; its error kind is `deploy`, `config` or `infra`) | Read the log link. A build or test failure in the deploy workflow is a code problem: prepare a spec for a fix task, to queue when the user says go. A `config` error is a manifest field: prepare the `deploy` block change. The next merge deploys again | the workflow, the Pages settings or the hosting needs changing, or it's `infra`: always. Tell the user `scripts/coding_admin.py --project <project> redeploy` checks it again once fixed |
 | `review_dormant` | Remind the user: the PR, how long it has waited, what waits behind it. Ask them to tell you once they've reviewed it on GitHub | never: the reminder is the message |
 
 ## Applying a Fix
@@ -30,8 +31,9 @@ Only after the user says go:
 - One `filesystem` `replace_block` on that task's entry in `pkm/wiki/software/<project>/build_request.json`. Read the entry first and copy the lines you change exactly. If the tick changed them since, the block won't match and the edit fails: read it again.
   - To re-queue: `"status": "queued"`, `"attempts": {}`, `"last_error": null` (what a retry through `scripts/coding_admin.py` writes), plus what the fix changes: `spec_path`, `setup_command`, `verification_command`, `allowed_files`, `dependencies`. In the same edit, add one to `planner_fixes`: `{"count": 1, "log": ["2026-11-03 17:10 · folded the review into spec v2, re-queued"]}`.
   - For a PR the user has reviewed: `"poll_until": null`, so the next tick reads their decision off GitHub.
+- For a `deploy_failed` `config` error: one `replace_block` on the manifest's top-level `deploy` block. Never edit `deployment`: the graph owns it, and the next merge or the user's `redeploy` asks again.
 - Never `overwrite` `build_request.json`: rewriting the whole file from an earlier read loses the tick's writes.
-- Everything else is the user's, through `scripts/coding_admin.py`: rewinding a task to an earlier stage, reset, abort and skip.
+- Everything else is the user's, through `scripts/coding_admin.py`: rewinding a task to an earlier stage, reset, abort, skip and redeploy.
 
 ## The Message
 One message per run, never one per item:
