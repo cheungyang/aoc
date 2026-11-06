@@ -5,7 +5,7 @@
   "emoji": "🌷",
   "tools": {
     "filesystem": {
-      "pkm/vault/wallets/aila/": [
+      "pkm/vault/wallets/ayla/": [
         "@write"
       ]
     }

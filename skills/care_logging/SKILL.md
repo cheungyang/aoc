@@ -21,4 +21,4 @@ Call load_skill with care_logging for the Reference section with tool requiremen
 ## Reference
 
 ### Required Tools
-- `filesystem`: To `read` and `append` to `pkm/vault/wallets/aila/health_log.md` and `milestones.md`.
+- `filesystem`: To `read` and `append` to `pkm/vault/wallets/ayla/health_log.md` and `milestones.md`.
