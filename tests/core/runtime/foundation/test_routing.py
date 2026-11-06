@@ -166,7 +166,7 @@ class TestLiveRoutingTable(unittest.TestCase):
 
     EXPECTED = {
         "agent-management": "agent-designer",  # Aki: an ordinary specialist, no bot of his own
-        "aila-care": "aila-caretaker",
+        "ayla-care": "ayla-caretaker",
         "content-creation": "content-creator",  # Coco: starts content runs, as Elephant starts coding
         "day-planning": "day-planner",
         "fitness-coach": "fitness-coach",

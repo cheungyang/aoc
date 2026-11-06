@@ -1,7 +1,7 @@
 {
-  "agent_id": "aila-caretaker",
+  "agent_id": "ayla-caretaker",
   "channels": [
-    "aila-care"
+    "ayla-care"
   ],
   "name": "Clara",
   "emoji": "🌷",
