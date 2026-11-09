@@ -604,6 +604,13 @@ class TestPromptDispatch(RunnerCase):
         await runner.run_schedule(self.prompt_spec())
         self.bots.get_channel.assert_called_with("main", "test-channel")
 
+    async def test_channel_owner_lookup_through_the_wildcard(self):
+        """main hosts "*": every channel, whether an agent lists it or not."""
+        self.configs["main"]["channel_hosts"] = ["*"]
+        runner = self.make_runner()
+        await runner.run_schedule(self.prompt_spec())
+        self.bots.get_channel.assert_called_with("main", "test-channel")
+
     async def test_limiter_caps_concurrent_runs(self):
         limiter = ScheduleLimiter(1)
         runner = self.make_runner(limiter=limiter)

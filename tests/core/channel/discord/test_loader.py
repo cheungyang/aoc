@@ -262,5 +262,32 @@ class TestBotsLoader(unittest.TestCase):
         found = loader.get_channel("main", channel_name="222")
         self.assertEqual(found, mock_ch_day_planning)
 
+    @patch('core.channel.discord.loader.AgentsLoader')
+    def test_get_channel_with_the_wildcard_finds_any_channel(self, mock_agents_loader):
+        """main hosts "*": every channel, whether an agent lists it or not."""
+        loader = BotsLoader()
+
+        mock_agents = MagicMock()
+        mock_agents_loader.return_value = mock_agents
+        mock_agent = MagicMock()
+        mock_agent.get_config.return_value = ["*"]
+        mock_agents.get_agent.return_value = mock_agent
+
+        channels = []
+        for channel_id, name in enumerate(("lounge", "day-planning", "general")):
+            channel = MagicMock()
+            channel.name, channel.id = name, channel_id
+            channels.append(channel)
+        mock_guild = MagicMock()
+        mock_guild.text_channels = channels
+        mock_bot_runner = MagicMock()
+        mock_bot_runner.bot.guilds = [mock_guild]
+        loader._bots = {"main": mock_bot_runner}
+
+        self.assertEqual(loader.get_channel("main", channel_name="day-planning"), channels[1])
+        self.assertEqual(loader.get_channel("main", channel_name="#lounge"), channels[0])
+        self.assertEqual(loader.get_channel("main"), channels[0])  # the first one the server has
+        self.assertIsNone(loader.get_channel("main", channel_name="nowhere"))
+
 if __name__ == '__main__':
     unittest.main()

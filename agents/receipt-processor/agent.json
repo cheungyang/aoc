@@ -8,6 +8,10 @@
   "emoji": "🧾",
   "description": "Extracts itemized data from receipt snapshots and maintains structured monthly ledgers.",
   "model": "FLASH_LITE",
+  "proactivity": {
+    "interests": ["purchases the user mentions", "returns and refunds"],
+    "offers": ["ask for the receipt"]
+  },
   "tools": {
     "ledger_append": {},
     "filesystem": {

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from core.loaders.agents_loader import AgentsLoader
+from core.loaders.channel_hosts import hosts
 from core.runtime.history.channel_posts import reply_sessions
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.commands.spoken.words import alias_key
@@ -35,7 +36,7 @@ class _Loader:
         return self.configs.get(agent_id)
 
     def hosts_channel(self, agent_id, channel):
-        return channel in (self.configs.get(agent_id) or {}).get("channel_hosts", [])
+        return hosts((self.configs.get(agent_id) or {}).get("channel_hosts"), channel)
 
     def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
         return sorted(a for a, c in self.configs.items()
@@ -44,7 +45,7 @@ class _Loader:
 
 SMALL = {
     "main": {"name": "Concierge", "channels": ["*"], "tools": {"agent_call": {}},
-             "channel_hosts": ["general", "day-planning", "aoc-debug"]},
+             "channel_hosts": ["general", "day-planning", "lounge"]},
     "day-planner": {"name": "Daisy", "channels": ["day-planning", "general"]},
     "helper": {"name": "Helper", "channels": ["general"]},
 }
@@ -138,23 +139,32 @@ class TestDirectoryRules(unittest.TestCase):
     def test_targets_are_the_voice_hosts_channels(self):
         directory = FocusDirectory.build(_Loader(SMALL), voice_host="main")
         self.assertEqual({k: t.agent_id for k, t in directory.targets.items()},
-                         {"general": "main", "day-planning": "day-planner", "aoc-debug": "main"})
+                         {"general": "main", "day-planning": "day-planner", "lounge": "main"})
         self.assertEqual(directory.homes, {"day-planner": "day-planning"})  # Helper has no channel of its own
 
+    def test_a_wildcard_host_has_a_focus_for_every_channel_an_agent_lists(self):
+        """The live Concierge hosts "*", every channel, but a list holds only the
+        channels agents list: #lounge, which none does, has no focus."""
+        configs = dict(SMALL, main={**SMALL["main"], "channel_hosts": ["*"]})
+        directory = FocusDirectory.build(_Loader(configs), voice_host="main")
+        self.assertEqual({k: t.agent_id for k, t in directory.targets.items()},
+                         {"day-planning": "day-planner", "general": "main"})
+        self.assertTrue(directory.targets["general"].is_lobby)
+
     def test_a_channel_the_concierge_answers_is_spoken_of_by_its_name(self):
-        """No live channel but the lobby is like this since #aoc-debug left; the
-        phrasing still has to hold for one that comes back."""
+        """No live channel but the lobby is like this; the phrasing still has to
+        hold for a channel the concierge answers itself."""
         directory = FocusDirectory.build(_Loader(SMALL), voice_host="main")
-        focus = directory.targets["aoc-debug"]
-        self.assertEqual(directory.greeting(focus), "You're in aoc debug.")
-        self.assertEqual(directory.role(focus), "aoc debug")
-        self.assertEqual(directory.already(focus), "You're already in aoc debug.")
-        self.assertEqual(directory.words_to_switch(focus), "switch to aoc debug")
+        focus = directory.targets["lounge"]
+        self.assertEqual(directory.greeting(focus), "You're in lounge.")
+        self.assertEqual(directory.role(focus), "lounge")
+        self.assertEqual(directory.already(focus), "You're already in lounge.")
+        self.assertEqual(directory.words_to_switch(focus), "switch to lounge")
 
     def test_the_lobby_channel_can_be_configured(self):
-        directory = FocusDirectory.build(_Loader(SMALL), voice_host="main", lobby_channel="#AOC-Debug")
-        self.assertEqual(directory.lobby.key, "aoc-debug")
-        self.assertTrue(directory.targets["aoc-debug"].is_lobby)
+        directory = FocusDirectory.build(_Loader(SMALL), voice_host="main", lobby_channel="#Lounge")
+        self.assertEqual(directory.lobby.key, "lounge")
+        self.assertTrue(directory.targets["lounge"].is_lobby)
         self.assertFalse(directory.targets["general"].is_lobby)
 
     def test_a_lobby_exists_even_when_configs_cant_be_read(self):

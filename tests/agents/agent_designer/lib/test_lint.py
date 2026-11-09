@@ -340,12 +340,21 @@ class TestChannelsAndVoices(LintRepo):
 
     def setUp(self):
         super().setUp()
-        self.other("main", {"channels": ["*"], "channel_hosts": ["general", "day-planning", "note-taking"]})
+        self.other("main", {"channels": ["*"], "channel_hosts": ["general", "day-planning", "note-taking"],
+                            "shared_channels": ["general"]})
         self.other("day-planner", {"channels": ["day-planning", "general"], "voice": {"name": "en-US-Chirp3-HD-Zephyr"}})
         self.file(lint.ROUTING_TABLE_TEST, self.TABLE)
 
     def other(self, agent_id, config):
         self.file(f"agents/{agent_id}/agent.json", json.dumps({"agent_id": agent_id, "name": agent_id, **config}))
+
+    def agent(self, config=None, **files):
+        """With a peer card when it has channels: these tests are about channels and
+        voices (TestPeerCards has the cards)."""
+        config = dict(config or {})
+        if config.get("channels"):
+            config.setdefault("proactivity", TestPeerCards.CARD)
+        super().agent(config, **files)
 
     def test_a_channel_the_concierge_does_not_host(self):
         self.agent({"channels": ["note-keeping"], "voice": self.PUCK})
@@ -360,8 +369,31 @@ class TestChannelsAndVoices(LintRepo):
             '#note-taking goes to test-agent now: set `"note-taking": "test-agent"` in TestLiveRoutingTable.EXPECTED '
             '(tests/core/runtime/foundation/test_routing.py)'])
 
-    def test_joining_another_agents_channel_changes_its_entry(self):
+    def test_a_concierge_hosting_every_channel_hosts_a_new_one(self):
+        """The live concierge hosts "*", every channel: a new channel needs
+        only its line in the routing table."""
+        self.other("main", {"channels": ["*"], "channel_hosts": ["*"], "shared_channels": ["general"]})
+        self.agent({"channels": ["note-keeping"], "voice": self.PUCK})
+        self.assertEqual(self.found(), [(
+            "routing_table_stale",
+            '#note-keeping goes to test-agent now: set `"note-keeping": "test-agent"` in '
+            'TestLiveRoutingTable.EXPECTED (tests/core/runtime/foundation/test_routing.py)',
+            f"agents/{self.AGENT}/agent.json")])
+
+    def test_joining_another_agents_channel_leaves_it_without_an_agent(self):
+        """Neither would answer it: the concierge would flag every message there."""
         self.agent({"channels": ["Day-Planning"], "voice": self.PUCK})
+        self.assertEqual(self.found(), [(
+            "channel_unmapped",
+            "#day-planning is also listed by day-planner, so no single agent answers it and the concierge flags "
+            "every message there as not set up: keep it in one agent's `channels`, or add it to `shared_channels` "
+            "in agents/main/agent.json", f"agents/{self.AGENT}/agent.json")])
+
+    def test_a_channel_the_concierge_shares_may_have_several_agents(self):
+        """Then the routing table pins it to the concierge, as it does #general."""
+        self.other("main", {"channels": ["*"], "channel_hosts": ["*"], "shared_channels": ["general", "day-planning"]})
+        self.agent({"channels": ["day-planning"], "voice": self.PUCK})
+        self.assertEqual(self.found("channel_unmapped"), [])
         self.assertEqual(self.messages("routing_table_stale"), [
             '#day-planning goes to the concierge now: set `"day-planning": None` in TestLiveRoutingTable.EXPECTED '
             '(tests/core/runtime/foundation/test_routing.py)'])
@@ -401,6 +433,50 @@ class TestChannelsAndVoices(LintRepo):
         os.remove(os.path.join(self.root, "agents", "main", "agent.json"))
         self.agent({"channels": ["note-keeping"]})
         self.assertEqual(self.found(), [])
+
+
+class TestPeerCards(LintRepo):
+    """The agent's peer card, its `proactivity` interests and offers (core/proactive/cards.py)."""
+
+    CARD = {"interests": ["trips"], "offers": ["activity ideas"]}
+
+    def test_an_agent_with_a_channel_of_its_own_needs_a_card(self):
+        self.agent({"channels": ["note-taking"]})
+        self.assertEqual(self.found(), [(
+            "card_missing",
+            "no peer card: the Switchboard reads the description instead, and the Governor lets any offer through; "
+            "write `proactivity` interests and offers (agent_creation: Peer Card)", f"agents/{self.AGENT}/agent.json")])
+        self.agent({"channels": ["note-taking"], "proactivity": self.CARD})
+        self.assertEqual(self.found(), [])
+
+    def test_half_a_card(self):
+        self.agent({"channels": ["note-taking"], "proactivity": {"interests": ["trips"], "follow_ups": False}})
+        self.assertEqual(self.messages("card_format"), [
+            "`proactivity` has interests but no offers, so the card is built from the description and the interests "
+            "are never read"])
+        self.agent({"channels": ["note-taking"], "proactivity": {"offers": ["activity ideas"]}})
+        self.assertEqual(self.messages("card_format"), [
+            "`proactivity` has offers but no interests, so the Switchboard sees nothing the agent wants to hear about"])
+
+    def test_workers_and_stateless_agents_get_no_card(self):
+        """As card_for decides; only the follow-up opt-out means anything on them."""
+        for config in ({}, {"channels": ["*"]}, {"channels": ["note-taking"], "stateless": True}):
+            with self.subTest(config=config):
+                self.agent({**config, "proactivity": {"follow_ups": False}})
+                self.assertEqual(self.found(), [])
+                self.agent({**config, "proactivity": self.CARD})
+                self.assertEqual(self.messages("card_format"), [
+                    "`proactivity` lists interests or offers, but the agent gets no card (no channel of its own, or "
+                    "stateless), so nothing reads them"])
+        self.assertFalse(lint.gets_card("script-executor", {"channels": ["general"]}))
+        self.assertTrue(lint.gets_card("note-taker", {"channels": ["note-taking"]}))
+
+    def test_a_card_stays_short(self):
+        """Every card is in every decision's prompt."""
+        self.agent({"channels": ["note-taking"], "proactivity": {
+            "interests": ["a", "b", "c", "d", "e"], "offers": ["o" * lint.CARD_PHRASE_CHARS, "p" * 49]}})
+        self.assertEqual(self.messages("over_budget"), [
+            "card has 5 interests (cap 4)", f"card offer '{'p' * 49}' is 49 chars (cap 48)"])
 
 
 class TestDenyKeys(LintRepo):
@@ -748,16 +824,28 @@ def thing(action: str = "search", other: str = "x"):
 class TestRealRepo(unittest.TestCase):
 
     def test_every_agent_lints(self):
-        """And the grant, channel, voice and persona checks find nothing: the real agents keep those rules
-        (the config tests check the first three)."""
+        """And the grant, channel, voice, persona and card checks find nothing: the real agents keep those
+        rules (the config tests check the first three, and test_live_cards pins the cards)."""
         mirrored = {"redundant_grant", "channel_not_hosted", "routing_table_stale", "voice_missing", "unknown_voice",
-                    "voice_taken", "persona_format"}
+                    "voice_taken", "persona_format", "card_missing", "card_format"}
         reports = lint.lint_agents(measure_schemas=False)
         self.assertEqual([r.agent_id for r in reports], lint.agent_ids())
         for report in reports:
             with self.subTest(agent=report.agent_id):
                 self.assertTrue(report.render().startswith(report.agent_id))
                 self.assertEqual([f for f in report.findings if f.kind in mirrored], [])
+
+    def test_cards_go_to_the_agents_the_proactive_team_gives_them(self):
+        """gets_card reads the configs the way card_for does (core/proactive/cards.py)."""
+        from core.loaders.agents_loader import AgentsLoader
+        from core.proactive.cards import cards
+
+        carded = set()
+        for agent_id in lint.agent_ids():
+            with open(os.path.join(lint.PROJECT_ROOT, "agents", agent_id, "agent.json"), encoding="utf-8") as f:
+                if lint.gets_card(agent_id, json.load(f)):
+                    carded.add(agent_id)
+        self.assertEqual(carded, set(cards(AgentsLoader())))
 
     def test_the_routing_table_is_read_where_the_tests_keep_it(self):
         """TestLiveRoutingTable pins what channel_routes computes from the configs."""

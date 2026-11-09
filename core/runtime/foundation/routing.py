@@ -6,10 +6,13 @@ this?" has one possible answer, and asking a model to produce it costs two
 round-trips and can still be wrong. This module answers it from configuration.
 
 Routing is deterministic only. A message in a channel with one agent goes to
-that agent; a message in a channel several agents share (#general) gets a fixed
-line from the host, also without a model call. Having a model guess the agent
-there was retired: nearly every message is typed in its agent's own channel,
-and #general is used for commands.
+that agent. A message in a channel the host shares on purpose (its
+`shared_channels`: #general) gets a fixed line from the host, also without a
+model call. Having a model guess the agent there was retired: nearly every
+message is typed in its agent's own channel, and #general is used for commands.
+Any other channel without exactly one agent -- one nobody lists, or one several
+agents list -- isn't set up, and the host says so (`UNMAPPED`) instead of going
+quiet.
 
 A message that calls another agent by name -- "Ted, create a syllabus on THIS
 topic" in #pkm-wiki, "Daisy, ..." in #general -- is a hand-off: it goes to
@@ -22,8 +25,9 @@ of (prompt, context, config) so the routing table is something a test can pin.
 channel rather than a message, for the voice focus and the channel inbox.
 """
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from core.loaders.channel_hosts import hosts, shared_channels
 from core.runtime.foundation.addressing import addressed_agent, aliases_for
 
 Prompt = Union[str, list]
@@ -33,6 +37,7 @@ DIRECT_CALL = "direct_call"   # the channel's one agent answers, no model on the
 CONCIERGE = "concierge"       # the executing agent answers, with its own model
 FIXED = "fixed"               # the host answers with a fixed line, no model at all
 HANDOFF = "handoff"           # the agent the message names answers, in its own channel
+UNMAPPED = "unmapped"         # the host says the channel isn't set up, no model at all
 
 # `ExecutionContext.source` of turns addressed to the agent running them: a
 # delegation (`tool`), a job, a scheduled run, a graph's worker. Such a turn is
@@ -55,13 +60,15 @@ class RouteDecision:
     `reason` exists for logs and tests: when routing is wrong, the useful
     question is which rule fired, and reconstructing that from the target alone
     is guesswork. `channel` is where a hand-off continues: the named agent's
-    home channel.
+    home channel. `candidates` are the agents that list a channel that isn't
+    set up (none, or several), for the notice that says so.
     """
     target: str
     agent_id: Optional[str] = None
     prompt: Prompt = ""
     reason: str = ""
     channel: Optional[str] = None
+    candidates: Tuple[str, ...] = ()
 
     @property
     def is_direct(self) -> bool:
@@ -107,7 +114,9 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
     `ExecutionContext.source`; the default asks about a message posted in the
     channel, as the voice focus and the channel inbox do. A message calling
     another agent by name goes to that agent's home channel, ahead of the other
-    rules.
+    rules. Then: the channel's one agent; the fixed line in a channel the host
+    shares on purpose (`shared_channels` in its config); else the channel isn't
+    set up.
     """
     if not routing_enabled(agent_id, channel_name, agent_config, loader, source=source):
         return RouteDecision(CONCIERGE, prompt=prompt, reason="routing not enabled for this agent/channel")
@@ -125,7 +134,15 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
             reason=f"sole eligible agent in #{channel_name}",
         )
 
-    return RouteDecision(FIXED, prompt=prompt, reason=f"{len(eligible)} eligible agents in #{channel_name}")
+    if channel_name.lstrip("#").lower() in shared_channels(agent_config):
+        return RouteDecision(FIXED, prompt=prompt, reason=f"{len(eligible)} eligible agents in #{channel_name}")
+
+    return RouteDecision(
+        UNMAPPED,
+        prompt=prompt,
+        reason=f"{len(eligible)} eligible agents in #{channel_name}, which isn't shared",
+        candidates=tuple(eligible),
+    )
 
 
 def _handoff(prompt: Prompt, host_id: str, channel_name: str, eligible: List[str],
@@ -187,16 +204,13 @@ def home_channel(agent_id: str, loader: Any) -> Optional[str]:
 # --- who answers a channel, for the voice focus and the channel inbox ---------------
 
 def channel_hosts_for(channel_name: str, loader: Any) -> List[str]:
-    """Agent ids whose `channel_hosts` include `channel_name`, in loader order."""
+    """Agent ids that host `channel_name`, in loader order: their `channel_hosts`
+    names it, or is `["*"]`, every channel (core/loaders/channel_hosts.py)."""
     target = str(channel_name or "").lstrip("#").lower()
     if not target:
         return []
-    hosts = []
-    for agent_id in loader.list_agent_ids():
-        config = loader.get_agent_config(agent_id) or {}
-        if target in [str(h).lower() for h in (config.get("channel_hosts") or [])]:
-            hosts.append(agent_id)
-    return hosts
+    return [agent_id for agent_id in loader.list_agent_ids()
+            if hosts((loader.get_agent_config(agent_id) or {}).get("channel_hosts"), target)]
 
 
 def answering_agent(host_id: str, channel: str, loader: Any) -> str:
@@ -204,7 +218,7 @@ def answering_agent(host_id: str, channel: str, loader: Any) -> str:
 
     The policy typed messages follow (`decide`), so voice and the channel inbox
     can't drift from them: the sole eligible agent, else the host itself, with
-    its fixed line.
+    its fixed line in a shared channel and its notice in one that isn't set up.
     """
     decision = decide(
         prompt="",

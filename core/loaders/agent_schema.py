@@ -6,7 +6,8 @@ load time puts the error next to the mistake. Without it, a mistyped skill id,
 thinking level or voice would be silently ignored, and the agent would simply
 be a little worse at its job with nothing to say why.
 
-Checked here: the set of top-level keys, `skills`, `thinking` and `voice`.
+Checked here: the set of top-level keys, `skills`, `thinking`, `voice`,
+`proactivity` and `shared_channels`.
 Schedules have their own validator (core.scheduler.registry), which rejects
 entries one at a time; tool grants are resolved by ToolsLoader.
 
@@ -41,6 +42,7 @@ KNOWN_KEYS = frozenset({
     "stateless",
     "channels",
     "channel_hosts",
+    "shared_channels",
     "discord_token_key",
     "memory_topics",
     "proactivity",
@@ -58,9 +60,11 @@ THINKING_SURFACES = tuple(THINKING_BY_SURFACE)
 VOICE_KEYS = frozenset({"name", "rate"})
 # The agent's peer card for the proactive team (core/proactive/cards.py): what
 # it wants to hear about and what it can offer. Without the block, the card is
-# derived from `description` and `memory_topics`.
+# derived from `description` and `memory_topics`. `follow_ups: false` opts the
+# agent out of the follow_up tool (core/loaders/tools_loader.py gets_follow_up).
 PROACTIVITY_LISTS = ("interests", "offers")
-PROACTIVITY_KEYS = frozenset(PROACTIVITY_LISTS)
+PROACTIVITY_FLAGS = ("follow_ups",)
+PROACTIVITY_KEYS = frozenset(PROACTIVITY_LISTS + PROACTIVITY_FLAGS)
 
 # The voice name's shape. Whether the voice exists is checked against
 # core/channel/voice/foundation/settings.py by the config tests rather than here, because
@@ -149,7 +153,17 @@ def _validate_proactivity(proactivity: Any) -> List[str]:
         value = proactivity.get(key, [])
         if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
             errors.append(f"proactivity.{key} must be a list of short phrases, got {value!r}")
+    for key in PROACTIVITY_FLAGS:
+        if key in proactivity and not isinstance(proactivity[key], bool):
+            errors.append(f"proactivity.{key} must be true or false, got {proactivity[key]!r}")
     return errors
+
+
+def _validate_shared_channels(channels: Any) -> List[str]:
+    """The host's channels where no single agent is expected (core/loaders/channel_hosts.py)."""
+    if not isinstance(channels, list) or not all(isinstance(c, str) and c.strip().lstrip("#") for c in channels):
+        return [f"shared_channels must be a list of channel names, e.g. [\"general\"], got {channels!r}"]
+    return []
 
 
 def validate_agent_config(config: Any, known_skills: Iterable[str]) -> List[str]:
@@ -168,4 +182,6 @@ def validate_agent_config(config: Any, known_skills: Iterable[str]) -> List[str]
         errors.extend(_validate_voice(config["voice"]))
     if "proactivity" in config:
         errors.extend(_validate_proactivity(config["proactivity"]))
+    if "shared_channels" in config:
+        errors.extend(_validate_shared_channels(config["shared_channels"]))
     return errors

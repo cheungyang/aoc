@@ -7,6 +7,10 @@
   "emoji": "🛡️",
   "description": "Executive tactical briefing engine and senior manager sparring partner.",
   "model": "PRO",
+  "proactivity": {
+    "interests": ["work decisions or conflicts", "high-stakes meetings and reviews", "work deadlines"],
+    "offers": ["a sparring session", "prep for a meeting or decision"]
+  },
   "tools": {
     "filesystem": {
       "pkm/vault/journals/google/": [

@@ -22,6 +22,10 @@
   },
   "voice": { "name": "en-US-Chirp3-HD-Charon" },
   "memory_topics": ["finance"],
+  "proactivity": {
+    "interests": ["companies or stocks the user mentions", "industries the user is curious about"],
+    "offers": ["research a ticker", "add to the watchlist"]
+  },
   "schedules": [
     {
       "id": "daily-market-scan",

@@ -91,6 +91,29 @@ class TestProactivity(unittest.TestCase):
         self.assertIn("proactivity: unknown key(s) level", errors(proactivity={"level": "high"}))
         self.assertTrue(errors(proactivity=["inventory"])[0].startswith("'proactivity' must be an object"))
 
+    def test_the_follow_ups_opt_out(self):
+        """Documented in tools_loader.gets_follow_up; rejected, it kept the whole agent from loading."""
+        self.assertEqual(errors(proactivity={"follow_ups": False}), [])
+        self.assertEqual(errors(proactivity={"follow_ups": True, "offers": ["update the inventory"]}), [])
+        self.assertEqual(errors(proactivity={"follow_ups": "no"}),
+                         ["proactivity.follow_ups must be true or false, got 'no'"])
+
+
+class TestSharedChannels(unittest.TestCase):
+    """The host's channels where no single agent is expected (core/loaders/channel_hosts.py)."""
+
+    def test_a_list_of_channel_names(self):
+        self.assertEqual(errors(shared_channels=["general"]), [])
+        self.assertEqual(errors(shared_channels=["#general", "lounge"]), [])
+        self.assertEqual(errors(shared_channels=[]), [])
+
+    def test_anything_else_is_rejected(self):
+        """A bad shape would quietly give #general the not-set-up notice."""
+        for bad in ("general", ["general", 3], [""], ["#"], {"general": True}):
+            with self.subTest(value=bad):
+                [message] = errors(shared_channels=bad)
+                self.assertTrue(message.startswith("shared_channels must be a list of channel names"), message)
+
 
 class TestTopLevel(unittest.TestCase):
 

@@ -14,6 +14,10 @@
         "travel",
         "work"
     ],
+    "proactivity": {
+        "interests": ["trips and days off", "appointments and deadlines", "illness or low energy"],
+        "offers": ["adjust the daily plan", "a reminder in the morning digest"]
+    },
     "name": "Daisy",
     "tools": {
         "day_briefing": {},

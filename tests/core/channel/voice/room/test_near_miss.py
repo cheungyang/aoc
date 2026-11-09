@@ -30,7 +30,7 @@ class _Loader:
 
 DIRECTORY = FocusDirectory.build(_Loader({
     "main": {"name": "Concierge", "channels": ["*"], "tools": {"agent_call": {}},
-             "channel_hosts": ["general", "day-planning", "fitness-coach", "aoc-debug"]},
+             "channel_hosts": ["general", "day-planning", "fitness-coach", "lounge"]},
     "day-planner": {"name": "Daisy", "channels": ["day-planning", "general"],
                     "description": "Plans your day."},
     "fitness-coach": {"name": "Frankie", "channels": ["fitness-coach", "general"],
@@ -43,10 +43,10 @@ class TestPrompt(unittest.TestCase):
     def test_each_target_is_one_line_with_who_answers_and_what_they_do(self):
         lines = target_lines(DIRECTORY).splitlines()
         self.assertEqual(lines, [
-            "aoc-debug | the concierge | #aoc-debug | the aoc debug channel",
             "day-planning | day planner Daisy | #day-planning | Plans your day.",
             "fitness-coach | fitness coach Frankie | #fitness-coach | Curates and tracks home workouts.",
             "general | the concierge | #general | routes you to agents, runs jobs",
+            "lounge | the concierge | #lounge | the lounge channel",
         ])
 
 

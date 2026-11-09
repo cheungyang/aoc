@@ -8,6 +8,10 @@
     "note-taking"
   ],
   "memory_topics": [],
+  "proactivity": {
+    "interests": ["ideas the user wants to think through", "thoughts the user wants to capture"],
+    "offers": ["a sounding-board session", "save it as a note"]
+  },
   "skills": {
     "setup_session": {
       "preload": "full"

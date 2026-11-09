@@ -13,6 +13,7 @@ import discord
 from discord.ext import voice_recv
 
 from core.channel.voice.room import patches
+from core.loaders.channel_hosts import WILDCARD
 
 
 def normalize_channel_name(name: str) -> str:
@@ -39,14 +40,15 @@ DEFAULT_ROOM = "general-voice"
 def voice_rooms(agent_config: Optional[dict]) -> list:
     """The agent's voice rooms, best first: voice_config's `voice_channel`, then
     its `voice_channels`; with neither, `<channel>-voice` for each text channel
-    the agent hosts; with no hosted channel either, DEFAULT_ROOM."""
+    its `channel_hosts` names ("*" names none); with no such channel either,
+    DEFAULT_ROOM."""
     config = agent_config or {}
     voice_config = config.get("voice_config") or {}
     listed = voice_config.get("voice_channels")
     named = [voice_config.get("voice_channel"), *(listed if isinstance(listed, (list, tuple)) else ())]
     rooms = list(dict.fromkeys(str(room).strip() for room in named if room is not None and str(room).strip()))
     if not rooms:
-        rooms = [f"{channel}-voice" for channel in config.get("channel_hosts", [])]
+        rooms = [f"{channel}-voice" for channel in config.get("channel_hosts", []) if channel != WILDCARD]
     return rooms or [DEFAULT_ROOM]
 
 

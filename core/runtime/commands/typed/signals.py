@@ -17,12 +17,18 @@
                                       of the posts and how fast they came
     !signals why <message link>       the decision behind a team radio line, or
                                       behind a proactive post
+    !signals cards                    every teammate's card, as the Switchboard
+                                      reads it: where it posts, what it wants to
+                                      hear about, what it can offer
 
 Read from the Board (core/storage/signals.py), with no model. A label here is
 the same as a ✅/❌ on team radio: it counts toward acceptance at once, in
 place of the route's outcome, and it writes a line in main's memory log
 (core/knowledge/memory/outcomes.py). Dropped routes were never offered, so
-they take no label, and neither do closes.
+they take no label, and neither do closes. The cards aren't on the Board: they
+are built from each agent's agent.json (core/proactive/cards.py), and the
+Discord runner passes them in (`TypedContext.peer_cards`). This is the one
+place that shows the whole team at once.
 """
 import asyncio
 import re
@@ -33,6 +39,7 @@ from typing import Any, Dict, List, Optional
 
 from core.knowledge.memory.outcomes import REASONS, missed_line, record_outcome, route_line
 from core.runtime.commands.base import ChannelCommand, TypedContext
+from core.runtime.commands.ports import PeerCards
 from core.storage.signals import (
     APPROVED,
     DECLINED,
@@ -359,8 +366,25 @@ def why_text(store: SignalStore, link: str) -> str:
     return trace_text(store, found["decision_id"])
 
 
-def signals_text(args: str, store: Optional[SignalStore] = None) -> str:
-    """The reply to `!signals <args>` (module docstring)."""
+def cards_text(team: Optional[Dict[str, Any]]) -> str:
+    """Every teammate's card (core/proactive/cards.py), by agent id: a count of the
+    written ones and the ones built from a description, then each as the Switchboard
+    reads it. None: whoever ran the command passed no cards in."""
+    if team is None:
+        return "The teammates' cards aren't available here."
+    if not team:
+        return "No teammate has a card."
+    derived = sum(1 for card in team.values() if card.derived)
+    lines = [f"**Teammates' cards:** {len(team)} · {len(team) - derived} written · {derived} built from a "
+             "description (any offer is accepted)"]
+    lines += [team[agent_id].text() for agent_id in sorted(team)]
+    lines.append("A card is written in its agent's agent.json, under `proactivity`.")
+    return "\n".join(lines)
+
+
+def signals_text(args: str, store: Optional[SignalStore] = None, peer_cards: Optional[PeerCards] = None) -> str:
+    """The reply to `!signals <args>` (module docstring). `peer_cards` gives the
+    teammates' cards, for `!signals cards`."""
     store = store or SignalStore()
     words = (args or "").split(maxsplit=2)
     if not words:
@@ -372,6 +396,8 @@ def signals_text(args: str, store: Optional[SignalStore] = None) -> str:
         return missed_text(store, (args or "").split(maxsplit=1)[1] if len(words) > 1 else "")
     if head == "why":
         return why_text(store, words[1] if len(words) > 1 else "")
+    if head == "cards":
+        return cards_text(peer_cards() if peer_cards else None)
     if head.isdigit():
         decision_id = int(head)
         if len(words) == 1:
@@ -384,9 +410,10 @@ def signals_text(args: str, store: Optional[SignalStore] = None) -> str:
 
 class SignalsCommand(ChannelCommand):
     name = "signals"
-    usage = "[<id> [good | bad <why>] | missed [<what>] | stats | why <link>]"
-    summary = "What the proactive team decided: the latest decisions, one's trace, your labels, and stats."
+    usage = "[<id> [good | bad <why>] | missed [<what>] | stats | why <link> | cards]"
+    summary = ("What the proactive team decided: the latest decisions, one's trace, your labels, and stats; "
+               "and the teammates' cards.")
 
     async def run(self, ctx: TypedContext, args: str) -> None:
-        # The Board and main's memory log are files: read and written off the event loop.
-        await ctx.reply(await asyncio.to_thread(signals_text, args))
+        # The Board, main's memory log and the agents' configs are files: read and written off the event loop.
+        await ctx.reply(await asyncio.to_thread(signals_text, args, None, ctx.peer_cards))

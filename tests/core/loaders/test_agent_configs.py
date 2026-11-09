@@ -52,22 +52,32 @@ class TestCheckedInConfigs(unittest.TestCase):
     def test_one_agent_listens_in_one_voice_channel(self):
         """One voice room for the system; a second bot in it would
         transcribe and answer the same words. The host names the room, and the
-        lobby is a channel it hosts (#general): the room's chat holds no
-        conversation of its own."""
+        lobby is one of the channels it can switch to (#general). The room's
+        chat holds no conversation of its own: no agent lists it, so it is no
+        focus to switch to (and a message typed there hears it isn't set up)."""
+        from core.loaders.channel_hosts import hosted_channels
+
         hosts = [(name, config) for name, config in agent_configs()
                  if (config.get("voice_config") or {}).get("enabled")]
         self.assertEqual([name for name, _ in hosts], ["main"])
         main = hosts[0][1]
+        hosted = hosted_channels(main["channel_hosts"], (config for _, config in agent_configs()))
         voice_channel = main["voice_config"].get("voice_channel")
         self.assertTrue(voice_channel, "voice_config.voice_channel names the one voice room")
-        self.assertIn(main["voice_config"].get("lobby_channel") or "general", main["channel_hosts"])
-        self.assertNotIn(voice_channel, main["channel_hosts"])
+        self.assertIn(main["voice_config"].get("lobby_channel") or "general", hosted)
+        self.assertNotIn(voice_channel, hosted)
 
     def test_only_the_concierge_runs_a_bot(self):
         """No agent has a bot of its own, Aki included: Concierge hosts every
         channel and hands each to its agent, typed or spoken."""
         bots = [name for name, config in agent_configs() if config.get("discord_token_key")]
         self.assertEqual(bots, ["main"])
+
+    def test_only_the_concierge_hosts_channels(self):
+        """It hosts "*", every channel an agent lists, so no agent registers
+        its channel with it (core/loaders/channel_hosts.py)."""
+        hosts = {name: config["channel_hosts"] for name, config in agent_configs() if "channel_hosts" in config}
+        self.assertEqual(hosts, {"main": ["*"]})
 
     def test_every_agent_you_can_switch_to_has_its_own_voice(self):
         """In the one voice room, the voice is how you hear who is answering."""

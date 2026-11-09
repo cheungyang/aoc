@@ -4,8 +4,10 @@ Previously this was `create_react_agent` and nothing else, so every message in
 every channel cost at least one model call on the orchestrator -- including the
 ones whose answer was fixed by configuration. The graph now opens with a
 deterministic `route` step. A channel's one agent gets the turn with no model
-call on the host (`direct_call`); a message in a channel no single agent answers
-gets a fixed line, with no model call at all (`fixed`); a message that calls
+call on the host (`direct_call`); a message in a channel the host shares on
+purpose (#general) gets a fixed line, with no model call at all (`fixed`); a
+message in any other channel without exactly one agent gets a notice that the
+channel isn't set up, also without a model (`unmapped`); a message that calls
 another agent by name goes to that agent in its own channel, with a capsule of
 the conversation it came from (`handoff`); and the ReAct agent runs only for
 turns that are the executing agent's own (`concierge`).
@@ -46,7 +48,7 @@ from core.channel.handoff import agent_named
 from core.runtime.delegation import agent_header, prompt_to_text, safe_dispatch_custom_event, stream_delegate
 from core.runtime.foundation import events
 from core.runtime.foundation.addressing import message_text
-from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, decide, home_channel
+from core.runtime.foundation.routing import CONCIERGE, DIRECT_CALL, FIXED, HANDOFF, UNMAPPED, decide, home_channel
 from core.runtime.history.handoff import SWITCH_CAPSULE_TOKENS, capsule_for, with_capsule
 from core.runtime.history.repeats import unanswered_repeats
 from core.runtime.observability.turn_trace import current_turn_trace
@@ -58,6 +60,14 @@ from core.runtime.observability.turn_trace import current_turn_trace
 UNADDRESSED_TEXT = ("No agent picks up here. Start with an agent's name (\"Daisy, …\"), "
                     "post in their channel, or type `!help`.")
 UNADDRESSED_SPEECH = "Who's it for? Start with their name, like 'Daisy, what's on today?'"
+
+# What the `unmapped` node answers: a message in a channel that isn't set up --
+# no agent lists it, or several do, and it isn't one of the host's
+# `shared_channels`. The notice says what to change. Spoken, the voice says the
+# short line, and the channel still shows the whole notice.
+UNMAPPED_FIX = "or add it to `shared_channels` in agents/main/agent.json."
+UNMAPPED_SPEECH = ("This channel isn't set up yet, so nobody answers here. "
+                   "Start with an agent's name, like 'Daisy, what's on today?'")
 
 # How a capsule's conversation reached the agent it's for, on its tag
 # (`via`) and in the turn ledger (core/proactive/taps.py).
@@ -187,6 +197,30 @@ def fixed_reply(surface: str) -> str:
     return UNADDRESSED_TEXT
 
 
+def _and(items: List[str]) -> str:
+    """Joins names as a sentence does: `a`, `a and b`, `a, b and c`."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def unmapped_reply(channel: str, candidates: Any, surface: str) -> str:
+    """The notice that `channel` isn't set up, as `surface` needs it: no agent
+    lists it, or `candidates` all do, and what to change either way.
+
+    A voice turn also gets the short <speech> line; the channel shows the notice.
+    """
+    where = f"#{channel}" if channel else "This channel"
+    names = [f"`{agent}`" for agent in (candidates or ())]
+    if names:
+        why = (f"{_and(names)} {'list' if len(names) > 1 else 'lists'} it, so no single agent answers. "
+               f"Keep it in one agent's `channels`, {UNMAPPED_FIX}")
+    else:
+        why = f"no agent lists it in its `channels`. Give it to one agent, {UNMAPPED_FIX}"
+    text = f"⚠️ {where} isn't set up: {why}"
+    if surface == "voice":
+        return f"<speech>{UNMAPPED_SPEECH}</speech>\n{text}"
+    return text
+
+
 def handoff_pointer(agent_config: dict, agent_id: str, channel: str) -> str:
     """What the channel a hand-off came from shows: "→ 🔬 Ted has this in #topic-research"."""
     return f"→ {agent_config.get('emoji', '🤖')} {agent_config.get('name', agent_id)} has this in #{channel}"
@@ -246,12 +280,15 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             print(f"[graphs.main] Handing off to '{decision.agent_id}' ({decision.reason})")
         elif decision.target == FIXED:
             print(f"[graphs.main] Fixed line ({decision.reason})")
+        elif decision.target == UNMAPPED:
+            print(f"[graphs.main] ⚠️ Channel not set up ({decision.reason})", file=sys.stderr)
 
         update: Dict[str, Any] = {
             "route": decision.target,
             "route_agent_id": decision.agent_id,
             "route_reason": decision.reason,
             "route_channel": decision.channel,
+            "route_candidates": list(decision.candidates),
         }
         repeats = drop_repeats(messages, ctx)
         if repeats:
@@ -318,6 +355,28 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
         # Streamed as well as returned: the channel would show the reply from
         # the final state anyway, but the voice speaks only what streams.
+        await safe_dispatch_custom_event(
+            events.NODE_STREAM_TOKEN,
+            {"content": reply, "agent_id": (ctx.agent_id if ctx else owner_agent_id)},
+        )
+
+        if ctx is not None:
+            _record_turn(ctx, user_prompt, reply)
+
+        return {"messages": [AIMessage(content=reply)]}
+
+    async def _unmapped(state: Dict[str, Any]) -> Dict[str, Any]:
+        """Says the channel isn't set up: no agent lists it, or several do, and
+        it isn't shared. No model runs; the notice says what to change."""
+        from core.runtime.foundation.context import try_context
+
+        ctx = try_context()
+        messages = state.get("messages") or []
+        user_prompt = messages[-1].content if messages else ""
+        reply = unmapped_reply(ctx.channel_name if ctx else "", state.get("route_candidates") or (),
+                               ctx.get_surface() if ctx else "text")
+
+        # Streamed as well as returned, as the fixed line is: the voice speaks only what streams.
         await safe_dispatch_custom_event(
             events.NODE_STREAM_TOKEN,
             {"content": reply, "agent_id": (ctx.agent_id if ctx else owner_agent_id)},
@@ -401,11 +460,13 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         route_agent_id: Optional[str]
         route_reason: str
         route_channel: Optional[str]
+        route_candidates: List[str]
 
     workflow = StateGraph(RouterState)
     workflow.add_node("route", _decide)
     workflow.add_node(DIRECT_CALL, _direct_call)
     workflow.add_node(FIXED, _fixed)
+    workflow.add_node(UNMAPPED, _unmapped)
     workflow.add_node(HANDOFF, _handoff)
     workflow.add_node(CONCIERGE, _concierge)
 
@@ -413,10 +474,11 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
     workflow.add_conditional_edges(
         "route",
         lambda state: state.get("route") or CONCIERGE,
-        {DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE},
+        {DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, UNMAPPED: UNMAPPED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE},
     )
     workflow.add_edge(DIRECT_CALL, END)
     workflow.add_edge(FIXED, END)
+    workflow.add_edge(UNMAPPED, END)
     workflow.add_edge(HANDOFF, END)
     workflow.add_edge(CONCIERGE, END)
 

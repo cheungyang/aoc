@@ -1,4 +1,5 @@
 from core.loaders.agents_loader import AgentsLoader
+from core.loaders.channel_hosts import hosts, named_channels
 from core.channel.discord.runner import BotRunner
 from core.config.settings import Config
 
@@ -64,16 +65,20 @@ class BotsLoader:
             agent = loader.get_agent(agent_id)
             channel_hosts = agent.get_config("channel_hosts", []) if agent else []
             clean_target = str(channel_name).lstrip("#") if channel_name else None
-            
+
+            def hosted(ch):
+                # By name ("*": every channel), or by an id the agent names (core/loaders/channel_hosts.py).
+                return hosts(channel_hosts, ch.name) or str(ch.id) in named_channels(channel_hosts)
+
             for guild in bot_runner.bot.guilds:
                 for ch in self._get_guild_channels(guild):
                     if channel_name:
                         if self._match_channel(ch, channel_name) and (
-                            ch.name in channel_hosts or str(ch.id) in channel_hosts or (clean_target and clean_target in channel_hosts)
+                            hosted(ch) or (clean_target and hosts(channel_hosts, clean_target))
                         ):
                             return ch
                     else:
-                        if ch.name in channel_hosts or str(ch.id) in channel_hosts:
+                        if hosted(ch):
                             return ch
         return None
 
@@ -83,13 +88,12 @@ class BotsLoader:
         loader = AgentsLoader()
         clean_target = str(channel_name).lstrip("#")
         
-        # 1. Primary: Prefer the bot whose agent lists this channel in channel_hosts
+        # 1. Primary: Prefer the bot whose agent hosts this channel (channel_hosts; "*": every channel)
         for agent_id, bot_runner in self._bots.items():
             if bot_runner and bot_runner.bot:
                 agent = loader.get_agent(agent_id)
                 channel_hosts = agent.get_config("channel_hosts", []) if agent else []
-                if (channel_name in channel_hosts or clean_target in channel_hosts or
-                    any(str(h) == str(channel_name) or str(h) == clean_target for h in channel_hosts)):
+                if hosts(channel_hosts, channel_name) or hosts(channel_hosts, clean_target):
                     for guild in bot_runner.bot.guilds:
                         for ch in self._get_guild_channels(guild):
                             if self._match_channel(ch, channel_name):

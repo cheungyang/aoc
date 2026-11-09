@@ -30,10 +30,15 @@ what would fail, or cost a round trip, at run time:
   its `Agent ID:`, `Name:`, `Emoji:` and `Description:` lines, and AGENTS.md is
   operating instructions, never the design's classification table.
 - What the config tests hold every agent to: filesystem grants that name each
-  bundle once and never spell one out; channels the concierge hosts, pinned in
-  the routing table (tests/core/runtime/foundation/test_routing.py) as the
-  configs route them; and, for an agent the voice room switches to, a Chirp 3
-  HD voice no other agent has. A voice finding lists the free voices.
+  bundle once and never spell one out; channels the concierge hosts, each with
+  one agent unless the concierge shares it, pinned in the routing table
+  (tests/core/runtime/foundation/test_routing.py) as the configs route them;
+  and, for an agent the voice room switches to, a Chirp 3 HD voice no other
+  agent has. A voice finding lists the free voices.
+- The agent's peer card (`proactivity`, core/proactive/cards.py): written for
+  every agent the proactive team gives one, with interests and offers
+  together, short enough for the Switchboard's prompt, and on no agent that
+  gets none.
 - Budgets: persona files against agent_creation's ceilings, preloaded skill
   text against PRELOAD_TOKEN_BUDGET, and the static prompt and tool schemas.
 
@@ -66,6 +71,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from core.loaders.agent_schema import known_skill_ids
+from core.loaders.channel_hosts import hosted_channels, shared_channels
 from core.loaders.skills_loader import PRELOAD_TOKEN_BUDGET, core_section, skill_body
 from core.permissions.denies import DENY_PREFIX, deny_covers, is_deny
 from core.tooling import AgentTool, Report, Rule
@@ -90,14 +96,22 @@ USER_LIMIT = (400, 800)
 PERSONA_TARGET = 3500
 # agent_creation: an agent above ~2000 tokens of static prompt can't run on-device.
 LOCAL_PROMPT_TOKENS = 2000
+# A peer card (core/proactive/cards.py): the Switchboard reads every teammate's card
+# on every decision, so the lists stay short, and so does each phrase.
+CARD_LIMITS = {"interests": 4, "offers": 3}
+CARD_PHRASE_CHARS = 48
+# The one agent with a channel that gets no card: it runs scripts, not a model
+# (SCRIPT_EXECUTOR, core/runtime/agent_factory.py).
+SCRIPT_EXECUTOR = "script-executor"
 
 # Finding kinds, in the order a report lists them.
 KINDS = (
     "phantom_skill", "skill_not_granted", "unknown_tool", "tool_not_granted", "unresolved_bundle",
     "redundant_grant", "malformed_deny", "unknown_action", "action_not_granted", "path_outside_grants",
-    "read_not_granted", "missing_path", "unknown_precondition", "channel_not_hosted", "routing_table_stale",
-    "voice_missing", "unknown_voice", "voice_taken", "workflow_missing", "contract_gap", "rules_mismatch",
-    "unloaded_file", "persona_format", "preload_missing", "over_budget",
+    "read_not_granted", "missing_path", "unknown_precondition", "channel_not_hosted", "channel_unmapped",
+    "routing_table_stale", "voice_missing", "unknown_voice", "voice_taken", "card_missing", "card_format",
+    "workflow_missing", "contract_gap", "rules_mismatch", "unloaded_file", "persona_format", "preload_missing",
+    "over_budget",
 )
 
 # IDENTITY.md's lines, as every agent writes them (agent_creation: Persona Files).
@@ -293,6 +307,7 @@ def lint_agent(agent_id: str, root: str = PROJECT_ROOT, catalog: Optional[Catalo
     routes = live_routes(root)
     findings += _channels(agent_id, root, config, routes)
     findings += _voices(agent_id, root, config, routes)
+    findings += _cards(agent_id, config)
     tools = own_tools(agent_id, root)
     rules, rules_error = load_agent_rules(agent_id, root)
     findings += _contract(agent_id, root, tools, rules, rules_error)
@@ -679,7 +694,8 @@ def _redundant_grants(agent_id: str, root: str, config: Dict[str, Any], skills: 
 
 def channel_routes(hosts: Iterable[Any], channels: Dict[str, Iterable[Any]]) -> Dict[str, Optional[str]]:
     """Each channel the concierge hosts -> the agent it hands it to: the one agent that
-    lists it, or None when several or none do and the concierge answers itself.
+    lists it, or None when several or none do and the concierge answers itself (its
+    fixed line in a shared channel, its not-set-up notice elsewhere).
     `channels` maps every other agent to its `channels`; a worker listing `*` is
     reachable everywhere, so it never counts. Case doesn't matter, as in routing."""
     listed = {agent: {str(c).lower() for c in names} for agent, names in channels.items()}
@@ -694,18 +710,19 @@ def channel_routes(hosts: Iterable[Any], channels: Dict[str, Iterable[Any]]) -> 
 
 def live_routes(root: str = PROJECT_ROOT) -> Optional[Dict[str, Optional[str]]]:
     """channel_routes for the configs under `root`; None without a concierge
-    (agents/main/agent.json) that hosts channels."""
+    (agents/main/agent.json) that hosts channels. Its `channel_hosts` of "*"
+    hosts every channel; the ones config can route are those an agent lists
+    (core/loaders/channel_hosts.py hosted_channels)."""
     main = _read_json(os.path.join(root, "agents", "main", "agent.json"), None)
     hosts = main.get("channel_hosts") if isinstance(main, dict) else None
     if not isinstance(hosts, list):
         return None
-    channels = {}
-    for agent_id in agent_ids(root):
-        config = _read_json(os.path.join(root, "agents", agent_id, "agent.json"), None)
-        names = config.get("channels") if isinstance(config, dict) else None
-        if agent_id != "main" and isinstance(names, list):
-            channels[agent_id] = names
-    return channel_routes(hosts, channels)
+    configs = {agent_id: _read_json(os.path.join(root, "agents", agent_id, "agent.json"), None)
+               for agent_id in agent_ids(root)}
+    configs = {agent_id: config for agent_id, config in configs.items() if isinstance(config, dict)}
+    channels = {agent_id: config["channels"] for agent_id, config in configs.items()
+                if agent_id != "main" and isinstance(config.get("channels"), list)}
+    return channel_routes(hosted_channels(hosts, configs.values()), channels)
 
 
 def routing_table(root: str = PROJECT_ROOT) -> Optional[Dict[str, Any]]:
@@ -728,15 +745,34 @@ def routing_table(root: str = PROJECT_ROOT) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _shared_channels(root: str) -> List[str]:
+    """The concierge's `shared_channels` (agents/main/agent.json): where no single agent is expected."""
+    return shared_channels(_read_json(os.path.join(root, "agents", "main", "agent.json"), None))
+
+
+def _listing(root: str, channel: str, exclude: str) -> List[str]:
+    """The agents other than `exclude` and the concierge that list `channel`; a worker listing `*` never counts."""
+    found = []
+    for other in agent_ids(root):
+        config = _read_json(os.path.join(root, "agents", other, "agent.json"), None)
+        names = config.get("channels") if isinstance(config, dict) else None
+        names = {str(c).lower() for c in names} if isinstance(names, list) else set()
+        if other not in (exclude, "main") and "*" not in names and channel.lower() in names:
+            found.append(other)
+    return found
+
+
 def _channels(agent_id: str, root: str, config: Dict[str, Any],
               routes: Optional[Dict[str, Optional[str]]]) -> List[Finding]:
-    """Each of the agent's channels is hosted by the concierge, and pinned in the
-    routing table as the configs route it now."""
+    """Each of the agent's channels is hosted by the concierge, has this agent as
+    its one agent unless the concierge shares it, and is pinned in the routing
+    table as the configs route it now."""
     names = config.get("channels")
     channels = [c for c in names if isinstance(c, str) and c != "*"] if isinstance(names, list) else []
     if agent_id == "main" or routes is None or not channels:
         return []
     hosted = {channel.lower(): channel for channel in routes}
+    shared = set(_shared_channels(root))
     table = routing_table(root)
     where = f"agents/{agent_id}/agent.json"
     findings = []
@@ -745,6 +781,12 @@ def _channels(agent_id: str, root: str, config: Dict[str, Any],
         if channel is None:
             findings.append(Finding("channel_not_hosted", f"#{name} is not in the concierge's channel_hosts "
                                     "(agents/main/agent.json), so nothing routes it to this agent", where))
+        elif routes[channel] is None and channel.lower() not in shared:
+            others = ", ".join(_listing(root, channel, agent_id)) or "another agent"
+            findings.append(Finding("channel_unmapped", f"#{channel} is also listed by {others}, so no single agent "
+                                    "answers it and the concierge flags every message there as not set up: keep "
+                                    "it in one agent's `channels`, or add it to `shared_channels` in "
+                                    "agents/main/agent.json", where))
         elif table is not None and table.get(channel, _MISSING) != routes[channel]:
             agent = routes[channel]
             line = f'"{channel}": ' + (f'"{agent}"' if agent else "None")
@@ -795,6 +837,59 @@ def _voices(agent_id: str, root: str, config: Dict[str, Any],
         return [Finding("voice_taken", f"`{name}` is already {' and '.join(taken[key])}'s, and every agent needs "
                         f"its own voice; free: {free}", where)]
     return []
+
+
+def gets_card(agent_id: str, config: Dict[str, Any]) -> bool:
+    """Whether the proactive team gives the agent a peer card, as `card_for` decides
+    (core/proactive/cards.py): a channel, and not `*`; and a conversation of its own,
+    so not stateless, and not script-executor, which runs no model."""
+    names = config.get("channels")
+    channels = [str(c).lower() for c in names] if isinstance(names, list) else []
+    return agent_id != SCRIPT_EXECUTOR and bool(channels) and "*" not in channels and not config.get("stateless")
+
+
+def card_problems(agent_id: str, config: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """(kind, message) for each problem with the agent's peer card, its `proactivity`
+    interests and offers: a card it should have and doesn't (`card_missing`), half a
+    card or one nobody reads (`card_format`), and lists or phrases over CARD_LIMITS
+    and CARD_PHRASE_CHARS (`over_budget`)."""
+    block = config.get("proactivity")
+    block = block if isinstance(block, dict) else {}
+    lists = {}
+    for key in CARD_LIMITS:
+        value = block.get(key)
+        lists[key] = [str(p).strip() for p in value if str(p).strip()] if isinstance(value, list) else []
+    interests, offers = lists["interests"], lists["offers"]
+    if not gets_card(agent_id, config):
+        if interests or offers:
+            return [("card_format", "`proactivity` lists interests or offers, but the agent gets no card (no channel "
+                                    "of its own, or stateless), so nothing reads them")]
+        return []
+    problems = []
+    if not offers:
+        if interests:
+            problems.append(("card_format", "`proactivity` has interests but no offers, so the card is built from the "
+                                            "description and the interests are never read"))
+        else:
+            problems.append(("card_missing", "no peer card: the Switchboard reads the description instead, and the "
+                                             "Governor lets any offer through; write `proactivity` interests and "
+                                             "offers (agent_creation: Peer Card)"))
+    elif not interests:
+        problems.append(("card_format", "`proactivity` has offers but no interests, so the Switchboard sees nothing "
+                                        "the agent wants to hear about"))
+    for key, cap in CARD_LIMITS.items():
+        if len(lists[key]) > cap:
+            problems.append(("over_budget", f"card has {len(lists[key])} {key} (cap {cap})"))
+        for phrase in lists[key]:
+            if len(phrase) > CARD_PHRASE_CHARS:
+                problems.append(("over_budget", f"card {key[:-1]} {phrase!r} is {len(phrase)} chars "
+                                                f"(cap {CARD_PHRASE_CHARS})"))
+    return problems
+
+
+def _cards(agent_id: str, config: Dict[str, Any]) -> List[Finding]:
+    where = f"agents/{agent_id}/agent.json"
+    return [Finding(kind, message, where) for kind, message in card_problems(agent_id, config)]
 
 
 def _unloaded_files(agent_dir: str, agent_id: str) -> List[Finding]:

@@ -9,10 +9,12 @@ from typing import List
 from discord.ext import commands
 from core.channel.discord.output import DiscordOutput
 from core.loaders.agents_loader import AgentsLoader
+from core.loaders.channel_hosts import hosts, named_channels
 from core.runtime.commands.base import ControlContext, TypedContext
 from core.runtime.commands.registry import CONTROL, TYPED
 from core.runtime.foundation import events
 from core.runtime.foundation.sessions import SessionManager
+from core.proactive.cards import cards as peer_cards
 from core.scheduler.script_runner import ProjectScripts
 from core.storage.channel_inbox import Via
 from core.channel.discord.reactions import ReactionCallbackHandler
@@ -258,16 +260,18 @@ class BotRunner:
 
     def _hosts(self, channel) -> bool:
         """Whether this bot's agent hosts `channel` (a thread: its parent): its
-        name, its normalized name (general-voice -> general) or its id is in the
-        agent's channel_hosts."""
+        channel_hosts names it -- by name, normalized name (general-voice ->
+        general) or id -- or is "*", every channel with a name. A DM has none,
+        so only its id hosts it (core/loaders/channel_hosts.py)."""
         agent = AgentsLoader().get_agent(self.agent_id)
-        channel_hosts = agent.config.get("channel_hosts", []) if agent else []
+        channel_hosts = agent.config.get("channel_hosts") if agent else None
         channel_id = str(channel.id)
         channel_name = channel.name if hasattr(channel, "name") else ""
         if isinstance(channel, discord.Thread) and channel.parent:
             channel_name = channel.parent.name
         normalized_name = normalize_channel_name(channel_name)
-        return (channel_name in channel_hosts) or (normalized_name in channel_hosts) or (channel_id in channel_hosts)
+        return (hosts(channel_hosts, channel_name) or hosts(channel_hosts, normalized_name)
+                or channel_id in named_channels(channel_hosts))
 
     def _answers(self, message, is_host: bool) -> bool:
         """Whether this bot answers `message`: the host does, unless another bot
@@ -291,6 +295,7 @@ class BotRunner:
             voice=self.voice_manager,
             is_owner=self.bot.is_owner,
             scripts=ProjectScripts(),
+            peer_cards=peer_cards,
         )
         try:
             await TYPED.answer(content, ctx)

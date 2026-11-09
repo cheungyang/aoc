@@ -10,6 +10,10 @@
   "memory_topics": [
     "family"
   ],
+  "proactivity": {
+    "interests": ["Aila's milestones and firsts", "Aila's health, growth and checkups", "changes to Aila's routine"],
+    "offers": ["log a milestone", "log health details"]
+  },
   "tools": {
     "filesystem": {
       "pkm/vault/wallets/ayla/": [

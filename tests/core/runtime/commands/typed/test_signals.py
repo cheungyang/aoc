@@ -1,13 +1,24 @@
-"""`!signals` (core/runtime/commands/typed/signals.py): traces, labels and stats from the Board."""
+"""`!signals` (core/runtime/commands/typed/signals.py): traces, labels and stats from the Board,
+and the teammates' cards."""
 from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
+from core.proactive.cards import PeerCard
 from core.runtime.commands.base import TypedContext
 from core.runtime.commands.registry import TYPED
 from core.runtime.commands.typed import signals as signals_module
-from core.runtime.commands.typed.signals import p95, parse_why, part_of_day, signals_text, span, stats_text, when
+from core.runtime.commands.typed.signals import (
+    cards_text,
+    p95,
+    parse_why,
+    part_of_day,
+    signals_text,
+    span,
+    stats_text,
+    when,
+)
 from core.storage.signals import DecidedClose, SignalStore
 from core.util.local_time import get_local_timezone
 
@@ -276,6 +287,42 @@ def test_anything_else_shows_the_usage(store):
     assert signals_text("loud", store).startswith("Usage: `!signals")
 
 
+def _card(agent_id, home, offers=(), interests=(), description=""):
+    return PeerCard(agent_id=agent_id, name=agent_id.title(), emoji="🤖", home=home, description=description,
+                    interests=tuple(interests), offers=tuple(offers), topics=(), derived=not offers)
+
+
+def test_cards_show_each_teammate_as_the_switchboard_reads_it():
+    team = {
+        "meal-planner": _card("meal-planner", "meal-planning", offers=["update the kitchen inventory"],
+                              interests=["groceries bought"]),
+        "day-planner": _card("day-planner", "day-planning", description="Plans your day."),
+    }
+    lines = cards_text(team).splitlines()
+    assert lines[0] == "**Teammates' cards:** 2 · 1 written · 1 built from a description (any offer is accepted)"
+    assert lines[1:] == [
+        "- day-planner · Day-Planner 🤖 · #day-planning",       # by agent id
+        "  about: Plans your day.",
+        "  can offer: anything within that",
+        "- meal-planner · Meal-Planner 🤖 · #meal-planning",
+        "  wants to hear about: groceries bought",
+        "  can offer: update the kitchen inventory",
+        "A card is written in its agent's agent.json, under `proactivity`.",
+    ]
+
+
+def test_no_cards():
+    assert cards_text({}) == "No teammate has a card."
+    assert cards_text(None) == "The teammates' cards aren't available here."
+
+
+def test_signals_cards_shows_the_cards_it_is_given(store):
+    team = lambda: {"day-planner": _card("day-planner", "day-planning")}  # noqa: E731
+    assert signals_text("cards", store, team).startswith("**Teammates' cards:** 1 · 0 written · 1 built")
+    assert signals_text("cards", store) == "The teammates' cards aren't available here."
+    assert signals_text("loud", store).endswith("| cards]`")
+
+
 @pytest.mark.asyncio
 async def test_the_command_answers_where_the_bot_does(store, monkeypatch):
     monkeypatch.setattr(signals_module, "SignalStore", lambda: store)
@@ -284,3 +331,13 @@ async def test_the_command_answers_where_the_bot_does(store, monkeypatch):
     assert channel.send.await_args.args[0].startswith("No decisions yet.")
     assert await TYPED.answer("!signals", TypedContext(channel=AsyncMock(), agent_id="main",
                                                        answers_here=False)) is None
+
+
+@pytest.mark.asyncio
+async def test_the_command_shows_the_cards_its_runner_passes_in(store, monkeypatch):
+    monkeypatch.setattr(signals_module, "SignalStore", lambda: store)
+    channel = AsyncMock()
+    team = lambda: {"day-planner": _card("day-planner", "day-planning")}  # noqa: E731
+    assert await TYPED.answer("!signals cards", TypedContext(channel=channel, agent_id="main", answers_here=True,
+                                                             peer_cards=team))
+    assert channel.send.await_args.args[0].startswith("**Teammates' cards:** 1 ·")

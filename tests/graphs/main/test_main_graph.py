@@ -21,14 +21,17 @@ from core.runtime.history.handoff import SWITCH_CAPSULE_TOKENS
 from graphs.main.graph import (
     UNADDRESSED_SPEECH,
     UNADDRESSED_TEXT,
+    UNMAPPED_SPEECH,
     create_graph,
     fixed_reply,
     format_output,
     prepare_input,
+    unmapped_reply,
 )
 
-# The Concierge's shape: reachable everywhere, owning no channel, holding no tools.
-ORCHESTRATOR = {"agent_id": "main", "channels": ["*"], "tools": {}}
+# The Concierge's shape: reachable everywhere, owning no channel, holding no
+# tools, and sharing #general on purpose.
+ORCHESTRATOR = {"agent_id": "main", "channels": ["*"], "tools": {}, "shared_channels": ["general"]}
 
 
 @contextmanager
@@ -99,6 +102,31 @@ class TestFixedReply(unittest.TestCase):
         """Spoken, "…" is only a pause, so the example is a whole sentence."""
         self.assertIn("'Daisy, what's on today?'", UNADDRESSED_SPEECH)
         self.assertNotIn("…", UNADDRESSED_SPEECH)
+
+
+class TestUnmappedReply(unittest.TestCase):
+    """What a message gets in a channel that isn't set up: what's wrong, and what to change."""
+
+    def test_a_channel_nobody_lists(self):
+        self.assertEqual(unmapped_reply("random", (), "text"),
+                         "⚠️ #random isn't set up: no agent lists it in its `channels`. Give it to one agent, "
+                         "or add it to `shared_channels` in agents/main/agent.json.")
+
+    def test_a_channel_several_agents_list_names_them(self):
+        self.assertEqual(unmapped_reply("dinner", ("day-planner", "meal-planner"), "text"),
+                         "⚠️ #dinner isn't set up: `day-planner` and `meal-planner` list it, so no single agent "
+                         "answers. Keep it in one agent's `channels`, or add it to `shared_channels` in "
+                         "agents/main/agent.json.")
+        self.assertIn("`a`, `b` and `c` list it", unmapped_reply("x", ("a", "b", "c"), "text"))
+
+    def test_spoken_the_voice_says_the_short_line_and_the_channel_shows_the_notice(self):
+        response = AgentResponse.from_string(unmapped_reply("random", (), "voice"))
+        self.assertEqual(response.speech, UNMAPPED_SPEECH)
+        self.assertEqual(response.text, unmapped_reply("random", (), "text"))
+        self.assertIn("'Daisy, what's on today?'", UNMAPPED_SPEECH)
+
+    def test_a_turn_with_no_channel(self):
+        self.assertTrue(unmapped_reply("", (), "text").startswith("⚠️ This channel isn't set up"))
 
 
 class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
@@ -191,6 +219,37 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         spoken = f"<speech>{UNADDRESSED_SPEECH}</speech>"
         self.assertEqual(state["messages"][-1].content, spoken)
         self.assertEqual(dispatch.await_args.args[1]["content"], spoken)
+
+    async def test_a_channel_nobody_lists_says_it_isnt_set_up_without_a_model(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            state, delegate, record, dispatch, concierge = await self._run(
+                "hello?", self._loader(hosts=("random",), eligible=()), channel="random"
+            )
+
+        notice = unmapped_reply("random", (), "text")
+        delegate.assert_not_awaited()
+        self.assertEqual(concierge.calls, 0)
+        self.assertEqual(state["messages"][-1].content, notice)
+        dispatch.assert_awaited_once_with(events.NODE_STREAM_TOKEN, {"content": notice, "agent_id": "main"})
+        record.assert_called_once()
+        self.assertEqual(record.call_args.args[1:], ("hello?", notice))
+        self.assertIn("Channel not set up (0 eligible agents in #random, which isn't shared)", stderr.getvalue())
+
+    async def test_a_channel_two_agents_list_names_them_unless_it_is_shared(self):
+        state, _, _, _, concierge = await self._run("what's for dinner?", self._shared("dinner"), channel="dinner")
+
+        self.assertEqual(concierge.calls, 0)
+        self.assertEqual(state["messages"][-1].content,
+                         unmapped_reply("dinner", ("day-planner", "meal-planner"), "text"))
+
+    async def test_spoken_in_a_channel_that_isnt_set_up(self):
+        state, _, _, dispatch, _ = await self._run(
+            "hello?", self._loader(hosts=("random",), eligible=()), channel="random", surface="voice"
+        )
+
+        self.assertEqual(state["messages"][-1].content, unmapped_reply("random", (), "voice"))
+        self.assertTrue(dispatch.await_args.args[1]["content"].startswith(f"<speech>{UNMAPPED_SPEECH}</speech>"))
 
     async def test_a_former_concierge_prefix_is_delegated_like_any_message(self):
         """`[main]` was routing syntax; now it is just the user's words."""

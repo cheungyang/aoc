@@ -1,12 +1,16 @@
 """Ports: what commands act on, declared here so that a command never imports
 the adapter providing it (runtime rule 1). Whoever runs a command passes the
 real thing in its context: the Discord runner its voice room, the control
-thread and the project's scripts, the voice turn itself.
+thread, the project's scripts and the teammates' cards, the voice turn itself.
 """
-from typing import Any, Awaitable, Callable, List, Optional, Protocol, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 # say(text, agent_id): a line said in that agent's voice.
 Say = Callable[..., Awaitable[None]]
+
+# peer_cards(): every teammate's card by agent id, each with `derived` and `text()`
+# (PeerCard, core/proactive/cards.py), read from the agents' configs as it's called.
+PeerCards = Callable[[], Dict[str, Any]]
 
 
 class VoiceControls(Protocol):

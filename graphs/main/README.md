@@ -6,8 +6,10 @@ reads `config.get("graph", "main")` and no `agent.json` currently overrides it.
 The graph puts a deterministic router in front of the conversational ReAct
 agent. A turn whose answer is already fixed by configuration — a channel in
 which exactly one specialist is allowed to answer — is delegated without any
-model call. A message in a channel no single agent answers (`#general`) gets a
-fixed line, also without a model call. A message that calls another agent by
+model call. A message in a channel the Concierge shares on purpose (`#general`,
+its `shared_channels`) gets a fixed line, also without a model call, and one in
+any other channel without exactly one agent gets a notice that the channel
+isn't set up. A message that calls another agent by
 name ("Ted, create a syllabus on THIS topic") is handed to that agent in its
 own channel, with a capsule of the conversation it came from. Every other
 turn — the executing agent's own — reaches the
@@ -21,7 +23,7 @@ graph returned by [create_graph](graph.py#L84-L263).
 > for specialists. Any change here has to keep an agent that does not host
 > the channel, or lists it in its own `channels`, or is running a turn
 > addressed to it (a delegation, job or schedule), on the concierge path — see
-> [routing_enabled](../../core/runtime/foundation/routing.py#L75-L98).
+> [routing_enabled](../../core/runtime/foundation/routing.py#L82-L105).
 
 ## Workflow
 
@@ -30,17 +32,19 @@ flowchart TD
     START([START]) --> route["route (_decide)"]
     route -->|"state['route'] == 'direct_call'"| direct_call["direct_call (_direct_call)"]
     route -->|"state['route'] == 'fixed'"| fixed["fixed (_fixed)"]
+    route -->|"state['route'] == 'unmapped'"| unmapped["unmapped (_unmapped)"]
     route -->|"state['route'] == 'handoff'"| handoff["handoff (_handoff)"]
     route -->|"state['route'] == 'concierge' (default)"| concierge["concierge (_concierge)"]
     direct_call --> END([END])
     fixed --> END
+    unmapped --> END
     handoff --> END
     concierge --> END
 ```
 
 The conditional edge is
 `lambda state: state.get("route") or CONCIERGE`, mapped to
-`{DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE}`
+`{DIRECT_CALL: DIRECT_CALL, FIXED: FIXED, UNMAPPED: UNMAPPED, HANDOFF: HANDOFF, CONCIERGE: CONCIERGE}`
 ([graph.py:L253-L257](graph.py#L253-L257)),
 so a missing or empty `route` falls back to `concierge`.
 
@@ -56,10 +60,11 @@ The state schema is `RouterState`, a subclass of `MessagesState`
 | Field | Type | Description |
 | --- | --- | --- |
 | `messages` | `list[BaseMessage]` (from `MessagesState`) | Conversation history. Nodes return new messages; the compiled graph persists them via the checkpointer. |
-| `route` | `str` | Route target chosen by `route`: `"direct_call"`, `"fixed"`, `"handoff"` or `"concierge"`. Read by the conditional edge. |
+| `route` | `str` | Route target chosen by `route`: `"direct_call"`, `"fixed"`, `"unmapped"`, `"handoff"` or `"concierge"`. Read by the conditional edge. |
 | `route_agent_id` | `Optional[str]` | Target agent id when the route is `direct_call` or `handoff`; `None` otherwise. |
 | `route_reason` | `str` | Human-readable rule that fired (e.g. `"sole eligible agent in #receipts"`). Kept for logs and tests, not consumed by any edge. |
 | `route_channel` | `Optional[str]` | Where a `handoff` continues: the named agent's home channel. `None` otherwise. |
+| `route_candidates` | `list[str]` | For `unmapped`: the agents that list the channel (none, or several), named in the notice. Empty otherwise. |
 
 ## Nodes
 
@@ -74,17 +79,18 @@ route and stashes it for the conditional edge. Synchronous and model-free.
   [`ExecutionContext`](../../core/runtime/foundation/context.py#L94-L136)
   via `try_context()` (for `agent_id`, `channel_name` and `source`), the agent
   config captured at build time, a fresh
-  [`AgentsLoader`](../../core/loaders/agents_loader.py#L99-L130)
+  [`AgentsLoader`](../../core/loaders/agents_loader.py#L100-L138)
   as the routing-table source. There are no switches. When
   there is no active context it falls back to `owner_agent_id` (from
   `agent_id`/`config["agent_id"]`/`config["id"]`), an empty channel name and
   an empty source — which makes `routing_enabled` false, i.e. concierge.
 - **Writes to state:** `route`, `route_agent_id`, `route_reason`,
-  `route_channel`. It never rewrites the message.
+  `route_channel`, `route_candidates`. It never rewrites the message.
 - **Side effects:** prints `[graphs.main] Routing to '<agent>' (<reason>)` when
   the decision is direct, `[graphs.main] Handing off to '<agent>' (<reason>)`
-  for a hand-off, and `[graphs.main] Fixed line (<reason>)` when it is fixed.
-- **Routes to:** `direct_call`, `fixed`, `handoff` or `concierge`.
+  for a hand-off, `[graphs.main] Fixed line (<reason>)` when it is fixed, and
+  `[graphs.main] ⚠️ Channel not set up (<reason>)` to stderr when it is unmapped.
+- **Routes to:** `direct_call`, `fixed`, `unmapped`, `handoff` or `concierge`.
 
 ### `direct_call`
 
@@ -123,8 +129,8 @@ the turn to the one agent allowed to answer in this channel. Async.
 ### `fixed`
 
 [_fixed](graph.py#L158-L177) — answers a
-message in a channel no single agent answers with a fixed line. Async; no
-model runs.
+message in a channel the Concierge shares on purpose (`#general`, its
+`shared_channels`) with a fixed line. Async; no model runs.
 
 - **Inputs from state:** `messages[-1].content`, for the session log only.
 - **Other inputs:** the ambient context's surface
@@ -144,6 +150,30 @@ model runs.
   but the voice speaks only what streams. The node then calls `_record_turn`,
   for the same reason `direct_call` does.
 - **Writes to state:** `messages` — a single `AIMessage` with the line.
+- **Routes to:** `END`.
+
+### `unmapped`
+
+[_unmapped](graph.py#L368-L388) — answers a message in any other channel
+without exactly one agent: one nobody lists in `channels`, or one several
+agents list. That's a configuration mistake, so the Concierge says so, in the
+channel, every time. Async; no model runs.
+
+- **Inputs from state:** `messages[-1].content`, for the session log only, and
+  `route_candidates`.
+- **Other inputs:** the ambient context's channel name and surface.
+- **Behavior:** [unmapped_reply](graph.py#L205-L221) writes the notice:
+  - no agent: `⚠️ #random isn't set up: no agent lists it in its channels.
+    Give it to one agent, or add it to shared_channels in agents/main/agent.json.`
+  - several: `` ⚠️ #dinner isn't set up: `day-planner` and `meal-planner` list
+    it, so no single agent answers. Keep it in one agent's channels, or add it
+    to shared_channels in agents/main/agent.json. ``
+  - spoken: `UNMAPPED_SPEECH` in a `<speech>` block, ahead of the notice, so
+    the voice says the short line and the channel shows the notice.
+
+  Streamed and recorded as the fixed line is. A message naming an agent still
+  hands off from such a channel: the hand-off rule runs first.
+- **Writes to state:** `messages` — a single `AIMessage` with the notice.
 - **Routes to:** `END`.
 
 ### `handoff`
@@ -218,8 +248,8 @@ typed commands now: `!jobs`, `!job <id>`, `!kill <id>`
 The Concierge holds no tools; `#content-creation` belongs to 🎬 Coco
 (`content-creator`), who starts and resumes `content_creation` runs.
 
-[decide](../../core/runtime/foundation/routing.py#L101-L128) returns a
-frozen [RouteDecision](../../core/runtime/foundation/routing.py#L51-L72)
+[decide](../../core/runtime/foundation/routing.py#L108-L145) returns a
+frozen [RouteDecision](../../core/runtime/foundation/routing.py#L56-L79)
 (`target`, `agent_id`, `prompt`, `reason`, `channel`; `is_direct` and
 `is_handoff` are convenience properties). `reason` exists for logs and tests:
 when routing is wrong, the useful question is *which rule fired*.
@@ -231,11 +261,12 @@ when routing is wrong, the useful question is *which rule fired*.
 | `routing_enabled(...)` is false | `concierge` | `None` | `routing not enabled for this agent/channel` |
 | The message calls by name an agent other than the channel's, which has a home channel | `handoff` | that agent (`channel`: its home) | `<form> address to '<name>' in #<channel>; continues in #<home>` |
 | Exactly 1 eligible agent in the channel | `direct_call` | that agent | `sole eligible agent in #<channel>` |
-| 0 or ≥2 eligible agents | `fixed` | `None` | `<n> eligible agents in #<channel>` |
+| 0 or ≥2 eligible agents, in one of the host's `shared_channels` (`#general`) | `fixed` | `None` | `<n> eligible agents in #<channel>` |
+| 0 or ≥2 eligible agents anywhere else: the channel isn't set up | `unmapped` | `None` (`candidates`: the agents that list it) | `<n> eligible agents in #<channel>, which isn't shared` |
 
 ### `routing_enabled`
 
-[routing_enabled](../../core/runtime/foundation/routing.py#L75-L98)
+[routing_enabled](../../core/runtime/foundation/routing.py#L82-L105)
 requires all of:
 
 1. the turn's `source` is not in `ADDRESSED_SOURCES` (`tool`, `job`,
@@ -248,9 +279,11 @@ requires all of:
 2. a non-empty `agent_id` **and** non-empty `channel_name`;
 3. the channel is **not** in the agent's own `channels` — an agent that answers
    in a channel it hosts has nobody to hand it to;
-4. `loader.hosts_channel(agent_id, channel_name)` — i.e. the channel is listed
-   in the agent's `channel_hosts`
-   ([agents_loader.py:L99-L107](../../core/loaders/agents_loader.py#L99-L107)).
+4. `loader.hosts_channel(agent_id, channel_name)` — i.e. the agent's
+   `channel_hosts` names the channel, or is `["*"]` (the Concierge's): every
+   channel with a name
+   ([agents_loader.py:L100-L109](../../core/loaders/agents_loader.py#L100-L109),
+   [channel_hosts.py](../../core/loaders/channel_hosts.py)).
 
 This is *derived rather than declared* on purpose: because `graphs/main` is the
 default graph for every agent, a flag in one agent's config would not have
@@ -261,13 +294,15 @@ Concierge satisfies all four today: it hosts every channel and lists none
 ### Resolving the target agent
 
 When routing is enabled, the target comes from
-[eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)](../../core/loaders/agents_loader.py#L109-L137):
+[eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)](../../core/loaders/agents_loader.py#L111-L138):
 agents whose `channels` list contains the channel, **excluding** the caller
 itself and **excluding** agents declaring `channels: ["*"]` (a wildcard is a
 statement about reachability, not ownership — counting `graph-worker` would
-make every channel look shared and give each the fixed line). The result is
+make every channel look shared and flag each as not set up). The result is
 sorted for stability. Exactly one survivor ⇒ `direct_call`; otherwise no single
-agent owns the channel, and the message gets the fixed line.
+agent owns the channel, and the message gets the fixed line in one of the
+host's `shared_channels`, or the notice that the channel isn't set up anywhere
+else.
 
 > [!NOTE]
 > `direct_call` delegation is still permission-checked downstream:
@@ -278,10 +313,10 @@ agent owns the channel, and the message gets the fixed line.
 ### Hand-offs
 
 The hand-off rule runs before the channel rules
-([_handoff](../../core/runtime/foundation/routing.py#L131-L150)):
+([_handoff](../../core/runtime/foundation/routing.py#L148-L167)):
 
 1. **Who can be named:**
-   [addressable_agents](../../core/runtime/foundation/routing.py#L155-L170) —
+   [addressable_agents](../../core/runtime/foundation/routing.py#L172-L187) —
    every agent with channels of its own, by its `name` or its id; not a
    `["*"]` agent (the Concierge, the graph workers), not a stateless one, and
    not the agent that answers this channel (naming it is a message for it).
@@ -294,7 +329,7 @@ The hand-off rule runs before the channel rules
    front of every message, which would otherwise hide a name-first form.
    Words only; no model.
 3. **Where it continues:**
-   [home_channel](../../core/runtime/foundation/routing.py#L173-L184) — the
+   [home_channel](../../core/runtime/foundation/routing.py#L190-L201) — the
    first of the agent's `channels` in which it answers untagged messages, the
    same channel "switch to Ted" takes the voice to. An agent with no such
    channel (Terminator lists only `#general`) is not handed to.

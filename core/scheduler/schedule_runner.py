@@ -56,6 +56,7 @@ from core.channel.discord.loader import BotsLoader
 from core.channel.discord.output import DiscordOutput
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation import events
+from core.runtime.foundation.routing import channel_hosts_for
 from core.runtime.history.channel_posts import record_channel_post
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.sessions import SessionManager
@@ -379,13 +380,8 @@ class ScheduleRunner:
         if not channel_name:
             return None
 
-        # Find which agent owns the channel
-        owner_agent_id = None
-        for aid in self.loader.list_agent_ids():
-            config = self.loader.get_agent_config(aid) or {}
-            if channel_name in (config.get("channel_hosts") or []):
-                owner_agent_id = aid
-                break
+        # The agent that hosts the channel ("*": every channel): its bot finds it.
+        owner_agent_id = next(iter(channel_hosts_for(channel_name, self.loader)), None)
         channel = self.bots_loader.get_channel(owner_agent_id, channel_name) if owner_agent_id else None
         if channel is None:
             channel = self.bots_loader.find_channel(channel_name)

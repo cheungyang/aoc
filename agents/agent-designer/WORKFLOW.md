@@ -39,7 +39,7 @@ A filesystem grant list says each thing once, as the bundle tests require, in ag
 
 ### Channels and voices
 
-The concierge hosts every channel and hands each to the one agent that lists it; a channel several agents list, or none, gets the concierge's fixed line instead. A worker listing `*` never counts:
+The concierge hosts every channel and hands each to the one agent that lists it; a channel several agents list, or none, gets the concierge's fixed line if it is one of its `shared_channels` (`#general`), and its notice that the channel isn't set up otherwise. A worker listing `*` never counts:
 
 ```python
 >>> from agents.agent_designer.lib.lint import channel_routes
@@ -49,7 +49,8 @@ The concierge hosts every channel and hands each to the one agent that lists it;
 {'general': None, 'note-taking': 'note-taker'}
 ```
 
-- A channel in `channels` that `channel_hosts` in agents/main/agent.json lacks is `channel_not_hosted`.
+- A channel in `channels` that the concierge doesn't host is `channel_not_hosted`. Its `channel_hosts` in agents/main/agent.json is `["*"]`, every channel, so this fires only for a concierge that names its channels one by one.
+- A channel the agent lists that another agent lists too, and that isn't one of the concierge's `shared_channels`, is `channel_unmapped`: no single agent would answer it, and the concierge would flag every message there. It names the other agents.
 - The tests pin these routes in one table, `TestLiveRoutingTable.EXPECTED` in tests/core/runtime/foundation/test_routing.py; the voice room's focus test reads the same table. An entry for one of the agent's channels that is missing, or says another agent, is `routing_table_stale`, which names the line to write.
 - An agent the voice room switches to, the one agent of a hosted channel, needs a Chirp 3 HD voice no other agent has: one missing is `voice_missing`, one not in `CHIRP3_HD_VOICES` is `unknown_voice`, and another agent's is `voice_taken`. Each lists the free voices, with the gender and style to match the persona against:
 
@@ -57,6 +58,25 @@ The concierge hosts every channel and hands each to the one agent that lists it;
 >>> from agents.agent_designer.lib.lint import free_voices
 >>> free_voices({"Achernar", "Puck"})[:2]
 ['Achird (male, friendly)', 'Algenib (male, gravelly)']
+```
+
+### Peer cards
+
+The proactive team gives a card to every agent with a channel of its own: not `*`, not stateless, and not script-executor (core/proactive/cards.py). The Switchboard reads every card on every decision, and the Governor lets a route through only when its offer names one of the recipient's offers. The card is the agent's `proactivity` interests and offers:
+
+- No offers is `card_missing`: the card is built from the description, and any offer gets through.
+- Interests without offers (never read), offers without interests, or either on an agent that gets no card, is `card_format`. `follow_ups: false` alone is the follow-up opt-out, not a card.
+- More than 4 interests or 3 offers, or a phrase over 48 characters, is `over_budget`:
+
+```python
+>>> from agents.agent_designer.lib.lint import card_problems
+>>> card_problems("note-taker", {"channels": ["note-taking"],
+...                              "proactivity": {"interests": ["ideas to think through"], "offers": ["save it as a note"]}})
+[]
+>>> card_problems("note-taker", {"channels": ["note-taking"], "proactivity": {"offers": ["save it as a note"]}})
+[('card_format', '`proactivity` has offers but no interests, so the Switchboard sees nothing the agent wants to hear about')]
+>>> card_problems("graph-worker", {"channels": ["*"], "stateless": True, "proactivity": {"follow_ups": False}})
+[]
 ```
 
 ### What exists

@@ -64,7 +64,7 @@ flowchart TD
 | [delivery.py](delivery.py) | Live only: an approved route becomes a **proactive turn**. The schedule runner's due work claims each due delivery once and runs it as a one-shot `DeliverySchedule`; a `<silent/>` reply posts nothing. A `next` route rides along on the recipient's next scheduled run instead (`SignalsForMe`). |
 | [follow_ups.py](follow_ups.py) | Live only: a follow-up's due check. The schedule runner's due work claims each once and runs it as a one-shot `FollowUpSchedule`: a scan first, then a turn only for what's new; a one-off's turn, at its time, always. `FollowUpSweep` ends the ones past their `until`, with the switch on or off, and puts each one opened and closed on team radio. |
 | [outcomes.py](outcomes.py) | What came of each proactive post: engaged, declined or ignored, from your reply, your ✅/❌, or a day of neither. Code decides it; it counts toward acceptance unless you labeled the route. |
-| [cards.py](cards.py) | Peer cards: what each teammate wants and offers. They come from `agent.json` `proactivity`, or are derived from `description`. |
+| [cards.py](cards.py) | Peer cards: what each teammate wants and offers. They come from `agent.json` `proactivity`, or are derived from `description`. `agent_lint` reports a missing or half-written card (`card_missing`, `card_format`). |
 | [radio.py](radio.py) | Team radio's lines, your labels, the reason poll, and outcome lines. |
 | [board.py](board.py) | One worker thread for every Board call. |
 
@@ -331,6 +331,7 @@ When your goal isn't met yet and an agent can keep working on it, it opens a **f
 | `!signals missed` | The missed routes you reported. |
 | `!signals stats` | The last 14 days, against the targets (≥ 30 labels, precision ≥ 0.8), when deliveries would land, the posts' outcomes per agent, and how fast `now` routes came, each against its target. |
 | `!signals why <message link>` | The decision behind a team radio line, or behind a proactive post. |
+| `!signals cards` | Every teammate's card as the Switchboard reads it ([cards.py](cards.py)): its home channel, what it wants to hear about and what it can offer, or, for a card built from its description, that any offer is accepted. Each card lives in its own agent's `agent.json`, so this is the one view of the whole team. |
 
 ## Measuring before going live
 
@@ -363,7 +364,8 @@ Go live after ≥ 2 weeks of shadow running in prod and ≥ 30 labeled decisions
 | The schedule runner's wake, due work and briefings | `tests/core/scheduler/test_schedule_runner.py` |
 | Live Context, and its place in the system prompt | `tests/core/prompts/test_live_context.py`, `test_system_caching.py` |
 | The Discord side and the runner's hooks | `tests/core/channel/discord/test_radio.py`, `test_ack.py`, `test_output.py`, `test_runner.py`, `test_dispatcher.py` |
-| `!signals` | `tests/core/runtime/commands/typed/test_signals.py` |
+| `!signals`, and `!signals cards` | `tests/core/runtime/commands/typed/test_signals.py` |
+| The live peer cards, pinned: each teammate's home channel and offers. A change shows up in review. | `tests/core/proactive/test_live_cards.py` |
 | Follow-ups: the store, the tool, the checks, the sweep and `!followups` | `tests/core/storage/test_follow_ups.py`, `tests/tools/test_follow_up.py`, `tests/core/proactive/test_follow_ups.py`, `tests/core/runtime/commands/typed/test_followups.py` |
 | Miles' award watch: the scan, seats.aero's data, the US airports and their script | `tests/agents/reward_travel/preconditions/test_award_watch.py`, `tests/tools/test_seats_aero.py`, `tests/agents/reward_travel/lib/test_airports.py`, `tests/scripts/test_us_airports.py` |
 | The Switchboard's follow-up closes: the prompt and the reply, the taps' mark on a turn another agent asked for, the check on your words, live and shadow, the record and its trace | `tests/core/proactive/test_switchboard.py`, `test_taps.py`, `test_governor.py`, `test_pipeline.py`; `tests/core/storage/test_signals.py`; `tests/core/runtime/commands/typed/test_signals.py` |

@@ -4,6 +4,7 @@ import time
 from typing import Any, Callable, Optional
 from core.knowledge.memory.inject import report_unknown_topics
 from core.loaders.agent_schema import known_skill_ids, validate_agent_config
+from core.loaders.channel_hosts import hosts
 from core.loaders.hot_reloader import HotReloader
 
 # What builds an agent from its config: the runtime's `build_agent`, plugged in
@@ -97,14 +98,15 @@ class AgentsLoader:
         return self._agent_configs.get(agent_id)
 
     def hosts_channel(self, agent_id, channel_name) -> bool:
-        """Whether `agent_id` is the default responder for `channel_name`.
+        """Whether `agent_id` is the default responder for `channel_name`: its
+        `channel_hosts` names the channel, or is `["*"]`, every channel
+        (core/loaders/channel_hosts.py).
 
         Mirrors the `channel_hosts` check `BotRunner.on_message` already performs
         to decide whether to answer an untagged message.
         """
         config = self._agent_configs.get(agent_id) or {}
-        hosts = [str(h).lower() for h in (config.get("channel_hosts") or [])]
-        return str(channel_name or "").lower() in hosts
+        return hosts(config.get("channel_hosts"), channel_name)
 
     def eligible_agents_for_channel(self, channel_name, exclude_agent_id=None):
         """Agent ids that can legitimately answer in `channel_name`.

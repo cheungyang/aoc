@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Tuple
 
-from core.runtime.commands.ports import ControlThread, Say, Scripts, SpokenTurn, VoiceControls
+from core.runtime.commands.ports import ControlThread, PeerCards, Say, Scripts, SpokenTurn, VoiceControls
 from core.runtime.foundation.context import ExecutionContext
 from core.channel.chunks import safe_chunks
 
@@ -69,6 +69,7 @@ class TypedContext(CommandContext):
     # application's owner or team. None: nobody is known to own it.
     is_owner: Optional[Callable[[Any], Awaitable[bool]]] = None
     scripts: Optional[Scripts] = None            # the project's scripts/, for !python
+    peer_cards: Optional[PeerCards] = None       # the teammates' cards, for !signals cards
 
 
 @dataclass

@@ -9,7 +9,8 @@ from the agent's `proactivity` block in agent.json:
 
 An agent without a block gets a derived card: its description says what it
 cares about, and any offer is accepted (`derived`). So a new agent joins the
-team just by describing itself, and no other agent changes.
+team just by describing itself, and no other agent changes. It's a fallback:
+agent_lint reports it (`card_missing`, agents/agent-designer/lib/lint.py).
 
 Who has a card: every agent that runs a model and keeps a conversation in a
 channel of its own. These don't:

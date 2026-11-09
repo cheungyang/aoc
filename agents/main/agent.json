@@ -4,25 +4,10 @@
     "*"
   ],
   "channel_hosts": [
-    "agent-management",
-    "ayla-care",
-    "content-creation",
-    "day-planning",
-    "fitness-coach",
-    "general",
-    "google-knowledge",
-    "home-automation",
-    "lifestyle-perk",
-    "market-scout",
-    "meal-planning",
-    "note-taking",
-    "project-planning",
-    "real-estate",
-    "receipts",
-    "software-dev",
-    "topic-research",
-    "weekend-planning",
-    "weekly-planning"
+    "*"
+  ],
+  "shared_channels": [
+    "general"
   ],
   "description": "Host of every channel: hands each message to the channel's agent, without a model call. #general is for commands.",
   "discord_token_key": "DISCORD_TOKEN_MAIN",

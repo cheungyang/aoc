@@ -109,5 +109,46 @@ class TestBotRunnerRouting(unittest.IsolatedAsyncioTestCase):
         
         mock_loader.get_agent.return_value.execute_stream.assert_called_once()
 
+    def _wildcard_host(self, mock_agents_loader):
+        """A host whose channel_hosts is ["*"]: every channel."""
+        async def fake_empty_stream(*args, **kwargs):
+            if False:
+                yield None
+
+        mock_loader = MagicMock()
+        mock_agents_loader.return_value = mock_loader
+        mock_loader.get_agent.return_value.config = {"channels": ["*"], "channel_hosts": ["*"]}
+        mock_loader.get_agent.return_value.execute_stream = MagicMock(side_effect=fake_empty_stream)
+        return mock_loader
+
+    def _untagged(self, channel_name):
+        mock_message = MagicMock()
+        mock_message.author.bot = False
+        mock_message.channel.name = channel_name
+        mock_message.mentions = []
+        mock_message.content = "hello"
+        mock_message.channel.send = AsyncMock()
+        return mock_message
+
+    @patch('core.channel.discord.runner.AgentsLoader')
+    async def test_a_wildcard_host_answers_every_channel(self, mock_agents_loader):
+        """A channel an agent lists, or one nobody does: there the graph says it isn't set up."""
+        for channel in ("agent-lab", "random"):
+            with self.subTest(channel=channel):
+                mock_loader = self._wildcard_host(mock_agents_loader)
+
+                await self.runner.on_message(self._untagged(channel))
+
+                mock_loader.get_agent.return_value.execute_stream.assert_called_once()
+
+    @patch('core.channel.discord.runner.AgentsLoader')
+    async def test_a_wildcard_host_leaves_a_channel_with_no_name_alone(self, mock_agents_loader):
+        """A DM has no name, so "*" doesn't reach it: only an entry naming its id would."""
+        mock_loader = self._wildcard_host(mock_agents_loader)
+
+        await self.runner.on_message(self._untagged(""))
+
+        mock_loader.get_agent.return_value.execute_stream.assert_not_called()
+
 if __name__ == '__main__':
     unittest.main()

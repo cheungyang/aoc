@@ -187,6 +187,12 @@ def test_with_nothing_to_go_on_the_default_room():
     assert DEFAULT_ROOM == "general-voice"
 
 
+def test_the_wildcard_names_no_room():
+    """The Concierge hosts "*" and names its room in voice_config; without one, never "*-voice"."""
+    assert voice_rooms({"channel_hosts": ["*"], "voice_config": {"enabled": True}}) == [DEFAULT_ROOM]
+    assert voice_rooms({"channel_hosts": ["*", "general"]}) == ["general-voice"]
+
+
 def test_pick_voice_channel_takes_the_first_target_the_guild_has():
     voice = MagicMock(id=123)
     voice.name = "day-planning-voice"

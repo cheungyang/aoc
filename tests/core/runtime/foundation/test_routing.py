@@ -2,8 +2,8 @@
 
 Includes a snapshot of the live routing table. That test is the tripwire for the
 main hazard of deriving routing from configuration: adding an agent to a channel
-flips that channel from its agent to the fixed line with no code change and no
-other signal. If it fails, the question is whether the config change was
+flips that channel from its agent to the notice that it isn't set up, with no
+code change. If it fails, the question is whether the config change was
 intended -- not whether the test should be updated.
 """
 import json
@@ -14,22 +14,27 @@ from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
 
+from core.loaders import channel_hosts
+from core.loaders.channel_hosts import hosted_channels, listed_channels, shared_channels
 from core.runtime.foundation.routing import (
     CHANNEL_MESSAGE,
     CONCIERGE,
     DIRECT_CALL,
     FIXED,
     HANDOFF,
+    UNMAPPED,
     addressable_agents,
     answering_agent,
+    channel_hosts_for,
     decide,
     home_channel,
     routing_enabled,
 )
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-# The Concierge's shape: reachable everywhere, owning no channel, holding no tools.
-HOST = {"channels": ["*"], "tools": {}}
+# The Concierge's shape: reachable everywhere, owning no channel, holding no
+# tools, and sharing #general on purpose.
+HOST = {"channels": ["*"], "tools": {}, "shared_channels": ["general"]}
 
 
 def _loader(hosts=(), eligible=()):
@@ -114,9 +119,34 @@ class TestDecide(unittest.TestCase):
         self.assertIsNone(decision.agent_id)
         self.assertEqual(decision.reason, "2 eligible agents in #general")
 
-    def test_a_channel_nobody_lists_gets_the_fixed_line(self):
-        loader = _loader(hosts=("aoc-debug",), eligible=[])
-        self.assertEqual(decide("hello", "main", "aoc-debug", HOST, loader).target, FIXED)
+    def test_a_channel_nobody_lists_isnt_set_up(self):
+        loader = _loader(hosts=("random",), eligible=[])
+        decision = decide("hello", "main", "random", HOST, loader)
+
+        self.assertEqual((decision.target, decision.agent_id, decision.candidates), (UNMAPPED, None, ()))
+        self.assertEqual(decision.reason, "0 eligible agents in #random, which isn't shared")
+
+    def test_a_channel_several_agents_list_isnt_set_up_unless_shared(self):
+        """Nobody answers there either: the hazard the routing table guards against."""
+        loader = _loader(hosts=("dinner",), eligible=["day-planner", "meal-planner"])
+        decision = decide("what's for dinner?", "main", "dinner", HOST, loader)
+
+        self.assertEqual((decision.target, decision.candidates), (UNMAPPED, ("day-planner", "meal-planner")))
+        shared = dict(HOST, shared_channels=["general", "#Dinner"])
+        self.assertEqual(decide("what's for dinner?", "main", "dinner", shared, loader).target, FIXED)
+
+    def test_without_shared_channels_even_general_isnt_set_up(self):
+        loader = _loader(hosts=("general",), eligible=["day-planner", "meal-planner"])
+        unshared = {"channels": ["*"], "tools": {}}
+        self.assertEqual(decide("hello", "main", "general", unshared, loader).target, UNMAPPED)
+
+    def test_naming_an_agent_still_hands_off_from_a_channel_that_isnt_set_up(self):
+        loader = _ConfigLoader({
+            "main": {"channels": ["*"], "channel_hosts": ["*"], "shared_channels": ["general"]},
+            "day-planner": {"name": "Daisy", "channels": ["day-planning", "general"]},
+        })
+        decision = decide("Daisy, what's on today?", "main", "random", loader.configs["main"], loader)
+        self.assertEqual((decision.target, decision.agent_id, decision.channel), (HANDOFF, "day-planner", "day-planning"))
 
     def test_what_used_to_be_a_concierge_prefix_is_just_a_message(self):
         """`[main]`, `jobs` and `kill` once claimed a message for the concierge.
@@ -161,6 +191,37 @@ class TestAnsweringAgent(unittest.TestCase):
         self.assertEqual(answering_agent("main", "general", self._loader()), "main")
 
 
+class TestChannelHostsFor(unittest.TestCase):
+    """Who hosts a channel, for the channel inbox, channel posts and the scheduler."""
+
+    CONFIGS = {
+        "main": {"channels": ["*"], "channel_hosts": ["*"]},
+        "receipt-processor": {"channels": ["receipts", "general"]},
+        "graph-worker": {"channels": ["*"], "stateless": True},
+    }
+
+    def _loader(self, configs=None):
+        configs = configs or self.CONFIGS
+        loader = MagicMock()
+        loader.list_agent_ids.return_value = list(configs)
+        loader.get_agent_config.side_effect = configs.get
+        return loader
+
+    def test_the_wildcard_hosts_every_channel(self):
+        """A channel an agent lists, or one nobody does: the latter gets the notice that it isn't set up."""
+        for channel in ("receipts", "#receipts", "General", "random", "aoc-voice"):
+            with self.subTest(channel=channel):
+                self.assertEqual(channel_hosts_for(channel, self._loader()), ["main"])
+
+    def test_nobody_hosts_a_channel_with_no_name(self):
+        self.assertEqual(channel_hosts_for("", self._loader()), [])
+
+    def test_an_explicit_list_hosts_only_its_names(self):
+        configs = dict(self.CONFIGS, main={"channels": ["*"], "channel_hosts": ["general", "lounge"]})
+        self.assertEqual(channel_hosts_for("lounge", self._loader(configs)), ["main"])
+        self.assertEqual(channel_hosts_for("receipts", self._loader(configs)), [])
+
+
 class TestLiveRoutingTable(unittest.TestCase):
     """Pins the routing table produced by the real agent configs."""
 
@@ -170,7 +231,7 @@ class TestLiveRoutingTable(unittest.TestCase):
         "content-creation": "content-creator",  # Coco: starts content runs, as Elephant starts coding
         "day-planning": "day-planner",
         "fitness-coach": "fitness-coach",
-        "general": None,  # nearly every agent lists it: the fixed line
+        "general": None,  # nearly every agent lists it, and main shares it: the fixed line
         "google-knowledge": "google-knowledge",
         "home-automation": "home-steward",
         "lifestyle-perk": "reward-travel",
@@ -189,6 +250,9 @@ class TestLiveRoutingTable(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.configs = _load_agent_configs()
+        # The channels main hosts that config can name: for "*", every channel an agent lists.
+        cls.hosts = hosted_channels(cls.configs["main"]["channel_hosts"], cls.configs.values())
+        cls.shared = shared_channels(cls.configs["main"])
 
     def _eligible(self, channel):
         found = []
@@ -209,30 +273,41 @@ class TestLiveRoutingTable(unittest.TestCase):
     def _decision_for(self, channel):
         main = self.configs["main"]
         loader = MagicMock()
-        loader.hosts_channel.side_effect = lambda agent_id, ch: ch in main["channel_hosts"]
+        loader.hosts_channel.side_effect = lambda agent_id, ch: channel_hosts.hosts(main["channel_hosts"], ch)
         loader.eligible_agents_for_channel.return_value = self._eligible(channel)
         return decide("plan the week", "main", channel, main, loader)
 
     def test_hosted_channels_match_the_expected_table(self):
-        hosts = self.configs["main"]["channel_hosts"]
-        actual = {channel: self._sole_eligible(channel) for channel in hosts}
+        actual = {channel: self._sole_eligible(channel) for channel in self.hosts}
         self.assertEqual(
             actual,
             self.EXPECTED,
             "The routing table changed. A channel gaining or losing an agent silently "
-            "switches it between its agent and the fixed line -- confirm that was "
+            "switches it between its agent and the not-set-up notice -- confirm that was "
             "intended before updating EXPECTED.",
         )
 
-    def test_general_is_the_only_hosted_channel_without_one_agent(self):
-        hosts = self.configs["main"]["channel_hosts"]
-        self.assertEqual([c for c in hosts if self._sole_eligible(c) is None], ["general"])
+    def test_the_concierge_hosts_every_channel(self):
+        """Main is the only host, so it hosts "*": every channel on the server. A
+        new agent's channel is hosted with nothing to register here, and only the
+        table above changes."""
+        self.assertEqual(self.configs["main"]["channel_hosts"], ["*"])
+        self.assertEqual(self.hosts, listed_channels(self.configs.values()))
+        for channel in ("general", "receipts", "a-channel-nobody-lists"):
+            with self.subTest(channel=channel):
+                self.assertTrue(channel_hosts.hosts(self.configs["main"]["channel_hosts"], channel))
+
+    def test_every_channel_without_one_agent_is_shared(self):
+        """Anything else gets the notice that it isn't set up, in every message."""
+        self.assertEqual([c for c in self.hosts if self._sole_eligible(c) is None],
+                         [c for c in self.hosts if c in self.shared])
+        self.assertEqual(self.shared, ["general"])
 
     def test_general_gives_the_fixed_line(self):
         self.assertEqual(self._decision_for("general").target, FIXED)
 
     def test_every_other_hosted_channel_goes_straight_to_its_agent(self):
-        for channel in self.configs["main"]["channel_hosts"]:
+        for channel in self.hosts:
             if channel == "general":
                 continue
             with self.subTest(channel=channel):
@@ -240,17 +315,13 @@ class TestLiveRoutingTable(unittest.TestCase):
                 self.assertEqual(decision.target, DIRECT_CALL)
                 self.assertEqual(decision.agent_id, self.EXPECTED[channel])
 
-    def test_aoc_debug_is_not_hosted(self):
-        """Unused since dev mode, and hosting it gave the concierge a channel with no agent."""
-        self.assertNotIn("aoc-debug", self.configs["main"]["channel_hosts"])
-
-    def test_goal_planning_is_not_hosted(self):
-        """It is not a real Discord channel; hosting it only widened main's surface."""
-        self.assertNotIn("goal-planning", self.configs["main"]["channel_hosts"])
+    def test_a_channel_nobody_lists_is_flagged_as_not_set_up(self):
+        decision = self._decision_for("a-channel-nobody-lists")
+        self.assertEqual((decision.target, decision.candidates), (UNMAPPED, ()))
 
     def test_wildcard_workers_never_count_as_eligible(self):
         """`graph-worker` is reachable everywhere. Counting it would make every
-        channel look shared and give each the fixed line."""
+        channel look shared and flag each as not set up."""
         for worker in ("graph-worker", "graph-worker-low"):
             self.assertEqual(self.configs[worker]["channels"], ["*"])
         self.assertEqual(self._sole_eligible("receipts"), "receipt-processor")
@@ -298,8 +369,7 @@ class _ConfigLoader:
         return self.configs.get(agent_id)
 
     def hosts_channel(self, agent_id, channel):
-        hosts = [str(h).lower() for h in (self.configs.get(agent_id) or {}).get("channel_hosts") or []]
-        return str(channel).lower() in hosts
+        return channel_hosts.hosts((self.configs.get(agent_id) or {}).get("channel_hosts"), channel)
 
     def eligible_agents_for_channel(self, channel, exclude_agent_id=None):
         found = []

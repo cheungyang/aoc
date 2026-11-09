@@ -69,19 +69,17 @@ class TestScriptExecutorAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry["channel"], "software-dev")
 
     async def test_the_tick_channel_is_one_an_agent_actually_hosts(self):
-        """`ScheduleRunner` resolves the channel by looking for an agent whose
-        `channel_hosts` claims it. A name that nobody hosts falls through to a
+        """`ScheduleRunner` resolves the channel by looking for an agent that
+        hosts it (`channel_hosts_for`). A name that nobody hosts falls through to a
         global search and then to posting nowhere, silently, every five minutes.
         """
+        from core.runtime.foundation.routing import channel_hosts_for
+
         loader = AgentsLoader()
         entry = next(s for s in loader.get_agent("script-executor").config["schedules"]
                      if "coding_tick.py" in _scripts_of(s))
 
-        hosts = set()
-        for agent_id in loader.list_agent_ids():
-            hosts.update(loader.get_agent(agent_id).get_config("channel_hosts", []))
-
-        self.assertIn(entry["channel"], hosts)
+        self.assertTrue(channel_hosts_for(entry["channel"], loader))
 
     async def test_the_tick_posts_to_the_channel_not_a_thread(self):
         """A `thread` that does not exist in the target channel makes the runner

@@ -9,6 +9,10 @@
   "model": "PRO",
   "name": "Aki",
   "memory_topics": ["tooling"],
+  "proactivity": {
+    "interests": ["features the user wishes an agent had", "an agent repeating the same mistake"],
+    "offers": ["design an agent or skill", "fix an agent's instructions"]
+  },
   "skills": {
     "agent_creation": {
       "preload": "core"

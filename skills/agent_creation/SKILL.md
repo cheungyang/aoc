@@ -7,7 +7,7 @@ description: Designs and creates a new agent from a worksheet that classifies ea
 Use this skill when the user asks for a new agent. Plan first; write nothing until the user approves the plan.
 
 ### Guardrails
-- Change no other agent or system file, except the routing entries a new channel needs (`update_permissions`).
+- Change no other agent or system file, except the routing table line a new channel needs (`update_permissions`).
 - `SOUL.md` must match the description and tools in `agent.json`.
 - Budgets: persona under 3,500 chars, preloaded skills under 6,000, a voice flow 2–3 model calls a turn (Reference).
 
@@ -98,6 +98,10 @@ You MUST use this exact JSON structure:
   "model": "<Optional Tier: FLASH_LITE | FLASH | PRO>",
   "provider": "<Optional: google (default) | local>",
   "memory_topics": ["<Optional shared topic>"],
+  "proactivity": {
+    "interests": ["<What it wants to hear about from other conversations>"],
+    "offers": ["<What it can do about one, in one short post>"]
+  },
   "tools": {
     "<tool_name_1>": {}
   },
@@ -111,7 +115,7 @@ You MUST use this exact JSON structure:
 ```
 *Critical Constraints for agent.json:*
 - Remove every optional key the agent doesn't use rather than leaving a placeholder. `skills`, `thinking` and `voice` show example values: replace them with the agent's own, and drop `thinking` unless the plan calls for it, and `voice` only for an internal worker.
-- Use only the keys above, plus `schedules`. Validation rejects unknown top-level keys, and an `agent.json` that fails validation is not loaded at all. `stateless`, `graph`, `voice_config`, `discord_token_key` and `channel_hosts` are system keys (internal workers, and the concierge, which runs the only bot and hosts every channel); new agents don't use them. A new agent's channel goes in `channels`, and is registered with the concierge as `update_permissions` describes (rule 10).
+- Use only the keys above, plus `schedules`. Validation rejects unknown top-level keys, and an `agent.json` that fails validation is not loaded at all. `stateless`, `graph`, `voice_config`, `discord_token_key`, `channel_hosts` and `shared_channels` are system keys (internal workers, and the concierge, which runs the only bot and hosts every channel); new agents don't use them. A new agent's channel goes in `channels`, and the concierge hosts it from then on; `update_permissions` (rule 10) gives the one routing line it needs.
 - The `tools` field MUST be a dictionary object (e.g., `"tools": { "tool_name": {} }`), NOT an array.
 - Do not explicitly add tools to the `tools` object if they are already inherited via the skills in `skills` (e.g., `web_search` is inherited via the `research` skill).
 - `skills` MUST be an object keyed by skill id. Each value is `{}` (on demand: the agent sees a one-line entry and calls `load_skill`), `{"preload": "full"}` (the whole SKILL.md body is in every prompt) or `{"preload": "core"}` (only its `## Core` section is; `load_skill` returns the rest). Preload only skills the agent uses on most runs, keep the agent's preloaded text within 6,000 characters, and preload as `core` only skills split into `## Core` / `## Reference` (see `skill_creation`).
@@ -120,10 +124,21 @@ You MUST use this exact JSON structure:
 - The `provider` field selects where the model runs. Omit it for Gemini. `"local"` routes the agent to the on-device server configured by `LOCAL_LLM_BASE_URL`. Both providers answer the same tier names, so moving an agent on-device is adding this one key and nothing else.
 - `thinking` (optional, rare) overrides the code defaults for the surfaces it names. Keys: `voice` | `text` | `scheduled`; values: `minimal` | `low` | `medium` | `high`. PRO has no `minimal` (it's raised to `low`). A schedule entry's own `thinking_level` wins on that run (see `update_schedule`).
 - `voice` (optional): `name` must be a Chirp 3 HD voice from `CHIRP3_HD_VOICES` in `core/channel/voice/foundation/settings.py` (the catalog lists each voice's gender and style), written `en-US-Chirp3-HD-<Voice>`; `rate` is optional, 0.25–2.0. Every agent the user talks to has one, and no two agents share a voice: one `filesystem` `grep` for `Chirp3-HD-` in `agents/` lists the voices taken; pick one nobody has whose gender and style fit the persona, and name it in the plan. `agent_lint` reports a voice taken, unknown or missing, with the free ones (`voice_taken`, `unknown_voice`, `voice_missing`). Only internal workers omit it and speak in `DEFAULT_VOICE`. Settings shared by all agents live in `core/channel/voice/foundation/settings.py`, never in agent.json.
+- `proactivity` is the agent's peer card (Peer Card, below). Every agent with a channel of its own gets one; internal workers omit it.
 
 *Before setting `"provider": "local"`, know two things:*
 - **The server handles one request at a time.** Local agents queue behind each other, so keep the local roster small and prefer low-volume, single-purpose agents.
 - **Never put a mid-turn caller on it.** A component that invokes a model *inside* another turn's flow — `graph-worker-low` (used by `ContextPruner`) — would queue behind the very turn it is serving, stalling it. It stays on Gemini.
+
+### Peer Card
+When one agent learns something another could use, the Switchboard routes it there by the agents' peer cards, and the recipient posts once in its channel: a suggestion or a question, in its own voice. The card is `proactivity` in `agent.json`:
+- `interests`: up to 4 things it wants to hear about from other conversations, in the user's terms (`"trips away from home"`, `"groceries bought"`).
+- `offers`: up to 3 things it can do about one in that post, each something its skills already do (`"update the kitchen inventory"`, `"a lighter session"`). A route must name one, or the Governor drops it.
+- Each phrase is at most 48 characters: every card is in every routing decision's prompt.
+- A fact tagged `health` or `finance` reaches only an agent with that topic in `memory_topics`. An interest in one needs the topic, which costs prompt on every turn: name the trade-off in the plan.
+- `"follow_ups": false` turns off the agent's follow-ups; leave it out otherwise.
+
+Without offers the card is built from `description`, and any offer gets through; `agent_lint` reports it (`card_missing`), and half a card (`card_format`).
 
 ### Persona Files
 The prompt loads these on every turn, so each holds one thing, in the shape every other agent uses (e.g. `agents/fitness-coach/`, `agents/goal-setter/`):
@@ -172,6 +187,7 @@ RULES.md is a plain list, one rule per line, `- key: value  # description`. A ta
 ### Final Report
 Once the files are written, reply in plain Markdown, never XML (your reply is shown in Discord):
 - The new agent's id and what it specializes in, with its tools and skills.
+- Its peer card: what it wants to hear about and what it offers.
 - The files created: `agents/<agent_id>/agent.json`, `SOUL.md`, `AGENTS.md` and `IDENTITY.md`, plus `pkm/agents/<agent_id>/USER.md`, `MEMORY.md`, `FEEDBACK.md` and `RULES.md`.
 - The code asked for with `workflow_change`, and its PR link once there is one.
 - Its round-trip budget (model calls per workflow), and any `agent_lint` finding you left in place, with why.

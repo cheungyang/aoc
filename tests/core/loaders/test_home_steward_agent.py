@@ -39,7 +39,7 @@ class TestButlerAgentConfig(unittest.TestCase):
         self.assertIn("general", agent.get_config("channels", []))
         # Concierge hosts every channel (there is one voice channel); Butler hosts none.
         self.assertEqual(agent.get_config("channel_hosts", []), [])
-        self.assertIn("home-automation", self.agents_loader.get_agent("main").get_config("channel_hosts", []))
+        self.assertTrue(self.agents_loader.hosts_channel("main", "home-automation"))
 
     def test_skills_declared_and_valid(self):
         agent = self.agents_loader.get_agent("home-steward")

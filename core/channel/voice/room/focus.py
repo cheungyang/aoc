@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.channel.names import is_thread
+from core.loaders.channel_hosts import hosted_channels
 from core.runtime.foundation.routing import answering_agent
 from core.runtime.commands.spoken.words import alias_key
 from core.channel.voice.room.aliases import build_aliases
@@ -78,7 +79,7 @@ class FocusDirectory:
         configs = {a: c for a, c in configs.items() if isinstance(c, dict)}
 
         targets: Dict[str, VoiceFocus] = {}
-        for channel in _names((configs.get(voice_host) or {}).get("channel_hosts")):
+        for channel in hosted_channels((configs.get(voice_host) or {}).get("channel_hosts"), configs.values()):
             targets[channel] = VoiceFocus(
                 key=channel,
                 channel_name=channel,
