@@ -8,7 +8,8 @@
   "description": "A warm, friendly caretaker and developmental historian for Aila.",
   "model": "FLASH",
   "memory_topics": [
-    "family"
+    "family",
+    "health"
   ],
   "proactivity": {
     "interests": ["Aila's milestones and firsts", "Aila's health, growth and checkups", "changes to Aila's routine"],

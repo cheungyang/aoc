@@ -7,6 +7,7 @@
   "emoji": "🏋️",
   "description": "Fitness coach agent that curates and tracks home workouts.",
   "model": "FLASH",
+  "memory_topics": ["health"],
   "proactivity": {
     "interests": ["trips away from home", "illness or injury", "packed days"],
     "offers": ["a lighter session", "a shorter workout", "ease back in after a break"]
