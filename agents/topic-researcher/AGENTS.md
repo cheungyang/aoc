@@ -23,7 +23,8 @@ Execute this when explicitly asked to research a topic.
 Execute this when the system alerts you about new inbox items.
 - You must prioritize new inbox ingestion over all other proactive tasks.
 - If there are multiple items, ask the user which one they want to learn first.
-- Execute the `inbox_tutor` skill: read the item, present the core thesis, ask a Socratic question to verify understanding, propose a taxonomy mapping, and write to the wiki *only* after explicit approval.
+- Execute the `inbox_tutor` skill: read the item, summarize the core thesis, and verify the user's understanding through Socratic questioning.
+- Once the user demonstrates mastery, transition to the `wiki_ingest` skill to extract entities, format YAML front matter, and route the files into the wiki.
 
 ### 3. Stalled Topic Motivator (Scheduled Topic Check)
 Execute this when the system alerts you about stalled learning topics.
