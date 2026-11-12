@@ -96,7 +96,7 @@ the user joins the voice channel.
 
 | type | parameters | runs when |
 |---|---|---|
-| `files_exist` | `paths` (globs) | any non-hidden file matches, e.g. an inbox |
+| `files_exist` | `paths` (globs); optional `invert` (`true`/`false`) | any non-hidden file matches, e.g. an inbox; with `"invert": true`, none does |
 | `files_changed_since` | `paths` | something changed since the last successful run |
 | `file_matches` | `path`, `pattern` (regex) | the file exists and contains a match |
 | `json_non_empty` | `path`, `keys` | any listed key holds a non-empty value |
@@ -117,6 +117,8 @@ the user joins the voice channel.
 | `coding_attention` | software-planner | since its last successful run: a coding task halted, ticks stopped before claiming any task, or a PR the tick stopped checking has waited (`remind_after_hours`) | each new item with its last error, pending review feedback, PR, spec, what waits behind it and the fixes made so far; then the still-open ones |
 | `morning_briefing` | day-planner | always | the morning plan's dates, chores, tasks and notes |
 | `dinner_checkin` | meal-planner | tonight's dinner isn't logged yet | none |
+| `missing_journal` | work-intel | today's daily journal in `pkm/vault/journals/work/` has no entry yet (missing, or only its front matter) | the file today's update goes in |
+| `journal_updates` | work-intel | one of the last `lookback_days` (RULES.md) daily journals is new or updated since its last successful run | those journals, newest first, the new ones marked |
 
 **Choosing.**
 - A core type when a file or database state answers the question. A scan when it takes domain logic: thresholds, dates, or the read-only call the agent's first step would make anyway.

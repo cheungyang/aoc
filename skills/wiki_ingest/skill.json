@@ -1,0 +1,14 @@
+{
+  "skill_id": "wiki_ingest",
+  "name": "Wiki Ingest",
+  "description": "Processes a reading backlog, extracts/discusses concepts, and compiles a linked LLM Wiki graph.",
+  "emoji": "🕸️",
+  "tools": {
+    "filesystem": {
+      "pkm/wiki": ["@write"],
+      "pkm/inbox": ["@read", "delete"],
+      "pkm/vault/assets": ["@read"]
+    },
+    "web_search": []
+  }
+}
