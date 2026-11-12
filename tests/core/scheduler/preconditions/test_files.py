@@ -4,7 +4,7 @@ import time
 import unittest
 
 from core.scheduler import preconditions as pre
-from core.scheduler.preconditions import build_precondition, first_changed_path, first_existing_file
+from core.scheduler.preconditions import PreconditionError, build_precondition, first_changed_path, first_existing_file
 from tests.core.scheduler.preconditions import TmpDirCase, ctx
 
 
@@ -56,6 +56,32 @@ class TestFilePreconditions(TmpDirCase):
         self.assertFalse(p.evaluate(ctx()))
         self.write("inbox/a.md")
         self.assertTrue(p.evaluate(ctx()))
+
+    def test_files_exist_inverted_runs_only_while_nothing_matches(self):
+        p = build_precondition({"type": "files_exist", "paths": [self.abs("inbox/**")], "invert": True})
+        decision = p.evaluate(ctx())
+        self.assertTrue(decision)
+        self.assertIn("no files match", decision.reason)
+        self.write("inbox/.DS_Store")
+        self.assertTrue(p.evaluate(ctx()), "a hidden file still doesn't count")
+        self.write("inbox/a.md")
+        decision = p.evaluate(ctx())
+        self.assertFalse(decision)
+        self.assertTrue(decision.reason.endswith("inbox/a.md exists"), decision.reason)
+
+    def test_files_exist_without_invert_is_unchanged(self):
+        self.write("inbox/a.md")
+        for extra in ({}, {"invert": False}, {"invert": None}):
+            with self.subTest(extra=extra):
+                p = build_precondition({"type": "files_exist", "paths": [self.abs("inbox/**")], **extra})
+                self.assertTrue(p.evaluate(ctx()))
+
+    def test_files_exist_invert_must_be_true_or_false(self):
+        for bad in ("true", "yes", 1, 0, []):
+            with self.subTest(invert=bad):
+                with self.assertRaises(PreconditionError) as cm:
+                    build_precondition({"type": "files_exist", "paths": ["x"], "invert": bad})
+                self.assertIn("'files_exist' invert must be true or false", str(cm.exception))
 
     def test_file_matches(self):
         p = build_precondition(

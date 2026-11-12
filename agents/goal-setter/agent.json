@@ -41,7 +41,7 @@
             "pkm/vault/projects": [
                 "@write"
             ],
-            "pkm/vault/journals/google/weekly_rollups.md": [
+            "pkm/vault/journals/work/weekly_rollups.md": [
                 "@read"
             ]
         },

@@ -1,7 +1,7 @@
 {
-  "agent_id": "google-knowledge",
+  "agent_id": "work-intel",
   "channels": [
-    "google-knowledge"
+    "work-intel"
   ],
   "name": "Gemma",
   "emoji": "🛡️",
@@ -13,13 +13,13 @@
   },
   "tools": {
     "filesystem": {
-      "pkm/vault/journals/google/": [
+      "pkm/vault/journals/work/": [
         "@write"
       ]
     }
   },
   "skills": {
-    "google_sparring": {
+    "work_sparring": {
       "preload": "full"
     }
   },
@@ -32,40 +32,39 @@
   },
   "schedules": [
     {
+      "id": "journal-nudge",
       "cron": "0 8 * * 1-5",
       "kind": "prompt",
-      "channel": "google-knowledge",
+      "channel": "work-intel",
       "precondition": {
-        "type": "always",
-        "reason": "Pending Elephant implementing a missing-journal precondition."
+        "type": "missing_journal"
       },
       "session_policy": "stateless",
       "thinking_level": "medium",
       "prompt": [
-        "Ask Gemma to check pkm/vault/journals/google/ for today's update.",
-        "If today's update is missing, she should nudge Alva to copy and paste the 6 AM update from the crop agent into the vault.",
-        "If the update is already there, she should output nothing."
+        "Today's update isn't in pkm/vault/journals/work/ yet; the findings name the file it goes in.",
+        "Ask Gemma to nudge Alva to copy and paste the 6 AM update from the crop agent into the vault."
       ]
     },
     {
+      "id": "journal-sparring",
       "cron": "30 16 * * 1-5",
       "kind": "prompt",
-      "channel": "google-knowledge",
+      "channel": "work-intel",
       "precondition": {
-        "type": "always",
-        "reason": "Pending Elephant implementing the daily journal precondition script."
+        "type": "journal_updates"
       },
       "session_policy": "stateless",
       "thinking_level": "medium",
       "prompt": [
-        "Ask Gemma to check recent daily journals in pkm/vault/journals/google/.",
-        "If there are new tactical updates, she should initiate a brief sparring session."
+        "Ask Gemma to read the recent daily journals the findings list, starting with the ones marked new since her last sparring session.",
+        "If they hold new tactical updates, she should initiate a brief sparring session."
       ]
     },
     {
       "cron": "0 23 * * 5",
       "kind": "prompt",
-      "channel": "google-knowledge",
+      "channel": "work-intel",
       "precondition": {
         "type": "always",
         "reason": "Runs silently at the end of the week to synthesize rollups."
@@ -73,8 +72,8 @@
       "session_policy": "stateless",
       "thinking_level": "high",
       "prompt": [
-        "Ask Gemma to read this week's daily journals in pkm/vault/journals/google/ and synthesize the executive milestones.",
-        "She should append the weekly synthesis directly to pkm/vault/journals/google/weekly_rollups.md silently, without sending a message to Alva."
+        "Ask Gemma to read this week's daily journals in pkm/vault/journals/work/ and synthesize the executive milestones.",
+        "She should append the weekly synthesis directly to pkm/vault/journals/work/weekly_rollups.md silently, without sending a message to Alva."
       ]
     }
   ]

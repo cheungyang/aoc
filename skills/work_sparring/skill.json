@@ -1,11 +1,11 @@
 {
-  "skill_id": "google_sparring",
-  "name": "Google Sparring",
+  "skill_id": "work_sparring",
+  "name": "Work Sparring",
   "description": "Executes Red Team tactical sparring and executive pushback based on daily corporate journals.",
   "emoji": "🤺",
   "tools": {
     "filesystem": {
-      "pkm/vault/journals/google/": [
+      "pkm/vault/journals/work/": [
         "@read"
       ]
     }

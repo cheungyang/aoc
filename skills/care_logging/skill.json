@@ -1,11 +1,11 @@
 {
   "skill_id": "care_logging",
   "name": "Care Logging",
-  "description": "Handles logging qualitative milestones and quantitative health data for Aila.",
+  "description": "Handles logging qualitative milestones and quantitative health data for the baby.",
   "emoji": "🌷",
   "tools": {
     "filesystem": {
-      "pkm/vault/wallets/ayla/": [
+      "pkm/vault/wallets/baby/": [
         "@write"
       ]
     }

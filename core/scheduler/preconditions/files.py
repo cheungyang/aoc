@@ -111,18 +111,26 @@ class FilesChangedSince(Precondition):
 
 
 class FilesExist(Precondition):
-    """At least one (non-hidden) file matches — e.g. an inbox that is not empty."""
+    """At least one (non-hidden) file matches — e.g. an inbox that is not empty.
+
+    `"invert": true` turns it around: the run happens only while nothing
+    matches — e.g. a file that should have been written and isn't yet.
+    """
     type_name = "files_exist"
 
     def validate(self):
-        self._check_keys(["paths"])
+        self._check_keys(["paths", "invert"])
         self.paths = self._require_str_list("paths")
+        invert = self.config.get("invert")
+        if invert is not None and not isinstance(invert, bool):
+            raise PreconditionError(f"'{self.type_name}' invert must be true or false, got {invert!r}")
+        self.invert = bool(invert)
 
     def evaluate(self, ctx):
         found = first_existing_file(self.paths)
         if found:
-            return WorkDecision(True, f"{_rel(found)} exists")
-        return WorkDecision(False, f"no files match {', '.join(self.paths)}")
+            return WorkDecision(not self.invert, f"{_rel(found)} exists")
+        return WorkDecision(self.invert, f"no files match {', '.join(self.paths)}")
 
 
 class FileMatches(Precondition):
