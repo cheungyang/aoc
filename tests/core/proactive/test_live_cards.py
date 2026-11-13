@@ -17,13 +17,12 @@ from core.proactive.cards import cards
 # built from the agent's description and the Governor accepts any offer.
 EXPECTED = {
     "agent-designer": ("agent-management", ("design an agent or skill", "fix an agent's instructions")),
-    "ayla-caretaker": ("ayla-care", ("log a milestone", "log health details")),
+    "baby-caretaker": ("baby-care", ("log a milestone", "log health details")),
     "content-creator": ("content-creation", ("turn them into videos and posts",)),
     "day-planner": ("day-planning", ("adjust the daily plan", "a reminder in the morning digest")),
     "excursion-planner": ("weekend-planning", ("activity ideas", "bookings", "calendar holds")),
     "fitness-coach": ("fitness-coach", ("a lighter session", "a shorter workout", "ease back in after a break")),
     "goal-setter": ("project-planning", ("a coaching session", "turn a goal into milestones")),
-    "google-knowledge": ("google-knowledge", ("a sparring session", "prep for a meeting or decision")),
     "home-steward": ("home-automation", ("away mode", "automations")),
     "market-scout": ("market-scout", ("research a ticker", "add to the watchlist")),
     "meal-planner": ("meal-planning", ("update the kitchen inventory", "plan meals around events",
@@ -34,6 +33,7 @@ EXPECTED = {
     "reward-travel": ("lifestyle-perk", ("award flight search", "best card for a purchase", "statement credits to use")),
     "software-planner": ("software-dev", ("a co-design session", "a design spec")),
     "topic-researcher": ("topic-research", ("syllabi", "topic hubs")),
+    "work-intel": ("work-intel", ("a sparring session", "prep for a meeting or decision")),
 }
 
 

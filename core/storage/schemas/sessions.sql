@@ -8,7 +8,7 @@
 -- order; SessionStore adds the columns they lack.
 CREATE TABLE IF NOT EXISTS "{{table}}" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_type TEXT NOT NULL,           -- checkpoint, write, message, token or turn_trace
+    entry_type TEXT NOT NULL,           -- checkpoint, write, message, token, turn_trace or room_event
     checkpoint_id TEXT,                 -- checkpoint and write rows; not unique
     step INTEGER DEFAULT -1,            -- checkpoint rows: the LangGraph step
     data BLOB,                          -- checkpoint and write rows: a zlib-compressed pickle

@@ -106,6 +106,8 @@ class _Voice:
         self.previous = None   # where "go back" returns
         self.noise = None      # why the newest utterance isn't a voice, for a bare name
         self.live = False      # whether you were just talking where you are
+        self.handoffs = {}     # the hand-off waiting at a focus, by key (it has `from_agent`)
+        self.openings = []     # (focus key, who handed it over): the agent opened with a hand-off
 
     def directory(self):
         return DIRECTORY
@@ -122,8 +124,16 @@ class _Voice:
     def focus_channel(self, focus):
         return object() if self.reachable else None
 
-    async def arrive(self, focus, say):
+    def waiting_handoff(self, focus):
+        return self.handoffs.get(focus.key)
+
+    async def arrive(self, focus, say, *, handoff=None, undo_hint=None):
+        """As VoiceManager.arrive: the agent's opening with a hand-off, then how to go back."""
         self.arrivals.append(focus.key)
+        if handoff is not None:
+            self.openings.append((focus.key, handoff.from_agent))
+        if undo_hint:
+            await say(undo_hint, focus.agent_id)
 
     async def switch_to_named(self, phrase, say, *, asked=True, bare=False, turn=None):
         return await self.switcher.switch_to_named(phrase, say, asked=asked, bare=bare, noise=lambda: self.noise,
@@ -139,6 +149,9 @@ class _Voice:
 
     async def next_agent(self, say):
         return False  # no feature (the inbox's hook) offers one
+
+    async def presence(self, say):
+        return False  # the session is under way: "hello?" is for the agent
 
 
 class _Said:
@@ -447,6 +460,51 @@ class TestSwitchToAgent(unittest.IsolatedAsyncioTestCase):
         self.voice._focus = DIRECTORY.targets["day-planning"]
         self.assertTrue(await self.switcher.switch_to_agent("fitness-coach", self.say, live=lambda focus: True))
         self.assertEqual(self.say.lines, [("Frankie here. Say 'go back' for Daisy.", "fitness-coach")])
+
+
+class TestArrivingWithAHandOff(unittest.IsolatedAsyncioTestCase):
+    """A hand-off waits for the agent you arrive at: another agent's <switch>
+    or <pass> parked its brief there. In the prod logs you arrived to "Daisy
+    here." and had to ask, every time, whether she got what Miles sent."""
+
+    def setUp(self):
+        self.voice = _Voice()
+        self.switcher = self.voice.switcher = FocusSwitcher(self.voice, "main", resolver=AsyncMock(return_value=None))
+        self.say = _Said()
+        self.voice.handoffs["day-planning"] = MagicMock(from_agent="fitness-coach")
+
+    async def hear(self, transcript):
+        ctx = SpokenContext(voice=self.voice, heard=transcript, say=self.say, turn=MagicMock())
+        return await SPOKEN.answer(transcript, ctx) is not None
+
+    async def test_the_greeting_says_who_filled_the_agent_in_and_it_opens_with_the_hand_off(self):
+        self.voice._focus = DIRECTORY.targets["fitness-coach"]
+        self.assertTrue(await self.switcher.switch_to_agent("day-planner", self.say))
+        self.assertEqual(self.say.lines, [("Daisy here. Frankie filled me in.", "day-planner")])
+        self.assertEqual(self.voice.openings, [("day-planning", "fitness-coach")])
+
+    async def test_how_to_go_back_comes_after_the_opening_not_before_it(self):
+        self.voice._focus = DIRECTORY.targets["fitness-coach"]
+        self.assertTrue(await self.switcher.switch_to_agent("day-planner", self.say, live=lambda focus: True))
+        self.assertEqual(self.say.lines, [("Daisy here. Frankie filled me in.", "day-planner"),
+                                          ("Say 'go back' for Frankie.", "day-planner")])
+
+    async def test_asking_for_the_agent_yourself_picks_the_hand_off_up_too(self):
+        """A <pass> waits until you get there: "switch me to Daisy" later on."""
+        self.assertTrue(await self.hear("Switch me to Daisy"))
+        self.assertEqual(self.say.lines, [("Daisy here. Frankie filled me in.", "day-planner")])
+        self.assertEqual(self.voice.openings, [("day-planning", "fitness-coach")])
+
+    async def test_already_there_the_agent_still_opens_with_it(self):
+        self.voice._focus = DIRECTORY.targets["day-planning"]
+        self.assertTrue(await self.hear("Switch me to Daisy"))
+        self.assertEqual(self.say.lines, [("You're already with Daisy.", "day-planner")])
+        self.assertEqual(self.voice.openings, [("day-planning", "fitness-coach")])
+
+    async def test_without_one_the_greeting_is_as_ever(self):
+        self.assertTrue(await self.switcher.switch_to_agent("fitness-coach", self.say))
+        self.assertEqual(self.say.lines, [("Frankie here.", "fitness-coach")])
+        self.assertEqual(self.voice.openings, [])
 
 
 if __name__ == "__main__":

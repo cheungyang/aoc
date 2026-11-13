@@ -216,9 +216,10 @@ def user_words(prompt: Any) -> str:
 
 def handoff_of(prompt: Any) -> Optional[Dict[str, Any]]:
     """The hand-off capsule the message carried, as the ledger's context keeps
-    it: {"from": <the agent whose conversation it is>, "via": "handoff" or
-    "switch", "chars": N}. A router hand-off can carry a second one, parked by
-    an agent's <switch>: it goes under "also". None without a capsule."""
+    it: {"from": <the agent whose conversation it is>, "via": "handoff",
+    "switch" or "pass", "chars": N}. A router hand-off can carry a second one,
+    parked by an agent's <switch> or <pass>: it goes under "also". None
+    without a capsule."""
     capsules = []
     for match in _CAPSULE.finditer(message_text(prompt)):
         attributes = dict(_ATTRIBUTE.findall(match.group(1)))

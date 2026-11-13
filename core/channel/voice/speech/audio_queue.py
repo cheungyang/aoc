@@ -16,11 +16,25 @@ FIRST_AUDIO_TIMEOUT_S = 10.0
 
 
 class AudioItem:
-    def __init__(self, speaker, on_start: Optional[Callable[[], None]] = None):
+    def __init__(self, speaker, on_start: Optional[Callable[[], None]] = None,
+                 on_end: Optional[Callable[[bool], None]] = None):
         self.speaker = speaker
         # Called when playback of this item begins: how a turn learns when the
         # listener actually started hearing it (its TurnTrace `audio_start`).
         self.on_start = on_start
+        # Called once when it's done: True if it played to the end, False if it
+        # was dropped or cut off (a barge-in): whether a greeting was heard whole.
+        self.on_end = on_end
+
+    def ended(self, completed: bool) -> None:
+        """Tells `on_end`, once: later calls do nothing."""
+        callback, self.on_end = self.on_end, None
+        if callback is None:
+            return
+        try:
+            callback(completed)
+        except Exception as e:
+            print(f"[AudioStreamQueue] on_end callback failed: {e}")
 
 
 class AudioStreamQueue:
@@ -86,10 +100,12 @@ class AudioStreamQueue:
             except Exception as e:
                 print(f"[AudioStreamQueue] Error creating playback task: {e}")
 
-    async def put(self, speaker, on_start: Optional[Callable[[], None]] = None):
-        """Queues a speaker after everything before it. `on_start` is called when it starts playing."""
+    async def put(self, speaker, on_start: Optional[Callable[[], None]] = None,
+                  on_end: Optional[Callable[[bool], None]] = None):
+        """Queues a speaker after everything before it. `on_start` is called when
+        it starts playing; `on_end(completed)` once it's done (AudioItem)."""
         self._ensure_queue()
-        await self._queue.put(AudioItem(speaker, on_start=on_start))
+        await self._queue.put(AudioItem(speaker, on_start=on_start, on_end=on_end))
         self.start()
 
     def clear(self):
@@ -125,6 +141,7 @@ class AudioStreamQueue:
                 break
         for item in stale:
             item.speaker.cleanup()
+            item.ended(False)
 
     def duck(self, volume: float):
         """Keeps playing, at `volume`: stage one of barge-in, while the user's words
@@ -178,6 +195,7 @@ class AudioStreamQueue:
         vc = self._voice_client()
         if not has_audio or generation != self._generation or not vc or not vc.is_connected():
             item.speaker.cleanup()
+            item.ended(False)
             return
 
         if vc.is_playing():  # the cue
@@ -204,6 +222,7 @@ class AudioStreamQueue:
 
         source = discord.PCMVolumeTransformer(item.speaker, volume=self._volume)
         self._current_source = source
+        played = False
         try:
             vc.play(source, after=_after)
             if item.on_start is not None:
@@ -212,11 +231,14 @@ class AudioStreamQueue:
                 except Exception as e:
                     print(f"[AudioStreamQueue] on_start callback failed: {e}")
             await done.wait()
+            played = True
         except Exception as e:
             print(f"[AudioStreamQueue] Error playing audio item: {e}")
             item.speaker.cleanup()
         finally:
             self._current_source = None
+            # A barge-in's clear() bumps the generation and ends the wait early.
+            item.ended(played and generation == self._generation)
 
     async def stop(self):
         """Stops the audio queue completely."""

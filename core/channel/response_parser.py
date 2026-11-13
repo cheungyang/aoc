@@ -1,10 +1,11 @@
 """A reply, read: the text the channel shows, and the control tags around it.
 
 An agent's reply is markdown for the channel plus tags the runtime acts on:
-<switch> (hand the user to a teammate), <speech> (what a voice turn says
-aloud), <poll>, <images>, <videos> and <system_memory_log>.
-`AgentResponse.from_string` takes each out of the text, <switch> first, so one
-written inside <speech> is never read out.
+<switch> (hand the user to a teammate), <pass> (leave a teammate a brief and
+keep the user), <speech> (what a voice turn says aloud), <poll>, <images>,
+<videos> and <system_memory_log>. `AgentResponse.from_string` takes each out
+of the text, <switch> and <pass> first, so one written inside <speech> is
+never read out.
 
 A tag inside code is text, not a directive. A reply that explains the syntax
 quotes it -- "the syntax is `<switch to="ID"/>`" -- and that must neither
@@ -242,23 +243,41 @@ def split_question(speech: Optional[str]) -> tuple[Optional[str], Optional[str]]
 # (core/prompts/templates/system/team.md): the voice room moves there, and the
 # channel shows where to go. When the teammate should pick up the work, the
 # agent writes a brief for it inside: <switch to="goal-setter">brief</switch>.
-# The brief never crosses another <switch>, so a bare opener can't take a
-# later directive in as its brief.
-_SWITCH_RE = re.compile(
-    r"<switch\b[^>]*?\bto\s*=\s*[\"']([^\"']*)[\"'][^>]*?"
-    r"(?:/>(?:\s*</switch\s*>)?|>(?:((?:(?!<switch\b).)*?)</switch\s*>)?)",
-    re.IGNORECASE | re.DOTALL,
-)
-# The longest brief kept, in characters: it goes into the teammate's capsule
-# (core/runtime/history/handoff.py), which is never cut to fit around it.
+#
+# With <switch> the only directive, a user who asked an agent to pass
+# something along was moved mid-conversation. A reply that only leaves a
+# teammate something ends with <pass to="goal-setter">brief</pass> instead:
+# graphs/main parks the brief for the teammate, and the user stays where they
+# are. The two are read alike, and a reply may carry both.
+#
+# A brief never crosses another directive's opener, so a bare opener can't
+# take a later directive in as its brief. "\b" after a tag's name keeps
+# <switchboard>, <password> and <passage> out.
+_NO_DIRECTIVE = r"(?!<(?:switch|pass)\b)"
+
+
+def _directive(tag: str) -> "re.Pattern":
+    """The pattern of one directive: <tag to="ID"/>, or <tag to="ID">brief</tag>."""
+    return re.compile(
+        rf"<{tag}\b[^>]*?\bto\s*=\s*[\"']([^\"']*)[\"'][^>]*?"
+        rf"(?:/>(?:\s*</{tag}\s*>)?|>(?:((?:{_NO_DIRECTIVE}.)*?)</{tag}\s*>)?)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+
+_SWITCH_RE = _directive("switch")
+_PASS_RE = _directive("pass")
+# The longest brief kept, a switch's or a pass's, in characters: it goes into
+# the teammate's capsule (core/runtime/history/handoff.py), which is never cut
+# to fit around it.
 SWITCH_BRIEF_CHARS = 1000
 
 
-def _extract_switch(text: str) -> tuple[str, Optional[str], Optional[str]]:
-    """Extracts and strips <switch> directives outside code, wherever they are
-    (inside <speech> too, so the voice never reads one out), briefs and all.
-    The last one counts: its target, and its brief."""
-    found = list(_SWITCH_RE.finditer(mask_code(text)))
+def _extract_directive(text: str, pattern: "re.Pattern") -> tuple[str, Optional[str], Optional[str]]:
+    """Extracts and strips one kind of directive -- <switch> or <pass> -- outside
+    code, wherever it is (inside <speech> too, so the voice never reads one
+    out), briefs and all. The last one counts: its target, and its brief."""
+    found = list(pattern.finditer(mask_code(text)))
     if not found:
         return text, None, None
     target = _group(text, found[-1], 1).strip()
@@ -267,7 +286,7 @@ def _extract_switch(text: str) -> tuple[str, Optional[str], Optional[str]]:
 
 
 def _brief(raw: Optional[str]) -> Optional[str]:
-    """A switch's brief on one line, at most SWITCH_BRIEF_CHARS; None if empty."""
+    """A directive's brief on one line, at most SWITCH_BRIEF_CHARS; None if empty."""
     brief = " ".join((raw or "").split())
     if len(brief) > SWITCH_BRIEF_CHARS:
         brief = brief[:SWITCH_BRIEF_CHARS - 1].rstrip() + "…"
@@ -291,11 +310,18 @@ class AgentResponse:
     # What the agent wrote inside that tag for the teammate, on one line: it goes
     # into the teammate's hand-off capsule (graphs/main), never to the user.
     switch_brief: Optional[str] = None
+    # The teammate the reply passed something to, the user staying where they
+    # are: the agent id in <pass to="...">brief</pass>.
+    pass_to: Optional[str] = None
+    # What the agent wrote inside that tag, on one line: it goes into the
+    # teammate's hand-off capsule too (graphs/main), never to the user.
+    pass_brief: Optional[str] = None
 
     @classmethod
     def from_string(cls, reply_text: str) -> 'AgentResponse':
         text = reply_text
-        text, switch_to, switch_brief = _extract_switch(text)
+        text, switch_to, switch_brief = _extract_directive(text, _SWITCH_RE)
+        text, pass_to, pass_brief = _extract_directive(text, _PASS_RE)
         text, speech = _extract_speech(text)
         speech, question = split_question(speech)
         text, poll_data = _extract_poll(text)
@@ -313,4 +339,6 @@ class AgentResponse:
             question=question,
             switch_to=switch_to,
             switch_brief=switch_brief,
+            pass_to=pass_to,
+            pass_brief=pass_brief,
         )

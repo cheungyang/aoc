@@ -88,3 +88,26 @@ async def test_a_stalled_stream_ends_playback(monkeypatch):
     monkeypatch.setattr(pcm_speaker, "STALL_S", 0.0)
     time.sleep(0.001)
     assert speaker.read() == b""
+
+
+@pytest.mark.asyncio
+async def test_a_lead_in_is_silence_ahead_of_the_first_audio_only():
+    """The greeting opens on silence, so its first word isn't on the first
+    packets a listener's client gets of a stream it hasn't heard yet."""
+    speaker = PCMSpeaker(asyncio.get_running_loop(), lead_in_ms=60)
+    speaker.write(_mono(*[7] * ONE_FRAME))
+    speaker.write(_mono(*[7] * ONE_FRAME))
+    speaker.finish()
+    frames = [speaker.read() for _ in range(5)]
+    assert frames[:3] == [SILENCE] * 3
+    assert all(frame != SILENCE and len(frame) == FRAME_BYTES for frame in frames[3:])
+    assert speaker.underruns == 0, "the lead-in is audio, not a wait"
+    assert speaker.read() == b""
+
+
+@pytest.mark.asyncio
+async def test_a_silent_stream_has_no_lead_in_to_play():
+    speaker = PCMSpeaker(asyncio.get_running_loop(), lead_in_ms=250)
+    speaker.finish()
+    assert await asyncio.wait_for(speaker.ready(), 1) is False
+    assert speaker.read() == b""

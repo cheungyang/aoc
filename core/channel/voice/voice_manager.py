@@ -18,6 +18,21 @@ stops turns here. A turn answers every unanswered utterance as one request,
 under the current focus: exactly as an untagged message typed in the focus's
 text channel would be answered, so voice and text share each agent's history.
 
+Greeting you. Every time you arrive -- you join, or the bot (re)joins a room
+you're already in, after a restart or a reconnect -- the room greets you, but
+only once you can hear it: your client hears nothing until it has joined the
+call's end-to-end encryption (room/connection.py `until_audible`), and a
+greeting started at once was heard mid-sentence or not at all. "Hello?" over
+the greeting doesn't cut it off, and before anything else in the session it
+gets the greeting again (core/runtime/commands/spoken/presence.py). A restart
+within RESUME_FOCUS_S of your last turn puts you back where you were.
+
+Hand-offs. When the room arrives at an agent with a hand-off waiting for it
+-- the brief another agent's <switch> or <pass> parked there
+(core/storage/handoff_capsules.py) -- that agent speaks first, with no words
+from you: it opens with what it was handed (`arrive`), and whatever else it
+left you comes after that.
+
 The commands you give the room, typed or spoken, are core/runtime/commands/:
 they reach it through VoiceControls (core/runtime/commands/ports.py), which
 this class provides. The Discord runner, which hosts the voice room, builds
@@ -25,7 +40,10 @@ it, and forwards what Discord tells it: you moving between voice channels
 (`member_moved`), and the bot being ready (`auto_join`).
 """
 import asyncio
+import json
+import os
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import discord
@@ -33,6 +51,11 @@ import numpy as np
 
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation.output import TurnOutput
+from core.runtime.foundation.sessions import SessionManager
+from core.runtime.history.handoff import arrival_message
+from core.runtime.observability.turn_trace import Outcome, bind_turn_trace, current_turn_trace, start_turn_trace
+from core.storage.handoff_capsules import HandoffCapsuleStore
+from core.storage.sessions import SessionStore
 from core.channel.voice.engines.stt import SpeechRecognizer, agent_vocabulary
 from core.channel.voice.foundation import settings
 from core.channel.voice.hooks import VoiceHook
@@ -50,7 +73,7 @@ from core.channel.voice.room.connection import (
 from core.channel.voice.room.focus import DEFAULT_LOBBY_CHANNEL, FocusDirectory, VoiceFocus
 from core.channel.voice.room.room_switch import FocusSwitcher, Say
 from core.channel.voice.speech.audio_queue import AudioStreamQueue
-from core.channel.voice.speech.reply import ReplyStreamer, TextOutputFactory
+from core.channel.voice.speech.reply import ReplyStreamer, TextOutputFactory, TurnSpeech
 from core.channel.voice.turn import VoiceTurn
 
 # What the host passes for a turn's output in a text channel (foundation/output.py).
@@ -72,6 +95,26 @@ HANG_UP_WAIT_S = 6.0
 # Said in the voice channel's chat when Discord won't let the bot disconnect you.
 NO_MOVE_MEMBERS = ("📴 Hung up, but I couldn't disconnect you: I need the **Move Members** permission "
                    "in this voice channel.")
+# Where the room keeps its last focus across a restart (`rejoined`), in the
+# voice data dir beside memory.db.
+FOCUS_FILE = "room_focus.json"
+
+# Where the session's greeting is (`_Greeting.state`).
+WAITING = "waiting"    # for you to be able to hear it
+PLAYING = "playing"
+HEARD = "heard"        # played to the end
+CUT = "cut"            # cut off, or dropped before it played
+SKIPPED = "skipped"    # you spoke first: said, it would only talk over you
+
+
+@dataclass
+class _Greeting:
+    """This voice session's greeting, and where it is."""
+    line: str
+    state: str = WAITING
+    event: str = "welcome"  # "welcome" when you joined, "rejoin" when the bot did
+    how: Optional[str] = None
+    waited_ms: Optional[int] = None
 
 
 class VoiceManager:
@@ -128,6 +171,10 @@ class VoiceManager:
         self._idle_line: Optional[asyncio.Lock] = None
         # "Hanging up" is under way: speech starts no turn until the next join.
         self._hanging_up = False
+        # This voice session's greeting (`welcome`), and whether you've said
+        # anything since but "hello?": until you have, "hello?" gets it again.
+        self._greeting: Optional[_Greeting] = None
+        self._floor_taken = False
 
     def _log(self, message: str) -> None:
         print(f"[VoiceManager:{self.agent_id}] {message}")
@@ -169,11 +216,12 @@ class VoiceManager:
 
     async def leave(self) -> None:
         """Leaves the voice room (`!leave`, or hanging up): nothing of this
-        voice session carries over."""
+        voice session carries over, not even across a restart."""
         await self.connection.leave()
         self._reset_focus()
         self.enrollment.reset()
         self._hanging_up = False
+        self._forget_focus()
         self._call_hooks("left")
 
     async def hang_up(self, say: Say, member=None) -> bool:
@@ -244,17 +292,64 @@ class VoiceManager:
         except Exception as e:
             self._log(f"Could not post in the voice channel's chat: {e}")
 
-    async def welcome(self) -> None:
+    async def welcome(self, member=None, since: Optional[float] = None) -> None:
         """You joined the voice channel: a new voice session, with the concierge.
         A hook may greet you with something other than "Concierge here." (the
-        inbox's digest)."""
+        inbox's digest). Given who joined (`member`, at `since`, a
+        time.monotonic()), the greeting waits until they can hear it
+        (`_greet`); the session itself starts at once."""
         directory = self.directory()
         self._reset_focus()
         self._configure_gate()
         self.enrollment.reset()
         self._focus = directory.lobby
         greetings = [line for line in self._call_hooks("joined") if line]
-        await self.reply.say(greetings[0] if greetings else directory.greeting(directory.lobby), self.agent_id)
+        await self._greet(greetings[0] if greetings else directory.greeting(directory.lobby), member, since)
+
+    async def _greet(self, line: str, member=None, since: Optional[float] = None, *, event: str = "welcome",
+                     agent_id: Optional[str] = None) -> None:
+        """Says the session's greeting, `line`, in `agent_id`'s voice (the
+        concierge's by default), once `member` can hear it: the bot's E2EE
+        group holds them and no key change is pending
+        (room/connection.py `until_audible`), then GREET_SETTLE_S more for a
+        phone's audio route. Given no member, at once. Said with a short
+        silence ahead of it. Not said if you've spoken first (`took_floor`),
+        or a newer session has begun meanwhile."""
+        greeting = self._greeting = _Greeting(line, event=event)
+        if member is not None:
+            since = time.monotonic() if since is None else since
+            greeting.how = await self.connection.until_audible(getattr(member, "id", None), since)
+            if greeting.how != "gone":
+                await asyncio.sleep(settings.GREET_SETTLE_S)
+            greeting.waited_ms = round((time.monotonic() - since) * 1000)
+            self._log(f"👋 {getattr(member, 'display_name', 'You')} can hear the room "
+                      f"({greeting.how}, {greeting.waited_ms} ms after joining).")
+        if self._greeting is not greeting:
+            return  # a newer session's greeting took over
+        if self._floor_taken or self._hanging_up or not self.connection.is_connected():
+            self._log("👋 You spoke first: the greeting is moot." if self._floor_taken
+                      else "👋 No one to greet any more.")
+            self._greeting_done(greeting, SKIPPED)
+            return
+        await self._say_greeting(greeting, self.reply.say, agent_id or self.agent_id)
+
+    async def _say_greeting(self, greeting: _Greeting, say: Say, agent_id: Optional[str] = None) -> None:
+        """Plays `greeting`, noting when it ends whether it played to the end."""
+        greeting.state = PLAYING
+        await say(greeting.line, agent_id or self.agent_id, lead_in_ms=settings.GREETING_LEAD_IN_MS,
+                  on_end=lambda completed: self._greeting_done(greeting, HEARD if completed else CUT))
+
+    def _greeting_done(self, greeting: _Greeting, state: str) -> None:
+        """`greeting` is over: heard to the end, cut off, or skipped. Recorded
+        in the lobby's session (`_room_event`), so memory.db shows each join,
+        how long the room waited for you to hear it, and how it went."""
+        if greeting.state not in (WAITING, PLAYING):
+            return  # over already: only a replay (`presence`) plays it again
+        greeting.state = state
+        self._room_event(self.directory().lobby if greeting.event == "welcome" else self.focus(), {
+            "kind": greeting.event, "how": greeting.how, "waited_ms": greeting.waited_ms,
+            "chars": len(greeting.line), "state": state,
+        })
 
     def _on_joined(self, room) -> None:
         """The bot joined a room: nothing from the last voice session carries over."""
@@ -262,6 +357,68 @@ class VoiceManager:
         self._configure_gate()
         self.enrollment.reset()
         self._hanging_up = False
+
+    async def rejoined(self) -> None:
+        """The bot (re)joined its room on its own -- at startup, after a
+        restart or a reconnect, or taking voice over from another instance --
+        and you may be in there already. Discord says nothing of a member who
+        was there first, so nothing greeted you, and the restarts in the prod
+        logs left you talking into the lobby unawares. Now the room greets you
+        once you can hear it. Back within RESUME_FOCUS_S of your last turn, it
+        puts you back where you were, in that agent's voice: "I'm back. You're
+        in day planning, with Daisy."; otherwise it's a new session, with the
+        concierge's greeting."""
+        listener = self._listener()
+        if listener is None:
+            return
+        directory = self.directory()
+        resumed = directory.get(self._remembered_focus())
+        if resumed is None or resumed.is_lobby:
+            await self.welcome(listener, since=time.monotonic())
+            return
+        self._log(f"↩️ Back in the room within {settings.RESUME_FOCUS_S}s of your last turn: "
+                  f"resuming #{resumed.channel_name}.")
+        self._configure_gate()
+        self.set_focus(resumed, interrupt=False)
+        await self._greet(f"I'm back. {directory.whereabouts(resumed)}", listener, time.monotonic(),
+                          event="rejoin", agent_id=resumed.agent_id)
+
+    def _listener(self):
+        """The first person, not a bot, in the voice room; None if there's none."""
+        members = getattr(self.connection.channel, "members", None) or []
+        return next((member for member in members if not getattr(member, "bot", False)), None)
+
+    def _focus_file(self) -> str:
+        return os.path.join(settings.voice_data_dir(), FOCUS_FILE)
+
+    def _remember_focus(self, focus: VoiceFocus) -> None:
+        """Keeps where the room is, and when, across a restart (`rejoined`)."""
+        try:
+            path = self._focus_file()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + ".tmp", "w") as f:
+                json.dump({"focus": focus.key, "at": time.time()}, f)
+            os.replace(path + ".tmp", path)
+        except Exception as e:
+            self._log(f"Could not keep the room's focus: {e}")
+
+    def _remembered_focus(self) -> Optional[str]:
+        """The focus kept before a restart, if it was in use within RESUME_FOCUS_S."""
+        try:
+            with open(self._focus_file()) as f:
+                kept = json.load(f)
+        except (OSError, ValueError):
+            return None
+        at, key = kept.get("at"), kept.get("focus")
+        if not isinstance(at, (int, float)) or not isinstance(key, str):
+            return None
+        return key if 0 <= time.time() - at <= settings.RESUME_FOCUS_S else None
+
+    def _forget_focus(self) -> None:
+        try:
+            os.remove(self._focus_file())
+        except OSError:
+            pass
 
     def _configure_gate(self) -> None:
         """The voiceprint gate's settings, read afresh from voice_config on every
@@ -274,14 +431,16 @@ class VoiceManager:
         self.speaker_gate.configure(config if isinstance(config, dict) else self.config)
 
     def _reset_focus(self) -> None:
-        """Back to the lobby (on first use), with nothing left unanswered and
-        nowhere to go back to."""
+        """Back to the lobby (on first use), with nothing left unanswered,
+        nowhere to go back to, and no greeting yet."""
         self._focus = None
         self.floor.clear()
         self._previous_key = None
         self._turns_since_move = 0
         self._last_turn_at.clear()
         self._undo_hint = None
+        self._greeting = None
+        self._floor_taken = False
 
     def room(self):
         """The voice channel the bot is in, or None."""
@@ -304,8 +463,10 @@ class VoiceManager:
 
     async def member_moved(self, member, before, after) -> None:
         """You moved between voice channels. Into one this bot hosts, it follows
-        you and greets you there: each time you join is a new voice session,
-        with the concierge in the lobby. A mute or deafen changes nothing."""
+        you and greets you there, once you can hear it: each time you join is
+        a new voice session, with the concierge in the lobby. A mute or deafen
+        changes nothing."""
+        arrived = time.monotonic()  # Discord's word that you joined; hearing the bot comes later
         agent = AgentsLoader().get_agent(self.agent_id)
         if not agent:
             return
@@ -322,11 +483,13 @@ class VoiceManager:
                     return
             # You arrived (not a mute or deafen while already in the channel).
             if before.channel != after.channel:
-                await self.welcome()
+                await self.welcome(member, since=arrived)
 
     def auto_join(self) -> None:
         """With voice_config `auto_join` on, joins `default_room()` once Discord
-        is ready."""
+        is ready, and greets whoever is in there already (`rejoined`). Discord
+        calls this again whenever its gateway session is renewed; a bot still
+        in the room stays as it is, conversation and all."""
         agent = AgentsLoader().get_agent(self.agent_id)
         if not agent:
             return
@@ -339,8 +502,12 @@ class VoiceManager:
             await bot.wait_until_ready()
             await asyncio.sleep(AUTO_JOIN_DELAY_S)
             target = self.default_room()
+            if self.connection.in_room(target):
+                self._log(f"Already in '{target}': the voice session carries on.")
+                return
             print(f"Agent {self.agent_id} auto-joining voice channel '{target}'...")
-            await self.join(target)
+            if await self.join(target):
+                await self.rejoined()
 
         asyncio.create_task(_auto_join())
 
@@ -365,7 +532,8 @@ class VoiceManager:
         """Moves the focus. Nothing said to the old one carries over: a turn in
         flight is stopped (unless it is the turn asking: `interrupt=False`), and
         its unanswered words and last reply are forgotten. The old focus is
-        where "go back" returns."""
+        where "go back" returns. Where the room is now is kept across a
+        restart (`rejoined`), and the move is a room event in memory.db."""
         previous, self._focus = self._focus, focus
         if interrupt and self.busy():
             self.interrupt(f"focus moved to {focus.label}")
@@ -375,11 +543,26 @@ class VoiceManager:
                 self._previous_key = previous.key
                 self._moved_at = time.monotonic()
                 self._turns_since_move = 0
+            self._remember_focus(focus)
+            self._room_event(focus, {"kind": "focus", "from": previous.key if previous else None, "to": focus.key})
             self._spawn(self._announce_focus(focus))
 
-    async def arrive(self, focus: VoiceFocus, say: Say) -> None:
-        """After a switch's greeting: whatever the hooks have for you there,
-        said in the focus agent's own voice."""
+    async def arrive(self, focus: VoiceFocus, say: Say, *, handoff: Any = None,
+                     undo_hint: Optional[str] = None) -> None:
+        """After a switch's greeting. With a hand-off waiting there
+        (`waiting_handoff`), its agent opens with it, no words from you
+        needed (`_open_with_handoff`); what else it left you is handed to it
+        for after the hand-off, not played first. Otherwise, whatever the
+        hooks have for you there, said in the focus agent's own voice.
+        `undo_hint`, how to go back, is said after the opening: the switcher
+        puts it in the greeting itself when there's no hand-off."""
+        if handoff is not None and await self._open_with_handoff(focus, handoff, say):
+            if undo_hint and self.focus().key == focus.key:  # unless the opening moved you on again
+                await say(undo_hint, focus.agent_id)
+            return
+        if undo_hint:
+            await say(undo_hint, focus.agent_id)
+
         async def speak(text: str) -> None:
             await say(text, focus.agent_id)
             # A lone "yes" over the end of it is an answer, as after any reply.
@@ -392,6 +575,101 @@ class VoiceManager:
                 raise
             except Exception as e:
                 self._hook_failed(hook, "arrived", e)
+
+    def waiting_handoff(self, focus: VoiceFocus) -> Any:
+        """The hand-off waiting for `focus`'s agent in its channel, if there is
+        one: the brief an agent's <switch> or <pass> parked there, with the
+        conversation it came from (core/storage/handoff_capsules.py). Looked
+        at, not taken: the agent's first turn there takes it (graphs/main).
+        None in the lobby, and in a channel the concierge answers itself."""
+        if focus is None or focus.is_lobby or focus.agent_id == self.agent_id:
+            return None
+        try:
+            return HandoffCapsuleStore().waiting(focus.agent_id, focus.channel_name)
+        except Exception as e:
+            self._log(f"Could not look for a hand-off waiting in #{focus.channel_name}: {e}")
+            return None
+
+    async def _waiting_note(self, focus: VoiceFocus) -> Optional[str]:
+        """What a hook has waiting for you in `focus`, for its agent to bring
+        up after the hand-off it opens with (VoiceHook.handed_over); None."""
+        for hook in self.hooks:
+            try:
+                note = await hook.handed_over(self, focus)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._hook_failed(hook, "handed_over", e)
+                continue
+            if isinstance(note, str) and note.strip():
+                return note.strip()
+        return None
+
+    async def _open_with_handoff(self, focus: VoiceFocus, handoff: Any, say: Say) -> bool:
+        """The arrival turn: `focus`'s agent speaks first, opening with the
+        hand-off that waits for it. Handed over, an agent used to stay silent
+        until you spoke -- its brief rode on your next message -- and you heard
+        "Daisy here." and her unrelated morning post; in the prod logs you
+        asked every time, \"did you get what Eric sent you?\".
+
+        It runs as a turn of its own, on the channel's session, as a typed
+        message there would: graphs/main attaches the parked hand-off to this
+        turn's message (core/runtime/history/handoff.py `arrival_message`),
+        which team.md tells the agent how to open with. It runs inside the
+        turn that moved you, so a barge-in stops it as it would that turn.
+        False when it can't run (no agent, no channel, a newer turn): the
+        room then arrives as it otherwise would."""
+        agent, channel = self.agent(), self.focus_channel(focus)
+        turn_id = self._active_turn
+        if agent is None or channel is None or not self.is_current(turn_id):
+            return False
+        directory = self.directory()
+        sender = directory.names.get(getattr(handoff, "from_agent", "")) or getattr(handoff, "from_agent", "")
+        note = await self._waiting_note(focus)
+        self._log(f"↪️ {directory.who(focus)} opens with the hand-off from {sender}"
+                  + (", then what it left you." if note else "."))
+        outer = current_turn_trace()
+        trace = start_turn_trace(self.agent_id, turn_id, kind="arrival", handed_by=getattr(handoff, "from_agent", ""),
+                                 via=getattr(handoff, "via", ""))
+        speech = TurnSpeech(trace)
+        session = None
+        answered, cancelled = False, False
+        try:
+            session = SessionManager().get_session(
+                agent_id=self.agent_id, source="discord", channel=channel, surface="voice",
+                output=self.turn_output(channel) if self.turn_output else None,
+            )
+            answered = await self.reply.stream(
+                agent, arrival_message(note), sender, session, channel, speech,
+                is_current=lambda: self.is_current(turn_id), on_final=self.floor.set_reply,
+                speaker=focus.agent_id, on_handoff=self.handed_off,
+                on_switch=lambda teammate: self.switch_to_agent(teammate, say),
+                heading=self._handover_heading(handoff, directory),
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            trace.meta["outcome"] = Outcome.CANCELLED
+            raise
+        except Exception as e:
+            trace.meta["outcome"] = Outcome.ERROR
+            self._log(f"The hand-off's arrival failed: {type(e).__name__}: {e}")
+        finally:
+            if answered:
+                # A conversation there now: a move away says how to come back.
+                self._last_turn_at[focus.key] = time.monotonic()
+            session_id = session.session_id if session is not None else None
+            speech.finish_when_heard(lambda: trace.finish(session_id=session_id), cancelled=cancelled)
+            bind_turn_trace(outer)
+        return answered
+
+    def _handover_heading(self, handoff: Any, directory: FocusDirectory) -> str:
+        """What the channel shows above the agent's opening: who handed you over, from where."""
+        from_agent = getattr(handoff, "from_agent", "") or ""
+        config = AgentsLoader().get_agent_config(from_agent) or {}
+        name = directory.names.get(from_agent) or config.get("name") or from_agent
+        where = getattr(handoff, "from_channel", "") or ""
+        how = "Passed along" if getattr(handoff, "via", "") == "pass" else "Handed over"
+        return f"↪️ {how} from {config.get('emoji', '🤖')} {name}" + (f" in #{where}" if where else "")
 
     async def switch_to(self, focus: VoiceFocus, say: Say) -> bool:
         """Moves the focus as "switch to …" would: the greeting, then `arrive`.
@@ -578,11 +856,54 @@ class VoiceManager:
     def turn_starting(self, focus: VoiceFocus) -> None:
         """A turn is about to run in `focus`'s channel: every hook's `turn`.
         It is also a conversation there, now; and once you've talked in the
-        new place, "go back" soon stops being a command."""
+        new place, "go back" soon stops being a command. The room keeps
+        where it is, across a restart (`rejoined`)."""
         self._turns_since_move += 1
         self._last_turn_at[focus.key] = time.monotonic()
         self._undo_hint = None  # one a cancelled turn never said is stale now
+        self._floor_taken = True
+        self._remember_focus(focus)
         self._call_hooks("turn", focus)
+
+    # --- the greeting, as the floor and the turns ask about it ----------------------
+
+    def took_floor(self) -> None:
+        """You said something other than "hello?" (core/channel/voice/turn.py):
+        the session is under way, so a greeting still waiting for you to hear
+        it would only talk over you, and "hello?" is words for the agent now."""
+        self._floor_taken = True
+
+    def greeting_playing(self) -> bool:
+        """The session's greeting is what's playing (listening/floor.py): a
+        \"hello?\" over it is you not sure you're heard, and doesn't stop it."""
+        greeting = self._greeting
+        return greeting is not None and greeting.state == PLAYING and bool(self.audio_queue.is_playing())
+
+    async def presence(self, say: Say) -> bool:
+        """"Hello?", "can you hear me?" (core/runtime/commands/spoken/presence.py)
+        before anything else in the session: the greeting may never have
+        reached you, so it's said again. Still waiting for you to be able to
+        hear it, it's on its way, and the words need nothing more. False once
+        you've said anything else: the words are for the agent you're with."""
+        greeting = self._greeting
+        if greeting is None or self._floor_taken:
+            return False
+        if greeting.state == WAITING or self.greeting_playing():
+            self._log("👋 'Hello?' while the greeting is on its way.")
+            return True
+        self._log("👋 'Hello?' before anything else: the greeting again.")
+        await self._say_greeting(greeting, say, self.focus().agent_id if greeting.event == "rejoin" else None)
+        return True
+
+    def _room_event(self, focus: VoiceFocus, event: Dict[str, Any]) -> None:
+        """Records something the room did on its own in `focus`'s session
+        (SessionStore.append_room_event): best effort, it never stops the room."""
+        try:
+            session = SessionManager.get_session(agent_id=self.agent_id, source="discord",
+                                                 channel=focus.channel_name, surface="voice")
+            SessionStore().append_room_event(session.session_id, event)
+        except Exception as e:
+            self._log(f"Could not record the room's {event.get('kind')}: {e}")
 
     def _hook_failed(self, hook: VoiceHook, point: str, error: Exception) -> None:
         self._log(f"Voice hook {type(hook).__name__}.{point} failed: {type(error).__name__}: {error}")

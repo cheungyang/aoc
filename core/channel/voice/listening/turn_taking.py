@@ -14,10 +14,15 @@ A stop phrase interrupts at once, however short. The phrases, and what "stop"
 or "wait" on its own then does, are the stop and wait commands
 (core/runtime/commands/spoken/stop.py and wait.py). "Hanging up." ends its
 turn as quickly as a stop does (hang_up.py).
+
+The room's greeting, when you join, is the one thing a "hello?" over it
+doesn't stop (`keeps_greeting`): it's what you say when the greeting reaches
+you late (core/runtime/commands/spoken/presence.py).
 """
 from typing import Iterable
 
 from core.runtime.commands.spoken.hang_up import is_hang_up
+from core.runtime.commands.spoken.presence import is_presence_check
 from core.runtime.commands.spoken.stop import is_stop_request
 from core.runtime.commands.spoken.words import words
 from core.channel.voice.foundation.settings import (
@@ -67,6 +72,14 @@ def confirms_barge_in(text: str) -> bool:
     if is_stop_request(text):
         return True
     return len(words(text)) >= BARGE_IN_MIN_WORDS and not is_backchannel(text)
+
+
+def keeps_greeting(text: str) -> bool:
+    """Whether speech over the room's greeting, once you've finished saying
+    it, leaves the greeting playing: listening noise, or you checking you're
+    heard ("hello?", "can you hear me?") -- which is what you say when the
+    greeting reaches you late, and must not cut off what it's telling you."""
+    return is_backchannel(text) or is_presence_check(text)
 
 
 def end_of_turn_ms(text: str) -> int:

@@ -249,6 +249,15 @@ class TestWhatTheRunnerAdds(unittest.TestCase):
     def test_only_a_leading_stamp_is_a_stamp(self):
         self.assertEqual(message_text("Ted, move [Wed 18:44] to Friday"), "Ted, move [Wed 18:44] to Friday")
 
+    def test_a_hand_offs_arrival_is_no_ones_words(self):
+        """The voice room's arrival turn (core/runtime/history/handoff.py
+        `arrival_message`): a name in what else waits mustn't hand it off."""
+        from core.runtime.history.handoff import arrival_message
+
+        text = f"[Wed 17:16] {arrival_message('Ted, your syllabus is ready.')}"
+        self.assertEqual(message_text(text), "")
+        self.assertIsNone(who(text))
+
 
 class TestAliases(unittest.TestCase):
 

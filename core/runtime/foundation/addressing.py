@@ -47,7 +47,8 @@ spoke to one of them.
 
 What the Discord runner and the agent wrap around your words is left out: the
 message you replied to, a new thread's starter, a delegation's <caller> tag,
-and the local time every message is stamped with ("[Wed 18:44] ",
+a hand-off arrival's marker and note (the voice room's, holding none of your
+words), and the local time every message is stamped with ("[Wed 18:44] ",
 core/prompts/system.py). In front of your words, the stamp hid every
 name-first form.
 """
@@ -125,6 +126,9 @@ ROSTER_MIN_AGENTS = 3
 _REPLYING_TO = re.compile(r"<replying_to\b[^>]*>.*?</replying_to>", re.S | re.I)
 _CALLER = re.compile(r"<caller>.*?</caller>", re.S | re.I)
 _THREAD_STARTER = re.compile(r"^\s*\[Thread starter message from .*?\"\]\s*", re.S)
+# A hand-off's arrival turn (core/runtime/history/handoff.py `arrival_message`):
+# the voice room's marker and the note of what else waits, none of it yours.
+_ARRIVAL = re.compile(r"<handoff_arrival\b[^>]*/>|<also_waiting\b[^>]*>.*?</also_waiting>", re.S | re.I)
 # The local time core/runtime/agent.py puts in front of every user message;
 # more than one when a prompt passed on already carried its own.
 _TIME_STAMP = re.compile(rf"^\s*(?:{TIME_STAMP.pattern}\s*)+")
@@ -159,6 +163,7 @@ def message_text(prompt: Prompt) -> str:
         return ""
     text = _REPLYING_TO.sub("", text)
     text = _CALLER.sub("", text)
+    text = _ARRIVAL.sub("", text)
     # The stamp comes first (the agent stamps the finished prompt), or right
     # after a delegation's <caller> tag; a thread's starter comes after it.
     text = _TIME_STAMP.sub("", text)

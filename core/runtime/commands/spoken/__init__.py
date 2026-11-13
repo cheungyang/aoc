@@ -11,6 +11,9 @@ finished utterance, in order, before the agent hears it.
                    goodbye, you're disconnected, and the bot leaves
     next_agent.py  "next agent": the next channel with something for you
     where_am_i.py  "where am I": which agent and channel the room is with
+    presence.py    "hello?", "can you hear me?": before anything else in a
+                   session, the room's greeting again; over the greeting, not
+                   an interruption
     switch.py      "switch me to Daisy": moves the room's focus
 
 What a command does to the voice room goes through VoiceControls

@@ -97,6 +97,54 @@ class TestAudioStreamQueue(unittest.IsolatedAsyncioTestCase):
         await queue.stop()
 
 
+class TestOnEnd(unittest.IsolatedAsyncioTestCase):
+    """`on_end(completed)`: whether a line (the greeting) was heard to the end."""
+
+    async def test_speech_played_to_the_end_is_completed(self):
+        connection, vc = _connection()
+        vc.play = MagicMock(side_effect=lambda source, after=None: after(None))
+        queue, ends = AudioStreamQueue(connection), []
+        await queue.put(_speaker(), on_end=ends.append)
+        await asyncio.sleep(0.02)
+        self.assertEqual(ends, [True])
+        await queue.stop()
+
+    async def test_speech_cut_off_while_playing_is_not(self):
+        connection, vc = _connection()
+        vc.play = MagicMock()  # plays until stopped
+        queue, ends = AudioStreamQueue(connection), []
+        await queue.put(_speaker(), on_end=ends.append)
+        await asyncio.sleep(0.02)
+        vc.play.assert_called_once()
+        self.assertEqual(ends, [])
+        queue.clear()  # a barge-in
+        await asyncio.sleep(0.02)
+        self.assertEqual(ends, [False])
+        await queue.stop()
+
+    async def test_speech_dropped_before_it_played_is_not_and_is_told_once(self):
+        connection, vc = _connection(playing=True)
+        queue, ends = AudioStreamQueue(connection), []
+        preparing, queued = _speaker(audio=False, finished=False), _speaker(audio=False, finished=False)
+        await queue.put(preparing, on_end=lambda done: ends.append(("preparing", done)))
+        await queue.put(queued, on_end=lambda done: ends.append(("queued", done)))
+        await asyncio.sleep(0.01)  # the first is off the queue, waiting for its audio
+        queue.clear()
+        preparing.write(FRAME_OF_AUDIO)
+        preparing.finish()
+        await asyncio.sleep(0.02)
+        self.assertEqual(sorted(ends), [("preparing", False), ("queued", False)])
+        await queue.stop()
+
+    async def test_speech_that_never_makes_a_sound_is_not(self):
+        connection, vc = _connection()
+        queue, ends = AudioStreamQueue(connection), []
+        await queue.put(_speaker(audio=False), on_end=ends.append)  # its TTS failed
+        await asyncio.sleep(0.02)
+        self.assertEqual(ends, [False])
+        await queue.stop()
+
+
 class TestDucking(unittest.IsolatedAsyncioTestCase):
     """Stage one of barge-in: the reply keeps playing, quieter, until the user's
     words show whether they are interrupting."""

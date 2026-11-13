@@ -13,7 +13,10 @@ isn't set up. A message that calls another agent by
 name ("Ted, create a syllabus on THIS topic") is handed to that agent in its
 own channel, with a capsule of the conversation it came from. Every other
 turn — the executing agent's own — reaches the
-concierge (the ReAct agent) as before. It runs on every message an agent
+concierge (the ReAct agent) as before. When an agent's reply moves you to a
+teammate (`<switch>`) or leaves one a brief (`<pass>`), the graph parks a
+capsule of the conversation for that teammate's first turn
+([below](#capsules-a-reply-parks)). It runs on every message an agent
 handles: Discord messages, voice turns, scheduled jobs, `agent_call`
 delegations, and `graph_call` invocations all execute through the compiled
 graph returned by [create_graph](graph.py#L84-L263).
@@ -122,6 +125,11 @@ the turn to the one agent allowed to answer in this channel. Async.
     needed because the session log is populated by `LoggingHandler`'s *LLM*
     callbacks, and a routed turn never calls a model — without it the
     transcript would skip every deterministic exchange.
+  - Before the call it claims the capsule an agent's `<switch>` or `<pass>`
+    parked for the target in this channel, if one waits, and appends it to
+    your message, once. After a successful call it parks capsules for the
+    reply's own `<pass>` and `<switch>`
+    ([Capsules a reply parks](#capsules-a-reply-parks)).
 - **Writes to state:** `messages` — a single `AIMessage` with the attributed
   text (or `result.text`, or the error message).
 - **Routes to:** `END`.
@@ -192,7 +200,10 @@ channel. Async; no model runs on the host.
      exchanges of the session that answers the source channel (a specialist's
      `<agent>:tool:<channel>`, or the host's own in `#general`), the pruner's
      summary if there is one, and the files touched, capped at about 1,500
-     tokens. It only reads that session.
+     tokens. It only reads that session. A capsule an agent's `<switch>` or
+     `<pass>` parked for the named agent in its home channel is taken too and
+     goes after it; one parked from the source channel is the same
+     conversation, so the hand-off's own capsule carries its brief instead.
   2. Dispatches a [`ROUTE_HANDOFF`](../../core/runtime/foundation/events.py)
      custom event (`agent_id`, `name`, `emoji`, `channel`, `pointer`,
      `request`), which the stream turns into a `HANDOFF` event. A reader that
@@ -205,6 +216,8 @@ channel. Async; no model runs on the host.
      reply becomes the turn's `FINAL_RESPONSE` (`Agent.execute_stream`
      prefers a delegated agent's response).
   4. Calls `_record_turn` with the user's words and the pointer.
+  5. Parks capsules for the reply's `<pass>` and `<switch>`, from the named
+     agent's home channel ([Capsules a reply parks](#capsules-a-reply-parks)).
   - On failure it returns `AIMessage("Could not hand this to \`<target>\`:
     <error>")` and records nothing.
 - **Writes to state:** `messages` — a single `AIMessage` with the pointer. The
@@ -231,6 +244,59 @@ ReAct behaviour, for turns that are the executing agent's own. Async.
 replaces `llm` in the ReAct step. [graphs/voice](../voice/README.md) passes one
 that picks per call -- a voice turn's first call on a light model, every other
 on the agent's own -- and is otherwise this graph.
+
+## Capsules a reply parks
+
+A reply can involve a teammate in two ways
+([team.md](../../core/prompts/templates/system/team.md), read by
+[response_parser.py](../../core/channel/response_parser.py)):
+
+- `<switch to="ID"/>`, or `<switch to="ID">brief</switch>`, moves you: the
+  voice room follows it, and the channel shows where to go
+  (`→ Over to 🚀 Grace in #project-planning`).
+- `<pass to="ID">brief</pass>` leaves the teammate a brief and keeps you where
+  you are: the channel shows who has it (`📨 Passed to 🌼 Daisy in #day-planning`).
+
+Either way, once the reply has run, `direct_call` and `handoff` park a capsule
+of the conversation for the teammate's first turn in its home channel, off the
+event loop ([_park_capsules](graph.py)), in
+[HandoffCapsuleStore](../../core/storage/handoff_capsules.py):
+
+| | `<switch>` | `<pass>` |
+| --- | --- | --- |
+| `via`, on the capsule's tag and its row | `switch` | `pass` |
+| Waits for the teammate's first turn | 2 hours (`TTL_S`) | 24 hours (`PASS_TTL_S`) |
+| Logged as | `Parked hand-off capsule #N for '<teammate>' in #<home>: <n> chars, with a brief` | `Parked pass capsule #N for …` |
+
+- **Who gets one** (`_park`): the teammate is named by id or name
+  (`agent_named`) and must have a home channel; nothing is parked for the
+  agent itself, or for a teammate whose channel this is. The capsule is
+  `capsule_for` the source channel, with the brief, capped at
+  `SWITCH_CAPSULE_TOKENS`. Parking never raises: a failure is logged to stderr
+  and the turn goes on.
+- **A reply with both tags** parks the pass first, then the switch. When both
+  name the same teammate, the switch's capsule is the newer one, the one taken,
+  and it carries both briefs.
+- **Carry-over:** a new capsule supersedes the one still waiting for the same
+  teammate and channel. When that one was parked from this same conversation
+  (the same agent, from the same channel), its brief goes first in the new
+  one's, each on its own line and none twice, and the new capsule waits at
+  least as long (`park(..., until=...)`). So the bare `<switch to="ID"/>` that
+  hands you over when you're done keeps the brief of the pass made earlier,
+  and two passes to one teammate keep both briefs. A brief another
+  conversation left there -- a pass you haven't taken to the teammate yet --
+  is carried too, each line labelled `(from Daisy in #day-planning)` and kept
+  after this conversation's own, so a label heads only its own lines once the
+  capsule runs the brief into one paragraph (`_labelled`). One from another
+  conversation with no brief is superseded without being carried.
+- **Taking it:** `direct_call` claims the capsule waiting for the channel's
+  agent before the agent runs ([_take_parked](graph.py)) and appends it to
+  your message, once; `handoff` does the same for the named agent in its home
+  channel.
+- **Open passes:** until a pass is taken, the agent that made it sees it in
+  every prompt of that conversation, in an `<open_passes>` block
+  ([get_open_passes_prompt](../../core/prompts/team.py)), so it hands you to
+  the right teammate when you're done, and doesn't pass the same thing twice.
 
 ## Routing
 
@@ -390,14 +456,15 @@ never triggers.
 
 | File | Description |
 | --- | --- |
-| [graph.py](graph.py) | Builds and compiles the workflow: the `route`, `direct_call`, `fixed`, `handoff` and `concierge` nodes, `RouterState`, the fixed lines and the hand-off pointer, plus `prepare_input`/`format_output`. |
+| [graph.py](graph.py) | Builds and compiles the workflow: the `route`, `direct_call`, `fixed`, `handoff` and `concierge` nodes, `RouterState`, the fixed lines and the hand-off pointer, the capsules a reply's `<switch>` or `<pass>` parks, plus `prepare_input`/`format_output`. |
 | [graph.json](graph.json) | Graph metadata consumed by `GraphsLoader`: `graph_id`/`name` `main`, description, emoji 🧭, no extra tool grants, `dream` skill. |
 
 ### Tests
 
 | File | Description |
 | --- | --- |
-| [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, the fixed line typed and spoken (streamed, logged, no model), former prefixes delegated as plain words, a delegated turn reaching the concierge, turn recording, failed delegation, and that specialists never route. Hand-offs: the `ROUTE_HANDOFF` announcement and pointer, the capsule appended, no host model, spoken and typed alike; and, on the real store, that the source session is untouched. |
+| [test_main_graph.py](../../tests/graphs/main/test_main_graph.py) | Runs the compiled graph with doubles: direct call without a model, reply attribution, the fixed line typed and spoken (streamed, logged, no model), former prefixes delegated as plain words, a delegated turn reaching the concierge, turn recording, failed delegation, and that specialists never route. Hand-offs: the `ROUTE_HANDOFF` announcement and pointer, the capsule appended, no host model, spoken and typed alike; and, on the real store, that the source session is untouched. Capsules a reply parks, on the real store: a switch's and a pass's, taken once by the teammate's next turn; a bare switch after a pass carrying its brief and its time; repeated passes; a reply with both tags; another conversation's brief carried with its label, last, and one with no brief superseded, not carried; nothing parked for no one; failures never breaking the turn; end to end on the real capsule builder. |
+| [test_handoff_capsules.py](../../tests/core/storage/test_handoff_capsules.py) | The capsule store: taken once, superseded, expired; a pass's day-long wait and `until`; `waiting`, `waiting_all` and `open_passes`, which claim nothing. |
 | [test_routing.py](../../tests/core/runtime/foundation/test_routing.py) | Unit-tests `decide()`, `routing_enabled()` and `answering_agent()`, and pins the live routing table against the real `agents/` configs: every hosted channel but `#general` has exactly one agent, `#general` gets the fixed line, and the Concierge holds no tools. Hand-offs on the live configs, and every agent's home channel matching the voice focus's. |
 | [test_addressing.py](../../tests/core/runtime/foundation/test_addressing.py) | The addressed-agent rule: the vocative forms, real messages from session history, and the stoplist negatives ("William said …", possessives, acronyms). |
 | [test_handoff.py](../../tests/core/runtime/history/test_handoff.py) | The capsule: exchanges, posts, cleaned replies, touched files, the summary, the caps, and that building one writes nothing. |

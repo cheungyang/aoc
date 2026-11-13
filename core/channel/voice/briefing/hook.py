@@ -9,6 +9,13 @@
                     agent's unread post, or just the question it's waiting on
     announcements   one line when the pipeline is idle, for what needs you
                     and turned up after you joined
+    hand-offs       work an agent passed to a teammate for you to pick up
+                    (an agent's <pass>, core/storage/handoff_capsules.py),
+                    still waiting: first in the digest, first for "next
+                    agent". Arriving there, the agent opens with it
+                    (VoiceManager.arrive), and what it left you in the inbox
+                    goes to it to bring up afterwards (`handed_over`), rather
+                    than playing first and burying why you came
 
 Concierge only ever says a short label about an agent's work; everything else
 is said by the agent, in its own voice, after a focus switch. No prompt waits
@@ -21,10 +28,11 @@ announced) and the speech writer, and joins the voice room as a hook
 """
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Sequence, Set, Tuple
 
 from core.channel.inbox import mark_heard, mark_read, subscribe
 from core.storage.channel_inbox import InboxRow, InboxStore, Priority, Source, Status, Via
+from core.storage.handoff_capsules import HandoffCapsuleStore
 from core.util.local_time import get_local_now
 from core.channel.voice.briefing.speech_writer import SpeechWriter
 from core.channel.voice.hooks import Say, Speak, VoiceHook, VoiceRoom
@@ -33,6 +41,9 @@ from core.channel.voice.room.focus import FocusDirectory, VoiceFocus, spoken_lab
 # A switch into a channel whose speech version is still being written waits
 # this long for it (usually a second or less).
 ARRIVAL_WAIT_S = 8.0
+# A hand-off's arrival, where the agent is about to speak, waits less for one:
+# past this, the post stays for later.
+HANDED_OVER_WAIT_S = 2.0
 # The digest names at most this many per line, to stay near 20 seconds.
 MAX_NAMED = 4
 
@@ -49,6 +60,15 @@ class Entry:
     focus: VoiceFocus
     name: str    # how Concierge names whoever has it: "Daisy"
     alias: str   # what you say to get there: "Daisy"
+
+
+@dataclass(frozen=True)
+class Handed:
+    """A hand-off waiting for a teammate, and how it's spoken about."""
+    focus: VoiceFocus
+    name: str    # the teammate it waits for: "Daisy"
+    alias: str   # what you say to get there: "Daisy"
+    sender: str  # who passed it on: "Miles"
 
 
 # --- pure: composing what's said ------------------------------------------------------
@@ -129,24 +149,49 @@ def _names(names: List[str]) -> str:
     return _join(names)
 
 
-def compose_digest(entries: List[Entry], hour: int) -> Optional[str]:
+def handoffs_for(capsules: Iterable[Any], directory: FocusDirectory) -> List[Handed]:
+    """The hand-offs waiting for a teammate you can switch to, as spoken
+    about, in the order given (the store's: oldest first). `capsules` are
+    the store's parked rows (`to_agent`, `to_channel`, `from_agent`)."""
+    handed = []
+    for capsule in capsules:
+        focus = directory.get(getattr(capsule, "to_channel", None))
+        if focus is None or focus.agent_id != getattr(capsule, "to_agent", None):
+            continue
+        from_agent = getattr(capsule, "from_agent", "") or ""
+        sender = directory.names.get(from_agent) or spoken_label(from_agent)
+        handed.append(Handed(focus, spoken_name(directory, focus), directory.spoken_alias(focus), sender))
+    return handed
+
+
+def compose_digest(entries: List[Entry], hour: int, handed: Sequence[Handed] = ()) -> Optional[str]:
     """The digest, or None when nothing's in it:
 
         {Morning | Afternoon | Evening}. {N} agents have something for you.
+        [{A} has a hand-off from {B}. | {A} and {C} have hand-offs waiting.]
         [{A} and {B} are waiting for your answer.]
         [{Agent} has {label}, {Agent} {label}, and {Agent} {label}.]
         Start with {first}? Say 'start with {first}' to begin.
+
+    A hand-off waiting for a teammate (`handed`) comes first, and is where it
+    starts: it's work from a conversation you had, left for you to pick up.
     """
     shown = [e for e in entries if in_digest(e.row)]
     questions = [e for e in shown if e.row.question]
     labelled = sorted((e for e in shown if not e.row.question and e.row.status is Status.UNREAD),
                       key=lambda e: e.row.posted_at, reverse=True)
-    if not questions and not labelled:
+    if not questions and not labelled and not handed:
         return None
 
-    count = len(_distinct(e.name for e in questions + labelled))
+    count = len(_distinct([h.name for h in handed] + [e.name for e in questions + labelled]))
     number = _NUMBER_WORDS[count] if count < len(_NUMBER_WORDS) else str(count)
     lines = [f"{part_of_day(hour)}. {number} agent{'s have' if count != 1 else ' has'} something for you."]
+    if handed:
+        receivers = _distinct(h.name for h in handed)
+        if len(handed) == 1:
+            lines.append(f"{_cap(handed[0].name)} has a hand-off from {handed[0].sender}.")
+        else:
+            lines.append(f"{_cap(_names(receivers))} {'has' if len(receivers) == 1 else 'have'} hand-offs waiting.")
     if questions:
         waiting = _distinct(e.name for e in sorted(questions, key=lambda e: e.row.posted_at))
         lines.append(f"{_cap(_names(waiting))} {'is' if len(waiting) == 1 else 'are'} waiting for your answer.")
@@ -156,9 +201,12 @@ def compose_digest(entries: List[Entry], hour: int) -> Optional[str]:
         if len(labelled) > MAX_NAMED:
             items.append(f"{len(labelled) - MAX_NAMED} more")
         lines.append(f"{_cap(_join(items, gapped=True))}.")
-    included = set(map(id, questions + labelled))
-    first = next(e for e in ordered(shown) if id(e) in included)
-    lines.append(f"Start with {first.alias}? Say 'start with {first.alias}' to begin.")
+    if handed:
+        first = handed[0].alias
+    else:
+        included = set(map(id, questions + labelled))
+        first = next(e for e in ordered(shown) if id(e) in included).alias
+    lines.append(f"Start with {first}? Say 'start with {first}' to begin.")
     return " ".join(lines)
 
 
@@ -200,9 +248,11 @@ class VoiceBriefing(VoiceHook):
     """The inbox for one voice session: a drive starts when you join."""
 
     def __init__(self, store: Optional[InboxStore] = None, writer: Optional[SpeechWriter] = None,
-                 clock: Callable[[], float] = time.time, hour: Optional[Callable[[], int]] = None):
+                 clock: Callable[[], float] = time.time, hour: Optional[Callable[[], int]] = None,
+                 capsules: Optional[HandoffCapsuleStore] = None):
         self.store = store or InboxStore()
         self.writer = writer or SpeechWriter()
+        self.capsules = capsules or HandoffCapsuleStore()
         self._clock = clock
         self._hour = hour or _local_hour
         self.joined_at: Optional[float] = None
@@ -230,7 +280,8 @@ class VoiceBriefing(VoiceHook):
         self.end()
 
     async def next_agent(self, room: VoiceRoom, say: Say) -> bool:
-        """"Next agent": a switch to the next unfinished channel, or "That's everything."."""
+        """"Next agent": a switch to the next unfinished channel, or "That's everything.".
+        A teammate with a hand-off waiting comes first."""
         directory = room.directory()
         target, nothing_left_line = self.next_unfinished(directory, room.focus())
         if target is None:
@@ -246,6 +297,19 @@ class VoiceBriefing(VoiceHook):
             text, row = found
             await speak(text)
             self.heard(row)
+
+    async def handed_over(self, room: VoiceRoom, focus: VoiceFocus) -> Optional[str]:
+        """You arrived where a hand-off waits, and the agent opens with that:
+        what it left you here goes to it, for after the hand-off -- the speech
+        version, or the question it's still waiting on -- rather than being
+        played first. The agent says it, so it's heard as `arrived` would have
+        it. A speech version not written within HANDED_OVER_WAIT_S stays for later."""
+        found = await self.left_for_you(room.directory(), focus, wait_s=HANDED_OVER_WAIT_S)
+        if not found:
+            return None
+        text, row = found
+        self.heard(row)
+        return text
 
     def turn(self, room: VoiceRoom, focus: VoiceFocus) -> None:
         """You spoke in the channel: whatever its agent left you there is finished."""
@@ -281,14 +345,28 @@ class VoiceBriefing(VoiceHook):
             return []
         return entries_for(rows, directory, self._clock())
 
+    def handoffs(self, directory: FocusDirectory) -> List[Handed]:
+        """The hand-offs still waiting for a teammate, oldest first."""
+        try:
+            parked = self.capsules.waiting_all(self._clock())
+        except Exception as e:
+            print(f"[Briefing] Could not read the hand-offs waiting: {e}")
+            return []
+        return handoffs_for(parked, directory)
+
     def digest(self, directory: FocusDirectory) -> Optional[str]:
-        return compose_digest(self.entries(directory), self._hour())
+        return compose_digest(self.entries(directory), self._hour(), self.handoffs(directory))
 
     def next_unfinished(self, directory: FocusDirectory,
                         current: Optional[VoiceFocus]) -> Tuple[Optional[VoiceFocus], str]:
-        """Where "next agent" goes, or None and what to say instead."""
+        """Where "next agent" goes, or None and what to say instead: a
+        teammate with a hand-off waiting, then the inbox's order (`ordered`)."""
+        here = current.key if current else None
+        handed = next((h for h in self.handoffs(directory) if h.focus.key != here), None)
+        if handed is not None:
+            return handed.focus, ""
         entries = self.entries(directory)
-        upcoming = ordered(entries, self._visited, exclude=current.key if current else None)
+        upcoming = ordered(entries, self._visited, exclude=here)
         if upcoming:
             return upcoming[0].focus, ""
         return None, nothing_left(entries)

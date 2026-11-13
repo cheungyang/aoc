@@ -31,7 +31,7 @@ moving the focus, greeting in the target's voice. Features built on top switch
 through `switch_to` too: the inbox's "next agent" (core/channel/voice/briefing/hook.py)
 arrives the same way, and so does "go back".
 """
-from typing import Awaitable, Callable, Dict, Optional, Protocol
+from typing import Any, Awaitable, Callable, Dict, Optional, Protocol
 
 from core.runtime.commands.spoken.words import alias_key
 from core.runtime.observability.turn_trace import Outcome
@@ -80,8 +80,14 @@ class Focuser(Protocol):
     def focus_channel(self, focus: VoiceFocus):
         """The Discord channel `focus`'s turns are posted in, or None."""
 
-    async def arrive(self, focus: VoiceFocus, say: "Say") -> None:
-        """After the greeting: whatever the voice room's hooks add there."""
+    def waiting_handoff(self, focus: VoiceFocus) -> Any:
+        """The hand-off waiting for `focus`'s agent (it has `from_agent`), or None."""
+
+    async def arrive(self, focus: VoiceFocus, say: "Say", *, handoff: Any = None,
+                     undo_hint: Optional[str] = None) -> None:
+        """After the greeting: the agent opening with `handoff`, then
+        `undo_hint` (how to go back); or whatever the voice room's hooks add
+        there."""
 
 
 class FocusSwitcher:
@@ -176,12 +182,19 @@ class FocusSwitcher:
         """Moves the focus to `target` and greets you there, in its voice; then
         whatever the voice room adds on arriving. True: the request is answered.
         With `back_to`, the move took you out of a conversation there, and the
-        greeting says how to undo it."""
+        greeting says how to undo it.
+
+        Where a hand-off waits for the agent -- the brief another agent's
+        <switch> or <pass> parked for it -- the greeting says so ("Daisy here.
+        Miles filled me in."), and the agent then opens with what it was
+        handed instead of you having to ask (VoiceManager.arrive). How to undo
+        the move then comes after that opening, so the hand-off isn't kept
+        waiting behind it."""
         if target.key == self.voice.focus().key:
             await say(directory.already(target), target.agent_id)
             # Still, whatever it left you: an announcement about the agent
             # you're with says to switch to it, and that must play it.
-            await self.voice.arrive(target, say)
+            await self.voice.arrive(target, say, handoff=self.voice.waiting_handoff(target))
             return True
         if self.voice.focus_channel(target) is None:
             self._log(f"Focus switch: #{target.channel_name} can't be found in Discord.")
@@ -192,9 +205,13 @@ class FocusSwitcher:
         # The turn asking for the switch is the current one, and it already
         # superseded whatever was in flight; it must not cancel itself.
         self.voice.set_focus(target, interrupt=False)
-        greeting = directory.greeting(target)
-        if back_to is not None:
-            greeting = f"{greeting} {directory.go_back_hint(back_to)}"
+        handoff = self.voice.waiting_handoff(target)
+        undo_hint = directory.go_back_hint(back_to) if back_to is not None else None
+        if handoff is not None:
+            greeting = directory.handed_greeting(target, getattr(handoff, "from_agent", ""))
+        else:
+            greeting = f"{directory.greeting(target)} {undo_hint}" if undo_hint else directory.greeting(target)
+            undo_hint = None
         await say(greeting, target.agent_id)
-        await self.voice.arrive(target, say)
+        await self.voice.arrive(target, say, handoff=handoff, undo_hint=undo_hint)
         return True

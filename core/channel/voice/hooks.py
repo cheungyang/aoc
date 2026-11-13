@@ -15,6 +15,10 @@ hook at these moments, in order, and a hook overrides only the ones it needs:
                                      True if the hook answered it
     arrived(room, focus, speak)      a switch's greeting was said: anything
                                      the hook wants said next, via `speak`
+    handed_over(room, focus)         you arrived where a hand-off waits, which
+                                     the agent opens with instead: what the
+                                     hook has for you there, for the agent to
+                                     bring up after it (None: nothing)
     turn(room, focus)                a turn is about to run in the focus's channel
 
 `room` is what a hook may use of the voice side (`VoiceRoom`). A hook that
@@ -63,6 +67,9 @@ class VoiceHook:
         return False
 
     async def arrived(self, room: VoiceRoom, focus: VoiceFocus, speak: Speak) -> None:
+        return None
+
+    async def handed_over(self, room: VoiceRoom, focus: VoiceFocus) -> Optional[str]:
         return None
 
     def turn(self, room: VoiceRoom, focus: VoiceFocus) -> None:

@@ -110,3 +110,59 @@ def test_no_gate_is_fine():
     floor.gate = None
     said(floor)
     assert turns.began == 1
+
+
+# --- over the room's greeting -------------------------------------------------------------
+
+class GreetingTurns(Turns):
+    """The room's greeting is what's playing."""
+
+    def __init__(self, playing=True):
+        super().__init__(busy=True)
+        self.playing = playing
+
+    def greeting_playing(self):
+        return self.playing
+
+
+def _over(text, playing=True):
+    """`text` is being said over the greeting (or, not `playing`, over a reply)."""
+    floor, _ = make_floor(busy=True)
+    floor.turns = turns = GreetingTurns(playing)
+    floor.stt.transcribe = AsyncMock(return_value=Transcript(text, "gemini_live"))
+    utterance = Utterance(user=MagicMock(id=7, bot=False))
+    floor.utterance_opened(utterance)
+    utterance.interim = text
+    floor._on_text(utterance)
+    return floor, turns, utterance
+
+
+def test_two_words_over_the_greeting_wait_for_the_end_of_what_you_say():
+    """\"Are you there?\" is two words: over a reply that stops it at once."""
+    _floor, turns, _ = _over("are you there")
+    assert turns.interrupted == []
+    _floor, turns, _ = _over("are you there", playing=False)
+    assert turns.interrupted == ["heard 'are you there'"]
+
+
+def test_a_stop_phrase_stops_the_greeting_at_once():
+    _floor, turns, _ = _over("stop")
+    assert turns.interrupted == ["heard 'stop'"]
+
+
+@pytest.mark.asyncio
+async def test_hello_over_the_greeting_lets_it_play_on():
+    floor, turns, utterance = _over("Hello? Are you there?")
+    floor.utterance_finished(utterance)
+    await asyncio.gather(*list(floor._overlap_tasks))
+    assert turns.interrupted == [] and turns.began == 0
+    assert floor.unanswered() == []
+
+
+@pytest.mark.asyncio
+async def test_a_request_over_the_greeting_is_a_turn_once_said():
+    floor, turns, utterance = _over("Switch me to Daisy")
+    assert turns.interrupted == []
+    floor.utterance_finished(utterance)
+    await asyncio.gather(*list(floor._overlap_tasks))
+    assert turns.interrupted == ["heard 'Switch me to Daisy'"] and turns.began == 1

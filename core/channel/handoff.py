@@ -10,8 +10,14 @@ with <switch to="goal-setter"/> (core/prompts/templates/system/team.md). The
 channel then shows where to go -- "→ Over to 🚀 Grace in #project-planning" --
 and the voice room moves there. The teammate's first turn there gets a capsule
 of the conversation you left (graphs/main parks it).
+
+Or it can pass something on and keep you, when you ask it to tell a teammate
+something: its reply ends with <pass to="day-planner">brief</pass>. The channel
+shows who has it -- "📨 Passed to 🌼 Daisy in #day-planning" -- and you stay
+where you are. The brief waits, in a capsule parked the same way, for your
+first turn with that teammate.
 """
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from core.loaders.agents_loader import AgentsLoader
 from core.runtime.foundation.routing import home_channel
@@ -35,6 +41,23 @@ def switch_pointer(agent: str, source: Any, loader: Any = None) -> Optional[str]
     "→ Over to 🚀 Grace in #project-planning", the channel a link where
     `source`'s guild has it. `agent` is the teammate's id, or its name. None
     when no agent by that id or name has a channel to go to."""
+    found = _teammate(agent, source, loader)
+    return f"→ Over to {found[0]} in {found[1]}" if found else None
+
+
+def pass_pointer(agent: str, source: Any, loader: Any = None) -> Optional[str]:
+    """What a channel shows when its agent passes something to a teammate and
+    keeps you: "📨 Passed to 🌼 Daisy in #day-planning", the channel a link
+    where `source`'s guild has it. `agent` is the teammate's id, or its name.
+    None when no agent by that id or name has a channel to pass to."""
+    found = _teammate(agent, source, loader)
+    return f"📨 Passed to {found[0]} in {found[1]}" if found else None
+
+
+def _teammate(agent: str, source: Any, loader: Any = None) -> Optional[Tuple[str, str]]:
+    """The teammate `agent` names, as a pointer shows it ("🚀 Grace"), and its
+    home channel, a link where `source`'s guild has it; None when no agent by
+    that id or name has a channel of its own."""
     loader = loader if loader is not None else AgentsLoader()
     agent_id = agent_named(agent, loader)
     home = home_channel(agent_id, loader) if agent_id else None
@@ -43,12 +66,12 @@ def switch_pointer(agent: str, source: Any, loader: Any = None) -> Optional[str]
     config = loader.get_agent_config(agent_id) or {}
     mention = getattr(channel_named(getattr(source, "guild", None), home), "mention", None)
     where = mention if isinstance(mention, str) else f"#{home}"
-    return f"→ Over to {config.get('emoji', '🤖')} {config.get('name', agent_id)} in {where}"
+    return f"{config.get('emoji', '🤖')} {config.get('name', agent_id)}", where
 
 
 def agent_named(agent: str, loader: Any) -> Optional[str]:
     """The id of the agent whose id or name `agent` is, or None: how a
-    <switch to="..."> names its teammate."""
+    <switch to="..."> or a <pass to="..."> names its teammate."""
     wanted = str(agent or "").strip()
     if not wanted:
         return None

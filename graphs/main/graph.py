@@ -17,7 +17,12 @@ An agent's reply can hand you on too, ending with <switch to="...">
 it on their own; this graph parks a capsule of the conversation for the
 teammate, with the brief the agent wrote inside the tag
 (core/storage/handoff_capsules.py), and `direct_call` attaches it to your first
-message in the teammate's channel.
+message in the teammate's channel. A reply can also leave a teammate a brief
+and keep you, ending with <pass to="...">brief</pass>: its capsule is parked
+the same way, and waits longer, for whenever you get to the teammate. When the
+agent then hands you over with a bare <switch>, the switch's capsule replaces
+the pass's, so it carries the pass's brief: a capsule still waiting from the
+same conversation passes its brief on to the next one parked for that teammate.
 
 On a voice turn, the `route` step also drops the copies of your words that a
 turn cancelled when you went on talking left unanswered, since this turn's
@@ -73,6 +78,7 @@ UNMAPPED_SPEECH = ("This channel isn't set up yet, so nobody answers here. "
 # (`via`) and in the turn ledger (core/proactive/taps.py).
 VIA_HANDOFF = "handoff"   # you named the agent: the router's hand-off
 VIA_SWITCH = "switch"     # an agent's reply handed you over: <switch to="...">
+VIA_PASS = "pass"         # an agent's reply left it a brief, and kept you: <pass to="...">
 
 
 def _record_turn(session, user_prompt, reply_text: str):
@@ -108,46 +114,113 @@ def _session_id(agent_id: str, channel: Any) -> str:
     return SessionManager.get_session(agent_id, source="tool", channel=channel).session_id
 
 
-def _park_switch(response: Any, *, agent_id: str, channel: str, source: Any, loader: Any) -> Optional[int]:
-    """Parks a capsule for the teammate a reply handed you to (<switch to="...">),
-    for its first turn in its own channel; the capsule's id, or None.
+def _park_capsules(response: Any, *, agent_id: str, channel: str, source: Any, loader: Any) -> List[int]:
+    """Parks a capsule for each teammate a reply names: the one it left a brief
+    (<pass to="...">), then the one it handed you to (<switch to="...">), for
+    that teammate's first turn in its own channel; the ids of those parked.
+
+    The pass goes first. When both name the same teammate, the switch's capsule
+    is the newer one, the one the teammate gets, and it carries the pass's
+    brief (`_park`).
+    """
+    parked = []
+    for via, wanted, brief in ((VIA_PASS, getattr(response, "pass_to", None), getattr(response, "pass_brief", None)),
+                               (VIA_SWITCH, getattr(response, "switch_to", None),
+                                getattr(response, "switch_brief", None))):
+        capsule_id = _park(wanted, brief, via=via, agent_id=agent_id, channel=channel, source=source, loader=loader)
+        if capsule_id is not None:
+            parked.append(capsule_id)
+    return parked
+
+
+def _park(wanted: Any, brief: Any, *, via: str, agent_id: str, channel: str, source: Any,
+          loader: Any) -> Optional[int]:
+    """Parks a capsule for `wanted`, the teammate a reply's <switch> or <pass>
+    (`via`) named, with the brief written inside the tag; its id, or None.
 
     `agent_id` replied in `channel`, read from `source` (its thread, or its
     name). Its run has ended, so the reply is in the transcript the capsule is
     read from: LoggingHandler logs it when the model call ends, before the
     stream does. Nothing is parked for a teammate with no channel of its own,
-    for the agent itself, or for one whose channel this is. Never raises: a
+    for the agent itself, or for one whose channel this is.
+
+    The new capsule supersedes the one still waiting for the teammate. When
+    that one was parked from this same conversation -- a pass, and now the
+    bare <switch> that hands you over, or a second pass -- its brief goes first
+    in the new one's (`_carried_brief`), and the new one waits at least as long
+    (`until`): what was passed isn't lost to what follows it. Nor is what
+    another conversation left the teammate: its brief is work you asked for
+    there -- a pass you haven't taken to the teammate yet, typically -- so it
+    goes along too, saying whose it is (`_labelled`). Never raises: a
     hand-over without context still reaches the teammate.
     """
-    wanted = getattr(response, "switch_to", None)
     if not isinstance(wanted, str) or not wanted:
         return None
+    what = "pass" if via == VIA_PASS else "hand-off"
     try:
         teammate = agent_named(wanted, loader)
         home = home_channel(teammate, loader) if teammate else None
         if not home or teammate == agent_id or home == (channel or "").lower():
             return None
-        brief = getattr(response, "switch_brief", None) or ""
-        capsule = capsule_for(source, loader=loader, brief=brief, via=VIA_SWITCH, max_tokens=SWITCH_CAPSULE_TOKENS)
+        from core.storage.handoff_capsules import HandoffCapsuleStore, channel_key
+
+        store = HandoffCapsuleStore()
+        waiting = store.waiting(teammate, home)
+        carried, until = "", None
+        if waiting is not None:
+            if (waiting.from_agent, waiting.from_channel) == (agent_id, channel_key(channel)):
+                carried, until = waiting.brief, waiting.expires_at
+            elif waiting.brief:
+                carried, until = _labelled(waiting, loader), waiting.expires_at
+            else:
+                waiting = None  # another conversation's, with no brief: superseded, as any older capsule is
+        brief = _carried_brief(carried, brief or "")
+        capsule = capsule_for(source, loader=loader, brief=brief, via=via, max_tokens=SWITCH_CAPSULE_TOKENS)
         if not capsule:
             return None
-        from core.storage.handoff_capsules import HandoffCapsuleStore
-
-        parked = HandoffCapsuleStore().park(from_agent=agent_id, from_channel=channel, to_agent=teammate,
-                                            to_channel=home, capsule=capsule, brief=brief, via=VIA_SWITCH)
+        parked = store.park(from_agent=agent_id, from_channel=channel, to_agent=teammate, to_channel=home,
+                            capsule=capsule, brief=brief, via=via, until=until)
     except Exception as e:
-        print(f"[graphs.main] Warning: could not park a hand-off capsule for '{wanted}': {e}", file=sys.stderr)
+        print(f"[graphs.main] Warning: could not park a {what} capsule for '{wanted}': {e}", file=sys.stderr)
         return None
-    print(f"[graphs.main] Parked hand-off capsule #{parked} for '{teammate}' in #{home}: {len(capsule)} chars"
-          + (", with a brief" if brief else ""))
+    print(f"[graphs.main] Parked {what} capsule #{parked} for '{teammate}' in #{home}: {len(capsule)} chars"
+          + (", with a brief" if brief else "")
+          + (f", #{waiting.id}'s carried over" if waiting is not None and waiting.brief else ""))
     return parked
 
 
+def _carried_brief(waiting: str, new: str) -> str:
+    """The brief of a capsule parked while one still waits for the teammate:
+    the waiting one's first, then the new one, each on a line of its own, the
+    new one left out when it's already there. Lines another conversation left
+    (`_labelled`) go last: the capsule runs the brief into one paragraph
+    (core/runtime/history/handoff.py), and a label must head only its own."""
+    lines = [line.strip() for line in (waiting or "").split("\n") if line.strip()]
+    if new.strip() and new.strip() not in lines:
+        lines.append(new.strip())
+    return "\n".join(sorted(lines, key=lambda line: line.startswith(_FROM_ELSEWHERE_START)))
+
+
+# How a brief carried over from another conversation says whose it was.
+_FROM_ELSEWHERE = "(from {name} in #{channel})"
+_FROM_ELSEWHERE_START = "(from "
+
+
+def _labelled(waiting: Any, loader: Any) -> str:
+    """Another conversation's brief, carried into a newer capsule for the same
+    teammate: each line says which agent left it, and where, unless it says so
+    already (it was carried before)."""
+    config = loader.get_agent_config(waiting.from_agent) or {}
+    label = _FROM_ELSEWHERE.format(name=config.get("name") or waiting.from_agent, channel=waiting.from_channel)
+    lines = [line.strip() for line in waiting.brief.split("\n") if line.strip()]
+    return "\n".join(line if line.startswith(_FROM_ELSEWHERE_START) else f"{label} {line}" for line in lines)
+
+
 def _take_parked(agent_id: str, channel: str, answers_in: Any) -> Optional[Any]:
-    """The capsule an agent's <switch> parked for `agent_id`'s next turn in
-    `channel`, claimed for the session it answers on in `answers_in` (the
-    channel, or a thread of it): None if there's none, or if it can't be read,
-    which only costs the turn its context."""
+    """The capsule an agent's <switch> or <pass> parked for `agent_id`'s next
+    turn in `channel`, claimed for the session it answers on in `answers_in`
+    (the channel, or a thread of it): None if there's none, or if it can't be
+    read, which only costs the turn its context."""
     try:
         from core.storage.handoff_capsules import HandoffCapsuleStore
 
@@ -167,8 +240,8 @@ def _attached(parked: Any) -> str:
 
 def _handoff_capsules(source: Any, source_name: str, parked: Any, loader: Any) -> List[str]:
     """What a router hand-off carries: a capsule of the conversation it came
-    from, and the one an agent's <switch> parked for the named agent there, if
-    any (`_take_parked`).
+    from, and the one an agent's <switch> or <pass> parked for the named agent
+    there, if any (`_take_parked`).
 
     A capsule parked from the channel the hand-off came from is the same
     conversation, read earlier: the hand-off's own capsule stands for both, and
@@ -298,9 +371,9 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
     async def _direct_call(state: Dict[str, Any]) -> Dict[str, Any]:
         """Hands the turn to the one agent allowed to answer here.
 
-        When an agent's <switch> handed you to this one, the capsule it parked
-        goes with your first message here, once. When this agent's reply hands
-        you on in turn, a capsule is parked for that teammate.
+        When an agent's <switch> or <pass> left this one a capsule, it goes with
+        your first message here, once. When this agent's reply hands you on in
+        turn, or leaves a teammate a brief, a capsule is parked for that teammate.
         """
         from core.runtime.foundation.context import try_context
         from core.loaders.agents_loader import AgentsLoader
@@ -339,7 +412,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         if ctx is not None:
             _record_turn(ctx, user_prompt, attributed)
             # Off the event loop: the reply's audio may still be streaming.
-            await asyncio.to_thread(_park_switch, result.response, agent_id=target, channel=channel,
+            await asyncio.to_thread(_park_capsules, result.response, agent_id=target, channel=channel,
                                     source=_source(ctx), loader=loader)
 
         return {"messages": [AIMessage(content=attributed or result.text)]}
@@ -393,13 +466,14 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
         The named agent answers on the session its own channel's messages use,
         so the conversation continues there, and the message carries a capsule
         of the one it came from (core/runtime/history/handoff.py), built
-        without a model -- and the capsule an agent's <switch> parked for it
-        there, if one waits (`_handoff_capsules`). The readers of the stream
-        (the Discord runner, voice) learn of the move from the HANDOFF event and
-        show the reply in that channel; one that doesn't know the event shows it
-        here. This turn's own record -- the checkpoint, the host's log -- keeps
-        the user's words and the pointer, never the named agent's reply. If the
-        reply hands you on, a capsule is parked for that teammate.
+        without a model -- and the capsule an agent's <switch> or <pass> parked
+        for it there, if one waits (`_handoff_capsules`). The readers of the
+        stream (the Discord runner, voice) learn of the move from the HANDOFF
+        event and show the reply in that channel; one that doesn't know the
+        event shows it here. This turn's own record -- the checkpoint, the
+        host's log -- keeps the user's words and the pointer, never the named
+        agent's reply. If the reply hands you on, or leaves a teammate a brief,
+        a capsule is parked for that teammate.
         """
         from core.runtime.foundation.context import try_context
         from core.loaders.agents_loader import AgentsLoader
@@ -444,7 +518,7 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
 
         if ctx is not None:
             _record_turn(ctx, user_prompt, pointer)
-        await asyncio.to_thread(_park_switch, result.response, agent_id=target, channel=home, source=home,
+        await asyncio.to_thread(_park_capsules, result.response, agent_id=target, channel=home, source=home,
                                 loader=loader)
         return {"messages": [AIMessage(content=pointer)]}
 

@@ -9,6 +9,7 @@ from core.runtime.commands.control.status import StatusCommand
 from core.runtime.commands.spoken.go_back import GoBackCommand
 from core.runtime.commands.spoken.hang_up import HangUpCommand
 from core.runtime.commands.spoken.next_agent import NextAgentCommand
+from core.runtime.commands.spoken.presence import PresenceCommand
 from core.runtime.commands.spoken.stop import StopCommand
 from core.runtime.commands.spoken.switch import SwitchCommand
 from core.runtime.commands.spoken.wait import WaitCommand
@@ -86,8 +87,9 @@ TYPED = CommandRegistry([
 # Said in the voice room (core/channel/voice/turn.py), tried in this order: a stop
 # first, then a hang-up; then "next agent", "where am I" and "go back" before
 # the switch, which would otherwise take them for a name ("back", "next agent").
+# "Hello?" names no one, so its place before the switch is only for reading.
 SPOKEN = CommandRegistry([StopCommand(), WaitCommand(), HangUpCommand(), NextAgentCommand(), WhereAmICommand(),
-                          GoBackCommand(), SwitchCommand()])
+                          GoBackCommand(), PresenceCommand(), SwitchCommand()])
 
 # Typed in the ownership control thread (core/channel/discord/ownership.py).
 CONTROL = CommandRegistry([ClaimCommand(), ReleaseCommand(), StatusCommand()])

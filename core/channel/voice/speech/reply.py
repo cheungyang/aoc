@@ -121,18 +121,21 @@ class _TranscriptPost:
     task: Optional[asyncio.Task] = None  # posting them
     message: Any = None                  # the post, once Discord has it
     answered: bool = False               # the turn posted more than your words, or finished
+    heading: Optional[str] = None        # posted instead of your words: a turn you said nothing in
 
     @property
     def line(self) -> str:
-        return f"🎤 **{self.author} (Voice):** {self.words}"
+        return self.heading or f"🎤 **{self.author} (Voice):** {self.words}"
 
     def carried_into(self, later: "_TranscriptPost") -> bool:
         """Whether `later` is these words again, with more said since. A turn
         cut short before any of its answer was heard leaves its words to the
         next turn, first (the floor keeps them; core/channel/voice/turn.py
-        merges them with a space) -- and this one posted nothing after them."""
+        merges them with a space) -- and this one posted nothing after them.
+        A heading is nobody's words: never carried."""
         heard = self.speech is not None and self.speech.heard
-        return (self.message is not None and not self.answered and not heard
+        return (self.heading is None and later.heading is None
+                and self.message is not None and not self.answered and not heard
                 and later.channel == self.channel and later.author == self.author
                 and (later.words == self.words or later.words.startswith(self.words + " ")))
 
@@ -164,32 +167,43 @@ class ReplyStreamer:
         except Exception as e:
             self._log(f"Error playing static blurp: {e}")
 
-    async def say(self, text: str, agent_id: Optional[str] = None, is_current: IsCurrent = lambda: True):
+    async def say(self, text: str, agent_id: Optional[str] = None, is_current: IsCurrent = lambda: True, *,
+                  lead_in_ms: int = 0, on_end: Optional[Callable[[bool], None]] = None):
         """Speaks a fixed line (a focus switch) outside an agent reply, in
-        `agent_id`'s voice: this bot's own agent by default."""
+        `agent_id`'s voice: this bot's own agent by default. `lead_in_ms` of
+        silence go before it (the greeting's, settings.GREETING_LEAD_IN_MS);
+        `on_end(completed)` is told once it's done playing -- False if it was
+        dropped, cut off, or never said."""
         line = speakable(text)
         if not line or not is_current() or not self.connection.is_connected():
+            if on_end is not None:
+                on_end(False)
             return
-        stream = await self._open(agent_voice(agent_id or self.agent_id))
+        stream = await self._open(agent_voice(agent_id or self.agent_id), lead_in_ms=lead_in_ms, on_end=on_end)
         stream.send(line)
         stream.finish()
 
-    async def _open(self, voice: Voice, speech: Optional[TurnSpeech] = None):
+    async def _open(self, voice: Voice, speech: Optional[TurnSpeech] = None, *, lead_in_ms: int = 0,
+                    on_end: Optional[Callable[[bool], None]] = None):
         """Starts a stretch of speech in `voice`: a TTS stream into a speaker queued to play."""
         on_audio = (lambda: speech.trace.mark(Stage.TTS_FIRST_BYTE)) if speech else None
-        speaker = PCMSpeaker(asyncio.get_running_loop(), on_audio=on_audio)
+        speaker = PCMSpeaker(asyncio.get_running_loop(), on_audio=on_audio, lead_in_ms=lead_in_ms)
         speaker.stream = await self.tts.open(voice, speaker)
         if speech is not None:
             speech.queued_audio = True
         self.audio.start()
-        await self.audio.put(speaker, on_start=speech.on_audio_start if speech else None)
+        queued = {"on_start": speech.on_audio_start if speech else None}
+        if on_end is not None:
+            queued["on_end"] = on_end
+        await self.audio.put(speaker, **queued)
         return speaker.stream
 
     async def stream(self, agent, transcript: str, author: str, session, channel, speech: TurnSpeech,
                      is_current: IsCurrent, on_final: Callable[[str], None],
                      speaker: Optional[str] = None,
                      on_handoff: Optional[Callable[[dict], Any]] = None,
-                     on_switch: Optional[Callable[[str], Awaitable[Any]]] = None) -> bool:
+                     on_switch: Optional[Callable[[str], Awaitable[Any]]] = None,
+                     heading: Optional[str] = None) -> bool:
         """Streams the agent and fans its events out to a text lane and a speech lane.
 
         Speech and text diverge here, deliberately. The speaker gets the
@@ -212,12 +226,15 @@ class ReplyStreamer:
 
         `on_switch(agent_id)` is awaited once the reply has been said, when the
         agent handed you to a teammate (<switch to="..."/>): the room moves to
-        the teammate's channel, and the teammate greets you.
+        the teammate's channel, and the teammate opens there. A reply that
+        only passed work to a teammate (<pass to="..."/>) moves nothing: you
+        stay, and graphs/main has parked the brief for when you get there.
 
         Your words go to the channel above the reply. When they're words a turn
         cut short already posted, with more said since, that post is edited to
         hold them all instead -- if the turn posted nothing after them -- so the
-        channel shows what you said once.
+        channel shows what you said once. A turn you said nothing in (a
+        hand-off's arrival) posts its `heading` there instead.
 
         Returns whether the agent answered: False if a newer turn took over
         first, leaving the words unanswered. `on_final` gets what the user
@@ -227,8 +244,8 @@ class ReplyStreamer:
         # up the agent: only the text lane waits for it, so the transcript
         # still lands above the reply.
         earlier, post = self._transcript, None
-        if self.config.get("post_transcript_to_chat", True) and channel:
-            post = _TranscriptPost(channel, author, transcript, speech)
+        if channel and (heading or self.config.get("post_transcript_to_chat", True)):
+            post = _TranscriptPost(channel, author, transcript, speech, heading=heading)
             post.task = asyncio.create_task(self._post_transcript(post, earlier))
         self._transcript = post
 
@@ -312,8 +329,12 @@ class ReplyStreamer:
             speech_lane.put_nowait(("end", closing, said_by))
             text_lane.put_nowait(None)
             await asyncio.gather(text_task, speech_task)
+            # Work passed to a teammate moves nothing; the trace notes it.
+            pass_to = getattr(response, "pass_to", None) if replied and not failed else None
+            if isinstance(pass_to, str) and pass_to:
+                trace.event("pass", agent=pass_to)
             # The reply handed you to a teammate: once it's said, the room
-            # follows (the teammate's greeting queues behind the reply).
+            # follows (the teammate's opening queues behind the reply).
             switch_to = getattr(response, "switch_to", None) if replied and not failed else None
             if isinstance(switch_to, str) and switch_to and on_switch is not None and is_current():
                 trace.event("switch", agent=switch_to)

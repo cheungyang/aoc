@@ -10,6 +10,7 @@ from core.channel.voice.listening.turn_taking import (
     confirms_barge_in,
     end_of_turn_ms,
     is_backchannel,
+    keeps_greeting,
     merge_transcripts,
 )
 
@@ -98,3 +99,18 @@ def test_merge_transcripts_joins_in_order_and_skips_empty_parts():
     assert merge_transcripts(["Add milk to the list.", "", "  ", "And eggs."]) == \
         "Add milk to the list. And eggs."
     assert merge_transcripts([]) == ""
+
+
+class TestOverTheGreeting:
+    """What's said over the room's greeting. "Hello?" is what you say when it
+    reaches you late; it used to cut the greeting off for the lobby's \"Who's
+    it for?\"."""
+
+    @pytest.mark.parametrize("text", ["Hello?", "Hello? Hello?", "Can you hear me?", "Are you there?",
+                                      "Okay.", "Mm-hmm."])
+    def test_presence_checks_and_listening_noises_let_it_play(self, text):
+        assert keeps_greeting(text)
+
+    @pytest.mark.parametrize("text", ["Stop.", "Switch me to Daisy", "Hello, what's on my list today?", "Daisy."])
+    def test_anything_else_is_heard_as_ever(self, text):
+        assert not keeps_greeting(text)

@@ -69,10 +69,11 @@ class TestTheRegistries(unittest.TestCase):
         self.assertIs(TYPED.find("summarize"), TYPED.find("compact"))
 
     def test_spoken_in_the_order_they_are_tried(self):
-        """A stop first, then a hang-up; "next agent", "where am I" and "go
-        back" before the switch, which would otherwise take them for a name."""
+        """A stop first, then a hang-up; "next agent", "where am I", "go
+        back" and "hello?" before the switch, which would otherwise take them
+        for a name."""
         self.assertEqual([c.name for c in SPOKEN], [
-            "stop", "wait", "hang up", "next agent", "where am I", "go back", "switch",
+            "stop", "wait", "hang up", "next agent", "where am I", "go back", "hello", "switch",
         ])
 
     def test_control(self):

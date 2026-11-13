@@ -199,6 +199,31 @@ class TestPromptCacheLayout(unittest.TestCase):
         self.assertEqual(with_team[5], "<team>T</team>")
         self.assertEqual(with_team[6:], plain[5:])  # knowledge onwards
 
+    def test_open_passes_follow_the_channel_and_precede_voice_mode(self):
+        """They belong to one conversation: after the per-channel block, and
+        before the voice block, which a voice turn alone adds."""
+        plain = self._system_blocks()
+        with patch("core.runtime.graph_builder.get_open_passes_prompt", return_value="<open_passes>P</open_passes>"), \
+             patch("core.runtime.graph_builder.get_voice_mode_prompt", return_value="<voice_mode>V</voice_mode>"):
+            blocks = self._system_blocks()
+        self.assertEqual(blocks[:-2], plain)  # up to and including the channel
+        self.assertEqual(blocks[-2:], ["<open_passes>P</open_passes>", "<voice_mode>V</voice_mode>"])
+
+    def test_open_passes_are_read_for_the_live_turns_channel(self):
+        """A compiled graph outlives the turn it was built for, so the channel is
+        the live turn's. A stateless run talks with no one, and gets none."""
+        from tests.helpers import execution_context
+
+        with patch("core.runtime.graph_builder.get_open_passes_prompt", return_value="") as open_passes:
+            with execution_context(agent_id="test-agent", source="tool", channel="day-planning", stateless=False):
+                self._system_blocks()
+            open_passes.assert_called_with("test-agent", "day-planning")
+            with execution_context(agent_id="test-agent", source="job", channel="day-planning"):
+                self._system_blocks()
+            open_passes.assert_called_with("test-agent", "")
+            self._system_blocks()
+            open_passes.assert_called_with("test-agent", "")
+
 
 if __name__ == "__main__":
     unittest.main()

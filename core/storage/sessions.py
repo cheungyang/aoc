@@ -6,7 +6,8 @@ Two writers share a session's table (schemas/sessions.sql):
   LangGraph's state in `checkpoint` and `write` rows. It pickles them; the
   checkpoint methods here only store and find the blobs.
 - The session store proper adds the readable transcript (`message` rows),
-  token use (`token`) and voice turn traces (`turn_trace`).
+  token use (`token`), voice turn traces (`turn_trace`), and what the voice
+  room did on its own there -- its greeting, a move of its focus (`room_event`).
 
 A table is made by its first write. One made by older code keeps its column
 order and gets the columns it lacks, so rows are read by column name. `!new`
@@ -146,6 +147,20 @@ class SessionStore(Store):
                                   "execution_time": None if ttfa_ms is None else ttfa_ms / 1000.0,
                                   "surface": surface, "created_at": now})
         return f"Appended turn trace to {session_id}"
+
+    def append_room_event(self, session_id: str, event: Dict[str, Any], surface: Optional[str] = "voice") -> str:
+        """Stores something the voice room did on its own -- the greeting when
+        you join, a move of its focus -- as JSON in `message`, beside the
+        session's turns. These lines run no turn, so without a row of their
+        own memory.db never showed when you joined or what you heard first.
+        `execution_time` is how long the room waited before speaking (seconds;
+        NULL when it didn't wait), the figure a lost greeting is checked by."""
+        table_name = sanitize_table_name(session_id)
+        waited_ms = event.get("waited_ms")
+        self._append(table_name, {"entry_type": "room_event", "message": json.dumps(event, default=str),
+                                  "execution_time": None if waited_ms is None else waited_ms / 1000.0,
+                                  "surface": surface, "created_at": time.time()})
+        return f"Appended room event to {session_id}"
 
     def archive_session(self, session_id: str) -> str:
         if not session_id:

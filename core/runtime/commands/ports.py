@@ -68,6 +68,12 @@ class VoiceControls(Protocol):
         is disconnected from the voice channel and the bot leaves. True: it
         answered the words."""
 
+    async def presence(self, say: Say) -> bool:
+        """"Hello?", "can you hear me?": before anything else in the voice
+        session, the room's greeting -- said again, or, still on its way, said
+        as soon as you can hear it. False once you've switched or talked to an
+        agent: the words are for the agent."""
+
 
 class SpokenTurn(Protocol):
     """The voice turn a spoken command was said in (core/channel/voice/turn.py)."""

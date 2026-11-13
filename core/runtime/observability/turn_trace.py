@@ -108,6 +108,7 @@ class Outcome:
     HOOK = "hook"                    # a voice hook answered it ("next agent")
     FOCUS_SWITCH = "focus_switch"    # the switcher answered it: a switch, "where am I?"
     HANG_UP = "hang_up"              # "hanging up": the voice session ended
+    GREETING = "greeting"            # "hello?" before anything else: the room's greeting, again
 
 _current_trace: contextvars.ContextVar[Optional["TurnTrace"]] = contextvars.ContextVar(
     "current_turn_trace", default=None
@@ -229,3 +230,11 @@ def detach_turn_trace() -> None:
     its model calls aren't counted as the turn's.
     """
     _current_trace.set(None)
+
+
+def bind_turn_trace(trace: Optional[TurnTrace]) -> None:
+    """Binds `trace` (or none) to the current context: how a turn that runs
+    inside another -- a hand-off's arrival, which the switching turn runs
+    (core/channel/voice/voice_manager.py) -- hands the outer turn's trace
+    back once it's done."""
+    _current_trace.set(trace)

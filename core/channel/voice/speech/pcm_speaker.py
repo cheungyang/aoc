@@ -24,7 +24,8 @@ STALL_S = 15.0
 class PCMSpeaker(discord.AudioSource):
     """48 kHz mono PCM in (`write`), 20 ms stereo frames out (`read`)."""
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, on_audio: Optional[Callable[[], None]] = None):
+    def __init__(self, loop: asyncio.AbstractEventLoop, on_audio: Optional[Callable[[], None]] = None,
+                 lead_in_ms: int = 0):
         self._loop = loop
         self._on_audio = on_audio  # called on the loop when the first audio arrives
         self._lock = threading.Lock()
@@ -33,6 +34,10 @@ class PCMSpeaker(discord.AudioSource):
         self._finished = False
         self._ready = asyncio.Event()
         self._last_audio = time.monotonic()
+        # Silence played before the first audio, once it's in: a greeting opens
+        # on it, so its first word isn't on the first packets a listener's
+        # client gets of a stream it hasn't heard yet.
+        self._lead_in = SILENCE * max(0, round(lead_in_ms / 20))
         self.received = False
         self.underruns = 0  # silent frames played while waiting for audio
         self.stream = None  # the TTS stream feeding this speaker; stopped with it
@@ -50,9 +55,11 @@ class PCMSpeaker(discord.AudioSource):
         with self._lock:
             if self._finished:
                 return
+            first, self.received = not self.received, True
+            if first:
+                self._buffer += self._lead_in
             self._buffer += frames
             self._last_audio = time.monotonic()
-            first, self.received = not self.received, True
         if first:
             self._call_soon(self._on_audio)
             self._call_soon(self._ready.set)

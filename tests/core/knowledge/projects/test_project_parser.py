@@ -60,12 +60,12 @@ class TestProjectParser(unittest.TestCase):
         self.assertIn("# Plain Note", updated_plain)
 
     def test_extract_tags(self):
-        fm = {"tags": ["s/✊Executing", "c/🔺2026", "#t/🍄Google"]}
+        fm = {"tags": ["s/✊Executing", "c/🔺2026", "#t/🍄Work"]}
         body = "Here is an inline tag #p/aoc and another #urgent/high."
         tags = extract_tags(fm, body)
         self.assertIn("s/✊Executing", tags)
         self.assertIn("c/🔺2026", tags)
-        self.assertIn("#t/🍄Google", tags)
+        self.assertIn("#t/🍄Work", tags)
         self.assertIn("#p/aoc", tags)
         self.assertIn("#urgent/high", tags)
 

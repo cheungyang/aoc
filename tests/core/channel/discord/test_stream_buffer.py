@@ -279,3 +279,51 @@ class TestDiscordStreamBuffer(unittest.IsolatedAsyncioTestCase):
                 with patch("core.channel.discord.stream_buffer.switch_pointer", return_value=pointer_line):
                     await buffer.finalize(response.text, response=response)
                 self.assertEqual(len(channel.send.await_args_list), 1)
+
+    def test_a_pass_never_shows_whole_or_half_streamed(self):
+        for text in ('Noted. <pass to="day-planner">Book the dentist; mornings only.</pass>',
+                     'Noted. <pass to="day-planner">Book the den', 'Noted. <pass to="day-pl', "Noted. <pa",
+                     'Noted. <pass to="day-planner"/>', 'Noted. <PASS to="day-planner"></PASS>'):
+            with self.subTest(text=text):
+                self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(text), "Noted.")
+        self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream('A <pass to="x"/> B'), "A  B",
+                         "a self-closing pass hides nothing after it")
+
+    def test_lookalikes_of_a_pass_show(self):
+        for text in ("Keep the <password> safe.", "Read the <passage> twice.", "A `<pass to=\"ID\"/>` example."):
+            with self.subTest(text=text):
+                self.assertEqual(DiscordStreamBuffer.filter_xml_for_stream(text), text)
+
+    async def test_a_reply_passing_something_on_says_who_has_it(self):
+        from unittest.mock import patch
+        from core.channel.response_parser import AgentResponse
+        channel = AsyncMock()
+        channel.send.return_value = AsyncMock()
+        buffer = DiscordStreamBuffer(channel, edit_interval=60)
+        raw = "Noted, I'll let Daisy know. <pass to=\"day-planner\">Book the dentist for Tuesday.</pass>"
+        response = AgentResponse.from_string(raw)
+        with patch("core.channel.discord.stream_buffer.pass_pointer",
+                   return_value="📨 Passed to 🌼 Daisy in #day-planning") as pointer, \
+             patch("core.channel.discord.stream_buffer.switch_pointer") as switched:
+            await buffer.append_token(raw)
+            await buffer.finalize(response.text, response=response)
+        pointer.assert_called_once_with("day-planner", channel)
+        switched.assert_not_called()
+        self.assertEqual([c.args[0] for c in channel.send.await_args_list],
+                         ["Noted, I'll let Daisy know.", "📨 Passed to 🌼 Daisy in #day-planning"])
+
+    async def test_a_reply_that_passes_and_switches_posts_both_pointers(self):
+        from unittest.mock import patch
+        from core.channel.response_parser import AgentResponse
+        channel = AsyncMock()
+        channel.send.return_value = AsyncMock()
+        buffer = DiscordStreamBuffer(channel, edit_interval=60)
+        raw = ('The list is with Ramsay; over to Daisy. <pass to="meal-planner">Eggs, milk.</pass>'
+               '<switch to="day-planner"/>')
+        response = AgentResponse.from_string(raw)
+        with patch("core.channel.discord.stream_buffer.pass_pointer", return_value="📨 Passed to 🍳 Ramsay"), \
+             patch("core.channel.discord.stream_buffer.switch_pointer", return_value="→ Over to 🌼 Daisy"):
+            await buffer.append_token(raw)
+            await buffer.finalize(response.text, response=response)
+        self.assertEqual([c.args[0] for c in channel.send.await_args_list],
+                         ["The list is with Ramsay; over to Daisy.", "📨 Passed to 🍳 Ramsay", "→ Over to 🌼 Daisy"])

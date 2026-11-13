@@ -1,9 +1,10 @@
 """How a hand-over shows in a channel (core/channel/handoff.py): the pointer an
-agent's <switch to="..."/> leaves under its reply."""
+agent's <switch to="..."/> leaves under its reply, and the one its <pass
+to="...">brief</pass> leaves."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from core.channel.handoff import agent_named, switch_pointer
+from core.channel.handoff import agent_named, pass_pointer, switch_pointer
 
 
 class _Loader:
@@ -46,6 +47,23 @@ def test_the_channel_is_a_link_where_the_guild_has_it():
 def test_no_pointer_for_no_one_to_go_to():
     for agent in ("nobody", "main", "graph-worker", ""):
         assert switch_pointer(agent, None, loader=_Loader()) is None, agent
+
+
+def test_a_pass_says_who_has_it_now():
+    """The user stays put: the line says who the brief went to, not "over to"."""
+    assert pass_pointer("goal-setter", None, loader=_Loader()) == "📨 Passed to 🚀 Grace in #project-planning"
+    assert pass_pointer("GRACE", None, loader=_Loader()) == "📨 Passed to 🚀 Grace in #project-planning"
+
+
+def test_a_pass_links_the_channel_where_the_guild_has_it():
+    planning = SimpleNamespace(name="project-planning", mention="<#7>")
+    source = MagicMock(guild=SimpleNamespace(text_channels=[planning]))
+    assert pass_pointer("goal-setter", source, loader=_Loader()) == "📨 Passed to 🚀 Grace in <#7>"
+
+
+def test_no_pass_pointer_for_no_one_to_pass_to():
+    for agent in ("nobody", "main", "graph-worker", ""):
+        assert pass_pointer(agent, None, loader=_Loader()) is None, agent
 
 
 def test_a_teammate_is_named_by_id_or_by_name_in_any_case():

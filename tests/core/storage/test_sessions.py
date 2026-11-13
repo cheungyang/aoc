@@ -107,6 +107,23 @@ class TestSessionStore(unittest.TestCase):
         self.assertEqual(tokens[0]["cached_token"], 20.0)
         self.assertEqual(tokens[0]["execution_time"], 2.45)
 
+    def test_a_room_event_is_kept_beside_the_turns_but_is_none_of_them(self):
+        """The welcome and the room's moves run no turn: memory.db never showed
+        when you joined, how long the room waited, or what you heard first."""
+        session_id = "main:discord:general"
+        self.store.append_message(session_id, "user", "hello")
+        self.store.append_room_event(session_id, {"kind": "welcome", "how": "e2ee", "waited_ms": 1840,
+                                                  "state": "heard"})
+        self.store.append_room_event(session_id, {"kind": "focus", "from": "general", "to": "day-planning"})
+
+        rows = self.store.query(f"SELECT message, execution_time, surface FROM {sanitize_table_name(session_id)} "
+                                "WHERE entry_type = 'room_event' ORDER BY id")
+        self.assertEqual([json.loads(r["message"])["kind"] for r in rows], ["welcome", "focus"])
+        self.assertEqual([r["execution_time"] for r in rows], [1.84, None], "the wait, in seconds")
+        self.assertEqual({r["surface"] for r in rows}, {"voice"})
+        self.assertEqual([h["message"] for h in self.store.load_history(session_id)], ["hello"])
+        self.assertEqual(self.store.load_token_history(session_id), [])
+
     def test_archive_session_renames_table(self):
         session_id = "main:discord:general"
         self.store.append_message(session_id, "user", "hello world")

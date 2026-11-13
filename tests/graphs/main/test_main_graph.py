@@ -684,6 +684,189 @@ class TestSwitchCapsulesAndHandOffs(_SwitchTurns):
                          ("topic-researcher", "topic-research", "day-planner", "day-planning"))
 
 
+PASSES = "Noted, I'll let Elephant know. <pass to=\"software-planner\">Spec the inbox scanner.</pass>"
+SWITCHES_BARE = 'Over to Elephant. <switch to="software-planner"/>'
+
+
+class TestPassCapsules(_SwitchTurns):
+    """A reply ending with <pass to="...">brief</pass> parks a capsule for the
+    teammate as a switch does, and leaves the user where they are. When the
+    agent later hands the user over with a bare <switch>, the pass's brief
+    goes along."""
+
+    async def test_a_reply_that_passes_parks_a_capsule_and_moves_no_one(self):
+        from core.storage.handoff_capsules import PASS_TTL_S
+
+        _, capsule_for, printed = await self._turn("Pass the scanner spec to Elephant.", "agent-management",
+                                                   reply=PASSES)
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief="Spec the inbox scanner.",
+                                            via="pass", max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual((row["from_agent"], row["from_channel"], row["to_agent"], row["to_channel"], row["via"],
+                          row["brief"], row["capsule"]),
+                         ("agent-designer", "agent-management", "software-planner", "software-dev", "pass",
+                          "Spec the inbox scanner.", CAPSULE))
+        self.assertAlmostEqual(row["expires_at"] - row["created_at"], PASS_TTL_S, places=3)
+        self.assertIn(f"[graphs.main] Parked pass capsule #{row['id']} for 'software-planner' in #software-dev: "
+                      f"{len(CAPSULE)} chars, with a brief\n", printed)
+        self.assertEqual(self.state["messages"][-1].content, "🧬 Aki: Noted, I'll let Elephant know.")
+
+    async def test_the_teammates_next_turn_in_its_channel_gets_it_once(self):
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        (row,) = self._waiting()
+
+        delegate, _, printed = await self._turn("Hi Elephant", "software-dev")
+        self.assertEqual(delegate.await_args.kwargs["prompt"], f"Hi Elephant\n\n{CAPSULE}")
+        self.assertIn(f"[graphs.main] Attached parked capsule #{row['id']} from 'agent-designer'", printed)
+        self.assertEqual(self._waiting(), [])
+
+    async def test_a_bare_switch_after_a_pass_hands_over_with_the_pass_brief(self):
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        (passed,) = self._waiting()
+
+        _, capsule_for, printed = await self._turn("Thanks, that's all.", "agent-management", reply=SWITCHES_BARE)
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief="Spec the inbox scanner.",
+                                            via="switch", max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual((row["via"], row["brief"]), ("switch", "Spec the inbox scanner."))
+        self.assertEqual(row["expires_at"], passed["expires_at"], "it waits as long as the pass would have")
+        self.assertIn(f"[graphs.main] Parked hand-off capsule #{row['id']} for 'software-planner' in "
+                      f"#software-dev: {len(CAPSULE)} chars, with a brief, #{passed['id']}'s carried over", printed)
+
+    async def test_a_switchs_own_brief_goes_after_the_pass_brief(self):
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        await self._turn("Take me to him now.", "agent-management",
+                         reply='Over to Elephant. <switch to="software-planner">Start with the state file.</switch>')
+        (row,) = self._waiting()
+        self.assertEqual((row["via"], row["brief"]), ("switch", "Spec the inbox scanner.\nStart with the state file."))
+
+    async def test_a_second_pass_to_the_same_teammate_keeps_the_first_and_none_twice(self):
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        await self._turn("Tell him about the state file too.", "agent-management",
+                         reply='Will do. <pass to="software-planner">Keep a state file.</pass>')
+        await self._turn("And the spec, to be sure.", "agent-management", reply=PASSES)
+        (row,) = self._waiting()
+        self.assertEqual((row["via"], row["brief"]), ("pass", "Spec the inbox scanner.\nKeep a state file."))
+
+    async def test_a_reply_that_passes_and_switches_to_the_same_teammate_leaves_one_capsule_with_both(self):
+        reply = ('Over to Elephant. <pass to="software-planner">Spec the inbox scanner.</pass>'
+                 '<switch to="software-planner">Start with the state file.</switch>')
+        _, capsule_for, _ = await self._turn("Pass it on and take me there.", "agent-management", reply=reply)
+        self.assertEqual([c.kwargs["via"] for c in capsule_for.call_args_list], ["pass", "switch"])
+        (row,) = self._waiting()
+        self.assertEqual((row["via"], row["brief"]), ("switch", "Spec the inbox scanner.\nStart with the state file."))
+
+    async def test_a_reply_that_passes_to_one_and_switches_to_another_parks_both(self):
+        await self._turn("Give Daisy the dates and take me to Elephant.", "agent-management",
+                         reply='Done. <pass to="Daisy">Block Oct 17-18.</pass><switch to="software-planner"/>')
+        self.assertEqual({row["to_agent"]: (row["via"], row["brief"]) for row in self._waiting()},
+                         {"day-planner": ("pass", "Block Oct 17-18."), "software-planner": ("switch", "")})
+
+    async def test_another_conversations_pass_is_carried_saying_whose_it_is(self):
+        """Daisy passed something to Elephant, and before you got there Aki
+        handed you over: what Daisy passed used to vanish with her capsule."""
+        from core.storage.handoff_capsules import PASS, HandoffCapsuleStore
+
+        older = HandoffCapsuleStore().park(from_agent="day-planner", from_channel="day-planning",
+                                           to_agent="software-planner", to_channel="software-dev",
+                                           capsule="<daisy/>", brief="Block Friday for the spec.", via=PASS)
+        _, capsule_for, printed = await self._turn("Hand this over now.", "agent-management", reply=SWITCHES)
+        brief = "Spec the inbox scanner.\n(from Daisy in #day-planning) Block Friday for the spec."
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief=brief,
+                                            via="switch", max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual(row["brief"], brief, "this conversation's own brief first, the label heading only its own")
+        superseded = HandoffCapsuleStore().get(older)
+        self.assertIsNotNone(superseded.superseded_at)
+        self.assertEqual(row["expires_at"], superseded.expires_at, "it waits as long as the pass would have")
+        self.assertIn(f"#{older}'s carried over", printed)
+
+    async def test_a_carried_label_is_kept_not_doubled_and_stays_last(self):
+        from core.storage.handoff_capsules import PASS, HandoffCapsuleStore
+
+        HandoffCapsuleStore().park(from_agent="day-planner", from_channel="day-planning",
+                                   to_agent="software-planner", to_channel="software-dev", capsule="<daisy/>",
+                                   brief="Block Friday.\n(from Ted in #topic-research) Festival is Oct 17.", via=PASS)
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        await self._turn("Take me to him now.", "agent-management",
+                         reply='Over to Elephant. <switch to="software-planner">Start with the state file.</switch>')
+        (row,) = self._waiting()
+        self.assertEqual(row["brief"].split("\n"), [
+            "Spec the inbox scanner.", "Start with the state file.",
+            "(from Daisy in #day-planning) Block Friday.", "(from Ted in #topic-research) Festival is Oct 17."])
+
+    async def test_another_conversations_capsule_with_no_brief_is_superseded_not_carried(self):
+        from core.storage.handoff_capsules import HandoffCapsuleStore
+
+        older = HandoffCapsuleStore().park(from_agent="day-planner", from_channel="day-planning",
+                                           to_agent="software-planner", to_channel="software-dev",
+                                           capsule="<daisy/>")
+        _, capsule_for, printed = await self._turn("Hand this over now.", "agent-management", reply=SWITCHES)
+        capsule_for.assert_called_once_with("agent-management", loader=ANY, brief="Spec the inbox scanner.",
+                                            via="switch", max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual(row["brief"], "Spec the inbox scanner.")
+        self.assertIsNotNone(HandoffCapsuleStore().get(older).superseded_at)
+        self.assertNotIn("carried over", printed)
+
+    async def test_nothing_is_parked_for_a_pass_to_no_channel_to_itself_or_to_this_channel(self):
+        for teammate in ("graph-worker", "nobody", "agent-designer", "Aki"):
+            with self.subTest(teammate=teammate):
+                _, capsule_for, _ = await self._turn("Tell them.", "agent-management",
+                                                     reply=f'Sure. <pass to="{teammate}">brief</pass>')
+                capsule_for.assert_not_called()
+        with patch("graphs.main.graph.home_channel", return_value="agent-management"):
+            _, capsule_for, _ = await self._turn("Tell him.", "agent-management", reply=PASSES)
+        capsule_for.assert_not_called()
+        self.assertEqual(self._waiting(), [])
+
+    async def test_a_pass_that_cant_be_parked_never_breaks_the_turn(self):
+        with patch("core.storage.handoff_capsules.HandoffCapsuleStore.park", side_effect=RuntimeError("disk full")), \
+             redirect_stderr(io.StringIO()) as errors:
+            await self._turn("Pass the scanner spec to Elephant.", "agent-management", reply=PASSES)
+        self.assertEqual(self.state["messages"][-1].content, "🧬 Aki: Noted, I'll let Elephant know.")
+        self.assertIn("could not park a pass capsule for 'software-planner': disk full", errors.getvalue())
+
+    async def test_a_hand_offs_reply_that_passes_parks_a_capsule_from_its_channel(self):
+        _, capsule_for, _ = await self._turn(
+            "Ted, find the festival dates", "pkm-wiki",
+            reply='Found them; Daisy will have them. <pass to="day-planner">Block Oct 17-18.</pass>')
+        capsule_for.assert_called_with("topic-research", loader=ANY, brief="Block Oct 17-18.", via="pass",
+                                       max_tokens=SWITCH_CAPSULE_TOKENS)
+        (row,) = self._waiting()
+        self.assertEqual((row["from_agent"], row["from_channel"], row["to_agent"], row["to_channel"], row["via"]),
+                         ("topic-researcher", "topic-research", "day-planner", "day-planning", "pass"))
+
+    async def test_end_to_end_the_teammate_gets_the_pass_brief_with_the_hand_over(self):
+        """Real capsule builder and session store: Aki passed the spec on earlier
+        in the conversation, and hands you over with a bare switch at its end."""
+        from core.storage.sessions import SessionStore
+
+        aki, store = "agent-designer:tool:agent-management", SessionStore()
+
+        def aki_replies(reply):
+            async def answers(**kwargs):
+                store.append_message(aki, "user", f"<caller>main</caller>\n{kwargs['prompt']}")
+                store.append_message(aki, "ai", reply)
+                response = AgentResponse.from_string(reply)
+                return DelegationResult(agent_id=kwargs["agent_id"], text=response.text, response=response)
+            return AsyncMock(side_effect=answers)
+
+        await self._turn("Pass the scanner spec to Elephant.", "agent-management", capsule=None,
+                         delegate=aki_replies(PASSES))
+        await self._turn("Thanks, that's all.", "agent-management", capsule=None,
+                         delegate=aki_replies(SWITCHES_BARE))
+        delegate, _, _ = await self._turn("Hi Elephant", "software-dev", capsule=None)
+
+        prompt = delegate.await_args.kwargs["prompt"]
+        self.assertIn('via="switch">\n<brief from="Aki">\nSpec the inbox scanner.\n</brief>\n<recent>', prompt)
+        for line in ("You: Pass the scanner spec to Elephant.", "Aki: Noted, I'll let Elephant know.",
+                     "You: Thanks, that's all.", "Aki: Over to Elephant."):
+            self.assertIn(line, prompt)
+        self.assertEqual(prompt.count("<handoff_context"), 1)
+        self.assertNotIn("<pass", prompt)
+
+
 class TestTheReplyIsLoggedBeforeTheRunEnds(unittest.IsolatedAsyncioTestCase):
     """Why a switch's capsule is built as soon as stream_delegate returns, not
     later: the reply that switched is already in the transcript. LoggingHandler

@@ -24,6 +24,7 @@ from typing import Any, List, Optional, Protocol
 from core.runtime.commands.base import SpokenContext
 from core.runtime.commands.ports import VoiceControls
 from core.runtime.commands.registry import SPOKEN
+from core.runtime.commands.spoken.presence import is_presence_check
 from core.runtime.foundation.sessions import SessionManager
 from core.runtime.observability.turn_trace import Outcome, Stage, start_turn_trace
 from core.util.errors import format_error_message
@@ -95,7 +96,11 @@ class TurnRoom(VoiceControls, Protocol):
 
     async def switch_to_agent(self, agent: str, say: Any) -> bool:
         """The agent's reply handed you to `agent`, a teammate (<switch
-        to="..."/>): moves the focus to its channel, greeted in its voice."""
+        to="..."/>): moves the focus to its channel, where it opens."""
+
+    def took_floor(self) -> None:
+        """You said something other than "hello?": the session is under way,
+        and a greeting still on its way is moot."""
 
 
 class VoiceTurn:
@@ -211,6 +216,11 @@ class VoiceTurn:
         author = getattr(user, "display_name", str(user)) if user else "Speaker"
         merged = f" ({len(utterances)} utterances merged)" if len(utterances) > 1 else ""
         self._log(f"📝 Transcribed prompt from {author}{merged}: '{transcript}'")
+        # Words, and not just "hello?": you've started the session, so the
+        # greeting, if it's still waiting for you to hear it, isn't said over
+        # them (core/runtime/commands/spoken/presence.py).
+        if not is_presence_check(newest):
+            room.took_floor()
 
         # 3. A spoken command. "Stop" or "wait" on its own is for the
         #    pipeline, not the agent: the reply has already stopped, and

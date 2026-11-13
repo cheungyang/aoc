@@ -336,6 +336,72 @@ class TestSwitchBrief(unittest.TestCase):
         self.assertEqual(response.text, "no, Grace:")
 
 
+class TestPassDirective(unittest.TestCase):
+    """<pass to="...">brief</pass>: an agent leaving a teammate a brief while the
+    user stays with it (core/prompts/templates/system/team.md). Read like
+    <switch>: the brief goes in the teammate's capsule, never to the user."""
+
+    def test_a_pass_names_the_teammate_and_its_brief_and_leaves_no_trace(self):
+        response = AgentResponse.from_string(
+            "<speech>Done, I'll let Daisy know.</speech>Noted for Daisy.\n\n"
+            '<pass to="day-planner">\n  Book the dentist for Tuesday.\n  Mornings only.\n</pass>')
+        self.assertEqual((response.pass_to, response.pass_brief),
+                         ("day-planner", "Book the dentist for Tuesday. Mornings only."))
+        self.assertEqual((response.text, response.speech), ("Noted for Daisy.", "Done, I'll let Daisy know."))
+        self.assertEqual((response.switch_to, response.switch_brief), (None, None), "the user isn't moved")
+
+    def test_forms_a_model_may_write(self):
+        for raw in ("Noted. <pass to='day-planner'></pass>", 'Noted.<PASS to="day-planner" />',
+                    'Noted. <pass  to = "day-planner">', 'Noted. <pass to="day-planner"/></pass>'):
+            with self.subTest(raw=raw):
+                response = AgentResponse.from_string(raw)
+                self.assertEqual((response.pass_to, response.pass_brief, response.text),
+                                 ("day-planner", None, "Noted."))
+
+    def test_inside_speech_neither_the_tag_nor_the_brief_is_read_out(self):
+        response = AgentResponse.from_string(
+            "<speech>I'll tell Ramsay. <pass to=\"meal-planner\">No dairy this week.</pass></speech>Noted.")
+        self.assertEqual((response.speech, response.pass_to, response.pass_brief, response.text),
+                         ("I'll tell Ramsay.", "meal-planner", "No dairy this week.", "Noted."))
+
+    def test_the_last_one_counts_and_none_means_no_pass(self):
+        response = AgentResponse.from_string('<pass to="ted"/> no, <pass to="goal-setter">Plan it.</pass>')
+        self.assertEqual((response.pass_to, response.pass_brief, response.text), ("goal-setter", "Plan it.", "no,"))
+        self.assertIsNone(AgentResponse.from_string("Pass this to Daisy, please.").pass_to)
+        self.assertIsNone(AgentResponse.from_string('<pass to=""/>Hm.').pass_to)
+
+    def test_lookalike_tags_are_text(self):
+        raw = "Keep the <password> safe; the <passage> is long, and a <pass> names no one."
+        response = AgentResponse.from_string(raw)
+        self.assertEqual((response.pass_to, response.text), (None, raw))
+
+    def test_a_long_brief_is_clipped_like_a_switchs(self):
+        from core.channel.response_parser import SWITCH_BRIEF_CHARS
+
+        response = AgentResponse.from_string(f'Noted. <pass to="x">{"word " * 400}</pass>')
+        self.assertEqual(len(response.pass_brief), SWITCH_BRIEF_CHARS)
+        self.assertTrue(response.pass_brief.endswith("…"))
+        self.assertEqual(response.text, "Noted.")
+
+    def test_a_reply_may_pass_and_switch(self):
+        response = AgentResponse.from_string(
+            "Ramsay gets the list; over to Daisy. "
+            '<pass to="meal-planner">Eggs, milk.</pass><switch to="day-planner">Plan the morning.</switch>')
+        self.assertEqual((response.pass_to, response.pass_brief), ("meal-planner", "Eggs, milk."))
+        self.assertEqual((response.switch_to, response.switch_brief), ("day-planner", "Plan the morning."))
+        self.assertEqual(response.text, "Ramsay gets the list; over to Daisy.")
+
+    def test_a_brief_never_takes_a_later_directive_in(self):
+        response = AgentResponse.from_string('<pass to="ted"> no, Daisy: <pass to="day-planner">Book it.</pass>')
+        self.assertEqual((response.pass_to, response.pass_brief, response.text),
+                         ("day-planner", "Book it.", "no, Daisy:"))
+        # Nor does a switch's brief take in a pass written inside it: the pass still counts.
+        response = AgentResponse.from_string(
+            'Over to Daisy. <switch to="day-planner"><pass to="meal-planner">Eggs.</pass></switch>')
+        self.assertEqual((response.switch_to, response.switch_brief), ("day-planner", None))
+        self.assertEqual((response.pass_to, response.pass_brief), ("meal-planner", "Eggs."))
+
+
 # The shape of a real reply (Aki, #agent-management) that explained the switch
 # syntax in backticks, then ended with a poll and its real memory log. The prose
 # is reworded here; the markup is as it came. Read as directives, the quoted
@@ -405,6 +471,12 @@ class TestCodeIsText(unittest.TestCase):
             with self.subTest(raw=raw):
                 response = AgentResponse.from_string(raw)
                 self.assertEqual((response.switch_to, response.switch_brief, response.text), (None, None, raw))
+
+    def test_a_pass_in_code_is_text(self):
+        for raw in ('The syntax is `<pass to="ID">brief</pass>`.', "Like this:\n```\n<pass to=\"ID\"/>\n```\nDone."):
+            with self.subTest(raw=raw):
+                response = AgentResponse.from_string(raw)
+                self.assertEqual((response.pass_to, response.pass_brief, response.text), (None, None, raw))
 
     def test_tags_in_a_fenced_block_are_text(self):
         raw = ("Like this:\n```xml\n<switch to=\"software-planner\">brief</switch>\n<speech>Hi.</speech>\n"

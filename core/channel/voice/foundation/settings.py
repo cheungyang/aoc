@@ -83,6 +83,27 @@ LIVE_CONVERSATION_S = 300
 # and in any case for this long after the move.
 GO_BACK_WINDOW_S = 90
 
+# --- Greeting you ------------------------------------------------------------
+# Discord says you joined before your client can hear the bot: it still has to
+# connect to the voice server and join the call's end-to-end encryption (DAVE)
+# group, a second or more, longer on a phone. A greeting started at once lost
+# its opening (heard mid-sentence), or all of a short one ("Concierge here.").
+# So it waits until the bot's E2EE group holds you with no key change pending
+# (room/connection.py `until_audible`) -- for at most GREET_MAX_WAIT_S, then
+# it's said anyway -- and GREET_SETTLE_S more, for a phone's audio route
+# (Bluetooth, CarPlay) to open.
+GREET_MAX_WAIT_S = 6.0
+GREET_SETTLE_S = 0.6
+# With no E2EE group to ask, it waits for your client to connect to the voice
+# server instead, or this long after you joined when no such signal comes.
+GREET_NO_SIGNAL_WAIT_S = 1.5
+# The greeting opens with this much silence, so its first syllable isn't on the
+# first packets your client gets of a stream it hasn't heard before.
+GREETING_LEAD_IN_MS = 250
+# The bot back in the room within this long of your last turn -- a restart, a
+# reconnect -- puts you back where you were, and says so.
+RESUME_FOCUS_S = 600
+
 # --- Hearing only you ------------------------------------------------------
 # The voiceprint gate (core/channel/voice/listening/speaker_gate.py) scores how much
 # an utterance sounds like your enrolled voice. `voice_config.speaker_gate`

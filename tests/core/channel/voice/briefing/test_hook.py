@@ -3,6 +3,7 @@ live announcements -- checked against one sample drive, joined at 8:10 --
 and the briefing as a voice room hook."""
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from core.storage.channel_inbox import InboxStore
@@ -11,6 +12,7 @@ from core.channel.voice.briefing.hook import (
     announcement,
     compose_digest,
     entries_for,
+    handoffs_for,
     nothing_left,
     ordered,
     should_announce,
@@ -359,6 +361,86 @@ class TestAsAHook(unittest.IsolatedAsyncioTestCase):
         self.hook.joined(self.room)
         self.hook.left(self.room)
         self.assertFalse(self.hook.active)
+
+
+# --- hand-offs: what an agent's <pass> left a teammate -------------------------------------
+
+def parked(to_agent, to_channel, from_agent, via="pass"):
+    """A capsule row as the store gives it (core/storage/handoff_capsules.py)."""
+    return SimpleNamespace(to_agent=to_agent, to_channel=to_channel, from_agent=from_agent, via=via)
+
+
+class TestHandOffsInTheDigest(unittest.TestCase):
+
+    def test_handoffs_for_names_the_teammate_and_who_passed_it(self):
+        handed = handoffs_for([parked("day-planner", "day-planning", "topic-researcher"),
+                               parked("ghost", "nowhere", "topic-researcher"),          # no such channel
+                               parked("market-scout", "day-planning", "topic-researcher")],  # not that channel's agent
+                              DIRECTORY)
+        self.assertEqual([(h.focus.key, h.name, h.alias, h.sender) for h in handed],
+                         [("day-planning", "Daisy", "Daisy", "Ted")])
+
+    def test_a_hand_off_comes_first_and_is_where_it_starts(self):
+        handed = handoffs_for([parked("market-scout", "market-scout", "topic-researcher")], DIRECTORY)
+        self.assertEqual(
+            compose_digest(entries(DAISY), HOUR, handed),
+            "Morning. Two agents have something for you. Marvin has a hand-off from Ted. "
+            "Daisy is waiting for your answer. Start with Marvin? Say 'start with Marvin' to begin.",
+        )
+
+    def test_a_hand_off_alone_is_a_digest(self):
+        handed = handoffs_for([parked("day-planner", "day-planning", "wiki-gardener")], DIRECTORY)
+        self.assertEqual(compose_digest([], 20, handed),
+                         "Evening. One agent has something for you. Daisy has a hand-off from William. "
+                         "Start with Daisy? Say 'start with Daisy' to begin.")
+
+    def test_several_hand_offs_are_counted_with_the_rest(self):
+        handed = handoffs_for([parked("day-planner", "day-planning", "wiki-gardener"),
+                               parked("market-scout", "market-scout", "topic-researcher")], DIRECTORY)
+        self.assertEqual(compose_digest(entries(DAISY), HOUR, handed),
+                         "Morning. Two agents have something for you. Daisy and Marvin have hand-offs waiting. "
+                         "Daisy is waiting for your answer. Start with Daisy? Say 'start with Daisy' to begin.")
+
+
+class _Capsules:
+    """HandoffCapsuleStore.waiting_all, from rows given up front."""
+
+    def __init__(self, *rows):
+        self.rows = list(rows)
+
+    def waiting_all(self, now=None):
+        return list(self.rows)
+
+
+class TestHandOffsInTheDrive(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        self.store = InboxStore()
+        self.capsules = _Capsules(parked("market-scout", "market-scout", "topic-researcher"))
+        self.hook = VoiceBriefing(store=self.store, writer=SpeechWriter(write=AsyncMock()), clock=lambda: JOINED,
+                                  hour=lambda: HOUR, capsules=self.capsules)
+
+    def test_next_agent_goes_to_a_hand_off_first(self):
+        self.store.put(TED)
+        target, _ = self.hook.next_unfinished(DIRECTORY, DIRECTORY.lobby)
+        self.assertEqual(target.key, "market-scout")
+        target, _ = self.hook.next_unfinished(DIRECTORY, DIRECTORY.get("market-scout"))
+        self.assertEqual(target.key, "topic-research", "not the hand-off you're with")
+
+    def test_a_store_that_cant_be_read_costs_only_the_hand_offs(self):
+        self.capsules.waiting_all = lambda now=None: (_ for _ in ()).throw(RuntimeError("locked"))
+        self.store.put(TED)
+        self.assertEqual(self.hook.next_unfinished(DIRECTORY, DIRECTORY.lobby)[0].key, "topic-research")
+        self.assertIn("Ted", self.hook.digest(DIRECTORY))
+
+    async def test_arriving_with_a_hand_off_the_post_goes_to_the_agent_not_the_speaker(self):
+        """Daisy's 16:30 routine played on arrival, burying why you came."""
+        self.store.put(DAISY)
+        self.hook.begin()
+        note = await self.hook.handed_over(_Room(), DIRECTORY.get("day-planning"))
+        self.assertEqual(note, DAISY.speech)
+        self.assertIs(self.store.get("day-planning").status, Status.AWAITING_REPLY, "the agent says it: heard")
+        self.assertIsNone(await self.hook.handed_over(_Room(), DIRECTORY.get("market-scout")), "nothing left there")
 
 
 if __name__ == "__main__":

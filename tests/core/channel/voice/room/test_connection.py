@@ -1,4 +1,8 @@
-"""The voice connection: which voice channel the bot uses, and joining and leaving it."""
+"""The voice connection: which voice channel the bot uses, joining and leaving
+it, and whether you can hear it yet."""
+import asyncio
+import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -201,3 +205,171 @@ def test_pick_voice_channel_takes_the_first_target_the_guild_has():
     assert pick_voice_channel(guilds, ["general-voice", "123"]) == "123"
     assert pick_voice_channel(guilds, ["Day Planning"]) == "Day Planning"  # normalized
     assert pick_voice_channel([], ["general-voice", "other"]) == "general-voice"
+
+
+# --- already in the room ----------------------------------------------------------------
+
+def _in(connection, name="aoc-voice", room_id=777, connected=True):
+    voice_client = MagicMock()
+    voice_client.is_connected.return_value = connected
+    voice_client.channel.name = name
+    voice_client.channel.id = room_id
+    connection.voice_client = voice_client
+    return voice_client
+
+
+def test_in_room_by_name_or_id_only_while_connected(mock_bot_runner):
+    """Auto-join runs on every on_ready; it must know the bot is there already."""
+    connection = _connection(mock_bot_runner)
+    assert connection.in_room("aoc-voice") is False  # no voice client
+    _in(connection)
+    assert connection.in_room("aoc-voice") is True
+    assert connection.in_room("vc-aoc") is True  # normalized
+    assert connection.in_room("777") is True
+    assert connection.in_room("general-voice") is False
+    assert connection.in_room("") is False
+    _in(connection, connected=False)
+    assert connection.in_room("aoc-voice") is False
+
+
+# --- whether you can hear the bot yet ---------------------------------------------------
+#
+# The state is discord.py's VoiceConnectionState (voice_client._connection):
+# dave_protocol_version, dave_session (davey.DaveSession: ready,
+# get_user_ids() -> List[str]) and dave_pending_transitions (Dict[int, int]).
+
+YOU = 42
+
+
+def _dave(connection, version=1, ready=True, members=(str(YOU),), pending=None, session=True):
+    voice_client = _in(connection)
+    dave_session = MagicMock(ready=ready)
+    dave_session.get_user_ids.return_value = list(members)
+    voice_client._connection = SimpleNamespace(
+        dave_protocol_version=version, dave_session=dave_session if session else None,
+        dave_pending_transitions=dict(pending or {}))
+    return voice_client._connection
+
+
+def test_with_no_e2ee_session_it_cannot_tell(mock_bot_runner):
+    connection = _connection(mock_bot_runner)
+    assert connection.audible_to(YOU) is None  # no voice client
+    _in(connection)
+    assert connection.audible_to(YOU) is None  # a MagicMock's protocol version is no number
+    _dave(connection, version=0)
+    assert connection.audible_to(YOU) is None  # the call isn't end-to-end encrypted
+
+
+def test_audible_once_the_group_holds_you_with_no_key_change_pending(mock_bot_runner):
+    connection = _connection(mock_bot_runner)
+    _dave(connection)
+    assert connection.audible_to(YOU) is True
+    assert connection.audible_to(str(YOU)) is True
+    assert connection.audible_to(7) is False  # someone the group doesn't hold yet
+
+
+@pytest.mark.parametrize("state", [
+    {"session": False},          # no MLS session yet
+    {"ready": False},            # the bot's own group isn't ready: it can't encrypt
+    {"pending": {3: 1}},         # a welcome or commit is still to be executed
+    {"members": ("99",)},        # your client hasn't joined the group
+], ids=["no-session", "not-ready", "transition-pending", "not-a-member"])
+def test_not_audible_before_your_client_has_the_keys(mock_bot_runner, state):
+    connection = _connection(mock_bot_runner)
+    _dave(connection, **state)
+    assert connection.audible_to(YOU) is False
+
+
+@pytest.fixture
+def quick(monkeypatch):
+    """until_audible looks every 5 ms, and assumes you hear it after 50 ms of no signal."""
+    from core.channel.voice.foundation import settings
+    from core.channel.voice.room import connection as module
+    monkeypatch.setattr(module, "AUDIBLE_POLL_S", 0.005)
+    monkeypatch.setattr(settings, "GREET_NO_SIGNAL_WAIT_S", 0.05)
+
+
+@pytest.mark.asyncio
+async def test_until_audible_waits_for_the_key_transition(mock_bot_runner, quick):
+    """The greeting used to start ~0.4 s after you joined, while your client was
+    still joining the E2EE group: you heard it mid-sentence or not at all."""
+    connection = _connection(mock_bot_runner)
+    state = _dave(connection, pending={5: 1}, members=())
+
+    async def your_client_joins():
+        await asyncio.sleep(0.03)
+        state.dave_session.get_user_ids.return_value = [str(YOU)]
+        await asyncio.sleep(0.03)
+        state.dave_pending_transitions.clear()  # the transition executes
+
+    joining = asyncio.create_task(your_client_joins())
+    started = time.monotonic()
+    assert await connection.until_audible(YOU, started, timeout=2.0) == "e2ee"
+    assert time.monotonic() - started >= 0.05
+    await joining
+
+
+@pytest.mark.asyncio
+async def test_until_audible_gives_up_after_the_timeout(mock_bot_runner, quick):
+    connection = _connection(mock_bot_runner)
+    _dave(connection, ready=False)
+    assert await connection.until_audible(YOU, time.monotonic(), timeout=0.05) == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_until_audible_without_e2ee_waits_for_your_client_to_connect(mock_bot_runner, quick):
+    """No E2EE to ask: voice_recv's op 11 (`voice_member_connect`) says your
+    client reached the voice server."""
+    connection = _connection(mock_bot_runner)
+    _in(connection)
+    connection._watch_members()
+
+    async def your_client_connects():
+        await asyncio.sleep(0.02)
+        await connection._member_connected(SimpleNamespace(id=YOU))
+
+    connecting = asyncio.create_task(your_client_connects())
+    assert await connection.until_audible(YOU, time.monotonic(), timeout=2.0) == "connected"
+    await connecting
+
+
+@pytest.mark.asyncio
+async def test_until_audible_with_no_signal_at_all_assumes_after_a_moment(mock_bot_runner, quick):
+    connection = _connection(mock_bot_runner)
+    _in(connection)
+    started = time.monotonic()
+    assert await connection.until_audible(YOU, started, timeout=2.0) == "assumed"
+    assert time.monotonic() - started >= 0.05
+
+
+@pytest.mark.asyncio
+async def test_a_connect_from_an_earlier_visit_does_not_count(mock_bot_runner, quick):
+    connection = _connection(mock_bot_runner)
+    _in(connection)
+    connection._connected_at[YOU] = time.monotonic() - 2.0  # before you joined this time
+    assert await connection.until_audible(YOU, time.monotonic(), timeout=2.0) == "assumed"
+
+
+@pytest.mark.asyncio
+async def test_until_audible_stops_when_the_bot_is_gone(mock_bot_runner, quick):
+    connection = _connection(mock_bot_runner)
+    assert await connection.until_audible(YOU, time.monotonic(), timeout=2.0) == "gone"
+
+
+@pytest.mark.asyncio
+async def test_joining_watches_members_connect_and_disconnect(mock_bot_runner):
+    connection = _connection(mock_bot_runner)
+    voice_client = MagicMock()
+    _guild_with_room(mock_bot_runner, AsyncMock(return_value=voice_client))
+    connection._connected_at[YOU] = 1.0  # from the last voice session
+
+    assert await connection.join("general-voice") is True
+    assert connection._connected_at == {}
+    names = [c.kwargs["name"] for c in voice_client.add_listener.call_args_list]
+    assert names == ["on_voice_member_connect", "on_voice_member_disconnect"]
+
+    connected, disconnected = (c.args[0] for c in voice_client.add_listener.call_args_list)
+    await connected(SimpleNamespace(id=YOU))
+    assert YOU in connection._connected_at
+    await disconnected(SimpleNamespace(id=YOU))
+    assert YOU not in connection._connected_at

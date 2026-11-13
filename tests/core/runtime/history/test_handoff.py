@@ -25,6 +25,7 @@ from core.runtime.history.handoff import (
     MAX_TOUCHED,
     SUMMARY_CHARS,
     SWITCH_CAPSULE_TOKENS,
+    arrival_message,
     build_capsule,
     capsule_for,
     with_capsule,
@@ -188,6 +189,38 @@ class TestRecent(unittest.TestCase):
         text = capsule(rows)
         for words in ("You: Hello there", "You: Add milk\n", "You: Add milk and eggs"):
             self.assertIn(words, text)
+
+    def test_a_hand_offs_arrival_holds_none_of_your_words(self):
+        """The voice room ran Daisy's opening with only its marker (and what
+        else she had waiting): handed on later, no "You:" line comes of it,
+        and her opening is still there."""
+        arrival = (f"[Wed 17:16] {arrival_message('Your evening wrap-up is ready.')}\n\n"
+                   '<handoff_context from="topic-researcher" channel="topic-research"><recent>old</recent>'
+                   "</handoff_context>")
+        rows = [
+            row("user", arrival, at(8, 0)),
+            row("ai", "Miles says the Amex call needs a slot. Ten tomorrow?", at(8, 0)),
+            row("user", "[Wed 17:17] Ten works.", at(8, 1)),
+            row("ai", "Booked.", at(8, 1)),
+        ]
+        text = capsule(rows)
+        self.assertIn("William: Miles says the Amex call needs a slot. Ten tomorrow?", text)
+        self.assertIn("You: [Wed 17:17] Ten works.", text)
+        for hidden in ("handoff_arrival", "also_waiting", "evening wrap-up", "You: [Wed 17:16]", "old"):
+            self.assertNotIn(hidden, text)
+
+
+class TestArrivalMessage(unittest.TestCase):
+    """The message of a hand-off's arrival turn: no words of yours, only the
+    marker team.md explains, and what else the teammate has for you."""
+
+    def test_the_marker_alone(self):
+        self.assertEqual(arrival_message(), "<handoff_arrival/>")
+        self.assertEqual(arrival_message("  "), "<handoff_arrival/>")
+
+    def test_what_else_waits_goes_with_it_on_one_line(self):
+        self.assertEqual(arrival_message("Your evening\n wrap-up is ready."),
+                         "<handoff_arrival/>\n<also_waiting>Your evening wrap-up is ready.</also_waiting>")
 
 
 class TestTouched(unittest.TestCase):

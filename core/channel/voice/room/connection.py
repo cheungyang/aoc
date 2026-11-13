@@ -1,17 +1,30 @@
-"""The bot's voice connection: which voice channel it uses, and joining and
-leaving it.
+"""The bot's voice connection: which voice channel it uses, joining and
+leaving it, and whether you can hear it yet.
 
 Which text channel a turn belongs to is not decided here: that is the focus
 (focus.py), which moves when you ask for another agent, not when the bot
 changes rooms.
+
+Hearing the bot takes your client longer than Discord takes to say you
+joined. Your client still connects to the voice server, then joins the call's
+end-to-end encryption (DAVE) group: the bot commits you to its MLS group, your
+client processes the welcome, and a key transition runs. Until then what the
+bot sends is encrypted for a group you're not in, or, when the bot is the one
+joining, not yet encrypted at all; either way your client drops it. A greeting
+started at once was heard mid-sentence, or not at all. `until_audible` waits
+for the group to hold you (`audible_to`); with no E2EE session to ask, for
+your client's connect on the voice gateway (op 11, which voice_recv dispatches
+as `voice_member_connect`).
 """
 import asyncio
 import re
-from typing import Any, Callable, Optional
+import time
+from typing import Any, Callable, Dict, Optional
 
 import discord
 from discord.ext import voice_recv
 
+from core.channel.voice.foundation import settings
 from core.channel.voice.room import patches
 from core.loaders.channel_hosts import WILDCARD
 
@@ -78,6 +91,18 @@ def pick_voice_channel(guilds, targets: list):
     return selected_target or targets[0]
 
 
+# `until_audible` looks again this often.
+AUDIBLE_POLL_S = 0.1
+
+
+def _user_key(user_id) -> Optional[int]:
+    """A Discord user id as `_connected_at` keys it, or None."""
+    try:
+        return int(user_id)
+    except (TypeError, ValueError):
+        return None
+
+
 class VoiceConnection:
     """One bot's voice client and the sink listening on it.
 
@@ -94,6 +119,10 @@ class VoiceConnection:
         self._on_joined = on_joined
         self.voice_client = None
         self.sink = None
+        # When each member's client last connected to the voice server
+        # (time.monotonic(), by user id): what `until_audible` waits for with
+        # no E2EE to ask. Forgotten when they disconnect, and on every join.
+        self._connected_at: Dict[int, float] = {}
 
     @property
     def bot(self):
@@ -111,6 +140,91 @@ class VoiceConnection:
     def own_user(self):
         """The bot's own member in voice, which it must never listen to."""
         return getattr(self.voice_client, "user", None) if self.voice_client else None
+
+    def in_room(self, channel_name_or_id) -> bool:
+        """Whether the bot is connected to `channel_name_or_id` already: by
+        id, or by exact or normalized name."""
+        room = self.channel
+        if room is None or not channel_name_or_id or not self.is_connected():
+            return False
+        wanted = str(channel_name_or_id)
+        if wanted.isdigit() and getattr(room, "id", None) == int(wanted):
+            return True
+        name = getattr(room, "name", None)
+        return isinstance(name, str) and is_channel(name, wanted)
+
+    # --- whether you can hear the bot yet ---------------------------------------
+
+    def audible_to(self, user_id) -> Optional[bool]:
+        """Whether what the bot sends now reaches `user_id`'s ears, as far as
+        E2EE can tell: True once the call's DAVE group holds them and no key
+        transition is pending, False before that. None when there's no E2EE
+        session to ask (protocol 0, or no voice client)."""
+        state = getattr(self.voice_client, "_connection", None) if self.voice_client else None
+        version = getattr(state, "dave_protocol_version", 0)
+        if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
+            return None
+        session = getattr(state, "dave_session", None)
+        if session is None or getattr(session, "ready", False) is not True:
+            return False
+        if getattr(state, "dave_pending_transitions", None):
+            return False
+        try:
+            members = {str(member) for member in session.get_user_ids()}
+        except Exception:
+            return None
+        return str(user_id) in members
+
+    async def until_audible(self, user_id, since: float, timeout: float = settings.GREET_MAX_WAIT_S) -> str:
+        """Waits until `user_id` can hear the bot, for at most `timeout`
+        seconds after `since` (time.monotonic() when they joined), and says
+        how it knew:
+
+            "e2ee"       the call's E2EE group holds them, no key change pending
+            "connected"  no E2EE to ask: their client connected to the voice server
+            "assumed"    no signal of either kind: GREET_NO_SIGNAL_WAIT_S went by
+            "timeout"    `timeout` went by first
+            "gone"       the bot isn't connected any more
+        """
+        deadline = since + timeout
+        while True:
+            if not self.is_connected():
+                return "gone"
+            audible = self.audible_to(user_id)
+            if audible:
+                return "e2ee"
+            now = time.monotonic()
+            if audible is None:
+                if self._connected_at.get(_user_key(user_id), float("-inf")) >= since - 1.0:
+                    return "connected"
+                if now - since >= settings.GREET_NO_SIGNAL_WAIT_S:
+                    return "assumed"
+            if now >= deadline:
+                return "timeout"
+            await asyncio.sleep(AUDIBLE_POLL_S)
+
+    def _watch_members(self) -> None:
+        """Listens on the voice client for members' clients connecting to the
+        voice server and leaving it (voice_recv's op 11 and op 13 events)."""
+        self._connected_at.clear()
+        add_listener = getattr(self.voice_client, "add_listener", None)
+        if not callable(add_listener):
+            return
+        try:
+            add_listener(self._member_connected, name="on_voice_member_connect")
+            add_listener(self._member_disconnected, name="on_voice_member_disconnect")
+        except Exception as e:
+            print(f"[VoiceManager:{self.agent_id}] Could not watch voice members: {e}")
+
+    async def _member_connected(self, member, *_args) -> None:
+        key = _user_key(getattr(member, "id", None))
+        if key is not None:
+            self._connected_at[key] = time.monotonic()
+
+    async def _member_disconnected(self, member, *_args) -> None:
+        key = _user_key(getattr(member, "id", None))
+        if key is not None:
+            self._connected_at.pop(key, None)
 
     # --- joining and leaving --------------------------------------------------
 
@@ -168,6 +282,7 @@ class VoiceConnection:
 
             self.sink = self._make_sink()
             self._warn_if_no_opus()
+            self._watch_members()
             self.voice_client.listen(self.sink)
 
             print(f"[VoiceManager:{self.agent_id}] Connected to '{channel_name}'. Listening for voice...")

@@ -21,7 +21,7 @@ from core.prompts.system import (
     get_tool_rules_prompt,
 )
 from core.prompts.live_context import get_live_context_prompt
-from core.prompts.team import get_team_prompt
+from core.prompts.team import get_open_passes_prompt, get_team_prompt
 from core.prompts.voice import get_voice_mode_prompt
 from core.runtime.history.budget import cap_tool_output
 from langgraph.types import interrupt
@@ -97,6 +97,15 @@ class GraphBuilder:
             # 4. Channel Prompt
             channel_prompt = get_channel_prompt()
 
+            # 4.2. Open passes: what this agent passed to teammates from this
+            # conversation that hasn't reached them yet (empty when nothing
+            # waits). The channel is the live turn's, not `ctx`'s: a compiled
+            # graph is reused across channels (core/runtime/agent.py). A
+            # stateless run (a job, a dream) talks with no one, and gets none.
+            live = try_context()
+            open_passes_prompt = get_open_passes_prompt(
+                agent_id, live.channel_name if live is not None and not live.is_stateless() else "")
+
             # 4.5. Voice mode: on turns the user will hear, the <speech> contract
             voice_mode_prompt = get_voice_mode_prompt()
 
@@ -112,12 +121,15 @@ class GraphBuilder:
             #   agent memory (HUMAN_CONTEXT/MEMORY/FEEDBACK)     -> rewritten by memory/dream
             #   live context (teammates' live situations)        -> changes a few times a day
             #   channel                                          -> differs per channel/thread
+            #   open passes                                      -> differs per conversation
             #   voice mode                                       -> voice turns only
             # Memory precedes channel: memory is identical across all of an agent's
             # channels and changes rarely, so channel-varying calls (e.g. agent_call
             # into another channel) still share the prefix up to and including memory.
             # Live context sits between them: it's the same in every channel too, but
             # changes more often than the nightly memory, so it comes after it.
+            # Open passes follow the channel: they belong to one conversation, and
+            # change when a pass is made or picked up.
             # Voice mode comes last, so a voice turn shares every block before it with
             # a typed turn in the same channel.
             # Each block goes in as a message, not a template, so its braces are text.
@@ -132,6 +144,7 @@ class GraphBuilder:
                 agent_memory_prompt,
                 live_context_prompt,
                 channel_prompt,
+                open_passes_prompt,
                 voice_mode_prompt,
             ]
 

@@ -20,9 +20,10 @@ import asyncio
 import time
 from typing import Dict, List, Optional, Protocol
 
+from core.runtime.commands.spoken.stop import is_stop_request
 from core.storage.speaker_gate_log import Effect
 from core.channel.voice.foundation import settings
-from core.channel.voice.listening.turn_taking import confirms_barge_in, is_backchannel
+from core.channel.voice.listening.turn_taking import confirms_barge_in, is_backchannel, keeps_greeting
 from core.channel.voice.foundation.utterance import Utterance
 
 
@@ -37,6 +38,9 @@ class Turns(Protocol):
 
     def interrupt(self, reason: str) -> None:
         """Stops the reply and abandons the turn in progress."""
+
+    def greeting_playing(self) -> bool:
+        """The room's greeting is what's playing: \"hello?\" over it doesn't stop it."""
 
 
 class Floor:
@@ -168,10 +172,15 @@ class Floor:
     def _on_text(self, utterance: Utterance):
         """Stage two of barge-in: once the words confirm an interruption, stop
         the agent. The recognizer reciting its vocabulary isn't words (stt.py
-        `echo`), and leaves the reply playing."""
+        `echo`), and leaves the reply playing. Over the room's greeting only a
+        stop phrase stops it at once: \"are you there\" is two words, but not
+        an interruption, so the end of what you say decides
+        (`_resolve_overlap`)."""
         if utterance.confirmed or utterance.id not in self._speaking or not self.turns.busy():
             return
         text = utterance.text_so_far()
+        if self._greeting_playing() and not is_stop_request(text):
+            return
         if confirms_barge_in(text) and not self.stt.echo(utterance, text):
             utterance.confirmed = True
             self.turns.interrupt(f"heard {text!r}")
@@ -181,15 +190,26 @@ class Floor:
 
         Its final words decide. Listening noise ("okay", "mm-hmm") is dropped and
         the reply carries on -- unless the reply ended on a question, when a lone
-        "yes" is the answer. Anything else interrupts and becomes the next turn,
-        merged with the question it cut off if that was never answered.
+        "yes" is the answer. Over the room's greeting, so is you checking you're
+        heard ("hello?"), which is what you say when it reaches you late.
+        Anything else interrupts and becomes the next turn, merged with the
+        question it cut off if that was never answered.
         """
         transcript = await self.stt.transcribe(utterance)
         text = transcript.text.strip()
-        if not text or (is_backchannel(text) and not self._reply.rstrip().endswith("?")):
+        if not text or (is_backchannel(text) and not self._reply.rstrip().endswith("?")) \
+                or (self._greeting_playing() and keeps_greeting(text)):
             self._log(f"Letting the reply continue over {text!r}.")
             self._restore_volume()
             return
         if self.turns.busy():
             self.turns.interrupt(f"heard {text!r}")
         self._hand_over(utterance)
+
+    def _greeting_playing(self) -> bool:
+        """Whether the room's greeting is what's playing (`Turns.greeting_playing`)."""
+        playing = getattr(self.turns, "greeting_playing", None)
+        try:
+            return callable(playing) and playing() is True
+        except Exception:
+            return False

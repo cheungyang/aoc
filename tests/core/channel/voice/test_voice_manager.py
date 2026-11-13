@@ -5,6 +5,8 @@ A turn's own tests are in test_turn.py and the voiceprint's in test_voiceprint.p
 the doubles they share are in voice_room.py.
 """
 import asyncio
+import json
+import os
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -19,7 +21,7 @@ from core.channel.voice.foundation.utterance import Utterance
 from core.channel.voice.listening.speaker_gate import Assessment, Verdict
 from core.channel.voice.voice_manager import VoiceManager
 from tests.core.channel.voice.voice_room import (
-    TEXT_OUTPUT, _capture_sessions, _focused, _room_fixture, _say, _spoken, _turn,
+    TEXT_OUTPUT, _capture_sessions, _focused, _play_at_once, _room_fixture, _say, _spoken, _turn,
 )
 
 
@@ -1326,3 +1328,376 @@ async def test_the_wait_for_the_goodbye_has_a_cap(mock_bot_runner):
     with _quick_hang_up():
         await vm._until_said(0.05)
     assert time.monotonic() - started < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Greeting you: once you can hear it, every time you arrive, never cut by "hello?"
+# ---------------------------------------------------------------------------
+
+YOU = MagicMock(bot=False, display_name="Sam", id=42)
+
+
+def _room_events(channel):
+    """What the room recorded on its own in `channel`'s voice session (SessionStore.append_room_event)."""
+    from core.storage.sessions import SessionStore, sanitize_table_name
+
+    try:
+        rows = SessionStore().query(f"SELECT message FROM {sanitize_table_name('main:discord:' + channel)} "
+                                    "WHERE entry_type = 'room_event' ORDER BY id")
+    except Exception:
+        return []
+    return [json.loads(row["message"]) for row in rows]
+
+
+def _no_settling():
+    return patch.object(voice_settings, "GREET_SETTLE_S", 0)
+
+
+@pytest.mark.asyncio
+async def test_following_you_in_greets_you_once_you_can_hear_it(mock_bot_runner):
+    """Who joined, and when Discord said so: the greeting waits from there."""
+    vm, room = _following_vm(mock_bot_runner)
+    before = time.monotonic()
+    with _hosting(AOC_VOICE):
+        await vm.member_moved(YOU, MagicMock(channel=None), MagicMock(channel=room))
+    (member,), kwargs = vm.welcome.await_args
+    assert member is YOU
+    assert before <= kwargs["since"] <= time.monotonic()
+
+
+@pytest.mark.asyncio
+async def test_the_greeting_waits_until_you_can_hear_it(mock_bot_runner, tmp_path):
+    """It started ~0.4 s after you joined, while your client was still joining
+    the call's encryption: heard mid-sentence, or not at all."""
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    said_while_waiting = []
+
+    async def until_audible(user_id, since):
+        said_while_waiting.extend(vm.reply.tts.said())
+        return "e2ee"
+
+    vm.connection.until_audible = AsyncMock(side_effect=until_audible)
+    joined = time.monotonic()
+    with _focused(loader), _no_settling():
+        await vm.welcome(YOU, since=joined)
+
+    vm.connection.until_audible.assert_awaited_once_with(42, joined)
+    assert said_while_waiting == []
+    assert vm.reply.tts.said() == ["Concierge here."]
+    lead_in = vm.reply.tts.streams[0].speaker._lead_in
+    assert lead_in and not any(lead_in), "it opens on a moment of silence"
+
+
+@pytest.mark.asyncio
+async def test_a_greeting_heard_to_the_end_is_recorded_with_the_wait(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    _play_at_once(vm)
+    vm.connection.until_audible = AsyncMock(return_value="e2ee")
+    with _focused(loader), _no_settling():
+        await vm.welcome(YOU, since=time.monotonic())
+    (event,) = _room_events("general")
+    assert (event["kind"], event["how"], event["state"]) == ("welcome", "e2ee", "heard")
+    assert isinstance(event["waited_ms"], int) and event["chars"] == len("Concierge here.")
+
+
+@pytest.mark.asyncio
+async def test_speaking_before_you_could_hear_it_skips_the_greeting(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+
+    async def until_audible(user_id, since):
+        vm.took_floor()  # "Daisy, what's on today?" while your client was still joining
+        return "timeout"
+
+    vm.connection.until_audible = AsyncMock(side_effect=until_audible)
+    with _focused(loader), _no_settling():
+        await vm.welcome(YOU, since=time.monotonic())
+    assert vm.reply.tts.said() == []
+    assert [(e["kind"], e["state"]) for e in _room_events("general")] == [("welcome", "skipped")]
+
+
+@pytest.mark.asyncio
+async def test_hello_over_the_playing_greeting_lets_it_play_on(mock_bot_runner, tmp_path):
+    """It used to stop the greeting for the lobby's "Who's it for?"."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await vm.welcome()
+        vm.audio_queue.is_playing = MagicMock(return_value=True)  # the greeting is playing
+        assert vm.greeting_playing()
+        vm.interrupt, vm.begin_turn = MagicMock(), MagicMock()
+        utterance = _spoken("Hello? Are you there?")
+        vm.floor.utterance_opened(utterance)
+        utterance.interim = "hello are you there"
+        vm.floor._on_text(utterance)
+        vm.floor.utterance_finished(utterance)
+        await asyncio.gather(*list(vm.floor._overlap_tasks))
+
+    vm.interrupt.assert_not_called()
+    vm.begin_turn.assert_not_called()
+    main_agent.execute_stream.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hello_before_anything_else_gets_the_greeting_again(mock_bot_runner, tmp_path):
+    """11-02 16:35: the session opened on "Hello." with nothing playing. Once
+    you've said anything else, "hello?" is for the agent you're with."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    _play_at_once(vm)
+    with _focused(loader):
+        await vm.welcome()
+        await _turn(vm, "Hello?")
+        assert vm.reply.tts.said() == ["Concierge here.", "Concierge here."]
+        await _turn(vm, "Switch me to Daisy.")
+        await _turn(vm, "Hello?")
+
+    assert [prompt for prompt, _session in calls] == ["Hello?"]
+    assert calls[0][1].session_id == "main:discord:day-planning"
+
+
+@pytest.mark.asyncio
+async def test_hello_while_the_greeting_waits_for_you_needs_nothing_more(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    hearing = asyncio.Event()
+
+    async def until_audible(user_id, since):
+        await hearing.wait()
+        return "e2ee"
+
+    vm.connection.until_audible = AsyncMock(side_effect=until_audible)
+    with _focused(loader), _no_settling():
+        greeting = asyncio.create_task(vm.welcome(YOU, since=time.monotonic()))
+        await asyncio.sleep(0)
+        await _turn(vm, "Hello?")
+        assert vm.reply.tts.said() == [], "the greeting is on its way"
+        hearing.set()
+        await greeting
+
+    assert vm.reply.tts.said() == ["Concierge here."]
+    main_agent.execute_stream.assert_not_called()
+
+
+def _rejoining(vm, channels, how="e2ee"):
+    """You're in the voice room already, and can hear it as soon as the bot is back."""
+    channels["room"].members = [MagicMock(bot=True), YOU]
+    vm.connection.until_audible = AsyncMock(return_value=how)
+
+
+@pytest.mark.asyncio
+async def test_a_restart_mid_session_puts_you_back_where_you_were(mock_bot_runner, tmp_path):
+    """11-05 16:31 and 11-11 17:09: the bot restarted and came back silent, in
+    the lobby, and your next words went to no one."""
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+    restarted, _agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    _rejoining(restarted, channels)
+    _play_at_once(restarted)
+    with _focused(loader), _no_settling():
+        await restarted.rejoined()
+
+    assert restarted.focus().key == "day-planning"
+    assert restarted.reply.tts.said() == ["I'm back. You're in day planning, with Daisy."]
+    assert _voices(restarted) == [DAISY_VOICE]
+    restarted.connection.until_audible.assert_awaited_once()
+    assert ("rejoin", "e2ee", "heard") in [(e["kind"], e.get("how"), e.get("state")) for e in _room_events("day-planning")]
+
+
+@pytest.mark.asyncio
+async def test_a_rejoin_long_after_your_last_turn_is_a_new_session(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    os.makedirs(os.path.dirname(vm._focus_file()), exist_ok=True)
+    with open(vm._focus_file(), "w") as f:
+        json.dump({"focus": "day-planning", "at": time.time() - voice_settings.RESUME_FOCUS_S - 1}, f)
+    _rejoining(vm, channels)
+    with _focused(loader), _no_settling():
+        await vm.rejoined()
+
+    assert vm.focus().is_lobby
+    assert vm.reply.tts.said() == ["Concierge here."]
+
+
+@pytest.mark.asyncio
+async def test_rejoining_an_empty_room_says_nothing(mock_bot_runner, tmp_path):
+    vm, _main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    channels["room"].members = [MagicMock(bot=True)]
+    vm.connection.until_audible = AsyncMock(return_value="e2ee")
+    with _focused(loader):
+        await vm.rejoined()
+    assert vm.reply.tts.said() == []
+    vm.connection.until_audible.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_leaving_forgets_where_you_were(mock_bot_runner, tmp_path):
+    """Hanging up, or !leave, ends the session: a restart then is a new one."""
+    vm, _main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+        assert vm._remembered_focus() == "day-planning"
+        vm.connection.voice_client.disconnect = AsyncMock()
+        await vm.leave()
+    assert vm._remembered_focus() is None
+
+
+@pytest.mark.asyncio
+async def test_auto_join_leaves_a_room_it_is_in_as_it_is(mock_bot_runner):
+    """Discord calls on_ready again when its session is renewed: the bot used
+    to leave and rejoin, dropping you in the lobby, without a word."""
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
+    vm.join, vm.rejoined = AsyncMock(return_value=True), AsyncMock()
+    vm.connection.in_room = MagicMock(return_value=True)
+    await _auto_join(vm, {"enabled": True, "auto_join": True}, channel_hosts=["general"])
+    vm.connection.in_room.assert_called_once_with("general-voice")
+    vm.join.assert_not_awaited()
+    vm.rejoined.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_join_greets_whoever_is_in_the_room(mock_bot_runner):
+    vm = VoiceManager(mock_bot_runner, text_output=TEXT_OUTPUT)
+    vm.join, vm.rejoined = AsyncMock(return_value=True), AsyncMock()
+    vm.connection.in_room = MagicMock(return_value=False)
+    await _auto_join(vm, {"enabled": True, "auto_join": True}, channel_hosts=["general"])
+    vm.join.assert_awaited_once_with("general-voice")
+    vm.rejoined.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Hand-offs: the teammate opens with what it was handed
+# ---------------------------------------------------------------------------
+
+def _parked(to_agent="day-planner", to_channel="day-planning", from_agent="market-scout",
+            from_channel="market-scout", via="pass", brief="Book the Amex call."):
+    """A capsule an agent's <pass> or <switch> left the teammate, as graphs/main parks it."""
+    from core.storage.handoff_capsules import HandoffCapsuleStore
+
+    return HandoffCapsuleStore().park(from_agent=from_agent, from_channel=from_channel, to_agent=to_agent,
+                                      to_channel=to_channel, capsule="<handoff_context/>", brief=brief, via=via)
+
+
+DAISY_OPENS = "Marvin says the Amex call needs a slot. Ten tomorrow?"
+
+
+@pytest.mark.asyncio
+async def test_arriving_where_a_hand_off_waits_the_agent_opens_with_it(mock_bot_runner, tmp_path):
+    """In all six voice hand-offs in the logs you had to ask -- "did you get
+    what Eric sent you?" -- and heard "Daisy here." and her morning post first."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    _parked()
+    calls = _capture_sessions(main_agent, reply=DAISY_OPENS)
+    _play_at_once(vm)
+    traces = []
+    with _focused(loader, _recording_traces(traces)):
+        await _turn(vm, "Switch me to Daisy.")
+
+    assert vm.reply.tts.said() == ["Daisy here. Marvin filled me in.", DAISY_OPENS]
+    assert _voices(vm) == [DAISY_VOICE, DAISY_VOICE]
+    (prompt, session), = calls
+    assert prompt == "<handoff_arrival/>", "no words of yours: graphs/main attaches the hand-off to it"
+    assert session.session_id == "main:discord:day-planning" and session.get_surface() == "voice"
+    shown = _shown(channels["day-planning"])
+    assert shown[0] == "↪️ Passed along from 🤖 Marvin in #market-scout"
+    assert not any(line.startswith("🎤") for line in shown), "you said nothing there"
+    arrival = [t for t in traces if t.meta.get("kind") == "arrival"]
+    assert [(t.meta["handed_by"], t.meta["via"]) for t in arrival] == [("market-scout", "pass")]
+    assert vm.floor._reply == DAISY_OPENS, "a lone \"yes\" over its end is an answer"
+
+
+@pytest.mark.asyncio
+async def test_what_else_the_agent_left_you_comes_after_the_hand_off(mock_bot_runner, tmp_path):
+    """11-11: Daisy's 16:30 evening routine played on arrival, and you asked
+    why you'd been forwarded."""
+    vm, main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("day-planning", "day-planner", label="your morning check-in", speech=DAISY_SPEECH,
+                   question=DAISY_QUESTION),
+    )
+    _parked()
+    calls = _capture_sessions(main_agent, reply=DAISY_OPENS)
+    with _focused(loader):
+        await _turn(vm, "Switch me to Daisy.")
+
+    assert vm.reply.tts.said() == ["Daisy here. Marvin filled me in.", DAISY_OPENS]
+    (prompt, _session), = calls
+    assert prompt == f"<handoff_arrival/>\n<also_waiting>{DAISY_SPEECH}</also_waiting>"
+    assert _status("day-planning") == "AWAITING_REPLY", "she brings it up: it counts as heard"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_handing_you_over_lands_you_with_a_teammate_who_opens_with_it(mock_bot_runner, tmp_path):
+    """Frankie hands you to Daisy at the end of a conversation; graphs/main has
+    parked the brief by the time the reply ends. Daisy speaks first, and how
+    to go back comes after her, not in front of her."""
+    from tests.core.channel.voice.voice_room import _final, _spoken_reply
+
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    replies = ['<speech>Daisy will fit it in. Over to her.</speech>Over to Daisy. '
+               '<switch to="day-planner">Plan Friday\'s run.</switch>',
+               _spoken_reply("Frankie says Friday's run needs a slot. Seven?")]
+    prompts = []
+
+    async def stream(prompt, session=None):
+        prompts.append((prompt, session.session_id))
+        raw = replies.pop(0)
+        if "<switch" in raw:
+            _parked(from_agent="fitness-coach", from_channel="fitness-coach", via="switch", brief="Plan Friday's run.")
+        yield {"type": "token", "content": raw}
+        yield _final(raw)
+
+    main_agent.execute_stream = MagicMock(side_effect=stream)
+    pointer = patch("core.channel.discord.stream_buffer.switch_pointer", return_value="→ Over to Daisy")
+    with _focused(loader, pointer):
+        await _turn(vm, "Switch me to Frankie.")
+        await _turn(vm, "Plan a run for Friday, then I'm done.")
+
+    assert vm.focus().key == "day-planning"
+    assert vm.reply.tts.said() == ["Frankie here.", "Daisy will fit it in. Over to her.",
+                                   "Daisy here. Frankie filled me in.", "Frankie says Friday's run needs a slot. Seven?",
+                                   "Say 'go back' for Frankie."]
+    assert prompts == [("Plan a run for Friday, then I'm done.", "main:discord:fitness-coach"),
+                       ("<handoff_arrival/>", "main:discord:day-planning")]
+    assert _shown(channels["day-planning"])[0] == "↪️ Handed over from 🤖 Frankie in #fitness-coach"
+
+
+@pytest.mark.asyncio
+async def test_a_pass_keeps_you_where_you_are(mock_bot_runner, tmp_path):
+    """11-04 18:18: asked to forward something to Daisy, Eric moved you there
+    at once, and you went back to him 25 s later."""
+    vm, main_agent, loader, channels = _room_fixture(mock_bot_runner, tmp_path)
+    _replying(main_agent, "<speech>I'll pass that to Daisy.</speech>Passing it to Daisy. "
+                          '<pass to="day-planner">Book the ticket for the 14th.</pass>')
+    pointer = patch("core.channel.discord.stream_buffer.pass_pointer", return_value="📨 Passed to Daisy")
+    traces = []
+    _play_at_once(vm)
+    with _focused(loader, pointer, _recording_traces(traces)):
+        await _turn(vm, "Switch me to Frankie.")
+        await _turn(vm, "Forward the ticket booking to Daisy.")
+
+    assert vm.focus().key == "fitness-coach"
+    assert vm.reply.tts.said() == ["Frankie here.", "I'll pass that to Daisy."]
+    shown = _shown(channels["fitness-coach"])
+    assert "📨 Passed to Daisy" in shown
+    assert not any("<pass" in line or "Book the ticket" in line for line in shown), shown
+    assert [event["agent"] for event in traces[-1].events if event["kind"] == "pass"] == ["day-planner"]
+
+
+@pytest.mark.asyncio
+async def test_next_agent_and_the_digest_put_a_waiting_hand_off_first(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _briefed_room(
+        mock_bot_runner, tmp_path,
+        _inbox_row("market-scout", "market-scout", label="the market scan", speech="Markets are flat."),
+    )
+    _parked(from_agent="fitness-coach", from_channel="fitness-coach")
+    _capture_sessions(main_agent, reply="Frankie wants Friday's run booked. Seven?")
+    with _focused(loader):
+        await vm.welcome()
+        await _settle(vm)
+        await _turn(vm, "Next agent.")
+
+    assert vm.reply.tts.said() == [
+        "Morning. Two agents have something for you. Daisy has a hand-off from Frankie. "
+        "Marvin has the market scan. Start with Daisy? Say 'start with Daisy' to begin.",
+        "Daisy here. Frankie filled me in.",
+        "Frankie wants Friday's run booked. Seven?",
+    ]
+    assert vm.focus().key == "day-planning"

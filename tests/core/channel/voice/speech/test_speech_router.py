@@ -122,3 +122,44 @@ def test_a_lookalike_switch_is_said():
 def test_a_switch_in_the_text_is_left_to_the_text_lane():
     assert route(["<speech>Hi.</speech><switch to=\"x\">brief</switch>"]) == (
         "Hi.\n", "<switch to=\"x\">brief</switch>")
+
+
+# A pass inside <speech> is never said either: like a switch's, its brief is
+# for the teammate, and spans sentences.
+PASSED = (
+    "<speech>Sure, I'll let Daisy know. "
+    "<pass to=\"day-planner\">Book the dentist for Tuesday. Mornings only, not before nine.</pass>"
+    " Anything else?</speech>Passed to Daisy."
+)
+
+
+def test_a_pass_inside_speech_is_never_said_however_tokens_fall():
+    rng = random.Random(11)
+    expected = ("Sure, I'll let Daisy know.  Anything else?\n", "Passed to Daisy.")
+    assert route([PASSED]) == expected
+    assert route(list(PASSED)) == expected
+    for _ in range(2000):
+        assert route(random_split(PASSED, rng)) == expected
+
+
+def test_a_self_closing_pass_inside_speech_is_dropped_too():
+    assert route(["<speech>Noted. <pass to=\"x\"/></speech>"]) == ("Noted. \n", "")
+    assert route(["<speech>Noted. <pa", "ss to=\"x\"/", "> Bye.</speech>"]) == ("Noted.  Bye.\n", "")
+
+
+def test_only_the_directive_that_opened_ends_its_brief():
+    assert route(["<speech>One. <pass to=\"x\">eggs </switch> and milk</pass> Two.</speech>"]) == ("One.  Two.\n", "")
+    assert route(["<speech>One. <switch to=\"x\">plan </pass> it</switch> Two.</speech>"]) == ("One.  Two.\n", "")
+
+
+def test_a_pass_and_a_switch_in_one_block():
+    assert route(["<speech>Done. <pass to=\"x\">Eggs.</pass>Bye. <switch to=\"y\"/></speech>"]) == ("Done. Bye. \n", "")
+
+
+def test_an_unfinished_pass_ends_with_its_block():
+    assert route(["<speech>One. <pass to=\"x\">brief</speech><speech>Two.</speech>"]) == ("One. \nTwo.\n", "")
+
+
+def test_a_lookalike_pass_is_said():
+    assert route(["<speech>Your <password> ", "is safe; the <pas", "sage> too. <p", "aste> it.</speech>"]) == (
+        "Your <password> is safe; the <passage> too. <paste> it.\n", "")

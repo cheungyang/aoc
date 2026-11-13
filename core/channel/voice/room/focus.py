@@ -171,6 +171,14 @@ class FocusDirectory:
         name = self.names.get(focus.agent_id) or ("Concierge" if concierge else focus.agent_id)
         return f"{name} here."
 
+    def handed_greeting(self, focus: VoiceFocus, from_agent: str) -> str:
+        """What you hear arriving where a hand-off waits, while the agent's
+        opening is on its way: "Daisy here. Miles filled me in." -- why you're
+        there, at once, before the agent picks it up."""
+        sender = self.names.get(from_agent) or spoken_label(from_agent)
+        greeting = self.greeting(focus)
+        return f"{greeting} {sender} filled me in." if sender else greeting
+
     def whereabouts(self, focus: VoiceFocus) -> str:
         """The answer to "where am I?"."""
         return f"You're in {focus.label}, with {self.who(focus)}."

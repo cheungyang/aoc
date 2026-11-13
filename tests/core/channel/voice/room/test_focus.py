@@ -126,6 +126,14 @@ class TestLiveDirectory(unittest.TestCase):
         self.assertEqual(d.words_to_switch(t["content-creation"]), "switch to Coco")
         self.assertEqual(d.words_to_switch(d.lobby), "switch to concierge")
 
+    def test_arriving_where_a_hand_off_waits_says_who_filled_the_agent_in(self):
+        """Said at once, while the agent's opening is on its way."""
+        d, t = self.directory, self.directory.targets
+        self.assertEqual(d.handed_greeting(t["day-planning"], "agent-designer"), "Daisy here. Aki filled me in.")
+        self.assertEqual(d.handed_greeting(t["day-planning"], "night-owl-bot"),
+                         "Daisy here. night owl bot filled me in.")  # no such agent: its id, read aloud
+        self.assertEqual(d.handed_greeting(t["day-planning"], ""), "Daisy here.")
+
     def test_the_words_to_switch_always_lead_back_to_the_same_focus(self):
         """Every spoken alias is one the switch phrase maps back to its focus."""
         for key, focus in self.directory.targets.items():

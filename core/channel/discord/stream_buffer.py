@@ -7,7 +7,7 @@ from typing import Iterable, Optional, List, Tuple
 from core.channel.response_parser import AgentResponse, mask_code
 from core.channel.discord.ui import PollButtonView, PollSelectView
 from core.channel.chunks import safe_chunks
-from core.channel.handoff import switch_pointer
+from core.channel.handoff import pass_pointer, switch_pointer
 
 
 def _cut(text: str, spans: Iterable[Tuple[int, int]]) -> str:
@@ -48,9 +48,10 @@ class DiscordStreamBuffer:
     # says aloud: the voice pipeline routes it away before this buffer, so it
     # is listed as the backstop for any path that doesn't. `switch` is a
     # directive (<switch to="goal-setter"/>), sometimes with a brief for the
-    # teammate inside: the pointer `finalize` posts says where it leads. A tag
-    # inside code is text, and shows (core/channel/response_parser.py).
-    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech", "switch")
+    # teammate inside, and so is `pass` (<pass to="day-planner">brief</pass>):
+    # the pointers `finalize` posts say where each leads. A tag inside code is
+    # text, and shows (core/channel/response_parser.py).
+    _STREAM_TAGS = ("poll", "images", "videos", "system_memory_log", "speech", "switch", "pass")
 
     @classmethod
     def _strip_partial_trailing_tag(cls, text: str) -> str:
@@ -81,12 +82,13 @@ class DiscordStreamBuffer:
     def filter_xml_for_stream(cls, text: str) -> str:
         """
         Suppresses completed and in-flight XML blocks (<poll>, <images>,
-        <videos>, <system_memory_log>, <speech>, <switch>) and self-closing
-        <switch .../> directives during live streaming so Discord users only
-        see natural text deltas. Tags inside code are text: the patterns run
-        on a copy with code masked (`mask_code`), and what they find is cut
-        from the text itself. A code span still streaming isn't closed yet,
-        so a tag in it stays hidden until it is.
+        <videos>, <system_memory_log>, <speech>, <switch>, <pass>) and
+        self-closing <switch .../> and <pass .../> directives during live
+        streaming so Discord users only see natural text deltas. Tags inside
+        code are text: the patterns run on a copy with code masked
+        (`mask_code`), and what they find is cut from the text itself. A code
+        span still streaming isn't closed yet, so a tag in it stays hidden
+        until it is.
         """
         if not text:
             return ""
@@ -289,12 +291,14 @@ class DiscordStreamBuffer:
                         except Exception:
                             pass
 
-                # The reply handed you to a teammate (<switch to="..."/>):
-                # where to find them, under the reply.
-                switch_to = getattr(response, "switch_to", None)
-                pointer = switch_pointer(switch_to, self.channel) if isinstance(switch_to, str) else None
-                if pointer:
-                    try:
-                        await self.channel.send(pointer)
-                    except Exception as e:
-                        print(f"[DiscordStreamBuffer] Error posting the switch pointer: {e}")
+                # The reply passed something to a teammate (<pass to="...">):
+                # who has it now, under the reply. Then, if it handed you to a
+                # teammate (<switch to="...">): where to find them.
+                for directive, pointer_for in (("pass", pass_pointer), ("switch", switch_pointer)):
+                    teammate = getattr(response, f"{directive}_to", None)
+                    pointer = pointer_for(teammate, self.channel) if isinstance(teammate, str) else None
+                    if pointer:
+                        try:
+                            await self.channel.send(pointer)
+                        except Exception as e:
+                            print(f"[DiscordStreamBuffer] Error posting the {directive} pointer: {e}")

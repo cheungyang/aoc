@@ -30,6 +30,11 @@ teammate, if anything -- the request, the decisions made, the constraints:
     ...
     </brief>
 
+In voice, the teammate doesn't wait for your first message: the room runs its
+first turn as soon as you arrive (core/channel/voice/voice_manager.py), and
+the capsule rides on `arrival_message` -- a marker team.md tells the agent to
+open with the hand-off by, and what else it left you, to mention after it.
+
 `summary` is the pruner's summary of older history, if the session has one.
 `recent` holds the last MAX_EXCHANGES exchanges: a message of yours with the
 agent's reply to it, or a post a scheduled job left in the channel. `touched`
@@ -89,6 +94,8 @@ _REPLYING_TO = re.compile(r"\s*<replying_to\b[^>]*>.*?</replying_to>", re.S | re
 _THREAD_STARTER = re.compile(r"^\s*\[Thread starter message from .*?\"\]\s*", re.S)
 # A capsule the source session got from an earlier hand-off: never nested in a new one.
 _CAPSULE = re.compile(r"\s*<handoff_context\b[^>]*>.*?</handoff_context>", re.S | re.I)
+# A hand-off's arrival (`arrival_message`): the room's words, not yours.
+_ARRIVAL = re.compile(r"\s*<handoff_arrival\b[^>]*/>|\s*<also_waiting\b[^>]*>.*?</also_waiting>", re.S | re.I)
 # When a message was sent, as the prompt stamps it ("[Mon 17:08] "): two tries
 # at the same words differ in it (`_superseded`).
 _STAMP = re.compile(r"^\[[A-Za-z]{3} \d{1,2}:\d{2}\]\s*")
@@ -142,16 +149,30 @@ def with_capsule(prompt: Prompt, capsule: str) -> Prompt:
     return f"{prompt}\n\n{capsule}" if prompt else capsule
 
 
+def arrival_message(note: Optional[str] = None) -> str:
+    """The message of a hand-off's arrival turn (core/channel/voice/voice_manager.py
+    `_open_with_handoff`): the voice room moved you to the teammate a hand-off
+    waits for, and the teammate speaks first. It holds no words of yours, only
+    the marker team.md explains -- open with the hand-off -- and, as `note`,
+    what the teammate left you before it, to bring up afterwards
+    (<also_waiting>). graphs/main attaches the parked capsule after it, as it
+    would to your first message there."""
+    message = "<handoff_arrival/>"
+    note = " ".join((note or "").split())
+    return f"{message}\n<also_waiting>{note}</also_waiting>" if note else message
+
+
 def build_capsule(session: Any, *, agent_name: Optional[str] = None, brief: Optional[str] = None,
                   via: Optional[str] = None, max_tokens: Optional[int] = None, store: Any = None,
                   checkpointer: Any = None, now: Optional[datetime] = None) -> str:
     """The capsule for `session`'s conversation (see the module docstring), or "".
 
     `agent_name` is how the session's agent is named in it ("William"); its id
-    by default. `brief` is what that agent wrote inside its <switch> for the
-    teammate, and `via` how the user is being handed over ("handoff",
-    "switch"), shown on the tag when given. `max_tokens` is the cap,
-    CAPSULE_TOKENS by default. `store`, `checkpointer` and `now` are for tests.
+    by default. `brief` is what that agent wrote inside its <switch> or <pass>
+    for the teammate, and `via` how the conversation reaches the teammate
+    ("handoff", "switch", "pass"), shown on the tag when given. `max_tokens`
+    is the cap, CAPSULE_TOKENS by default. `store`, `checkpointer` and `now`
+    are for tests.
     """
     name = agent_name or session.agent_id
     cap = max_tokens or CAPSULE_TOKENS
@@ -232,9 +253,11 @@ def _superseded(current: Optional[_Exchange], words: str) -> bool:
 
 def _user_words(text: str) -> str:
     text = _parts_text(text, images=True)
-    for wrapper in (_CAPSULE, _REPLYING_TO, _CALLER, _THREAD_STARTER):
+    for wrapper in (_CAPSULE, _ARRIVAL, _REPLYING_TO, _CALLER, _THREAD_STARTER):
         text = wrapper.sub("", text)
-    return _squash(text)
+    text = _squash(text)
+    # Only the stamp left: a message with none of your words (an arrival).
+    return text if _STAMP.sub("", text).strip() else ""
 
 
 def _agent_words(text: str) -> str:

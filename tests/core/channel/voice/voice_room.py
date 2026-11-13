@@ -88,10 +88,13 @@ def _voice_turn_fixture(mock_bot_runner, tmp_path, reply):
 
 
 def _play_at_once(vm):
-    """Queued audio starts playing at once, so the trace records at the turn's end."""
-    async def play_now(speaker, on_start=None):
+    """Queued audio starts playing at once, so the trace records at the turn's
+    end, and plays to the end (a greeting's `on_end`)."""
+    async def play_now(speaker, on_start=None, on_end=None):
         if on_start:
             on_start()
+        if on_end:
+            on_end(True)
 
     vm.audio_queue.put = AsyncMock(side_effect=play_now)
 
