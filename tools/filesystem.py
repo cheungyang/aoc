@@ -1,7 +1,11 @@
 import os
+import json
 import shutil
 import fnmatch
+from typing import Literal, get_args
 from langchain_core.tools import tool
+from pydantic import TypeAdapter, ValidationError
+from typing_extensions import Required, TypedDict
 from core.tooling import format_tool_response
 from core.runtime.foundation.context import try_context
 
@@ -25,8 +29,89 @@ PERMISSION_BUNDLES = {
     "@change": ["write", "overwrite", "append", "replace_block", "move", "delete", "rmdir"],
 }
 
+# One instruction's keys. They are the tool's schema, so the model sees them: under
+# a bare `list[dict]` it guessed, and sent {"path": ..., "type": "ls"} or
+# {"path": ..., "read": true}, about one instruction in 25. No docstring on the
+# class: it would ride along in every request's schema.
+Action = Literal["read", "read_image", "write", "overwrite", "append", "replace_block",
+                 "ls", "move", "delete", "rmdir", "find", "grep"]
+
+
+class Instruction(TypedDict, total=False):
+    action: Required[Action]
+    path: Required[str]
+    start_line: int
+    end_line: int
+    tail: int
+    content: str
+    old_block: str
+    new_block: str
+    destination: str
+    pattern: str
+    search_string: str
+
+
+_INSTRUCTIONS = TypeAdapter(list[Instruction])
+
+
+def _invalid_call(error: ValidationError) -> str:
+    """The reply to instructions that don't fit the schema: what is wrong with each,
+    echoing what it sent, then the shape to use. None of them has run."""
+    found: dict = {}
+    for err in error.errors():
+        # ("instructions", 1, "action") from the tool's schema; (1, "action") from _INSTRUCTIONS.
+        loc = [part for part in err["loc"] if part != "instructions"]
+        index = loc[0] if loc and isinstance(loc[0], int) else None
+        found.setdefault(index, []).append((loc[1] if len(loc) > 1 else None, err))
+    lines = [_what_is_wrong(index, errs) for index, errs in found.items()]
+    lines.append(f'Each instruction needs "action" ({", ".join(get_args(Action))}) and "path", plus the fields '
+                 'its action takes, e.g. {"action": "ls", "path": "pkm/wiki/"}. Nothing ran: send the whole '
+                 'call again, fixed.')
+    return format_tool_response("filesystem", payload="", errors="\n".join(lines))
+
+
+def _what_is_wrong(index: int | None, errs: list) -> str:
+    """One line for instruction `index` (from 0), or for the call itself when None."""
+    if index is None:
+        err = errs[0][1]
+        what = 'no "instructions" list' if err["type"] == "missing" else '"instructions" must be a list'
+        return f"Error: {what}. Sent: {_sent(err.get('input'))}"
+    where = f"instruction {index + 1}"
+    if any(field is None for field, _ in errs):
+        return f"Error: {where} must be an object. Sent: {_sent(errs[0][1].get('input'))}"
+    missing = [(field, err) for field, err in errs if err["type"] == "missing"]
+    problems = ["no " + " or ".join(f'"{field}"' for field, _ in missing)] if missing else []
+    for field, err in errs:
+        if err["type"] == "missing":
+            continue
+        if field == "action" and err["type"] == "literal_error":
+            problems.append(f"unknown action {_sent(err.get('input'))}")
+        else:
+            problems.append(f'bad "{field}" {_sent(err.get("input"), field)}: {err["msg"]}')
+    # A missing key's error carries the whole instruction; a bad value's, only the value.
+    sent = f" Sent: {_sent(missing[0][1].get('input'))}" if missing else ""
+    return f"Error: {where}: {'; '.join(problems)}.{sent}"
+
+
+# The text a write carries. The echo shows only its length: the words never show
+# the mistake, and they may be personal. The reply's first line becomes a friction
+# card's evidence (core/learning/detectors.py), which Kaizen and #learning-lab see.
+_TEXT_FIELDS = ("content", "old_block", "new_block")
+
+
+def _sent(value, key=None) -> str:
+    """What a call sent, as JSON with each value cut to 60 characters, and a write's
+    text as its length."""
+    if key in _TEXT_FIELDS:  # "(dict)", not "<dict>": first_error strips tag-like text
+        return f"<{len(value):,} chars>" if isinstance(value, str) else f"({type(value).__name__})"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{json.dumps(str(k), ensure_ascii=False)}: {_sent(v, k)}" for k, v in value.items()) + "}"
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    return text if len(text) <= 60 else text[:59] + "…"
+
+
 @tool
-def filesystem(instructions: list[dict]) -> str:
+def filesystem(instructions: list[Instruction]) -> str:
     """
     Perform file operations (read, write, overwrite, append, replace_block, ls, move, delete, rmdir, find, grep) with scoped permissions.
     Supports executing multiple actions in a single call.
@@ -56,14 +141,21 @@ def filesystem(instructions: list[dict]) -> str:
     - 'find': Recursively searches for filenames matching a pattern within a directory. Fails if more than 50 results.
         Requires: 'path' (directory to search). Optional: 'pattern' or 'search_string'.
     - 'grep': Recursively searches for text strings inside files within a directory. Fails if more than 50 results.
-        Requires: 'path' (directory or file to search), 'search_string' (or 'query'/'content').
+        Requires: 'path' (directory or file to search), 'search_string'.
 
     Args:
-        instructions: A list of dictionaries, where each dictionary represents an action to perform.
+        instructions: Up to 10, run in order. Each is {"action": ..., "path": ...} plus the fields its action takes, e.g. {"action": "read", "path": "pkm/wiki/index.md", "start_line": 1, "end_line": 40}.
     """
     ctx = try_context()
     if ctx is None:
         return format_tool_response("filesystem", payload="", errors="Error: no active execution context; this tool must be called from an agent run.")
+
+    # A model's call was checked against the schema before it got here; code and
+    # tests calling `filesystem.func` were not. Same check, same reply.
+    try:
+        instructions = _INSTRUCTIONS.validate_python(instructions)
+    except ValidationError as e:
+        return _invalid_call(e)
 
     from core.loaders.tools_loader import ToolsLoader
     tools_loader = ToolsLoader()
@@ -75,12 +167,8 @@ def filesystem(instructions: list[dict]) -> str:
     error_elements = []
 
     for inst in instructions:
-        action = inst.get("action")
-        path = inst.get("path")
-        
-        if action is None or path is None:
-            error_elements.append(f'<instruction_error action="{action}" path="{path}">Error: Both \'action\' and \'path\' are required in each instruction.</instruction_error>')
-            continue
+        action = inst["action"]
+        path = inst["path"]
 
         # Expand `~` once so the path that is permission-checked is exactly the
         # path that gets executed (check_permission also expands `~`).
@@ -117,6 +205,12 @@ def filesystem(instructions: list[dict]) -> str:
     return format_tool_response("filesystem", payload=full_payload, errors=full_errors)
 
 
+# A call that doesn't fit the schema gets _invalid_call's reply instead of an
+# exception. A raised error leaves no tool output in the session log, so the
+# tool_failure detector (core/learning/detectors.py) would never see the failure.
+filesystem.handle_validation_error = _invalid_call
+
+
 def _execute_single_action(inst: dict) -> tuple[str, str]:
     action = inst.get("action")
     path = inst.get("path")
@@ -146,7 +240,7 @@ def _execute_single_action(inst: dict) -> tuple[str, str]:
             pattern = inst.get("pattern") or inst.get("search_string") or "*"
             return _find(path, pattern)
         elif action == "grep":
-            search_string = inst.get("search_string") or inst.get("query") or inst.get("content")
+            search_string = inst.get("search_string") or inst.get("content")
             return _grep(path, search_string)
         else:
             return "", f"Error: Unknown action '{action}'"

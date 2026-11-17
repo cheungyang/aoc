@@ -7,6 +7,9 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tools.filesystem import filesystem
+from core.learning.detectors import first_error
+from core.loaders.tools_loader import ToolsLoader
+from core.runtime.observability.transcript import tool_status
 from core.tooling import format_tool_response
 from tests.helpers import execution_context, make_context
 
@@ -135,9 +138,12 @@ class TestFilesystemTool(unittest.TestCase):
         self.assertIn("<errors>None</errors>", result)
 
     def test_read_tail_rejects_bad_values(self):
-        for bad in (0, -2, "many"):
+        for bad in (0, -2):
             result = self._read_tail("a\nb\n", tail=bad)
             self.assertIn("Error: 'tail' must be a positive number of lines", result, bad)
+        # Not a number at all: the instruction schema refuses it before the read runs.
+        result = self._read_tail("a\nb\n", tail="many")
+        self.assertIn('Error: instruction 1: bad "tail" "many": Input should be a valid integer', result)
 
     def test_read_tail_cannot_be_combined_with_a_line_range(self):
         result = self._read_tail("a\nb\nc\n", tail=2, start_line=1)
@@ -723,6 +729,114 @@ class TestFilesystemTool(unittest.TestCase):
                 self.assertTrue(tools_loader.check_permission(ctx, "filesystem", "write", via_link))
                 self.assertTrue(tools_loader.check_permission(ctx, "filesystem", "write", via_real))
                 self.assertFalse(tools_loader.check_permission(ctx, "filesystem", "write", escaped))
+
+
+class TestInstructionShape(unittest.TestCase):
+    """The keys the model sees for each instruction, and the reply when a call doesn't fit them.
+
+    Under a bare `list[dict]` the model guessed: {"path": ..., "type": "ls"} was the
+    commonest tool failure the learning loop found. A call that doesn't fit now gets
+    a reply naming each bad instruction and what it sent. The reply still reads as
+    failed, so the tool_failure detector keeps counting it.
+    """
+
+    def _call(self, args):
+        """The tool as an agent's ToolNode calls it: a tool call in, a ToolMessage out."""
+        with execution_context(agent_id="software-coder"):
+            return filesystem.invoke({"type": "tool_call", "id": "call-1", "name": "filesystem", "args": args})
+
+    def test_the_model_sees_each_instructions_keys(self):
+        from typing import get_args
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+        from tools.filesystem import Action
+
+        schema = convert_to_openai_tool(filesystem)["function"]["parameters"]
+        items = schema["properties"]["instructions"]["items"]
+        self.assertEqual(items["required"], ["action", "path"])
+        self.assertEqual(items["properties"]["action"]["enum"], list(get_args(Action)))
+        self.assertIn("search_string", items["properties"])
+
+    def test_every_action_is_in_the_schema_a_bundle_and_the_dispatcher(self):
+        from typing import get_args
+        from core.permissions import bundles
+        from tools.filesystem import Action, PERMISSION_BUNDLES, _execute_single_action
+
+        actions = set(get_args(Action))
+        self.assertEqual(actions, set(bundles.expand_actions("filesystem", list(PERMISSION_BUNDLES))))
+        for action in actions:
+            _, error = _execute_single_action({"action": action, "path": "/nonexistent/example.txt"})
+            self.assertNotIn("Unknown action", error, action)
+
+    def test_type_in_place_of_action_is_refused_with_what_was_sent(self):
+        with patch.object(ToolsLoader, "check_permission") as check:
+            reply = self._call({"instructions": [{"path": "notes/", "type": "ls"}]})
+        self.assertEqual(reply.status, "error")  # a reply the model reads, not an exception
+        self.assertEqual(tool_status(reply.content), "failed")
+        self.assertEqual(first_error(reply.content),
+                         'Error: instruction 1: no "action". Sent: {"path": "notes/", "type": "ls"}')
+        self.assertIn('e.g. {"action": "ls", "path": "pkm/wiki/"}. Nothing ran', reply.content)
+        check.assert_not_called()
+
+    def test_each_kind_of_mistake_gets_a_line_naming_it(self):
+        cases = [
+            ([{"path": "notes/today.md", "read": True}],
+             'Error: instruction 1: no "action". Sent: {"path": "notes/today.md", "read": true}'),
+            ([{}], 'Error: instruction 1: no "action" or "path". Sent: {}'),
+            ([{"action": "replace_block,new_block:", "path": "a.md"}],
+             'Error: instruction 1: unknown action "replace_block,new_block:".'),
+            ([{"action": "read", "path": ["a.md", "b.md"]}],
+             'Error: instruction 1: bad "path" ["a.md", "b.md"]: Input should be a valid string.'),
+            (["ls notes/"], 'Error: instruction 1 must be an object. Sent: "ls notes/"'),
+        ]
+        for instructions, line in cases:
+            with self.subTest(line=line):
+                self.assertEqual(first_error(self._call({"instructions": instructions}).content), line)
+
+    def test_a_call_without_the_instructions_list_says_so(self):
+        reply = self._call({"action": "ls", "path": "notes/"})
+        self.assertEqual(first_error(reply.content),
+                         'Error: no "instructions" list. Sent: {"action": "ls", "path": "notes/"}')
+
+    def test_one_bad_instruction_stops_the_whole_call(self):
+        with patch.object(ToolsLoader, "check_permission", return_value=True) as check:
+            reply = self._call({"instructions": [{"action": "ls", "path": "notes/"},
+                                                 {"path": "notes/", "type": "find"}]})
+        self.assertEqual(first_error(reply.content),
+                         'Error: instruction 2: no "action". Sent: {"path": "notes/", "type": "find"}')
+        check.assert_not_called()
+
+    def test_the_echo_cuts_long_values_and_leaves_out_a_writes_text(self):
+        long_path = "notes/" + "deep/" * 20 + "draft.md"
+        reply = self._call({"instructions": [{"path": long_path, "content": "Dear diary, today I\n" * 180}]})
+        self.assertEqual(first_error(reply.content),
+                         f'Error: instruction 1: no "action". Sent: {{"path": "{long_path[:58]}…, "content": <3,600 chars>}}')
+        self.assertNotIn("diary", reply.content)
+        # Not text at all: its type, not its contents.
+        reply = self._call({"instructions": [{"action": "write", "path": "a.json", "content": {"note": "private"}}]})
+        self.assertEqual(first_error(reply.content),
+                         'Error: instruction 1: bad "content" (dict): Input should be a valid string.')
+        self.assertNotIn("private", reply.content)
+
+    def test_code_calling_the_function_directly_gets_the_same_reply(self):
+        instructions = [{"path": "notes/", "type": "ls"}]
+        with execution_context(agent_id="software-coder"):
+            direct = filesystem.func(instructions=instructions)
+            via_schema = filesystem.invoke({"instructions": instructions})
+        self.assertEqual(direct, via_schema)
+
+    def test_line_numbers_sent_as_text_still_read(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "notes.md")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("one\ntwo\nthree\n")
+            with patch.object(ToolsLoader, "check_permission", return_value=True):
+                reply = self._call({"instructions": [{"action": "read", "path": path,
+                                                      "start_line": "2", "end_line": "3"}]})
+        self.assertEqual(reply.status, "success")
+        self.assertIn("2: two\n3: three", reply.content)
+
 
 if __name__ == '__main__':
     unittest.main()
