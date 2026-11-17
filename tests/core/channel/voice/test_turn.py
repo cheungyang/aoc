@@ -348,6 +348,20 @@ async def test_a_spoken_reply_gets_no_note(mock_bot_runner, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_miss_is_logged_for_the_learning_loop_and_a_spoken_reply_is_not(mock_bot_runner, tmp_path):
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "You have two meetings today.")
+    _play_at_once(vm)
+    with patch("core.learning.events.record_speech_fallback") as record:
+        await _run_turn(vm, agent)
+    record.assert_called_once_with("main")
+
+    vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, _spoken_reply("Logged your run."))
+    with patch("core.learning.events.record_speech_fallback") as record:
+        await _run_turn(vm, agent)
+    record.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_a_turn_without_a_model_reply_is_not_held_to_speech(mock_bot_runner, tmp_path):
     """A stream that ends before any model runs has nothing to hold to speech."""
     vm, agent, _channel = _voice_turn_fixture(mock_bot_runner, tmp_path, "unused")

@@ -6,6 +6,7 @@ import time
 import ast
 from typing import Any, Optional, Union
 from langchain_core.callbacks import BaseCallbackHandler
+from core.learning import versions
 from core.runtime.foundation.context import ExecutionContext
 from core.storage.sessions import SessionStore
 from core.runtime.observability.log_format import extract_model_name, format_tool_extra_str
@@ -178,7 +179,7 @@ class LoggingHandler(BaseCallbackHandler):
         if self.session_id:
             self.manager.append_token_usage(
                 self.session_id, model, input_token, output_token, cached_percent, execution_time,
-                surface=self._surface(),
+                surface=self._surface(), prompt_version=versions.current(self.agent_id),
             )
 
     def on_chain_end(self, outputs, **kwargs):

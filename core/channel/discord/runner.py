@@ -13,6 +13,7 @@ from core.loaders.channel_hosts import hosts, named_channels
 from core.runtime.commands.base import ControlContext, TypedContext
 from core.runtime.commands.registry import CONTROL, TYPED
 from core.runtime.foundation import events
+from core.learning import events as learning_events
 from core.runtime.foundation.sessions import SessionManager
 from core.proactive.cards import cards as peer_cards
 from core.scheduler.script_runner import ProjectScripts
@@ -32,6 +33,8 @@ from core.channel.voice.voice_manager import VoiceManager
 # How much of a replied-to message is quoted back to the agent. Enough to know
 # which post is meant; the full text is usually already in some session.
 REPLY_EXCERPT_CHARS = 1500
+# Your 👎 (any skin tone) on an agent's message: friction for the learning loop.
+THUMBS_DOWN = "👎"
 
 
 def format_reply_context(author: str, posted_at, content: str) -> str:
@@ -141,8 +144,12 @@ class BotRunner:
         it is that post's outcome (the listeners in core/channel/discord/radio.py).
         On a `!gate review` post it marks that utterance as yours or not
         (core/channel/voice/listening/gate_commands.py). ✅ on any other post, a proactive
-        one too, finishes its channel's inbox row (core/channel/voice/briefing)."""
+        one too, finishes its channel's inbox row (core/channel/voice/briefing).
+        👎 on this bot's message is friction the learning loop counts (_note_thumbs_down)."""
         emoji = str(getattr(payload, "emoji", ""))
+        if emoji.startswith(THUMBS_DOWN):
+            self._note_thumbs_down(payload, emoji)
+            return
         if emoji not in GATE_REACTIONS:
             return
         member = getattr(payload, "member", None)
@@ -163,6 +170,23 @@ class BotRunner:
             return
         mark_read(channel, Via.REACTION,
                   message_time=discord.utils.snowflake_time(payload.message_id).timestamp())
+
+    def _note_thumbs_down(self, payload, emoji: str) -> None:
+        """Your 👎 on one of this bot's messages: logged for the learning loop's friction
+        scan (core/learning/events.py). Every bot sees the reaction; only the one that
+        posted the message logs it, and only where this instance owns its agent. A
+        bot's reaction or a DM's isn't logged."""
+        member = getattr(payload, "member", None)
+        if member is None or getattr(member, "bot", False):
+            return
+        if not Ownership().is_mine(self.agent_id):
+            return
+        me = getattr(self.bot, "user", None)
+        if me is None or getattr(payload, "message_author_id", None) != me.id:
+            return
+        channel = self.bot.get_channel(payload.channel_id)
+        learning_events.record_reaction(self.agent_id, emoji, message_id=payload.message_id,
+                                        channel_id=payload.channel_id, channel=getattr(channel, "name", "") or "")
 
     async def on_raw_poll_vote_add(self, payload):
         """A vote in a poll: team radio's reason poll under a ❌ (core/channel/discord/radio.py)."""

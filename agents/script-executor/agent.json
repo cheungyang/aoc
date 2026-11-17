@@ -57,6 +57,25 @@
       "thread": "cronjobs",
       "cron": "*/5 * * * *",
       "script": "reap_jobs.py"
+    },
+    {
+      "id": "learning-nightly",
+      "priority": "IGNORE",
+      "kind": "script",
+      "channel": "general",
+      "thread": "cronjobs",
+      "cron": "0 2 * * *",
+      "script": "learning_nightly.py",
+      "timeout": 1800
+    },
+    {
+      "id": "learning-digest",
+      "priority": "LOW",
+      "label": "the weekly friction digest",
+      "kind": "script",
+      "channel": "learning-lab",
+      "cron": "0 9 * * 1",
+      "script": "learning_digest.py"
     }
   ]
 }

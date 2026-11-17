@@ -1,8 +1,10 @@
 import os
 import sys
 import importlib
+from typing import Optional
 
 from core.config.settings import Config
+from core.learning import events
 
 # The follow-ups tool (tools/follow_up.py): auto-added, like load_skill, to
 # the runs `gets_follow_up` allows.
@@ -217,9 +219,21 @@ class ToolsLoader:
         what's allowed (device_list picking the entities home-steward may
         control): the answer is the same, and the read-only replay
         (scripts/voice_dryrun.py) doesn't count it as a refused write.
+
+        A refused action is logged for the learning loop's friction scan
+        (core/learning/events.py); a probe isn't, nor a check with no action,
+        which asks only whether the tool is granted at all (prompt building,
+        agent_tool's gate).
         """
-        import os
         self._require_ctx(ctx, "check_permission")
+        allowed = self._permitted(ctx, tool_id, action_name, path)
+        if not allowed and action_name is not None and not kwargs.get("probe"):
+            events.record_refusal(ctx, tool_id, action_name, path)
+        return allowed
+
+    def _permitted(self, ctx, tool_id: str, action_name: Optional[str], path: Optional[str]) -> bool:
+        """check_permission's verdict, without the logging."""
+        import os
         agent_id = ctx.agent_id
         merged = self._merge_tool_permissions(ctx)
         if tool_id not in merged:

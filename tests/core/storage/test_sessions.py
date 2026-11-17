@@ -340,7 +340,8 @@ UNIFIED_COLUMNS = [
     ("config", "TEXT", None, 0), ("parent_config", "TEXT", None, 0), ("from_role", "TEXT", None, 0),
     ("message", "TEXT", None, 0), ("model", "TEXT", None, 0), ("input_tokens", "INTEGER", "0", 0),
     ("output_tokens", "INTEGER", "0", 0), ("cached_tokens", "REAL", "0.0", 0),
-    ("execution_time", "REAL", "0.0", 0), ("surface", "TEXT", None, 0), ("created_at", "REAL", None, 1),
+    ("execution_time", "REAL", "0.0", 0), ("surface", "TEXT", None, 0), ("prompt_version", "TEXT", None, 0),
+    ("created_at", "REAL", None, 1),
 ]
 # Each index, by its suffix after idx_<table>_: its columns.
 UNIFIED_INDEXES = {
@@ -398,16 +399,20 @@ class TestSessionTables(unittest.TestCase):
                              "VALUES ('message', 'user', 'kept', 1.0)")
 
         SqliteCheckpointer(self.db_path).put({"configurable": {"thread_id": "old:cp"}}, {"id": "cp1"}, {"step": 1}, {})
-        self.store.append_token_usage("old:store", "m", 1, 2, 0.0, 0.5, surface="voice")
+        self.store.append_token_usage("old:store", "m", 1, 2, 0.0, 0.5, surface="voice", prompt_version="a1b2c3d4.e5f6a7b8")
 
         for table in ("ctx_old_cp", "ctx_old_store"):
             with self.subTest(table=table):
                 names = [c[0] for c in self.columns(table)]
-                self.assertEqual(names[-3:], ["created_at", "execution_time", "surface"], "added at the end")
+                self.assertEqual(names[-4:], ["created_at", "execution_time", "surface", "prompt_version"],
+                                 "added at the end")
                 self.assertEqual(sorted(names), sorted(c[0] for c in UNIFIED_COLUMNS))
                 self.assertEqual(self.indexes(table), self.unified_indexes())
                 self.assertEqual(self.store.load_history(table.removeprefix("ctx_").replace("_", ":"))[0]["message"],
                                  "kept")
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT prompt_version FROM ctx_old_store WHERE entry_type = 'token'").fetchone()
+        self.assertEqual(row[0], "a1b2c3d4.e5f6a7b8")
 
     def test_archiving_drops_the_archived_tables_indexes(self):
         archivers = {

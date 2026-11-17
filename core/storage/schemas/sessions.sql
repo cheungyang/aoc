@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS "{{table}}" (
     cached_tokens REAL DEFAULT 0.0,     -- the share of input tokens read from the cache, in %
     execution_time REAL DEFAULT 0.0,    -- seconds: the model call (token), to first audio (turn_trace; NULL if none)
     surface TEXT,                       -- token and turn_trace rows: voice, text, scheduled...
+    prompt_version TEXT,                -- token rows: the agent's prompt, "<static>.<memory>" (core/learning/versions.py)
     created_at REAL NOT NULL            -- epoch seconds
 );
 -- Both writers' indexes. Archiving drops an archived table's indexes, so the

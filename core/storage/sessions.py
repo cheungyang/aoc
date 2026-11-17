@@ -48,7 +48,7 @@ KEEP_CHECKPOINTS = 10
 ORPHAN_WRITE_GRACE_S = 600
 # Columns added after the first tables were made, and their definitions.
 # Rows written before the column existed stay NULL: their surface is unknown, not "text".
-_ADDED_COLUMNS = (("execution_time", "REAL DEFAULT 0.0"), ("surface", "TEXT"))
+_ADDED_COLUMNS = (("execution_time", "REAL DEFAULT 0.0"), ("surface", "TEXT"), ("prompt_version", "TEXT"))
 _INDEX = re.compile(r'CREATE INDEX IF NOT EXISTS "([^"]+)"')
 # octet_length() gives a value's size from the row header, without reading it (SQLite 3.43+).
 _HAS_OCTET_LENGTH = sqlite3.sqlite_version_info >= (3, 43, 0)
@@ -125,12 +125,15 @@ class SessionStore(Store):
                                   "created_at": now})
         return f"Appended message to {session_id}"
 
-    def append_token_usage(self, session_id: str, model: str, input_token: int, output_token: int, cached_token: float, execution_time: float = 0.0, surface: Optional[str] = None) -> str:
+    def append_token_usage(self, session_id: str, model: str, input_token: int, output_token: int, cached_token: float, execution_time: float = 0.0, surface: Optional[str] = None, prompt_version: Optional[str] = None) -> str:
+        """One model call's token use. `prompt_version` is the agent's prompt it ran on
+        (core/learning/versions.py), or None when that couldn't be told."""
         table_name = sanitize_table_name(session_id)
         now = time.time()
         self._append(table_name, {"entry_type": "token", "model": model, "input_tokens": input_token,
                                   "output_tokens": output_token, "cached_tokens": cached_token,
-                                  "execution_time": execution_time, "surface": surface, "created_at": now})
+                                  "execution_time": execution_time, "surface": surface,
+                                  "prompt_version": prompt_version, "created_at": now})
         return f"Appended token usage to {session_id}"
 
     def append_turn_trace(self, session_id: str, trace: Dict[str, Any], surface: Optional[str] = "voice") -> str:

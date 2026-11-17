@@ -26,6 +26,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 import discord
 
 from core.channel.handoff import pointer_line, request_line
+from core.learning import events as learning_events
 from core.runtime.foundation import events
 from core.runtime.observability.turn_trace import Stage
 from core.channel.voice.engines.tts import TTSEngine, Voice, agent_voice
@@ -326,6 +327,7 @@ class ReplyStreamer:
             if replied and not failed and self._missing_speech(speaker, response, trace):
                 closing = missing_speech.fallback_speech(final_text)
                 text_lane.put_nowait(("note", missing_speech.alert(speaker)))
+                learning_events.record_speech_fallback(speaker)  # friction for the learning loop
             speech_lane.put_nowait(("end", closing, said_by))
             text_lane.put_nowait(None)
             await asyncio.gather(text_task, speech_task)

@@ -48,6 +48,9 @@ def _redirect(setenv, sessions_dir: str) -> None:
     # a host that happens to be paused must not change what the tests see.
     setenv("CODING_TICK_PAUSE_FILE", os.path.join(sessions_dir, "coding_tick.paused"))
     setenv("CODING_TICK_ENABLED", "1")
+    # The learning loop's hooks (core/learning/events.py) write on a worker thread,
+    # which could outlive the test and its tmp_path. Off, unless a test turns them on.
+    setenv("LEARNING_OBSERVE", "0")
 
 
 def _plain_setenv(name, value):

@@ -149,6 +149,16 @@ class Config:
     proactive_delivery = Setting("PROACTIVE_DELIVERY", False, bool)
 
     # -------------------------------------------------------------------------
+    # Self-learning loop (core/learning/README.md)
+    # -------------------------------------------------------------------------
+    # Phase 0 only observes: the runtime's hooks log commands, refused actions,
+    # voice replies without <speech> and your 👎; token rows keep the prompt
+    # version; a nightly scan finds friction, and a weekly digest reports it in
+    # #learning-lab. Nothing an agent does changes. Off: none of that runs.
+    # `LEARNING_OBSERVE`.
+    learning_observe = Setting("LEARNING_OBSERVE", True, bool)
+
+    # -------------------------------------------------------------------------
     # LangSmith / Observability settings
     # -------------------------------------------------------------------------
     langsmith_tracing = Setting("LANGSMITH_TRACING", False, bool, fallback_env="LANGCHAIN_TRACING_V2")

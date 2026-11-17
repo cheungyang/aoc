@@ -139,7 +139,10 @@ def stamp_user_message(content):
     return content
 
 
-def _read_prompt_file(file_path: str) -> str:
+def read_prompt_file(file_path: str) -> str:
+    """A prompt file's text as the system prompt carries it: without its title line
+    ("# USER.md"); "" if there's no such file. The prompt ledger measures with it too
+    (core/learning/ledger.py)."""
     if not os.path.exists(file_path):
         return ""
     file_name = os.path.basename(file_path)
@@ -164,7 +167,7 @@ def _block(tag: str, content: str, group_desc: Optional[str] = None) -> str:
 
 
 def _load_prompt_from_file(file_inputs, tag, group_desc=None) -> str:
-    combined_content = [c for c in (_read_prompt_file(path) for path, _ in file_inputs) if c]
+    combined_content = [c for c in (read_prompt_file(path) for path, _ in file_inputs) if c]
     return _block(tag, "\n\n".join(combined_content), group_desc)
 
 
@@ -249,7 +252,7 @@ def get_agent_memory_prompt(agent_id: str, config: Optional[dict] = None) -> str
         config = AgentsLoader().get_agent_config(agent_id) or {}
     shared = not config.get("stateless")
 
-    user = _read_prompt_file(user_path(agent_id))
+    user = read_prompt_file(user_path(agent_id))
     profile = inject.render_profile() if shared else ""
     human = "\n\n".join(part for part in (user, profile) if part)
     topics = inject.render_topics(inject.memory_topics(config, agent_id=agent_id)) if shared else ""

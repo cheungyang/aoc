@@ -1,7 +1,7 @@
 import unittest
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Inject root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
@@ -260,10 +260,13 @@ class TestLoggingHandler(unittest.TestCase):
         }
         handler.last_execution_time = 1.234
         
-        handler.on_chain_end({})
-        
+        with patch("core.learning.versions.current", return_value="abcd1234.ef567890") as current:
+            handler.on_chain_end({})
+
+        current.assert_called_once_with("test-agent")
         handler.manager.append_token_usage.assert_called_once_with(
-            "test-agent:discord:session1", "gemini-pro", 100, 50, 20.0, 1.234, surface="text"
+            "test-agent:discord:session1", "gemini-pro", 100, 50, 20.0, 1.234, surface="text",
+            prompt_version="abcd1234.ef567890",
         )
 
     def test_on_llm_start_and_end_tracks_execution_time(self):
@@ -593,7 +596,7 @@ class TestSurfaceColumnStorage(unittest.TestCase):
         store = SessionStore(self.db_path)
         # Reading an unmigrated table must not fail.
         self.assertEqual(store.load_token_history("main:discord:general")[0]["surface"], None)
-        self.assertEqual(store.columns(table)[-1], "surface", "the migration adds it at the end")
+        self.assertEqual(store.columns(table)[-2:], ["surface", "prompt_version"], "the migration adds them at the end")
         store.append_token_usage("main:discord:general", "new", 1, 1, 0.0, surface="scheduled")
         rows = store.load_token_history("main:discord:general")
         self.assertEqual([(r["model"], r["surface"]) for r in rows], [("old", None), ("new", "scheduled")])

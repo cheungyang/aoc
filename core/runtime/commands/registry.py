@@ -2,6 +2,7 @@
 one for each way a command is given."""
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
+from core.learning import events
 from core.runtime.commands.base import Command, CommandContext
 from core.runtime.commands.control.claim import ClaimCommand
 from core.runtime.commands.control.release import ReleaseCommand
@@ -24,6 +25,7 @@ from core.runtime.commands.typed.job import JobCommand
 from core.runtime.commands.typed.jobs import JobsCommand
 from core.runtime.commands.typed.join import JoinCommand
 from core.runtime.commands.typed.kill import KillCommand
+from core.runtime.commands.typed.learn import LearnCommand
 from core.runtime.commands.typed.leave import LeaveCommand
 from core.runtime.commands.typed.new import NewCommand
 from core.runtime.commands.typed.new_all import NewAllCommand
@@ -34,9 +36,12 @@ from core.runtime.commands.typed.voiceprint import VoiceprintCommand
 
 
 class CommandRegistry:
-    """Commands in the order they're tried. A name or alias is taken once."""
+    """Commands in the order they're tried. A name or alias is taken once. `kind` (typed,
+    spoken or control) is how its commands are given, as the learning loop's command log
+    records them (core/learning/events.py)."""
 
-    def __init__(self, commands: Iterable[Command] = ()):
+    def __init__(self, commands: Iterable[Command] = (), kind: str = ""):
+        self.kind = kind
         self._commands: List[Command] = []
         self._by_name: Dict[str, Command] = {}
         for command in commands:
@@ -67,12 +72,16 @@ class CommandRegistry:
 
     async def answer(self, text: str, ctx: CommandContext) -> Optional[Command]:
         """Runs the first command that `text` gives, is answered here, and
-        answers it. None if there's none: the text is a message for the agent."""
+        answers it. None if there's none: the text is a message for the agent.
+        The one that answers is logged for the learning loop."""
         for command in self._commands:
             args = command.match(text)
             if args is None or not command.available(ctx):
                 continue
+            # Read before it runs: "go back" or a switch moves the voice room.
+            origin = events.command_origin(ctx) if events.observing() else None
             if await command.run(ctx, args) is not False:
+                events.record_command(self.kind, command.name, ctx, args, origin=origin)
                 return command
         return None
 
@@ -80,19 +89,19 @@ class CommandRegistry:
 # `!name`, typed to the Discord bot (core/channel/discord/runner.py).
 TYPED = CommandRegistry([
     NewCommand(), NewAllCommand(), CompactCommand(), RestartCommand(), JobsCommand(), JobCommand(), KillCommand(),
-    PythonCommand(), SignalsCommand(), FollowUpsCommand(), JoinCommand(), LeaveCommand(), InboxCommand(),
-    EnrollCommand(), VoiceprintCommand(), GateCommand(),
-])
+    PythonCommand(), SignalsCommand(), FollowUpsCommand(), LearnCommand(), JoinCommand(), LeaveCommand(),
+    InboxCommand(), EnrollCommand(), VoiceprintCommand(), GateCommand(),
+], kind="typed")
 
 # Said in the voice room (core/channel/voice/turn.py), tried in this order: a stop
 # first, then a hang-up; then "next agent", "where am I" and "go back" before
 # the switch, which would otherwise take them for a name ("back", "next agent").
 # "Hello?" names no one, so its place before the switch is only for reading.
 SPOKEN = CommandRegistry([StopCommand(), WaitCommand(), HangUpCommand(), NextAgentCommand(), WhereAmICommand(),
-                          GoBackCommand(), PresenceCommand(), SwitchCommand()])
+                          GoBackCommand(), PresenceCommand(), SwitchCommand()], kind="spoken")
 
 # Typed in the ownership control thread (core/channel/discord/ownership.py).
-CONTROL = CommandRegistry([ClaimCommand(), ReleaseCommand(), StatusCommand()])
+CONTROL = CommandRegistry([ClaimCommand(), ReleaseCommand(), StatusCommand()], kind="control")
 
 # `!help` lists every command, from all three.
 TYPED.register(HelpCommand(TYPED, SPOKEN, CONTROL))
