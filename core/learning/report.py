@@ -6,6 +6,7 @@
     cards_text     `!learn cards [n]`: cards to label, spread across detectors
     label_text     `!learn label <id>... real|not`: your verdict on cards
     ledger_text    `!learn ledger`: each agent's prompt size, and its change over 30 days
+    proposals_text `!learn proposals [id]`: what Kaizen handed in, and what the checks found
     digest_text    the weekly digest in #learning-lab (scripts/learning_digest.py)
 
 A pattern is one agent's cards from one detector. It recurs once it has
@@ -25,7 +26,7 @@ from core.config.settings import Config
 from core.learning import ledger as ledger_mod
 from core.learning import thresholds as T
 from core.learning.detectors import clip, muted
-from core.storage.learning import NOT_REAL, REAL, LearningStore
+from core.storage.learning import CHECKED, NOT_REAL, REAL, LearningStore
 from core.util.local_time import get_local_timezone
 
 DAY = 86400
@@ -50,7 +51,10 @@ LEDGER_MONTH_DAYS = 30
 _YES = {"real", "yes", "y", "✅", "true", "1", "friction"}
 _NO = {"not", "no", "n", "❌", "false", "0", "fine"}
 BANNER = "⏸ LEARNING_OBSERVE is off: the hooks record nothing, and token rows get no prompt version."
-HELP = ("`!learn friction [agent]` · `!learn cards [n]` · `!learn label <id>… real|not` · `!learn ledger`")
+HELP = ("`!learn friction [agent|?]` · `!learn cards [n]` · `!learn label <id>… real|not` · `!learn ledger` · "
+        "`!learn proposals [id]`")
+# How far back `!learn proposals` lists.
+PROPOSALS_S = 14 * DAY
 
 
 # -- formatting ------------------------------------------------------------------
@@ -331,7 +335,8 @@ def top(events: Sequence[Dict[str, Any]], n: int = TOP) -> List[Dict[str, Any]]:
 
 def summary_text(store: LearningStore, now: float) -> str:
     """The reply to `!learn`."""
-    lines = ["🪞 **Learning loop** · Phase 0: observing; no agent's behaviour changes"]
+    lines = ["🪞 **Learning loop** · observing, and Kaizen proposes; nothing is applied, so no agent's "
+             "behaviour changes"]
     if not Config().learning_observe:
         lines.append(BANNER)
     lines.append(scan_line(store, now))
@@ -343,15 +348,21 @@ def summary_text(store: LearningStore, now: float) -> str:
         lines.extend(card_line(e, now) for e in top(week))
     else:
         lines.append("No friction recorded in the last 7 days.")
+    proposed = store.proposals(since=now - PROPOSALS_S)
+    if proposed:
+        lines.append(f"**Proposals, 14 days:** {proposals_count(proposed)} · `!learn proposals`")
     lines.append(exit_line(store, now))
     lines.append(HELP)
     return "\n".join(lines)
 
 
 def friction_text(store: LearningStore, agent: str, now: float) -> str:
-    """The reply to `!learn friction [agent]`."""
-    events = store.friction(now - PATTERN_S, agent_id=agent or None)
-    who = f" for {agent}" if agent else ""
+    """The reply to `!learn friction [agent]`; `?` for the cards no agent was found for."""
+    if agent == "?":
+        events = [e for e in store.friction(now - PATTERN_S) if not e.get("agent_id")]
+    else:
+        events = store.friction(now - PATTERN_S, agent_id=agent or None)
+    who = " with no agent" if agent == "?" else f" for {agent}" if agent else ""
     if not events:
         return f"No friction recorded{who} in the last 14 days."
     found = patterns(events)
@@ -397,6 +408,63 @@ def digest_text(store: LearningStore, now: float) -> str:
     return "\n".join(lines)
 
 
+# -- proposals ---------------------------------------------------------------------
+
+def proposals_count(proposed: Sequence[Dict[str, Any]]) -> str:
+    """`2 checked · 1 failed its checks`"""
+    checked = sum(1 for p in proposed if p["status"] == CHECKED)
+    parts = [f"{checked} checked"] if checked else []
+    others = len(proposed) - checked
+    if others:
+        parts.append(f"{others} failed {'its' if others == 1 else 'their'} checks")
+    return " · ".join(parts)
+
+
+def proposal_line(p: Dict[str, Any], now: float) -> str:
+    """`#12 ✅ topic-researcher:tool_failure · skills/research/SKILL.md −40 · Tue 10:02 · "..."`"""
+    mark = "✅" if p["status"] == CHECKED else "❌"
+    return (f"#{p['id']} {mark} {p['pattern']} · {p['path']} {p['delta_chars']:+} · {when(p['at'], now)} · "
+            f"{clip(p['rationale'], 100)}")
+
+
+def proposal_detail(p: Dict[str, Any], now: float) -> str:
+    """One proposal in full: why, what changes, what the checks said."""
+    lines = [f"**Proposal #{p['id']}** · {p['status']} · {p['pattern']} · {p['path']} ({p['delta_chars']:+} chars) · "
+             f"{when(p['at'], now)}",
+             f"**Why:** {clip(p['rationale'], 400)}"]
+    if p.get("expected"):
+        lines.append(f"**Expected:** {clip(p['expected'], 300)}")
+    lines.append("**Cards:** " + " ".join(f"#{i}" for i in p.get("fixes") or []))
+    for n, edit in enumerate(p.get("edits") or [], 1):
+        lines.append(f"**Edit {n}:** \"{clip(edit.get('find'), 160)}\" → \"{clip(edit.get('replace'), 160)}\"")
+    if p.get("retires"):
+        lines.append("**Retires:** " + "; ".join(clip(r, 80) for r in p["retires"]))
+    lines.append("**Checks:** " + " · ".join(f"{'✅' if g.get('ok') else '❌'} {g.get('gate')}" for g in p.get("gates") or []))
+    lines.extend(f"   ↳ {g.get('gate')}: {clip(g.get('detail'), 240)}" for g in p.get("gates") or [] if not g.get("ok"))
+    return "\n".join(lines)
+
+
+def proposals_text(store: LearningStore, args: str, now: float) -> str:
+    """The reply to `!learn proposals [id]`."""
+    word = (args or "").strip().lstrip("#")
+    if word:
+        if not word.isdigit():
+            return "Usage: `!learn proposals [id]`"
+        found = store.proposal(int(word))
+        return proposal_detail(found, now) if found else f"No proposal #{word}."
+    proposed = store.proposals(since=now - PROPOSALS_S)
+    if not proposed:
+        return "No proposals in the last 14 days. Kaizen hands them in from #learning-lab."
+    checked = [p for p in proposed if p["status"] == CHECKED]
+    lines = [f"🪞 **Proposals, 14 days:** {proposals_count(proposed)} · nothing is applied until you approve one"]
+    lines.extend(proposal_line(p, now) for p in checked[:PATTERNS_SHOWN])
+    failed = [p for p in proposed if p["status"] != CHECKED]
+    if failed:
+        ids = " ".join(f"#{p['id']}" for p in failed[:12])
+        lines.append(f"Failed their checks: {ids}; `!learn proposals <id>` shows why.")
+    return "\n".join(lines)
+
+
 def learn_text(args: str, store: Optional[LearningStore] = None, now: Optional[float] = None) -> str:
     """The reply to `!learn <args>` (core/runtime/commands/typed/learn.py)."""
     store = store or LearningStore()
@@ -414,4 +482,6 @@ def learn_text(args: str, store: Optional[LearningStore] = None, now: Optional[f
         return label_text(store, rest)
     if head == "ledger" and not rest:
         return ledger_text(store, now)
+    if head == "proposals":
+        return proposals_text(store, rest, now)
     return f"Usage: `!learn` · {HELP}"

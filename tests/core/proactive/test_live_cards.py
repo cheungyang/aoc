@@ -17,6 +17,7 @@ from core.proactive.cards import cards
 # built from the agent's description and the Governor accepts any offer.
 EXPECTED = {
     "agent-designer": ("agent-management", ("design an agent or skill", "fix an agent's instructions")),
+    "agent-learner": ("learning-lab", ("find why it keeps happening",)),
     "baby-caretaker": ("baby-care", ("log a milestone", "log health details")),
     "content-creator": ("content-creation", ("turn them into videos and posts",)),
     "day-planner": ("day-planning", ("adjust the daily plan", "a reminder in the morning digest")),

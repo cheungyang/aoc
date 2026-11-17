@@ -233,6 +233,7 @@ class TestLiveRoutingTable(unittest.TestCase):
         "fitness-coach": "fitness-coach",
         "general": None,  # nearly every agent lists it, and main shares it: the fixed line
         "home-automation": "home-steward",
+        "learning-lab": "agent-learner",  # Kaizen 🪞: reads friction, proposes; never writes a file
         "lifestyle-perk": "reward-travel",
         "market-scout": "market-scout",
         "meal-planning": "meal-planner",

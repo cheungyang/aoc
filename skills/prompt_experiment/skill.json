@@ -1,0 +1,6 @@
+{
+  "skill_id": "prompt_experiment",
+  "name": "Prompt Experiment",
+  "description": "Drafts one small, testable change to an agent's prompt text for a friction pattern, and hands it in with submit_proposal.",
+  "emoji": "🧪"
+}

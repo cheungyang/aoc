@@ -8,7 +8,7 @@ import time
 import unittest
 
 from core.storage.follow_ups import FollowUpStore
-from core.storage.learning import COMMAND, NOT_REAL, REAL, REFUSAL, LearningStore, archived_at
+from core.storage.learning import CHECKED, COMMAND, FAILED, NOT_REAL, REAL, REFUSAL, LearningStore, archived_at
 from core.storage.sessions import SessionStore
 from core.storage.signals import SignalStore
 
@@ -117,6 +117,58 @@ class TestEventsVersionsLedgerRuns(_StoreTest):
         self.store.record_run(since=10, until=20, found=1, added=1, errors="refusals: KeyError: 'id'", at=20.0)
         self.assertEqual(self.store.last_run()["errors"], "refusals: KeyError: 'id'")
         self.assertEqual([r["found"] for r in self.store.runs(15)], [1])
+
+
+class TestProposals(_StoreTest):
+
+    def proposal(self, **overrides):
+        row = {"by_agent": "agent-learner", "pattern": "day-planner:correction", "path": "skills/x/SKILL.md",
+               "base": "abc", "edits": [{"find": "a", "replace": "b"}], "rationale": "why", "fixes": [3, 4],
+               "status": CHECKED, "gates": [{"gate": "where", "ok": True, "detail": ""}]}
+        row.update(overrides)
+        return row
+
+    def test_a_proposal_round_trips_with_its_json(self):
+        pid = self.store.add_proposal(self.proposal(), at=10.0)
+        saved = self.store.proposal(pid)
+        self.assertEqual((saved["edits"], saved["fixes"], saved["retires"], saved["dropped"]),
+                         ([{"find": "a", "replace": "b"}], [3, 4], [], []))
+        self.assertEqual(saved["gates"][0]["gate"], "where")
+        self.assertIsNone(self.store.proposal(999))
+
+    def test_proposals_newest_first_by_window_status_and_pattern(self):
+        self.store.add_proposal(self.proposal(), at=10.0)
+        self.store.add_proposal(self.proposal(status=FAILED), at=20.0)
+        self.store.add_proposal(self.proposal(pattern="main:rephrase"), at=30.0)
+        self.assertEqual([p["at"] for p in self.store.proposals()], [30.0, 20.0, 10.0])
+        self.assertEqual([p["at"] for p in self.store.proposals(since=15)], [30.0, 20.0])
+        self.assertEqual([p["at"] for p in self.store.proposals(status=CHECKED)], [30.0, 10.0])
+        self.assertEqual([p["at"] for p in self.store.proposals(pattern="main:rephrase")], [30.0])
+        self.assertEqual(len(self.store.proposals(limit=1)), 1)
+
+
+class TestWhatTheDigestsRead(_StoreTest):
+
+    def test_cards_by_id_and_a_logged_event(self):
+        self.store.record_friction([event(source_id="a"), event(source_id="b")])
+        ids = sorted(e["id"] for e in self.store.friction(0))
+        self.assertEqual([e["source_id"] for e in self.store.friction_by_ids([ids[1], 999, ids[0]])], ["a", "b"])
+        self.assertEqual(self.store.friction_by_ids([]), [])
+        eid = self.store.record_event(REFUSAL, at=5.0, name="filesystem", detail={"action": "write"})
+        self.assertEqual(self.store.learning_event(eid)["detail"], {"action": "write"})
+        self.assertIsNone(self.store.learning_event(eid + 1))
+
+    def test_a_ledger_turn_with_the_ones_before_it_in_its_session(self):
+        self.assertEqual(self.store.ledger_turns_around(1), [], "no turn ledger yet")
+        with SignalStore(self.path).connect():
+            pass
+        for at, session in ((10.0, "s1"), (20.0, "s2"), (30.0, "s1"), (40.0, "s1"), (50.0, "s1")):
+            self.sql("INSERT INTO turn_ledger (at, agent_id, session_id, caller, tap, surface, user_text, reply_text) "
+                     "VALUES (?, 'day-planner', ?, 'main', 'chat', 'text', 'hi', 'hello')", (at, session))
+        turns = self.store.ledger_turns_around(4, before=2)
+        self.assertEqual([t["at"] for t in turns], [10.0, 30.0, 40.0], "its session only, oldest first")
+        self.assertEqual(turns[-1]["effects"], [], "JSON comes back decoded")
+        self.assertEqual(self.store.ledger_turns_around(99), [])
 
 
 class TestWhatTheDetectorsRead(_StoreTest):

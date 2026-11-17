@@ -1,0 +1,55 @@
+{
+  "agent_id": "agent-learner",
+  "channels": [
+    "learning-lab"
+  ],
+  "name": "Kaizen",
+  "emoji": "🪞",
+  "description": "Agent Learner: finds recurring friction across the team and proposes small, tested prompt changes.",
+  "model": "PRO",
+  "proactivity": {
+    "interests": ["a reply you had to correct", "a tool failing the same way again"],
+    "offers": ["find why it keeps happening"],
+    "follow_ups": false,
+    "taps": false
+  },
+  "skills": {
+    "friction_review": {
+      "preload": "core"
+    },
+    "prompt_experiment": {}
+  },
+  "tools": {
+    "friction_query": {},
+    "submit_proposal": {},
+    "filesystem": {
+      "agents/": ["@read"],
+      "skills/": ["@read"],
+      "core/prompts/templates/": ["@read"],
+      "pkm/agents/": ["@read"],
+      "pkm/wiki/memory/": ["@read"],
+      "!pkm/": ["@change"]
+    }
+  },
+  "voice": {
+    "name": "en-US-Chirp3-HD-Iapetus"
+  },
+  "schedules": [
+    {
+      "id": "friction-review",
+      "priority": "LOW",
+      "label": "the weekly friction review",
+      "kind": "prompt",
+      "channel": "learning-lab",
+      "cron": "0 10 * * 1",
+      "precondition": {
+        "type": "open_patterns"
+      },
+      "session_policy": "stateless",
+      "prompt": [
+        "Weekly friction review: follow the friction_review skill for the recurring patterns in the findings,",
+        "hand in a proposal with submit_proposal where prompt text is the cause, and post the review here."
+      ]
+    }
+  ]
+}

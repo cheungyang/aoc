@@ -11,7 +11,9 @@ The schema is core/storage/schemas/learning.sql:
 - `prompt_versions` and `prompt_files`: which prompt each model call ran on
   (core/learning/versions.py), and every repo prompt file's text by hash;
 - `prompt_ledger`: a daily snapshot of each agent's prompt size (core/learning/ledger.py);
-- `learning_runs`: when the nightly scan ran, and what it found.
+- `learning_runs`: when the nightly scan ran, and what it found;
+- `proposals`: each change the analyst (agents/agent-learner/) hands in, with what the
+  static checks found (core/learning/proposals.py). Saving one edits no file.
 
 The detectors also read other stores' tables -- the Board's turn ledger and
 routes, the Switchboard's decisions, the follow-ups and the ctx_ session
@@ -34,6 +36,11 @@ REAL, NOT_REAL = "real", "not"
 LABELS = (REAL, NOT_REAL)
 # The kinds of learning_events rows (core/learning/events.py).
 COMMAND, REFUSAL, SPEECH_FALLBACK, REACTION = "command", "refusal", "speech_fallback", "reaction"
+# A proposal's status: its checks failed, or passed and it waits for review. Later
+# steps add approved, applied, rejected and reverted.
+FAILED, CHECKED = "failed", "checked"
+# The proposals table's JSON columns, and what each holds when empty.
+_PROPOSAL_JSON = {"edits": [], "fixes": [], "retires": [], "dropped": [], "gates": []}
 # The turn_ledger's JSON columns, as the Board writes them (core/storage/signals.py).
 _LEDGER_JSON = {"memory": [], "effects": [], "context": {}}
 # A session row's message, cut to its two ends past this many characters: a tool's
@@ -67,6 +74,13 @@ def _ledger_turn(row: Row) -> Dict[str, Any]:
     for column, empty in _LEDGER_JSON.items():
         if column in out:
             out[column] = _loads(out[column], empty)
+    return out
+
+
+def _proposal(row: Row) -> Dict[str, Any]:
+    out = dict(row)
+    for column, empty in _PROPOSAL_JSON.items():
+        out[column] = _loads(out.get(column), empty)
     return out
 
 
@@ -228,6 +242,72 @@ class LearningStore(Store):
     def last_run(self) -> Optional[Dict[str, Any]]:
         row = self.select_one("learning_runs", order_by="id DESC")
         return dict(row) if row else None
+
+    # -- proposals ---------------------------------------------------------------
+
+    def add_proposal(self, row: Mapping[str, Any], at: Optional[float] = None) -> int:
+        """Saves a proposal (core/learning/proposals.py) with its checks; its id."""
+        values = dict(row)
+        for column in _PROPOSAL_JSON:
+            values[column] = _dumps(values.get(column, _PROPOSAL_JSON[column]))
+        values["at"] = time.time() if at is None else at
+        return self.insert("proposals", values)
+
+    def proposals(self, *, since: Optional[float] = None, status: Optional[str] = None,
+                  pattern: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Proposals, newest first, by when they were handed in, their status and their pattern."""
+        sql, params = "SELECT * FROM proposals WHERE 1 = 1", []
+        if since is not None:
+            sql += " AND at >= ?"
+            params.append(since)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if pattern:
+            sql += " AND pattern = ?"
+            params.append(pattern)
+        sql += " ORDER BY at DESC, id DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return [_proposal(r) for r in self.query(sql, params)]
+
+    def proposal(self, proposal_id: int) -> Optional[Dict[str, Any]]:
+        row = self.select_one("proposals", {"id": proposal_id})
+        return _proposal(row) if row else None
+
+    # -- what the episode digests read -------------------------------------------
+
+    def friction_by_ids(self, ids: Iterable[int]) -> List[Dict[str, Any]]:
+        """The friction events with these ids, in id order; unknown ids are left out."""
+        wanted = sorted({int(i) for i in ids})
+        if not wanted:
+            return []
+        marks = ", ".join("?" for _ in wanted)
+        return [_friction(r) for r in self.query(f"SELECT * FROM friction_events WHERE id IN ({marks}) ORDER BY id",
+                                                 wanted)]
+
+    def learning_event(self, event_id: int) -> Optional[Dict[str, Any]]:
+        row = self.select_one("learning_events", {"id": event_id})
+        if not row:
+            return None
+        event = dict(row)
+        event["detail"] = _loads(event.get("detail"), {})
+        return event
+
+    def ledger_turns_around(self, turn_id: int, before: int = 2) -> List[Dict[str, Any]]:
+        """The Board's turn `turn_id` and up to `before` earlier turns in its session, oldest first."""
+        with self.connect() as conn:
+            if not table_exists(conn, "turn_ledger"):
+                return []
+            row = conn.execute("SELECT * FROM turn_ledger WHERE id = ?", (turn_id,)).fetchone()
+            if row is None:
+                return []
+            earlier = []
+            if row["session_id"] and before > 0:
+                earlier = conn.execute("SELECT * FROM turn_ledger WHERE session_id = ? AND id < ? "
+                                       "ORDER BY id DESC LIMIT ?", (row["session_id"], turn_id, before)).fetchall()
+        return [_ledger_turn(r) for r in reversed(earlier)] + [_ledger_turn(row)]
 
     # -- what the detectors read (other stores' tables, SELECT only) ---------
 

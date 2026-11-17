@@ -76,6 +76,9 @@ class TestWhichTurnsCount:
         ("a background job", lambda: _turn(source="job")),
         ("the voice replay", lambda: _turn(source="voice_replay")),
         ("an agent with no channel", lambda: _turn(config={})),
+        ("an agent that opts out: the learning analyst",
+         lambda: _turn(agent_id="agent-learner", config={"channels": ["learning-lab"], "proactivity": {"taps": False}},
+                       channel="learning-lab")),
     ])
     def test_these_are_skipped(self, why, turn):
         assert not counts(turn()), why

@@ -45,7 +45,10 @@ Which turns count: an agent's own work. These are skipped:
   - stateless workers;
   - runs that record no memory (a dream, a replay);
   - steps inside a graph run;
-  - background jobs.
+  - background jobs;
+  - an agent that opts out with `"proactivity": {"taps": false}`: the learning
+    analyst (agents/agent-learner/), whose talk quotes everyone else's
+    conversations, health and finance included.
 """
 import re
 import time
@@ -137,6 +140,9 @@ def counts(turn: Turn) -> bool:
     if config.get("stateless") or ctx.is_stateless() or not ctx.record_memory:
         return False
     if ctx.graph_id or ctx.source in SKIPPED_SOURCES:
+        return False
+    proactivity = config.get("proactivity")
+    if isinstance(proactivity, dict) and proactivity.get("taps") is False:
         return False
     return True
 

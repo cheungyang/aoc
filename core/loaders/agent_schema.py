@@ -61,9 +61,11 @@ VOICE_KEYS = frozenset({"name", "rate"})
 # The agent's peer card for the proactive team (core/proactive/cards.py): what
 # it wants to hear about and what it can offer. Without the block, the card is
 # derived from `description` and `memory_topics`. `follow_ups: false` opts the
-# agent out of the follow_up tool (core/loaders/tools_loader.py gets_follow_up).
+# agent out of the follow_up tool (core/loaders/tools_loader.py gets_follow_up);
+# `taps: false` keeps its conversations from the team (core/proactive/taps.py),
+# for the learning analyst, whose talk quotes everyone else's.
 PROACTIVITY_LISTS = ("interests", "offers")
-PROACTIVITY_FLAGS = ("follow_ups",)
+PROACTIVITY_FLAGS = ("follow_ups", "taps")
 PROACTIVITY_KEYS = frozenset(PROACTIVITY_LISTS + PROACTIVITY_FLAGS)
 
 # The voice name's shape. Whether the voice exists is checked against

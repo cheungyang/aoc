@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from core.learning import report
 from core.learning import thresholds as T
-from core.storage.learning import NOT_REAL, REAL, LearningStore
+from core.storage.learning import CHECKED, FAILED, NOT_REAL, REAL, LearningStore
 
 NOW = 1_800_000_000.0
 DAY = 86400
@@ -162,9 +162,54 @@ class TestSummaryAndDigest(_ReportTest):
         self.assertNotIn("day-planner", text)
         self.assertEqual(report.friction_text(self.store, "nobody", NOW), "No friction recorded for nobody in the last 14 days.")
 
+    def test_friction_with_no_agent(self):
+        self.store.record_friction([card(1), card(2, agent="", detector="voice_cutoff", evidence="You said stop")])
+        text = report.friction_text(self.store, "?", NOW)
+        self.assertIn("**Friction with no agent, last 14 days:** 1 cards in 1 patterns", text)
+        self.assertIn("? · voice_cutoff", text)
+        self.assertNotIn("day-planner", text)
+
     def test_a_failed_scan_is_in_the_digest_even_in_a_quiet_week(self):
         self.store.record_run(since=0, until=NOW, found=0, added=0, errors="refusals: KeyError: 'id'", at=NOW - 3600)
         self.assertIn("nightly scans: 1, 1 with errors", report.digest_text(self.store, NOW))
+
+
+class TestProposals(_ReportTest):
+
+    def propose(self, at, status=CHECKED, **overrides):
+        row = {"by_agent": "agent-learner", "pattern": "day-planner:correction", "path": "skills/x/SKILL.md",
+               "base": "abc", "edits": [{"find": "List every item", "replace": "Lead with three"}],
+               "rationale": "Three corrections asked for fewer items.", "fixes": [3, 4], "delta_chars": -12,
+               "status": status, "gates": [{"gate": "where", "ok": True, "detail": "prompt text"},
+                                           {"gate": "capability", "ok": status == CHECKED, "detail": "a new URL"}]}
+        row.update(overrides)
+        return self.store.add_proposal(row, at=at)
+
+    def test_none_yet(self):
+        self.assertIn("No proposals in the last 14 days", report.proposals_text(self.store, "", NOW))
+        self.assertNotIn("Proposals", report.summary_text(self.store, NOW))
+
+    def test_the_checked_ones_and_the_ids_of_those_that_failed(self):
+        good = self.propose(NOW - DAY)
+        bad = self.propose(NOW - 2 * DAY, status=FAILED)
+        self.propose(NOW - 20 * DAY)
+        text = report.proposals_text(self.store, "", NOW)
+        self.assertIn("**Proposals, 14 days:** 1 checked · 1 failed its checks", text)
+        self.assertIn(f"#{good} ✅ day-planner:correction · skills/x/SKILL.md -12", text)
+        self.assertIn(f"Failed their checks: #{bad};", text)
+        self.assertIn("**Proposals, 14 days:** 1 checked · 1 failed its checks", report.summary_text(self.store, NOW))
+
+    def test_one_in_full(self):
+        bad = self.propose(NOW - DAY, status=FAILED, expected="It leads with three.")
+        text = report.proposals_text(self.store, f"#{bad}", NOW)
+        self.assertIn(f"**Proposal #{bad}** · failed · day-planner:correction", text)
+        self.assertIn('**Edit 1:** "List every item" → "Lead with three"', text)
+        self.assertIn("**Cards:** #3 #4", text)
+        self.assertIn("**Expected:** It leads with three.", text)
+        self.assertIn("✅ where · ❌ capability", text)
+        self.assertIn("↳ capability: a new URL", text)
+        self.assertEqual(report.proposals_text(self.store, "999", NOW), "No proposal #999.")
+        self.assertEqual(report.proposals_text(self.store, "abc", NOW), "Usage: `!learn proposals [id]`")
 
 
 class TestLearnText(_ReportTest):
@@ -176,6 +221,7 @@ class TestLearnText(_ReportTest):
         self.assertIn("1 card(s) to label", report.learn_text("cards 2", self.store, NOW))
         self.assertIn("as not friction", report.learn_text(f"label {self.ids()['1']} not", self.store, NOW))
         self.assertIn("No ledger yet", report.learn_text("ledger", self.store, NOW))
+        self.assertIn("No proposals", report.learn_text("proposals", self.store, NOW))
         self.assertTrue(report.learn_text("exp 7", self.store, NOW).startswith("Usage: `!learn`"))
 
     def test_now_defaults_to_the_clock(self):

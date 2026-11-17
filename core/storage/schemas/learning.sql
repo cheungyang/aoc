@@ -1,7 +1,7 @@
--- The learning loop's tables (core/storage/learning.py). Phase 0 only observes:
--- what the nightly detectors found, what the runtime logged for them, which
--- prompt each model call ran on, and how big each agent's prompt is.
--- core/learning/README.md walks through the flow.
+-- The learning loop's tables (core/storage/learning.py): what the nightly
+-- detectors found, what the runtime logged for them, which prompt each model
+-- call ran on, how big each agent's prompt is, and the changes the analyst
+-- proposes. core/learning/README.md walks through the flow.
 
 -- One row per friction a detector found (core/learning/detectors.py). The
 -- unique key makes a rerun over the same rows add nothing twice.
@@ -89,3 +89,29 @@ CREATE TABLE IF NOT EXISTS learning_runs (
     took_s REAL,
     errors TEXT NOT NULL DEFAULT ''         -- detectors that failed, and why
 );
+
+-- Each change the analyst hands in (core/learning/proposals.py), with what the static
+-- checks found (core/learning/gates.py). Saving one edits no file: an approved
+-- proposal is applied by agent-designer, never by the analyst.
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at REAL NOT NULL,
+    by_agent TEXT NOT NULL DEFAULT '',      -- who handed it in: agent-learner
+    session_id TEXT NOT NULL DEFAULT '',
+    pattern TEXT NOT NULL,                  -- the pattern it answers: "<agent>:<detector>"
+    path TEXT NOT NULL,                     -- the file it changes: repo-relative, or pkm/agents/<id>/...
+    base TEXT NOT NULL,                     -- sha256 of that file's text when it was handed in
+    edits TEXT NOT NULL DEFAULT '[]',       -- JSON list of {find, replace}: exact text, each find once
+    rationale TEXT NOT NULL DEFAULT '',
+    expected TEXT NOT NULL DEFAULT '',      -- what the agent should do differently in the cards' cases
+    fixes TEXT NOT NULL DEFAULT '[]',       -- JSON list of friction_events ids it should fix
+    retires TEXT NOT NULL DEFAULT '[]',     -- JSON list: FEEDBACK entries it makes redundant
+    dropped TEXT NOT NULL DEFAULT '[]',     -- JSON list: what a deletion drops on purpose
+    delta_chars INTEGER NOT NULL DEFAULT 0, -- how much the file grows; negative when it shrinks
+    status TEXT NOT NULL,                   -- failed or checked; later approved, applied, rejected, reverted
+    gates TEXT NOT NULL DEFAULT '[]',       -- JSON list of {gate, ok, detail}
+    decided_at REAL,
+    note TEXT NOT NULL DEFAULT ''           -- why it was rejected or reverted
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_pattern ON proposals(pattern, at);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, at);

@@ -6,11 +6,13 @@ prompt changes that remove that cost. The design is in the self-learning
 proposal: find **friction**, propose a small diff to the prompt that causes
 it, prove the diff with a replay and your votes, then keep or revert it.
 
-**This is Phase 0: it only observes.** No agent's prompt, tools or behaviour
+**Phase 0 observes; Phase 1 proposes.** No agent's prompt, tools or behaviour
 change. The loop logs what no other table keeps, records which prompt each
 model call ran on, scans memory.db every night for friction, and reports
-weekly in `#learning-lab`. It has **one switch**, `LEARNING_OBSERVE`
-(`core/config/settings.py`):
+weekly in `#learning-lab`. There, the analyst, Kaizen 🪞 (`agents/agent-learner/`),
+traces recurring friction to the prompt text that causes it and hands in
+proposals, which code checks and saves; none is applied yet (Proposals, below).
+It has **one switch**, `LEARNING_OBSERVE` (`core/config/settings.py`):
 
 | `LEARNING_OBSERVE` | What happens |
 |---|---|
@@ -67,13 +69,18 @@ flowchart LR
 | `thresholds.py` | Every number the detectors use, in one place, to tune from your labels |
 | `ledger.py` | The daily prompt-size snapshot per agent |
 | `report.py` | Every text `!learn` and the digest show |
+| `boundaries.py` | What the analyst may hold, read and propose: the lethal-trifecta rule, in code |
+| `digests.py` | A card's episode, cut and clipped by code, for the analyst |
+| `proposals.py` | `submit()`: refuses what isn't a proposal, runs the checks, saves it |
+| `gates.py` | The nine static checks on a proposal |
+| `protected.py` | The behaviours a proposal may never weaken |
 | `core/storage/learning.py` | `LearningStore`: the tables below, plus the SELECT-only reads of other stores' tables that the detectors make |
 | `core/runtime/commands/typed/learn.py` | `!learn` |
 | `scripts/learning_nightly.py`, `scripts/learning_digest.py` | The two schedules (`agents/script-executor/agent.json`) |
 
 **Tables** (`core/storage/schemas/learning.sql`, in memory.db): `friction_events`,
 `learning_events`, `prompt_versions`, `prompt_files`, `prompt_ledger`,
-`learning_runs`. Token rows in the `ctx_` tables gain a `prompt_version` column.
+`learning_runs`, `proposals`. Token rows in the `ctx_` tables gain a `prompt_version` column.
 
 ## The hooks
 
@@ -124,7 +131,7 @@ holds. The nightly run reads three days, well inside that.
 A **pattern** is one agent's cards from one detector (`report.patterns`). It
 **recurs** once it has ≥3 cards in ≥2 sessions within 14 days, or at once for a
 correction that says you'd told the agent before. Recurring patterns are
-what Phase 1's analyst will work on.
+what the analyst works on.
 
 Phase 0 ends when the detectors can be trusted:
 - ≥50 labeled cards at ≥0.7 precision;
@@ -141,6 +148,36 @@ loads it. `!learn ledger` shows the change over 30 days. It flags growth past
 10% in a month, and any drop of a quarter from one night to the next: a
 rewrite that lost text is the failure the proposal's §10 warns about.
 
+## Proposals (Phase 1)
+
+Kaizen 🪞 (`agents/agent-learner/`, home `#learning-lab`) reads the friction
+through one tool, `friction_query`: patterns, cards, and a card's episode as
+`digests.py` cuts it. It never reads memory.db itself, and never edits a file.
+Mondays at 10:00, when a recurring pattern has no proposal yet, it reviews up to
+three (`skills/friction_review/`) and hands in a change for each whose cause is
+prompt text (`skills/prompt_experiment/`), with `submit_proposal`:
+
+1. **Refused** outright, with nothing saved: no edits, no rationale, unknown
+   cards, the same change twice, or a fourth pattern (or candidate) this week.
+2. **Checked** by code (`gates.py`): where it may land, that each edit applies,
+   size, budget, protected behaviours, new wiring, personal information
+   outside pkm/, that the file still loads, and agent_lint. The reasons go back
+   to Kaizen, which revises or drops it.
+3. **Saved** as `checked` or `failed` in `proposals`. `!learn proposals` lists
+   them; nothing is applied.
+
+**Boundaries** (`boundaries.py`, tested over its agent.json): it holds
+`friction_query`, `submit_proposal`, a read-only `filesystem` and `load_skill`,
+nothing else; it lives in `#learning-lab`; no follow-ups, and its conversations
+stay out of the proactive team (`"taps": false`). A deny key refuses even the
+write every agent gets on its own vault folder, so its FEEDBACK and MEMORY
+change only through the nightly dream, like everyone's. It may propose to an
+agent's AGENTS.md or SOUL.md, a skill's SKILL.md, a template, or an agent's
+RULES.md or FEEDBACK.md in pkm; never code, config, its own files, or this
+folder, which it can't even read.
+
+Next steps: the replay and your votes (1b), then Aki applying what you approve (1c).
+
 ## `!learn`
 
 ```
@@ -150,10 +187,10 @@ rewrite that lost text is the failure the proposal's §10 warns about.
 !learn cards [n]               cards to label, taken in turn from each detector
 !learn label <id>… real|not    your verdict on cards
 !learn ledger                  each agent's prompt size and its change over 30 days
+!learn proposals [id]          what Kaizen handed in, and what the checks found
 ```
 
-Any channel's host answers it. `main` hosts every channel, so `!learn` works in
-`#learning-lab` before the analyst agent exists.
+Any channel's host answers it, `#learning-lab` included.
 
 ## Security and privacy
 
@@ -161,7 +198,11 @@ Any channel's host answers it. `main` hosts every channel, so `!learn` works in
   Tests use invented text.
 - The digest quotes your words from any channel into `#learning-lab`, in the
   same Discord server. Keep that channel private.
-- Nothing here calls a model, the network, or another agent.
+- Nothing here calls a model, the network, or another agent. Kaizen calls a
+  model; it can't send anything anywhere (`boundaries.py`).
+- A proposal for a repo file may carry nothing personal: the repo is public
+  (`gates.py`, the personal check). A lesson that needs a personal detail goes
+  to the agent's FEEDBACK.md or RULES.md in pkm.
 
 ## Tests
 
@@ -170,3 +211,5 @@ Any channel's host answers it. `main` hosts every channel, so `!learn` works in
 - `tests/core/runtime/commands/typed/test_learn.py`: `!learn`.
 - `tests/scripts/test_learning_nightly.py`, `tests/scripts/test_learning_digest.py`: the two scripts.
 - `tests/core/channel/voice/test_turn.py`: a voice reply without `<speech>` is logged.
+- `tests/core/learning/test_boundaries.py`, `test_gates.py`, `test_proposals.py`, `test_digests.py`: the analyst's boundaries, each check, proposals, episodes.
+- `tests/agents/agent_learner/`: Kaizen's tools, views and Monday scan.

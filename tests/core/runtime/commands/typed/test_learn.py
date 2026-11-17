@@ -32,5 +32,5 @@ async def test_a_label_typed_in_the_channel_is_recorded():
 
 def test_help_lists_it_with_its_usage():
     learn = TYPED.find("learn")
-    assert learn.usage == "[friction [agent] | cards [n] | label <id>… real|not | ledger]"
+    assert learn.usage == "[friction [agent|?] | cards [n] | label <id>… real|not | ledger | proposals [id]]"
     assert learn.summary

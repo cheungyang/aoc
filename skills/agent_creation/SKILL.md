@@ -137,6 +137,7 @@ When one agent learns something another could use, the Switchboard routes it the
 - Each phrase is at most 48 characters: every card is in every routing decision's prompt.
 - A fact tagged `health` or `finance` reaches only an agent with that topic in `memory_topics`. An interest in one needs the topic, which costs prompt on every turn: name the trade-off in the plan.
 - `"follow_ups": false` turns off the agent's follow-ups; leave it out otherwise.
+- `"taps": false` keeps the agent's own conversations from the team: only for an agent whose talk quotes everyone else's (agent-learner); leave it out otherwise.
 
 Without offers the card is built from `description`, and any offer gets through; `agent_lint` reports it (`card_missing`), and half a card (`card_format`).
 
