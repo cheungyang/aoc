@@ -23,6 +23,8 @@ elsewhere (MCP, say). Shared tools in tools/ use it for their envelope,
   the example runner and the contract checks the test suite runs. Not for tools.
 - hooks.py: `ToolHook`, told about every finished tool call of any tool, for
   code that watches the tools (the proactive team). Not for tools either.
+- invalid_call.py: the reply to a call whose arguments a tool's schema
+  refuses, which the graph builder gives every tool. Not for tools either.
 """
 from core.tooling.agent_tool import (
     AgentTool,

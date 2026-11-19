@@ -18,6 +18,8 @@ It does what each tool used to repeat, so the body holds only its logic:
    - `ToolError("...")`: the call can't be done as asked (a bad argument, a
      duplicate, a refused write); the message goes to <errors>.
    - Any other exception: a bug; <errors> names it.
+   Arguments the schema refuses never reach the body: the graph builder gives
+   every tool a reply for them (core/tooling/invalid_call.py).
 
 The result is a LangChain tool, like `@tool`'s. The tools loader binds
 attribute `<name>` of `agents/<agent_id>/tools/<name>.py`, so the module, the

@@ -28,6 +28,7 @@ from langgraph.types import interrupt
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.foundation.context import try_context
 from core.runtime.model.chat import chat_model
+from core.tooling.invalid_call import give_reply
 
 # The graph a turn with a light first call is built on: graphs/main, plus that call.
 VOICE_GRAPH = "voice"
@@ -175,6 +176,10 @@ class GraphBuilder:
             except AttributeError:
                 import copy as _copy
                 t = _copy.copy(t)
+
+            # A call whose arguments the tool's schema refuses gets a reply too, so it
+            # reaches the session log like any failed call (core/tooling/invalid_call.py).
+            give_reply(t)
 
             original_run = t._run
             original_arun = t._arun
