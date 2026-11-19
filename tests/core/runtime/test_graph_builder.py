@@ -166,6 +166,39 @@ class TestGraphBuilder(unittest.IsolatedAsyncioTestCase):
          wrapped_tool._run()
          
          mock_interrupt.assert_called_once_with("Job was killed")
+
+     @patch('core.runtime.graph_builder.get_agent_static_prompt')
+     @patch('core.runtime.graph_builder.SkillsLoader')
+     @patch('core.runtime.graph_builder.ToolsLoader')
+     @patch('core.runtime.model.chat.RetryingChatGoogleGenerativeAI')
+     @patch('core.runtime.graph_builder.SqliteCheckpointer')
+     async def test_every_tool_replies_to_a_call_its_schema_refuses(self, mock_sqlite_checkpointer, mock_llm_class, mock_tool_loader_class, mock_skills_loader_class, mock_get_agent_static_prompt):
+         from langchain_core.tools import tool
+         from tools.filesystem import filesystem
+
+         @tool
+         def lookup(key: str) -> str:
+             """Looks a key up.
+
+             Args:
+                 key: The key.
+             """
+             return key
+
+         mock_get_agent_static_prompt.return_value = "Mock Agent Prompt"
+         mock_tool_loader_class.return_value.get_tools.return_value = [lookup, filesystem]
+         mock_skills_loader_class.return_value.get_skills_overview.return_value = "Mock Skills"
+
+         from core.runtime.graph_builder import GraphBuilder
+         await GraphBuilder().build_graph(make_context(agent_id="main"), config={"tools": {"lookup": {}, "filesystem": {}}})
+
+         built = {t.name: t for t in self.mock_create_graph.call_args.kwargs["tools"]}
+         reply = built["lookup"].invoke({"name": "lookup", "args": {"keys": "a"}, "id": "c1", "type": "tool_call"})
+         self.assertEqual(reply.status, "error")
+         self.assertIn('Error: no "key". Sent: "keys".', reply.content)
+         self.assertFalse(lookup.handle_validation_error, "the shared tool itself is left as it was")
+         self.assertIs(built["filesystem"].handle_validation_error, filesystem.handle_validation_error,
+                       "filesystem keeps its own reply")
  
      @patch('core.runtime.graph_builder.get_agent_static_prompt')
      @patch('core.runtime.graph_builder.SkillsLoader')
