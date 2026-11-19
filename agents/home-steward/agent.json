@@ -9,6 +9,7 @@
     "offers": ["away mode", "automations"]
   },
   "description": "Smart Home Steward: manages, automates, audits, and observes Home Assistant devices and configurations safely.",
+  "access": ["owner", "player2"],
   "channels": [
     "home-automation",
     "general"

@@ -1,5 +1,6 @@
 {
     "agent_id": "excursion-planner",
+    "access": ["owner", "player2"],
     "channels": [
         "weekend-planning",
         "general"

@@ -1,5 +1,6 @@
 {
   "agent_id": "receipt-processor",
+  "access": ["owner", "player2"],
   "channels": [
     "receipts",
     "general"

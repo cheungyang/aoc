@@ -9,6 +9,7 @@
     "interests": ["groceries bought", "guests or schedule changes around dinner", "trips away from home", "diet changes"],
     "offers": ["update the kitchen inventory", "plan meals around events", "flag food at risk"]
   },
+  "access": ["owner", "player2"],
   "channels": [
     "meal-planning",
     "general"

@@ -1,5 +1,6 @@
 {
   "agent_id": "baby-caretaker",
+  "access": ["owner", "player2"],
   "channels": [
     "baby-care"
   ],

@@ -1,5 +1,6 @@
 {
   "agent_id": "reward-travel",
+  "access": ["owner", "player2"],
   "channels": [
     "lifestyle-perk",
     "general"
