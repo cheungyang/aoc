@@ -11,6 +11,7 @@ from core.runtime.commands.typed.followups import BANNER, followups_text, next_t
 from core.storage.follow_ups import RETRY_S, Check, Closer, FollowUpStore, Result, Status
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
+from tests.household import dormant, household
 
 NOW = datetime(2026, 11, 1, 9, 0, tzinfo=get_local_timezone()).timestamp()  # a Sunday
 HOUR, DAY = 3600, 86400
@@ -189,3 +190,36 @@ def test_extend_on_a_one_off_says_what_to_do_instead_and_cancel_works_as_for_any
         f'Cancelled follow-up #{logo.id} (agent-designer): "The logo redesign".')
     cancelled = store.get(logo.id)
     assert (cancelled.status, cancelled.closed_by, cancelled.close_reason) == (Status.CLOSED, Closer.YOU, "not needed")
+
+
+# -- who asked, in a household (core/permissions/access.py) ----------------------------
+
+def test_in_a_household_each_line_says_who_asked(store, live):
+    cabin = _open(store, "Tahoe cabin under $400", agent_id="excursion-planner", opened_by="player2")
+    logo = _once(store, "The logo redesign", NOW + 2 * DAY, opened_by="owner")
+    snow = _open(store, "Snow report", agent_id="excursion-planner", every_s=4 * DAY)  # no one's turn opened it
+    with household():
+        lines = followups_text("", store, NOW).splitlines()
+    assert lines == [
+        "**3 open follow-up(s)**, soonest check first",
+        f'#{cabin.id} excursion-planner · "Tahoe cabin under $400" · asked by player2 · every 2d · next Mon 09:00 · '
+        f'until 2026-12-15 · 0 checks, 0 finds · check: model, "Tahoe cabin under $400"',
+        f'#{logo.id} agent-designer · "The logo redesign" · asked by owner · once at Tue 09:00',
+        f'#{snow.id} excursion-planner · "Snow report" · every 4d · next Wed 09:00 · until 2026-12-15 · '
+        f'0 checks, 0 finds · check: model, "Snow report"',
+    ]
+    store.close(cabin.id, reason="found one", by=Closer.YOU, at=NOW)
+    with household():
+        assert followups_text("closed", store, NOW).splitlines()[1] == (
+            f'#{cabin.id} excursion-planner · "Tahoe cabin under $400" · asked by player2 · closed Nov 1 · '
+            f"you cancelled it: found one · 0 checks, 0 finds")
+
+
+def test_with_one_person_the_lines_read_as_before(store, live):
+    cabin = _open(store, "Tahoe cabin under $400", agent_id="excursion-planner", opened_by="player2")
+    with dormant():
+        assert followups_text("", store, NOW).splitlines()[1] == (
+            f'#{cabin.id} excursion-planner · "Tahoe cabin under $400" · every 2d · next Mon 09:00 · '
+            f'until 2026-12-15 · 0 checks, 0 finds · check: model, "Tahoe cabin under $400"')
+        store.close(cabin.id, at=NOW)
+        assert "asked by" not in followups_text("closed", store, NOW)

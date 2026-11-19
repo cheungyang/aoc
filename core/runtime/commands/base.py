@@ -6,6 +6,14 @@
                     for the voice room
     SpokenCommand   said in the voice room, recognized by its phrases
     ControlCommand  `!name args` too, typed in the ownership control thread
+
+Who may give a command (`Command.needs`) is checked before it runs
+(CommandRegistry.answer), against the person in its context
+(core/permissions/access.py): anyone the bots know, or the admin, whoever may
+use the Concierge. A typed command is the system's own, so it is the admin's
+unless it says otherwise. With nobody configured every account is the owner,
+who may give them all; a context with no person (a spoken command, a test) is
+never refused.
 """
 import asyncio
 import io
@@ -13,6 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Tuple
 
+from core.loaders.agents_loader import AgentsLoader
+from core.permissions import access
 from core.runtime.commands.ports import ControlThread, PeerCards, Say, Scripts, SpokenTurn, VoiceControls
 from core.runtime.foundation.context import ExecutionContext
 from core.channel.chunks import safe_chunks
@@ -21,14 +31,21 @@ from core.channel.chunks import safe_chunks
 CHANNEL = "channel"
 VOICE_ROOM = "voice room"
 
+# Who may give a command (`Command.needs`).
+ANYONE = "anyone"            # anyone the bots know: nobody else reaches a command
+ADMIN = "admin"              # whoever may use the Concierge (access.ADMIN_AGENT): the system's own commands
+
 
 @dataclass
 class CommandContext:
     """Where a command was given, and by whom. `channel` is where answers go
-    (None: there's nowhere to answer)."""
+    (None: there's nowhere to answer). `person` is who gave it
+    (core/permissions/access.py), as the adapter running it resolved the
+    author: None when it resolved nobody, and then nothing is refused."""
 
     channel: Any = None
     author: Any = None
+    person: Optional[str] = None
 
     def _sendable(self) -> bool:
         return self.channel is not None and hasattr(self.channel, "send")
@@ -97,11 +114,13 @@ class ControlContext(CommandContext):
 
 class Command:
     """One command. A subclass, one per file, sets `name` and `summary` (one
-    line, for `!help`) and implements `run`; its kind says how it's given."""
+    line, for `!help`) and implements `run`; its kind says how it's given,
+    and `needs` who may give it."""
 
     name: str = ""
     aliases: Tuple[str, ...] = ()
     summary: str = ""
+    needs: str = ANYONE   # ANYONE or ADMIN
 
     def match(self, text: str) -> Optional[str]:
         """Its arguments if `text` gives this command ("" for none), else None."""
@@ -109,6 +128,22 @@ class Command:
 
     def available(self, ctx: CommandContext) -> bool:
         """Whether this command is answered here and now."""
+        return True
+
+    def refusal(self, ctx: CommandContext) -> Optional[str]:
+        """Why `ctx.person` may not give this command, as the one line answered
+        instead ("`!restart` is admin-only."); None when they may. Only an
+        admin command is refused, and a context with no person never is."""
+        person = getattr(ctx, "person", None)
+        if self.needs != ADMIN or person is None:
+            return None
+        if access.can(person, AgentsLoader().get_agent_config(access.ADMIN_AGENT)):
+            return None
+        return f"`!{self.name}` is admin-only."
+
+    def says_refusal(self, ctx: CommandContext) -> bool:
+        """Whether this bot says a refusal: where every bot hears a command,
+        one of them does."""
         return True
 
     async def run(self, ctx: CommandContext, args: str) -> Optional[bool]:
@@ -122,10 +157,12 @@ _TYPED = re.compile(r"!(\S+)(?:\s+(.*))?\Z", re.DOTALL)
 
 
 class TypedCommand(Command):
-    """Typed to the Discord bot as `!name args`, or one of its aliases."""
+    """Typed to the Discord bot as `!name args`, or one of its aliases. It's
+    the system's own, so the admin's, unless it says otherwise (`needs`)."""
 
     usage: str = ""     # its arguments, as `!help` shows them
     section: str = ""   # CHANNEL or VOICE_ROOM
+    needs = ADMIN
 
     def match(self, text: str) -> Optional[str]:
         found = _TYPED.match(text or "")
@@ -153,6 +190,10 @@ class VoiceRoomCommand(TypedCommand):
 
     def available(self, ctx: TypedContext) -> bool:
         return ctx.voice is not None and (not self.voice_host_only or ctx.voice.hosts_voice())
+
+    def says_refusal(self, ctx: TypedContext) -> bool:
+        """Every bot hears one that isn't the voice host's only: the voice host says no."""
+        return ctx.voice is not None and ctx.voice.hosts_voice()
 
 
 class SpokenCommand(Command):
@@ -184,3 +225,7 @@ class ControlCommand(TypedCommand):
     def takes(self, args: str) -> bool:
         """Whether `args` are this command's arguments; by default it takes none."""
         return args == ""
+
+    def says_refusal(self, ctx: ControlContext) -> bool:
+        """Every bot sees the thread: the elected one says no."""
+        return ctx.control is not None and ctx.control.elected()

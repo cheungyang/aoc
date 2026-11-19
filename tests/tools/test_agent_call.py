@@ -13,8 +13,12 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from core.permissions import access
 from core.runtime.delegation import DelegationResult
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
 from core.tooling import format_tool_response
+from tests.household import ConfigLoader, dormant, household
 from tools.agent_call import agent_call
 
 
@@ -103,6 +107,63 @@ class TestAgentCallTool(unittest.IsolatedAsyncioTestCase):
                     "Error: agent_call requires 'agent_id', 'prompt', and 'channel'.",
                     result
                 )
+
+
+@patch('tools.agent_call.AgentsLoader', ConfigLoader)
+@patch('tools.agent_call.stream_delegate', new_callable=AsyncMock)
+class TestWhoTheCallIsFor(unittest.IsolatedAsyncioTestCase):
+    """An agent another agent's model asks for works for whoever the turn is for, so it
+    takes `use` on it: player2 may use Ramsay and Eric, and Daisy isn't theirs."""
+
+    def setUp(self):
+        patcher = household()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    async def _call(agent_id, person=None):
+        """agent_call asked in a turn for `person`; None: a turn nobody started."""
+        token = None
+        if person is not None:
+            ctx = SessionManager.get_session(agent_id="main", source="discord", channel="general", person=person)
+            token = current_execution_context.set(ctx)
+        try:
+            return await agent_call.ainvoke({"agent_id": agent_id, "prompt": "plan Saturday", "channel": "general"})
+        finally:
+            if token is not None:
+                current_execution_context.reset(token)
+
+    async def test_an_agent_the_person_may_not_use_is_refused(self, mock_delegate):
+        result = await self._call("day-planner", person="player2")
+        self.assertIn("Error: Daisy ('day-planner') isn't open to player2, who this turn is for", result)
+        mock_delegate.assert_not_awaited()
+
+    async def test_ones_they_may_use_are_called(self, mock_delegate):
+        for agent_id in ("meal-planner", "excursion-planner"):
+            with self.subTest(agent=agent_id):
+                mock_delegate.reset_mock()
+                mock_delegate.return_value = DelegationResult(agent_id=agent_id, text="Tacos on Saturday.")
+                result = await self._call(agent_id, person="player2")
+                mock_delegate.assert_awaited_once()
+                self.assertEqual(result, format_tool_response("agent_call", payload="Tacos on Saturday.",
+                                                              errors="None"))
+
+    async def test_the_owner_may_call_any_of_his(self, mock_delegate):
+        mock_delegate.return_value = DelegationResult(agent_id="day-planner", text="Free after 2.")
+        self.assertIn("Free after 2.", await self._call("day-planner", person="owner"))
+
+    async def test_a_turn_nobody_started_is_never_refused(self, mock_delegate):
+        mock_delegate.return_value = DelegationResult(agent_id="day-planner", text="Free after 2.")
+        self.assertIn("Free after 2.", await self._call("day-planner"))
+
+    async def test_an_agent_nobody_knows_is_left_to_the_delegation_to_report(self, mock_delegate):
+        mock_delegate.return_value = DelegationResult(agent_id="ghost", error="Agent 'ghost' not found.")
+        self.assertIn("Agent 'ghost' not found.", await self._call("ghost", person="player2"))
+
+    async def test_with_nobody_configured_the_owner_calls_every_agent_without_a_block(self, mock_delegate):
+        mock_delegate.return_value = DelegationResult(agent_id="day-planner", text="Free after 2.")
+        with dormant():
+            self.assertIn("Free after 2.", await self._call("day-planner", person=access.person_for("anyone")))
 
 
 if __name__ == '__main__':

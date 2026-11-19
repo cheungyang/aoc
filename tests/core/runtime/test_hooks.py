@@ -70,6 +70,26 @@ class TestMemoryLogHook(unittest.IsolatedAsyncioTestCase):
         await hooks.MemoryLogHook().after(hooks.Turn("main", {}, session, "hi", response=None))
         save.assert_not_called()
 
+    async def log(self, household: bool, person):
+        response = Agent("meal-planner", {})._parse_final_response(
+            "Sure.<system_memory_log>- [FEEDBACK] Keep it short.</system_memory_log>")
+        session = SessionManager.get_session("meal-planner", "discord", "meal-planning", person=person)
+        with patch("core.runtime.hooks.save_agent_memory_log") as save, \
+                patch("core.runtime.hooks.access.household_mode", return_value=household):
+            await hooks.MemoryLogHook().after(hooks.Turn("meal-planner", {}, session, "hi", response=response))
+        return save
+
+    async def test_in_a_household_the_log_names_who_the_turn_was_for(self):
+        """The dream files one person's preference as theirs (core/knowledge/memory/dream_ops.py)."""
+        save = await self.log(household=True, person="player2")
+        save.assert_called_once_with("meal-planner", "- [FEEDBACK] Keep it short.", person="player2")
+
+    async def test_with_one_person_or_nobodys_turn_the_log_is_written_as_always(self):
+        for household, person in ((False, "owner"), (True, None)):
+            with self.subTest(household=household, person=person):
+                save = await self.log(household, person)
+                save.assert_called_once_with("meal-planner", "- [FEEDBACK] Keep it short.")
+
 
 if __name__ == "__main__":
     unittest.main()

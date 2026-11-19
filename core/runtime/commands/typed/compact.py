@@ -1,7 +1,8 @@
 """`!compact` (or `!summarize`): this channel's session history, compacted now
-rather than after a turn: older messages become a summary."""
+rather than after a turn: older messages become a summary. Anyone the bots
+know may give it."""
 from core.knowledge.memory.sqlite_checkpointer import SqliteCheckpointer
-from core.runtime.commands.base import ChannelCommand, TypedContext
+from core.runtime.commands.base import ANYONE, ChannelCommand, TypedContext
 from core.runtime.history.pruner import ContextPruner, estimate_total_tokens
 
 
@@ -9,6 +10,7 @@ class CompactCommand(ChannelCommand):
     name = "compact"
     aliases = ("summarize",)
     summary = "Compacts this channel's session history now: older messages become a summary."
+    needs = ANYONE
 
     async def run(self, ctx: TypedContext, args: str) -> None:
         session = ctx.session

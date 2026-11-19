@@ -345,6 +345,8 @@ def create_graph(llm, tools, prompt=None, checkpointer=None, agent_id=None, conf
             agent_config=agent_config,
             loader=AgentsLoader(),
             source=(ctx.source if ctx else ""),
+            # Who the turn is for: a name hands it only to an agent they may use.
+            person=(ctx.person if ctx else None),
         )
 
         if decision.is_direct:

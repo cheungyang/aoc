@@ -9,6 +9,7 @@ from core.channel.discord.loader import BotsLoader
 from core.loaders.agents_loader import AgentsLoader
 from core.scheduler.schedule_runner import ScheduleRunner
 from core.channel.discord.ownership import DEV, PROD, Ownership
+from core.permissions import access
 from core.proactive.service import install as install_proactive
 from core.runtime import bootstrap
 from core.runtime.observability import loop_lag
@@ -63,6 +64,11 @@ async def run_bots(dev: bool = False, agents: list = None):
     unknown = sorted(set(agents) - set(agent_ids))
     if unknown:
         raise SystemExit(f"Unknown agent(s) for --agents: {', '.join(unknown)}. Known: {', '.join(sorted(agent_ids))}")
+
+    # The household's configuration (core/permissions/access.py): silent with
+    # nobody configured in DISCORD_USER_*.
+    for problem in access.problems({a: agents_loader.get_agent_config(a) or {} for a in agent_ids}):
+        print(f"[access] ⚠️ {problem}")
 
     ownership = Ownership()
     ownership.configure(role=DEV if dev else PROD, agents=agents)

@@ -111,27 +111,32 @@ def get_knowledge_prompt() -> str:
     ).render()
 
 
-def time_stamp(now=None) -> str:
-    """The local-time stamp put in front of user messages, e.g. "[Fri 06:42]"."""
+def time_stamp(now=None, person: Optional[str] = None) -> str:
+    """The local-time stamp put in front of user messages, e.g. "[Fri 06:42]",
+    or "[Fri 06:42 · player2]" when it names who wrote the message."""
     now = now or get_local_now()
-    return f"[{now.strftime('%a %H:%M')}]"
+    who = f" · {person}" if person else ""
+    return f"[{now.strftime('%a %H:%M')}{who}]"
 
 
 # What `time_stamp` writes, for code that reads a stamped message back: the
 # hand-off rule looks for a name at the start of your words, and the stamp
 # must not stand in front of it (core/runtime/foundation/addressing.py).
-# `%a` is the locale's day abbreviation, so any letters, with an optional dot.
-TIME_STAMP = re.compile(r"\[\w+\.? \d{1,2}:\d{2}\]")
+# `%a` is the locale's day abbreviation, so any letters, with an optional dot;
+# then, in a household, the writer's name (core/permissions/access.py NAME).
+TIME_STAMP = re.compile(r"\[\w+\.? \d{1,2}:\d{2}(?: · [a-z][a-z0-9_-]*)?\]")
 
 
-def stamp_user_message(content):
+def stamp_user_message(content, person: Optional[str] = None):
     """`content` with the current local time in front, for the model.
 
     Text gets a "[Fri 06:42] " prefix; multimodal content (a list of parts)
     gets the stamp as a leading text part. The stamp is stored with the
-    message, so history also shows when each message was sent.
+    message, so history also shows when each message was sent. With `person`
+    (a household: core/permissions/access.py), it also says who sent it, so a
+    channel two people share reads as a conversation between them.
     """
-    stamp = time_stamp()
+    stamp = time_stamp(person=person)
     if isinstance(content, str):
         return f"{stamp} {content}"
     if isinstance(content, list):

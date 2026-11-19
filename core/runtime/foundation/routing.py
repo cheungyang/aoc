@@ -17,7 +17,9 @@ quiet.
 A message that calls another agent by name -- "Ted, create a syllabus on THIS
 topic" in #pkm-wiki, "Daisy, ..." in #general -- is a hand-off: it goes to
 that agent in its home channel, and the conversation continues there. Who a
-message calls is addressing.py's rule, read from the words alone.
+message calls is addressing.py's rule, read from the words alone. Given who
+wrote it (`person`, core/permissions/access.py), a message calls only agents
+that person may use: to anyone else, a name is just a word.
 
 Nothing here performs work or touches the network. `decide()` is a pure function
 of (prompt, context, config) so the routing table is something a test can pin.
@@ -28,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from core.loaders.channel_hosts import hosts, shared_channels
+from core.permissions import access
 from core.runtime.foundation.addressing import addressed_agent, aliases_for
 
 Prompt = Union[str, list]
@@ -106,7 +109,7 @@ def routing_enabled(agent_id: str, channel_name: str, agent_config: dict, loader
 
 
 def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict, loader: Any, *,
-           source: str = CHANNEL_MESSAGE) -> RouteDecision:
+           source: str = CHANNEL_MESSAGE, person: Optional[str] = None) -> RouteDecision:
     """Resolves a turn to a route. Pure; performs no delegation.
 
     Only the hand-off rule reads `prompt`; it travels with the decision, so what
@@ -114,15 +117,15 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
     `ExecutionContext.source`; the default asks about a message posted in the
     channel, as the voice focus and the channel inbox do. A message calling
     another agent by name goes to that agent's home channel, ahead of the other
-    rules. Then: the channel's one agent; the fixed line in a channel the host
-    shares on purpose (`shared_channels` in its config); else the channel isn't
-    set up.
+    rules -- given `person`, the turn's, only an agent they may use. Then: the
+    channel's one agent; the fixed line in a channel the host shares on purpose
+    (`shared_channels` in its config); else the channel isn't set up.
     """
     if not routing_enabled(agent_id, channel_name, agent_config, loader, source=source):
         return RouteDecision(CONCIERGE, prompt=prompt, reason="routing not enabled for this agent/channel")
 
     eligible: List[str] = loader.eligible_agents_for_channel(channel_name, exclude_agent_id=agent_id)
-    handoff = _handoff(prompt, agent_id, channel_name, eligible, loader)
+    handoff = _handoff(prompt, agent_id, channel_name, eligible, loader, person)
     if handoff is not None:
         return handoff
 
@@ -146,13 +149,14 @@ def decide(prompt: Prompt, agent_id: str, channel_name: str, agent_config: dict,
 
 
 def _handoff(prompt: Prompt, host_id: str, channel_name: str, eligible: List[str],
-             loader: Any) -> Optional[RouteDecision]:
+             loader: Any, person: Optional[str] = None) -> Optional[RouteDecision]:
     """A hand-off, if `prompt` calls by name an agent other than the one that
-    answers here, and that agent has a home channel to continue in."""
+    answers here, one `person` may use, and that agent has a home channel to
+    continue in."""
     if not prompt:
         return None  # a question about the channel, not a message (answering_agent)
     answers_here = eligible[0] if len(eligible) == 1 else None
-    address = addressed_agent(prompt, addressable_agents(loader, exclude=(host_id, answers_here)))
+    address = addressed_agent(prompt, addressable_agents(loader, exclude=(host_id, answers_here), person=person))
     if address is None:
         return None
     home = home_channel(address.agent_id, loader)
@@ -169,12 +173,15 @@ def _handoff(prompt: Prompt, host_id: str, channel_name: str, eligible: List[str
 
 # --- who a message can call by name, and where it continues --------------------------
 
-def addressable_agents(loader: Any, exclude: Iterable[Optional[str]] = ()) -> Dict[str, str]:
+def addressable_agents(loader: Any, exclude: Iterable[Optional[str]] = (),
+                       person: Optional[str] = None) -> Dict[str, str]:
     """Alias -> agent id, for the agents a message can call by name (addressing.py).
 
     Every agent that keeps a conversation in channels of its own: not one
     reachable everywhere (`channels: ["*"]`: the Concierge, the graph workers),
     which owns no channel, nor a stateless one, which keeps nothing to continue.
+    Given `person`, only the ones they may use (core/permissions/access.py):
+    the name of an agent that isn't theirs calls nobody.
     """
     skip = {agent_id for agent_id in exclude if agent_id}
     agents = {}
@@ -182,6 +189,8 @@ def addressable_agents(loader: Any, exclude: Iterable[Optional[str]] = ()) -> Di
         config = loader.get_agent_config(agent_id) or {}
         channels = [str(c).lower() for c in (config.get("channels") or [])]
         if agent_id in skip or not channels or "*" in channels or config.get("stateless"):
+            continue
+        if not access.can(person, config):
             continue
         agents[agent_id] = config
     return aliases_for(agents)

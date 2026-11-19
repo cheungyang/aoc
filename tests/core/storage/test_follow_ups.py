@@ -550,12 +550,43 @@ def test_an_older_table_gets_the_one_off_columns_and_keeps_its_rows(tmp_path):
     store = FollowUpStore(str(path))
     (old,) = store.list()
     assert (old.goal, old.checks, old.finds, old.interval_s) == ("Business award seats SFO→MAD", 4, 1, 86400)
-    assert (old.kind, old.is_once, old.due_at, old.notes) == (Kind.WATCH, False, None, "")
+    assert (old.kind, old.is_once, old.due_at, old.notes, old.opened_by) == (Kind.WATCH, False, None, "", "")
     assert _once(store).is_once and store.extend(old.id, "2026-12-15").until == "2026-12-15"
     # Migrated, it's the table a new database gets: the same columns, in the same order.
     fresh = FollowUpStore(str(tmp_path / "fresh.db"))
     fresh.list()
     assert _columns(store) == _columns(fresh)
-    assert [column[1] for column in _columns(store)][-3:] == ["kind", "due_at", "notes"]
+    assert [column[1] for column in _columns(store)][-4:] == ["kind", "due_at", "notes", "opened_by"]
     with pytest.raises(sqlite3.IntegrityError):  # and it checks the kind, as a new one does
         store.update("follow_ups", {"kind": "alarm"}, {"id": old.id})
+
+
+# The table with one-offs, as it shipped before households: who asked came later still.
+ONE_OFF_TABLE = OLD_TABLE + """
+ALTER TABLE follow_ups ADD COLUMN kind TEXT NOT NULL DEFAULT 'watch' CHECK (kind IN ('watch', 'once'));
+ALTER TABLE follow_ups ADD COLUMN due_at REAL;
+ALTER TABLE follow_ups ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+"""
+
+
+def test_a_table_with_one_offs_gets_who_asked_and_keeps_its_rows(tmp_path):
+    path = tmp_path / "memory.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(ONE_OFF_TABLE)
+    conn.close()
+    store = FollowUpStore(str(path))
+    (old,) = store.list()
+    assert (old.goal, old.kind, old.opened_by) == ("Business award seats SFO→MAD", Kind.WATCH, "")
+    fresh = FollowUpStore(str(tmp_path / "fresh.db"))
+    fresh.list()
+    assert _columns(store) == _columns(fresh)
+    assert _once(store, opened_by="player2").opened_by == "player2"
+
+
+def test_who_asked_is_kept_and_is_nobody_unless_given(store):
+    """The tool passes who asked only in household mode (tools/follow_up.asker): the store keeps what it's given."""
+    assert (_open(store).opened_by, _once(store).opened_by) == ("", "")
+    watch = _open(store, agent_id="meal-planner", opened_by="player2")
+    once = _once(store, goal="The anniversary dinner", opened_by="owner")
+    assert (store.get(watch.id).opened_by, store.get(once.id).opened_by) == ("player2", "owner")
+    assert store.select_one("follow_ups", {"id": watch.id})["opened_by"] == "player2"

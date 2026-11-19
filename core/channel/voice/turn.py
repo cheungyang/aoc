@@ -21,6 +21,7 @@ import asyncio
 from functools import partial
 from typing import Any, List, Optional, Protocol
 
+from core.permissions import access
 from core.runtime.commands.base import SpokenContext
 from core.runtime.commands.ports import VoiceControls
 from core.runtime.commands.registry import SPOKEN
@@ -135,6 +136,14 @@ class VoiceTurn:
         """Who said the newest words (a Discord member): the one "hanging up"
         disconnects (core/runtime/commands/spoken/hang_up.py)."""
         return self.utterances[-1].user if self.utterances else None
+
+    def person(self) -> Optional[str]:
+        """Who the turn is for (core/permissions/access.py): the person whose
+        Discord account said the newest words. None when no account is known
+        for them, or it's nobody's: the turn then acts for nobody, as every
+        voice turn did before."""
+        user = self.speaker()
+        return access.person_for(getattr(user, "id", None)) if user is not None else None
 
     async def run(self) -> None:
         """Answers the turn; its trace is recorded once the answer is first heard."""
@@ -262,13 +271,15 @@ class VoiceTurn:
 
         # Same session as the text channel (so context is shared), but
         # tagged as voice so token rows can tell spoken turns from typed
-        # ones, and so the agent gets <voice_mode>.
+        # ones, and so the agent gets <voice_mode>. It acts for whoever spoke,
+        # as a typed message acts for whoever wrote it.
         session = SessionManager().get_session(
             agent_id=room.agent_id,
             source="discord",
             channel=channel,
             surface="voice",
             output=room.turn_output(channel) if room.turn_output and channel is not None else None,
+            person=self.person(),
         )
         self.session_id = session.session_id
         self.answered = await room.reply.stream(

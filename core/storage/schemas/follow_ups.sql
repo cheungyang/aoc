@@ -5,8 +5,8 @@
 -- passes. The schedule runner's checks (core/proactive/follow_ups.py) keep the
 -- counters and timing below, and team radio's lines keep radio_state.
 -- A one-off (kind 'once') is a topic its agent brings back to you at due_at, once:
--- no cadence, and its run closes it (closed_by 'fired'). kind, due_at and notes came
--- later: the store adds them to a table that lacks them (FollowUpStore._create).
+-- no cadence, and its run closes it (closed_by 'fired'). kind, due_at, notes and
+-- opened_by came later: the store adds them to a table that lacks them (FollowUpStore._create).
 CREATE TABLE IF NOT EXISTS follow_ups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_id TEXT NOT NULL,                   -- whose loop it is: of the agents, only it closes it
@@ -41,8 +41,10 @@ CREATE TABLE IF NOT EXISTS follow_ups (
     kind TEXT NOT NULL DEFAULT 'watch' CHECK (kind IN ('watch', 'once')),
                                               -- watch: a check on a cadence; once: a topic brought up at due_at
     due_at REAL,                              -- once: when it is brought up, epoch seconds; NULL for a watch
-    notes TEXT NOT NULL DEFAULT ''            -- once: the context its agent wrote, at most 1000 characters;
+    notes TEXT NOT NULL DEFAULT '',           -- once: the context its agent wrote, at most 1000 characters;
                                               -- '' for a watch
+    opened_by TEXT NOT NULL DEFAULT ''        -- in household mode, the person whose turn opened it
+                                              -- (core/permissions/access.py); '' otherwise
 );
 CREATE INDEX IF NOT EXISTS idx_follow_ups_due ON follow_ups(status, next_check_at);
 CREATE INDEX IF NOT EXISTS idx_follow_ups_agent ON follow_ups(agent_id, status);

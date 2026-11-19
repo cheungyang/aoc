@@ -21,7 +21,8 @@ channel, once, and asks whether to get into it now (core/proactive/follow_ups.py
 those stay in your task system.
 
 Every op is the calling agent's own (try_context): `open` stores one for it,
-with the channel and session it was opened in (core/storage/follow_ups.py);
+with the channel and session it was opened in and, in household mode, the
+person who asked (`asker`) (core/storage/follow_ups.py);
 `extend` moves a watch's `until` later, keeping its history (a one-off isn't
 extended: it's closed, and another opened at the new time); `close` ends one of
 its open ones; `list` shows them. A second open watch with the same check, or a
@@ -53,6 +54,7 @@ from typing import Any, Dict, Literal, Optional
 from langchain_core.tools import tool
 
 from core.config.settings import Config
+from core.permissions import access
 from core.runtime.foundation.context import try_context
 from core.scheduler.preconditions import PreconditionError, agent_preconditions, build_precondition
 from core.storage.follow_ups import (
@@ -177,6 +179,14 @@ def line(follow_up: FollowUp) -> str:
             f"until {follow_up.until} · check: {follow_up.check.text()}{early}")
 
 
+def asker(ctx: Any) -> str:
+    """Who asked for a follow-up this turn opens: the turn's person in household mode
+    (core/permissions/access.py), so `!followups` can name them and a one-off is brought
+    back to them. With one person there's nobody to tell apart: "", as on a row older
+    than the column. So is a turn nobody started (person None)."""
+    return (ctx.person or "") if access.household_mode() else ""
+
+
 def _error(message: str) -> str:
     return format_tool_response(NAME, payload="", errors=f"Error: {message}")
 
@@ -198,7 +208,7 @@ def _open(ctx: Any, goal: str, check: str, every: str, until: str, close_when: s
     try:
         opened = FollowUpStore().open(agent_id=ctx.agent_id, goal=goal, check=parsed, every_s=every_s, until=day,
                                       close_when=close_when, channel=ctx.channel_name or "",
-                                      session_id=ctx.session_id or "", at=at)
+                                      session_id=ctx.session_id or "", at=at, opened_by=asker(ctx))
     except DuplicateFollowUp as e:
         found = e.existing
         return _error(f"follow-up #{found.id} already has this check, until {found.until}: "
@@ -229,7 +239,7 @@ def _open_once(ctx: Any, goal: str, at: str, notes: str, watch: Dict[str, str]) 
     try:
         opened = FollowUpStore().open_once(agent_id=ctx.agent_id, goal=goal, due_at=due_at, notes=notes,
                                            channel=ctx.channel_name or "", session_id=ctx.session_id or "",
-                                           at=opened_at)
+                                           at=opened_at, opened_by=asker(ctx))
     except DuplicateFollowUp as e:
         return _error(f"follow-up #{e.existing.id} already brings this up then: \"{e.existing.goal}\"")
     when = f"{local(opened.due_at):%A %Y-%m-%d %H:%M}"

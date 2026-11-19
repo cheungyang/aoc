@@ -1,6 +1,9 @@
 This is your follow-up #{{id}}: on {{opened}}, the user asked you to bring this back to them on {{due}}. It's time: the message is yours, posted in your own channel, as you promised.
 
 It is {{now}}.
+{{#person}}
+It's for {{person}}, who asked you for it: address them by name.
+{{/person}}
 {{#late}}
 You're bringing it up {{late}} late: say so in a few words.
 {{/late}}

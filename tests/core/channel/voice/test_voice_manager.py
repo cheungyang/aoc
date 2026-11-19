@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
+from core.permissions import access
 from core.runtime.observability.turn_trace import Outcome
 from core.channel.voice.foundation import settings as voice_settings
 from core.channel.voice.foundation.utterance import Utterance
@@ -23,6 +24,7 @@ from core.channel.voice.voice_manager import VoiceManager
 from tests.core.channel.voice.voice_room import (
     TEXT_OUTPUT, _capture_sessions, _focused, _play_at_once, _room_fixture, _say, _spoken, _turn,
 )
+from tests.household import STRANGER_ID, PLAYER2_ID, dormant, household
 
 
 def test_voice_manager_init(mock_bot_runner):
@@ -1701,3 +1703,44 @@ async def test_next_agent_and_the_digest_put_a_waiting_hand_off_first(mock_bot_r
         "Frankie wants Friday's run booked. Seven?",
     ]
     assert vm.focus().key == "day-planning"
+
+
+# ---------------------------------------------------------------------------
+# Who a spoken turn is for (core/permissions/access.py)
+# ---------------------------------------------------------------------------
+
+def _speaker(account_id, name):
+    return MagicMock(display_name=name, bot=False, id=account_id)
+
+
+@pytest.mark.asyncio
+async def test_a_spoken_turn_acts_for_whoever_spoke(mock_bot_runner, tmp_path):
+    """As a typed message acts for whoever wrote it. A voice nobody is configured as
+    is nobody's: the turn acts for no one, as every voice turn did before."""
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with household(), _focused(loader):
+        await _turn(vm, "What's for dinner?", user=_speaker(PLAYER2_ID, "Player2"))
+        await _turn(vm, "And tomorrow?", user=_speaker(STRANGER_ID, "Guest"))
+    assert [session.person for _prompt, session in calls] == ["player2", None]
+    assert vm.speaker_person() is None, "between turns, nobody"
+
+
+@pytest.mark.asyncio
+async def test_the_hand_off_a_switch_opens_with_acts_for_who_asked(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    _parked()
+    calls = _capture_sessions(main_agent, reply=DAISY_OPENS)
+    with household(), _focused(loader):
+        await _turn(vm, "Switch me to Daisy.", user=_speaker(PLAYER2_ID, "Player2"))
+    (prompt, session), = calls
+    assert (prompt, session.person) == ("<handoff_arrival/>", "player2")
+
+
+@pytest.mark.asyncio
+async def test_with_nobody_configured_a_spoken_turn_is_the_owners(mock_bot_runner, tmp_path):
+    vm, main_agent, loader, _channels = _room_fixture(mock_bot_runner, tmp_path)
+    calls = _capture_sessions(main_agent)
+    with dormant(), _focused(loader):
+        await _turn(vm, "What's for dinner?", user=_speaker(STRANGER_ID, "Sam"))
+    assert [session.person for _prompt, session in calls] == [access.OWNER]

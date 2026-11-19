@@ -87,9 +87,23 @@ class TestPromptUtil(unittest.TestCase):
         tz = ZoneInfo("America/Los_Angeles")
         for day in range(19, 26):  # a Monday through a Sunday
             for hour, minute in ((0, 0), (9, 5), (23, 59)):
-                stamp = time_stamp(datetime.datetime(2026, 10, day, hour, minute, tzinfo=tz))
-                with self.subTest(stamp=stamp):
-                    self.assertTrue(TIME_STAMP.fullmatch(stamp))
+                for person in (None, "player2", "owner", "kid-2"):
+                    stamp = time_stamp(datetime.datetime(2026, 10, day, hour, minute, tzinfo=tz), person=person)
+                    with self.subTest(stamp=stamp):
+                        self.assertTrue(TIME_STAMP.fullmatch(stamp))
+
+    def test_in_a_household_the_stamp_names_who_wrote_it(self):
+        """Two people in one channel read as a conversation between them
+        (core/permissions/access.py)."""
+        from core.prompts.system import stamp_user_message
+
+        now = datetime.datetime(2026, 11, 12, 19, 2, tzinfo=ZoneInfo("America/Los_Angeles"))
+        with patch("core.prompts.system.get_local_now", return_value=now):
+            self.assertEqual(stamp_user_message("out of eggs", person="player2"), "[Thu 19:02 · player2] out of eggs")
+            parts = [{"type": "image_url", "image_url": "x"}]
+            self.assertEqual(stamp_user_message(parts, person="player2"),
+                             [{"type": "text", "text": "[Thu 19:02 · player2]"}, *parts])
+            self.assertEqual(stamp_user_message("out of eggs", person=None), "[Thu 19:02] out of eggs")
 
     def test_get_formatting_prompt(self):
         prompt = get_formatting_prompt()

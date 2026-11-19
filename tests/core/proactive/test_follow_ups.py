@@ -32,6 +32,7 @@ from core.storage.channel_inbox import Priority
 from core.storage.follow_ups import RETRY_S, Check, Closer, FollowUpStore, Result, Status, end_of
 from core.util.local_time import get_local_timezone
 from tests.helpers import make_follow_up
+from tests.household import dormant, household
 
 NOW = datetime(2026, 11, 1, 9, 0, tzinfo=get_local_timezone()).timestamp()  # a Sunday
 HOUR, DAY = 3600, 86400
@@ -551,6 +552,20 @@ class TestTheOneOff:
         assert "You're bringing it up about 3 hours late: say so in a few words." in prompt_at(3 * HOUR)
         assert (late_text(31 * 60), late_text(89 * 60), late_text(26 * HOUR)) == ("31 minutes", "89 minutes",
                                                                                   "about 26 hours")
+
+    def test_in_a_household_its_prompt_names_who_asked(self, store):
+        spec = FollowUpSchedule(_once(store, opened_by="player2"), store=store)
+        with household():
+            prompt = spec.build_prompt(_ctx(spec))
+        assert "It is Sunday 2026-11-01 09:00.\nIt's for player2, who asked you for it: address them by name.\n" in prompt
+
+    def test_with_one_person_or_nobody_asking_it_names_no_one(self, store):
+        asked = FollowUpSchedule(_once(store, opened_by="player2"), store=store)
+        nobody = FollowUpSchedule(_once(store, due_at=NOW + 60), store=store)
+        with dormant():
+            assert "It's for" not in asked.build_prompt(_ctx(asked))
+        with household():
+            assert "It's for" not in nobody.build_prompt(_ctx(nobody))
 
     @pytest.mark.asyncio
     async def test_a_post_or_a_silent_reply_closes_it_and_a_failure_is_tried_again(self, store):

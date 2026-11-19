@@ -102,6 +102,8 @@ class FollowUpOncePrompt(Prompt):
     marked as the question its post waits on, so a voice briefing can replay it.
     It replies <silent/> only when its notes made bringing it up conditional.
     Its post closes the follow-up (core/storage/follow_ups.py, `finish_check`).
+    In household mode it also names the person who asked, so the agent brings it
+    back to them and not to whoever else shares the agents.
     """
 
     template = "proactive/follow_up_once"
@@ -113,3 +115,4 @@ class FollowUpOncePrompt(Prompt):
     goal: str      # what to bring up
     notes: str     # the agent's notes from then; "" if none
     late: str      # how late it comes, in words, past half an hour; "" otherwise
+    person: str = ""  # in household mode, who asked for it (`opened_by`); "" otherwise

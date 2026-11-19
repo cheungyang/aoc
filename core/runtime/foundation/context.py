@@ -66,6 +66,14 @@ def inherited_record_memory() -> bool:
     ctx = current_execution_context.get()
     return True if ctx is None else ctx.record_memory
 
+
+def inherited_person() -> Optional[str]:
+    """The person a newly minted context acts for when none is given: the
+    current context's. An agent another agent asked, a job a turn started,
+    still works for whoever started the turn."""
+    ctx = current_execution_context.get()
+    return None if ctx is None else ctx.person
+
 # The single ambient identity for the currently executing agent.
 # Replaces the former `current_execution_context` and `current_graph_id` pair.
 #
@@ -136,6 +144,15 @@ class ExecutionContext:
     - `output` is where the turn's output goes (foundation/output.py): set by
       the adapter that starts the turn, kept by derived contexts, and handed on
       by delegation. None for a turn nobody sees (a job, a script).
+    - `person` is an authority field: the person the turn acts for
+      (core/permissions/access.py), set by the adapter from the Discord account
+      that typed or spoke. None for a turn nobody started (a schedule, a
+      delivery, a job). It is inherited -- a context minted while another is
+      current acts for the same person (`inherited_person`) -- and every
+      derivation keeps it, so an agent another agent asked is checked against
+      the person, not the agent that asked. Like `surface`, it never changes
+      the session id: a household channel is one conversation, each message
+      in it stamped with who wrote it.
     - `turn_hints` is the one mutable field: scratch state for the turn in
       flight, shared by the turn's tools, the tool hooks and the model wrapper
       (the model's pick for its next call, from its `<next_thinking>` marker,
@@ -155,6 +172,7 @@ class ExecutionContext:
     model: Optional[str] = None
     thinking_level: Optional[str] = None
     called_by_agent: bool = False
+    person: Optional[str] = None
     output: Optional[Any] = field(default=None, repr=False, compare=False)
     turn_hints: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _secret: Any = field(default=None, repr=False, compare=False)
@@ -216,6 +234,7 @@ class ExecutionContext:
         thinking_level: Optional[str] = None,
         called_by_agent: bool = False,
         output: Optional[Any] = None,
+        person: Optional[str] = None,
     ) -> "ExecutionContext":
         """Internal constructor invoked exclusively by SessionManager."""
         return cls(
@@ -230,6 +249,7 @@ class ExecutionContext:
             model=model,
             thinking_level=thinking_level,
             called_by_agent=called_by_agent,
+            person=person,
             output=output,
             _secret=_CONTEXT_SECRET,
         )

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, Tuple, Union
 
 from core.util.errors import format_error_message
+from core.permissions import access
 from core.prompts.system import stamp_user_message
 from core.runtime.base_agent import BaseAgent
 from core.runtime.foundation.context import current_execution_context
@@ -110,8 +111,12 @@ class Agent(BaseAgent):
         turn.config = config
 
         # The time of day rides on the user's message rather than in the system
-        # prompt, where it would break the cached prefix every minute.
-        content = stamp_user_message(prompt) if role == "user" else prompt
+        # prompt, where it would break the cached prefix every minute. In a
+        # household it also says who wrote it (core/permissions/access.py).
+        if role == "user":
+            content = stamp_user_message(prompt, person=session.person if access.household_mode() else None)
+        else:
+            content = prompt
         inputs = {"messages": [{"role": role, "content": content}]}
         return config, inputs, graph
 

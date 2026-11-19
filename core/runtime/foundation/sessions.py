@@ -1,5 +1,7 @@
 from typing import Optional, Any, Union
-from core.runtime.foundation.context import ExecutionContext, inherited_record_memory, inherited_surface
+from core.runtime.foundation.context import (
+    ExecutionContext, inherited_person, inherited_record_memory, inherited_surface,
+)
 from core.storage.sessions import SessionStore
 
 
@@ -26,6 +28,7 @@ class SessionManager:
         thinking_level: Optional[str] = None,
         called_by_agent: bool = False,
         output: Optional[Any] = None,
+        person: Optional[str] = None,
     ) -> ExecutionContext:
         """
         Creates an ExecutionContext instance.
@@ -47,9 +50,15 @@ class SessionManager:
         choosing it (stream_delegate sets it): that run gets no `follow_up`.
         `output` is where the turn's output goes (foundation/output.py): the
         adapter starting the turn passes its own.
+        `person` is who the turn acts for (core/permissions/access.py): the adapter
+        passes the person behind the Discord account. When omitted it is inherited
+        from the current context (`inherited_person`), so delegation keeps acting
+        for whoever started the turn; with no context, a turn nobody started.
         """
         if surface is None:
             surface = inherited_surface()
+        if person is None:
+            person = inherited_person()
         record_memory = bool(record_memory) and inherited_record_memory()
         return ExecutionContext._create(
             agent_id=str(agent_id or ""),
@@ -64,6 +73,7 @@ class SessionManager:
             thinking_level=thinking_level,
             called_by_agent=called_by_agent,
             output=output,
+            person=person,
         )
 
     def clear_session(self, session: ExecutionContext) -> str:

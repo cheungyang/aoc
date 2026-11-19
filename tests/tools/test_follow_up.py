@@ -1,13 +1,18 @@
 """The follow_up tool (tools/follow_up.py): open, extend, close and list, for the calling agent only."""
 import json
+from contextlib import contextmanager
 from datetime import datetime, time, timedelta
 
 import pytest
 
 from core.config.settings import Config
+from core.permissions import access
+from core.runtime.foundation.context import current_execution_context
+from core.runtime.foundation.sessions import SessionManager
 from core.storage.follow_ups import Check, Closer, FollowUpStore, Kind, Status
 from core.util.local_time import get_local_timezone
 from tests.helpers import execution_context, envelope
+from tests.household import dormant, household
 from tools import follow_up as tool_module
 from tools.follow_up import MIN_AT_S, NOTES_CHARS, cadence_text, follow_up, parse_every
 
@@ -382,3 +387,31 @@ def test_a_one_off_is_refused_on_the_scheduled_surface_too(live, source):
     assert reply["errors"] == ("Error: open or extend a follow-up in a conversation, after the user agreed; you can "
                                "offer it in your message")
     assert FollowUpStore().list() == []
+
+
+# -- who asked, in a household (core/permissions/access.py) -------------------------------
+
+@contextmanager
+def _for(person, agent_id="agent-designer", channel="agent-management"):
+    """A turn of `agent_id` in its channel for `person`, as the Discord runner starts one."""
+    ctx = SessionManager().get_session(agent_id, source="discord", channel=channel, stateless=False, person=person)
+    token = current_execution_context.set(ctx)
+    try:
+        yield ctx
+    finally:
+        current_execution_context.reset(token)
+
+
+def test_in_a_household_a_follow_up_records_who_asked(live):
+    with household(), _for("player2"):
+        assert _open_once()["errors"] == "None"
+        assert _open(goal="Agent roster review", check=MODEL)["errors"] == "None"
+    assert [f.opened_by for f in FollowUpStore().list()] == ["player2", "player2"]
+
+
+def test_with_one_person_or_nobody_asking_none_is_recorded(live):
+    with dormant(), _for(access.person_for("anyone")):  # the owner: nobody to tell apart
+        assert _open_once()["errors"] == "None"
+    with household(), _aki():  # a turn nobody started
+        assert _open_once(goal="Another topic")["errors"] == "None"
+    assert [f.opened_by for f in FollowUpStore().list()] == ["", ""]

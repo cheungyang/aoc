@@ -152,6 +152,9 @@ class VoiceManager:
         self._lock = asyncio.Lock()
         self._active_turn = 0
         self._current_task = None
+        # The turn being answered (turn.py), while it runs: what it does on the
+        # side, an arrival turn, acts for the same speaker (`speaker_person`).
+        self._turn: Optional[VoiceTurn] = None
         # Where the next turn goes. None means the lobby (see `focus`).
         self._focus: Optional[VoiceFocus] = None
         # The focus before the last move, by key, and what has happened since:
@@ -638,6 +641,7 @@ class VoiceManager:
             session = SessionManager().get_session(
                 agent_id=self.agent_id, source="discord", channel=channel, surface="voice",
                 output=self.turn_output(channel) if self.turn_output else None,
+                person=self.speaker_person(),
             )
             answered = await self.reply.stream(
                 agent, arrival_message(note), sender, session, channel, speech,
@@ -900,7 +904,8 @@ class VoiceManager:
         (SessionStore.append_room_event): best effort, it never stops the room."""
         try:
             session = SessionManager.get_session(agent_id=self.agent_id, source="discord",
-                                                 channel=focus.channel_name, surface="voice")
+                                                 channel=focus.channel_name, surface="voice",
+                                                 person=self.speaker_person())
             SessionStore().append_room_event(session.session_id, event)
         except Exception as e:
             self._log(f"Could not record the room's {event.get('kind')}: {e}")
@@ -956,6 +961,13 @@ class VoiceManager:
         """No newer turn has started, and turn `turn_id` wasn't interrupted."""
         return turn_id == self._active_turn
 
+    def speaker_person(self) -> Optional[str]:
+        """Who the turn being answered is for (VoiceTurn.person): what that
+        turn does on the side, an arrival turn, acts for the same person.
+        None between turns."""
+        turn = self._turn
+        return turn.person() if turn is not None and self.is_current(turn.id) else None
+
     def begin_turn(self):
         """Starts a turn that answers everything still unanswered; none once
         you're hanging up (`hang_up`): a "bye!" after it is for no one."""
@@ -988,4 +1000,9 @@ class VoiceManager:
                 self.floor.forget(utterances)
                 await self.enrollment.take(enrollment, utterances)
                 return
-            await VoiceTurn(self, turn_id, utterances).run()
+            turn = self._turn = VoiceTurn(self, turn_id, utterances)
+            try:
+                await turn.run()
+            finally:
+                if self._turn is turn:
+                    self._turn = None

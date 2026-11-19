@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.channel.discord import ownership as own
 from core.channel.discord.ownership import DEV, MANUAL, PROD, Event, Ownership, parse
+from tests.household import OWNER_ID, STRANGER_ID, PLAYER2_ID, ConfigLoader, household
 
 T0 = datetime.datetime(2026, 9, 30, 12, 0, tzinfo=datetime.timezone.utc)
 # Made up, and set for every test here: core/config/settings.py loads .env at
@@ -328,6 +329,58 @@ class TestCoordinationOff(unittest.IsolatedAsyncioTestCase):
         o = fresh(PROD)
         self.assertFalse(o.is_control_channel(MagicMock(id="")))
         self.assertFalse(o.is_control_channel(object()))
+
+
+def by(content, id_, author_id, bot=False):
+    """A control-thread line posted by the account `author_id`."""
+    m = msg(content, id_, bot=bot)
+    m.author.id = author_id
+    return m
+
+
+class TestInAHousehold(unittest.IsolatedAsyncioTestCase):
+    """Only a bot's own lines and the admin's -- owner, who manages the Concierge -- change
+    who holds what (`counts`), live and replayed."""
+
+    def setUp(self):
+        for patcher in (household(), patch.object(own, "AgentsLoader", ConfigLoader),
+                        patch("core.runtime.commands.base.AgentsLoader", ConfigLoader)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_what_counts(self):
+        self.assertTrue(own.counts(by("!claim a", 1, OWNER_ID)))
+        self.assertFalse(own.counts(by("!claim a", 2, PLAYER2_ID)))
+        self.assertFalse(own.counts(by("!claim a", 3, STRANGER_ID)))
+        self.assertTrue(own.counts(by("🔒 claim a @laptop", 4, 4242, bot=True)))  # a bot's own line
+
+    def test_a_refused_command_changes_nothing_but_is_still_returned_to_answer(self):
+        o = fresh(PROD)
+        self.assertEqual(o.apply(by("!claim a", 1, PLAYER2_ID)), Event("cmd_claim", "a"))
+        self.assertEqual(o.holds, {})
+        o.apply(by("!claim a", 2, OWNER_ID))
+        o.apply(by("!release", 3, PLAYER2_ID))
+        self.assertEqual(o.holder("a"), MANUAL)
+
+    async def test_a_refused_command_stays_refused_when_replayed(self):
+        o = fresh(PROD, ready=False)
+        thread = MagicMock()
+        thread.history = _History([by("!claim a", 1, OWNER_ID), by("!release", 2, PLAYER2_ID), by("!claim b", 3, PLAYER2_ID)])
+        bot = MagicMock()
+        bot.get_channel.return_value = thread
+        await o.rebuild(bot)
+        self.assertEqual({k: v.holder for k, v in o.holds.items()}, {"a": MANUAL})
+
+    @patch("core.channel.discord.loader.BotsLoader")
+    async def test_the_elected_bot_says_no_and_nothing_is_claimed(self, mock_bots_loader):
+        from core.channel.discord.runner import BotRunner
+        runner = BotRunner("test_token", "main")
+        runner.bot = MagicMock()
+        mock_bots_loader.return_value._bots = {"main": runner}
+        command = by("!claim main", 5, PLAYER2_ID)
+        await runner.on_message(command)
+        command.channel.send.assert_awaited_once_with("`!claim` is admin-only.")
+        self.assertIsNone(Ownership().holder("main"))
 
 
 if __name__ == "__main__":

@@ -30,8 +30,13 @@ Every read returns a FollowUp: every column but `check_key`, with its check a
 Check and each fixed vocabulary an enum (Kind, Status, Closer). A check is
 stored as JSON, {"type": "model", "what": ...} or a scan's {"type": <scan>,
 ...args}: `Check.from_spec` reads that form and `Check.spec` writes it. The
-table predates one-offs, so the store adds the columns an older one lacks
-(_ADDED_COLUMNS).
+table predates one-offs and `opened_by`, so the store adds the columns an older
+one lacks (_ADDED_COLUMNS).
+
+In household mode (core/permissions/access.py) a follow-up records the person
+whose turn opened it (`opened_by`), so `!followups` can say who asked and a
+one-off's turn can bring it back to them by name. With one person it stays "",
+as on a row opened before the column existed.
 
 Two follow-ups are the same when their `check_key`s match: a watch's is the
 agent and its check, normalised (`check_key`); a one-off's, the agent, its due
@@ -97,6 +102,7 @@ _ADDED_COLUMNS = (
     ("kind", "TEXT NOT NULL DEFAULT 'watch' CHECK (kind IN ('watch', 'once'))"),
     ("due_at", "REAL"),
     ("notes", "TEXT NOT NULL DEFAULT ''"),
+    ("opened_by", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -201,6 +207,7 @@ class FollowUp:
     kind: Kind = Kind.WATCH                  # a watch, or a one-off
     due_at: Optional[float] = None           # a one-off's: when it's brought up, epoch seconds; None for a watch
     notes: str = ""                          # a one-off's: the context its agent wrote for then; "" for a watch
+    opened_by: str = ""                      # in household mode, the person whose turn opened it; "" otherwise
 
     @property
     def is_open(self) -> bool:
@@ -355,6 +362,7 @@ def _follow_up(record: Row) -> FollowUp:
         kind=Kind(record["kind"]),
         due_at=record["due_at"],
         notes=record["notes"],
+        opened_by=record["opened_by"],
     )
 
 
@@ -393,33 +401,35 @@ class FollowUpStore(Store):
 
     def open(self, *, agent_id: str, goal: str, check: Check, every_s: int, until: str,
              close_when: str = "", channel: str = "", session_id: str = "",
-             at: Optional[float] = None) -> FollowUp:
+             at: Optional[float] = None, opened_by: str = "") -> FollowUp:
         """Opens a watch for `agent_id`, and returns it. Its cadence starts at `every_s`
         and its first check is due `every_s` from now. Raises DuplicateFollowUp while an
-        open follow-up has the same check (`check_key`)."""
+        open follow-up has the same check (`check_key`). `opened_by` is who asked, in
+        household mode."""
         at = time.time() if at is None else at
         key = check_key(agent_id, check)
         values = {"agent_id": agent_id, "goal": goal, "check_spec": json.dumps(check.spec(), ensure_ascii=False),
                   "check_key": key, "every_s": every_s, "interval_s": every_s, "until": until,
                   "close_when": close_when or "", "status": Status.OPEN, "opened_at": at, "channel": channel or "",
-                  "session_id": session_id or "", "next_check_at": at + every_s}
+                  "session_id": session_id or "", "next_check_at": at + every_s, "opened_by": opened_by or ""}
         return self._insert_open(values)
 
     def open_once(self, *, agent_id: str, goal: str, due_at: float, notes: str = "", channel: str = "",
-                  session_id: str = "", at: Optional[float] = None) -> FollowUp:
+                  session_id: str = "", at: Optional[float] = None, opened_by: str = "") -> FollowUp:
         """Opens a one-off for `agent_id`: `goal` brought up at `due_at` (epoch seconds), with
         the agent's `notes` for then, and returns it. It's due at `due_at`, with no cadence,
         and its `until` is the day after (`grace_until`). Its check is a model check on its
         goal: the column needs one, and a model check is the one kind nothing scans or builds.
         Raises DuplicateFollowUp while an open one-off of the agent's has the same goal at
-        the same time (`once_key`)."""
+        the same time (`once_key`). `opened_by` is who asked, in household mode: its turn
+        brings it back to them."""
         at = time.time() if at is None else at
         check = Check(type=MODEL_CHECK, what=goal)
         values = {"agent_id": agent_id, "goal": goal, "kind": Kind.ONCE, "due_at": due_at, "notes": notes or "",
                   "check_spec": json.dumps(check.spec(), ensure_ascii=False),
                   "check_key": once_key(agent_id, goal, due_at), "every_s": 0, "interval_s": 0,
                   "until": grace_until(due_at), "status": Status.OPEN, "opened_at": at, "channel": channel or "",
-                  "session_id": session_id or "", "next_check_at": due_at}
+                  "session_id": session_id or "", "next_check_at": due_at, "opened_by": opened_by or ""}
         return self._insert_open(values)
 
     def _insert_open(self, values: Dict[str, Any]) -> FollowUp:

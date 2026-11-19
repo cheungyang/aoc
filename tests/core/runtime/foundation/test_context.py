@@ -245,6 +245,34 @@ class TestExecutionContextSurface(unittest.TestCase):
                 current_execution_context.reset(token)
         self.assertEqual(callee.get_surface(), "voice")
 
+    def test_a_turn_acts_for_its_person_through_every_derivation(self):
+        """`person` (core/permissions/access.py): who started the turn. An agent
+        another agent asked is checked against that person, not the asker."""
+        ctx = SessionManager.get_session(agent_id="main", source="discord", channel="meal-planning", person="player2")
+        self.assertEqual(ctx.person, "player2")
+        for derived in (ctx.with_graph("coding"), ctx.with_surface("voice"), ctx.with_agent("meal-planner")):
+            self.assertEqual(derived.person, "player2")
+
+    def test_a_context_minted_under_a_turn_acts_for_its_person(self):
+        caller = SessionManager.get_session(agent_id="main", source="discord", channel="general", person="player2")
+        token = current_execution_context.set(caller)
+        try:
+            callee = SessionManager.get_session(agent_id="b", source="tool", channel="general")
+            explicit = SessionManager.get_session(agent_id="b", source="tool", channel="general", person="owner")
+        finally:
+            current_execution_context.reset(token)
+        self.assertEqual(callee.person, "player2")
+        self.assertEqual(explicit.person, "owner")
+
+    def test_a_turn_nobody_started_acts_for_nobody(self):
+        self.assertIsNone(SessionManager.get_session(agent_id="a", source="scheduled", channel="general").person)
+
+    def test_the_person_never_changes_the_session(self):
+        """A household channel is one conversation, whoever writes in it."""
+        yours = SessionManager.get_session(agent_id="a", source="discord", channel="meal-planning", person="owner")
+        theirs = SessionManager.get_session(agent_id="a", source="discord", channel="meal-planning", person="player2")
+        self.assertEqual(yours.session_id, theirs.session_id)
+
     def test_unknown_surface_rejected(self):
         with self.assertRaises(ValueError):
             SessionManager.get_session(agent_id="a", source="discord", channel="general", surface="telepathy")

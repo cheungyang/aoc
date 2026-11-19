@@ -7,7 +7,7 @@ thinking level or voice would be silently ignored, and the agent would simply
 be a little worse at its job with nothing to say why.
 
 Checked here: the set of top-level keys, `skills`, `thinking`, `voice`,
-`proactivity` and `shared_channels`.
+`proactivity`, `shared_channels` and `access`.
 Schedules have their own validator (core.scheduler.registry), which rejects
 entries one at a time; tool grants are resolved by ToolsLoader.
 
@@ -19,13 +19,16 @@ The shapes:
         "weekly_review": {}                         # on demand, via load_skill
     },
     "thinking": {"text": "high"},                 # per-surface overrides, rarely needed
-    "voice": {"name": "en-US-Chirp3-HD-Zephyr", "rate": 1.1}
+    "voice": {"name": "en-US-Chirp3-HD-Zephyr", "rate": 1.1},
+    "access": ["owner", "player2"]                # who may use it
+                                                  # (core/permissions/access.py)
 """
 import os
 import re
 from typing import Any, Dict, Iterable, List, Set
 
 from core.config.models import THINKING_BY_SURFACE, THINKING_LEVELS
+from core.permissions.access import validate_access
 
 # Every top-level key an agent.json may use. A key outside this set is almost
 # always a typo or a stale field, and both are cheaper to catch here than to
@@ -52,6 +55,7 @@ KNOWN_KEYS = frozenset({
     "thinking",
     "voice",
     "voice_config",
+    "access",
 })
 
 PRELOAD_MODES = ("full", "core")
@@ -186,4 +190,6 @@ def validate_agent_config(config: Any, known_skills: Iterable[str]) -> List[str]
         errors.extend(_validate_proactivity(config["proactivity"]))
     if "shared_channels" in config:
         errors.extend(_validate_shared_channels(config["shared_channels"]))
+    if "access" in config:
+        errors.extend(validate_access(config["access"]))
     return errors

@@ -10,4 +10,6 @@ the runtime agree.
 - denies.py: `"!<path>"` keys, which refuse actions under a path.
 - declarations.py: reads what a tool module declares about itself
   (`PERMISSION_BUNDLES`, `PERMISSION_MATCHER`), failing closed.
+- access.py: which *people* may use an agent, in a household: agent.json
+  `access`, a list of names.
 """

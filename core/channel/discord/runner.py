@@ -1,19 +1,24 @@
 import asyncio
 import contextlib
 import datetime
+import re
 import time
 import discord
 import base64
 from collections import OrderedDict
-from typing import List
+from typing import List, Optional, Set
 from discord.ext import commands
 from core.channel.discord.output import DiscordOutput
+from core.channel.discord.turn_locks import TURN_LOCKS
+from core.channel import names
 from core.loaders.agents_loader import AgentsLoader
 from core.loaders.channel_hosts import hosts, named_channels
+from core.permissions import access
 from core.runtime.commands.base import ControlContext, TypedContext
 from core.runtime.commands.registry import CONTROL, TYPED
 from core.runtime.foundation import events
 from core.learning import events as learning_events
+from core.runtime.foundation.routing import answering_agent
 from core.runtime.foundation.sessions import SessionManager
 from core.proactive.cards import cards as peer_cards
 from core.scheduler.script_runner import ProjectScripts
@@ -35,6 +40,33 @@ from core.channel.voice.voice_manager import VoiceManager
 REPLY_EXCERPT_CHARS = 1500
 # Your 👎 (any skin tone) on an agent's message: friction for the learning loop.
 THUMBS_DOWN = "👎"
+
+# What a message gets, instead of a turn, from someone who may not use the
+# agent it's for (core/permissions/access.py): a reaction, not a reply.
+LOCKED = "🔒"
+
+# A poll vote, as the bot posts it for whoever clicked (ui.py): "<@id>: answer".
+VOTE = re.compile(r"<@!?(\d+)>: ")
+
+# The accounts no person is configured for, already logged: the bots ignore
+# their messages, and say so once per account, not on every message.
+_strangers: Set[str] = set()
+
+
+def voter(text: str) -> Optional[str]:
+    """The person whose poll vote `text` is, or None when it names no account."""
+    found = VOTE.match(text or "")
+    return access.person_for(found.group(1)) if found else None
+
+
+def note_stranger(author) -> None:
+    """Logs, once per account and process, that the bots ignore `author`: no
+    DISCORD_USER_<NAME> lists the account (core/permissions/access.py)."""
+    key = str(getattr(author, "id", author))
+    if key not in _strangers:
+        _strangers.add(key)
+        print(f"[access] Ignoring {getattr(author, 'name', None) or key} ({key}): "
+              f"no DISCORD_USER_<NAME> lists this account.")
 
 
 def format_reply_context(author: str, posted_at, content: str) -> str:
@@ -245,11 +277,17 @@ class BotRunner:
         """Control-thread messages: claims, releases and user commands.
 
         Every bot in this process sees the same message; `apply` is idempotent,
-        and a user command (core/runtime/commands/control/) answers from one bot."""
+        and a user command (core/runtime/commands/control/) answers from one bot.
+        Only the admin's commands change anything (Ownership.counts), and only
+        the admin's are run: anyone else's gets a line saying so."""
         event = Ownership().apply(message)
         if event is None or getattr(message.author, "bot", False):
             return
-        ctx = ControlContext(channel=message.channel, author=message.author, agent_id=self.agent_id,
+        person = access.person_for(getattr(message.author, "id", None))
+        if person is None:
+            note_stranger(message.author)
+            return
+        ctx = ControlContext(channel=message.channel, author=message.author, person=person, agent_id=self.agent_id,
                              control=_ControlThread(self, message))
         await CONTROL.answer(message.content, ctx)
 
@@ -306,16 +344,40 @@ class BotRunner:
             return not (tagged_bots and not is_self_tagged)
         return is_self_tagged
 
-    async def _run_command(self, message, content: str) -> None:
-        """`!name args`: the typed command it names, if this bot answers it here.
-        Anything else after "!" is ignored."""
+    def _answering_agent(self, message, is_host: bool) -> str:
+        """The agent a message here reaches: for the host, whoever its router
+        hands the channel to (routing.answering_agent: Ramsay in #meal-planning,
+        the host itself in #general); for a bot tagged in, its own. Who may
+        talk here is asked of that agent."""
+        if not is_host:
+            return self.agent_id
+        try:
+            return answering_agent(self.agent_id, names.channel_name(message.channel), AgentsLoader())
+        except Exception as e:
+            print(f"[BotRunner:{self.agent_id}] Could not tell who answers here: {format_error_message(e)}")
+            return self.agent_id
+
+    @staticmethod
+    def _turn_lock(channel, config):
+        """One turn at a time in a household agent's channel or thread
+        (turn_locks.py), so two people typing at once don't race on its one
+        session; one person's agents take no lock, as before."""
+        if not access.is_household(config):
+            return contextlib.nullcontext()
+        return TURN_LOCKS.hold(str(getattr(channel, "id", None) or channel))
+
+    async def _run_command(self, message, content: str, person: Optional[str] = None) -> None:
+        """`!name args`: the typed command it names, if this bot answers it here,
+        given by `person`. Anything else after "!" is ignored."""
+        is_host = self._hosts(message.channel)
         ctx = TypedContext(
             channel=message.channel,
             author=message.author,
+            person=person,
             agent_id=self.agent_id,
             session=SessionManager().get_session(self.agent_id, source="discord", channel=message.channel,
-                                                 output=DiscordOutput(message.channel)),
-            answers_here=self._answers(message, self._hosts(message.channel)),
+                                                 output=DiscordOutput(message.channel), person=person),
+            answers_here=self._answers(message, is_host),
             voice=self.voice_manager,
             is_owner=self.bot.is_owner,
             scripts=ProjectScripts(),
@@ -361,23 +423,40 @@ class BotRunner:
                 parts = content.split(": ", 1)
                 if len(parts) > 1:
                     content = parts[1]
+                # The vote is the turn of whoever clicked. One from an account
+                # nobody is configured as is ignored, as its messages are.
+                person = voter(message.content)
+                if person is None:
+                    return
             else:
                 # Ignore other messages from self to prevent loops
+                return
+        else:
+            # Who wrote it (core/permissions/access.py). An account nobody is
+            # configured as is ignored: no command, no turn, no inbox signal.
+            person = access.person_for(getattr(message.author, "id", None))
+            if person is None:
+                note_stranger(message.author)
                 return
 
         # A typed command: `!name args` (core/runtime/commands/typed/). A bot's
         # own message never runs one.
         if content.startswith("!"):
             if mine and not getattr(message.author, "bot", False):
-                await self._run_command(message, content)
+                await self._run_command(message, content, person)
             return
 
         loader = AgentsLoader()
         is_host = self._hosts(message.channel)
+        # The agent the message reaches, and whether its author may use it
+        # (core/permissions/access.py): someone who may not isn't talking to it.
+        answering = self._answering_agent(message, is_host)
+        config = loader.get_agent_config(answering)
+        allowed = access.can(person, config)
 
         # You posted here, typed or by voting in a poll: whatever its agent
         # left you in this channel is finished (core/channel/voice/briefing).
-        if is_host and mine:
+        if is_host and mine and allowed:
             mark_read(message.channel, Via.TYPED)
 
         if not self._answers(message, is_host):
@@ -390,7 +469,21 @@ class BotRunner:
             print(f"[Ownership:{ownership.label()}] {self.agent_id}: not answering message {msg_id}, held by {holder}.")
             return
 
-        agent = loader.get_agent(self.agent_id)
+        # Only someone who may use that agent gets a turn; anyone else gets a
+        # 🔒, and the channel stays quiet.
+        if not allowed:
+            print(f"[BotRunner:{self.agent_id}] 🔒 {person} may not use {answering}: not answering message {msg_id}.")
+            await self._react(message, LOCKED)
+            return
+
+        async with self._turn_lock(message.channel, config):
+            await self._answer(message, content, is_host, person)
+
+    async def _answer(self, message, content: str, is_host: bool, person: Optional[str]) -> None:
+        """The turn `message` starts, as this bot's agent: on the channel's
+        session, acting for `person` through every delegation it makes, with
+        its reply streamed where it lands."""
+        agent = AgentsLoader().get_agent(self.agent_id)
         reaction_handler = ReactionCallbackHandler(message)
         
         content_payload = content
@@ -422,8 +515,10 @@ class BotRunner:
 
         # Get an immutable session object for this request. Its output remembers
         # this message: a live `now` route's reaction goes on it (core/proactive).
+        # It acts for whoever wrote the message, through every delegation.
         session = SessionManager().get_session(self.agent_id, source="discord", channel=message.channel,
-                                               output=DiscordOutput(message.channel, message_id=message.id))
+                                               output=DiscordOutput(message.channel, message_id=message.id),
+                                               person=person)
 
         # For newly opened threads, ensure the thread's starter message context is seeded
         if session.is_thread():

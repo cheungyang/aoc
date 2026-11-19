@@ -222,6 +222,23 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(content[0]["text"], r"^\[\w{3} \d\d:\d\d\]$")
         self.assertEqual(content[1:], list_content)
 
+    @patch('core.runtime.agent.LoggingHandler')
+    async def test_in_a_household_the_message_names_its_person(self, mock_logging_handler_class):
+        """core/permissions/access.py: with more than one person configured,
+        the stamp says who wrote the message; otherwise the prompt is as before."""
+        for household, expected in ((True, r"^\[\w{3} \d\d:\d\d · player2\] hello$"), (False, r"^\[\w{3} \d\d:\d\d\] hello$")):
+            with self.subTest(household=household), \
+                    patch("core.runtime.agent.access.household_mode", return_value=household):
+                mock_graph = MagicMock()
+                mock_graph.ainvoke = AsyncMock(return_value={"messages": [MagicMock(content="Reply text")]})
+                agent = Agent("test-agent", {})
+                agent._graphs[""] = mock_graph
+                session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general",
+                                                     person="player2")
+                await agent.execute("hello", session=session)
+                args, _ = mock_graph.ainvoke.call_args
+                self.assertRegex(args[0]["messages"][0]["content"], expected)
+
     async def test_execute_empty_list_content(self):
         agent = Agent("test-agent", {})
         session = SessionManager.get_session(agent_id="test-agent", source="discord", channel="general")

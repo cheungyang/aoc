@@ -15,7 +15,8 @@ leaves its agent's Live Context. An extend takes the same dates as the tool's
 Context show the new end. A one-off isn't extended: its time is what you asked
 for, so you cancel it and ask its agent for another. With the switch off and
 follow-ups still open, a banner says nothing checks them. Agents are named by
-id, as in `!signals`.
+id, as in `!signals`. In household mode (core/permissions/access.py) a line
+also says who asked for it (`asked_by`); with one person it reads as before.
 """
 import asyncio
 import time
@@ -23,6 +24,7 @@ from datetime import datetime
 from typing import Optional
 
 from core.config.settings import Config
+from core.permissions import access
 from core.runtime.commands.base import ChannelCommand, TypedContext
 from core.storage.follow_ups import Closer, FollowUp, FollowUpStore, Status, cadence_text, parse_until, when_text
 from core.util.local_time import get_local_timezone
@@ -47,6 +49,21 @@ def next_text(follow_up: FollowUp, now: float) -> str:
     return f"next {when_text(at, now)}"
 
 
+def asked_by(follow_up: FollowUp) -> str:
+    """Who asked for it, as "asked by player2", in household mode: two people share the
+    agents, so the list says whose each is. "" with one person, or for a row nobody's
+    turn opened, so the line reads as it always has."""
+    if not (follow_up.opened_by and access.household_mode()):
+        return ""
+    return f"asked by {follow_up.opened_by}"
+
+
+def goal_text(follow_up: FollowUp) -> str:
+    """`"goal"`, then ` · asked by player2` when `asked_by` has it."""
+    asker = asked_by(follow_up)
+    return f"\"{follow_up.goal}\" · {asker}" if asker else f"\"{follow_up.goal}\""
+
+
 def open_line(follow_up: FollowUp, now: float) -> str:
     """`#12 reward-travel · "goal" · every 4d (asked 2d) · next Thu 09:00 · until ... · checks · check: ...`"""
     if follow_up.is_once:
@@ -54,7 +71,7 @@ def open_line(follow_up: FollowUp, now: float) -> str:
     every = cadence_text(follow_up.interval_s)
     if follow_up.interval_s != follow_up.every_s:
         every += f" (asked {cadence_text(follow_up.every_s)})"
-    return (f"#{follow_up.id} {follow_up.agent_id} · \"{follow_up.goal}\" · every {every} · "
+    return (f"#{follow_up.id} {follow_up.agent_id} · {goal_text(follow_up)} · every {every} · "
             f"{next_text(follow_up, now)} · until {follow_up.until} · {follow_up.tally()} · "
             f"check: {follow_up.check.text()}")
 
@@ -62,7 +79,7 @@ def open_line(follow_up: FollowUp, now: float) -> str:
 def once_line(follow_up: FollowUp, now: float) -> str:
     """`#7 agent-designer · "goal" · once at Tue 09:00`, then "bringing it up now" while its run
     holds it, "due now" once its time has come, or after a failed attempt when it's tried again."""
-    line = f"#{follow_up.id} {follow_up.agent_id} · \"{follow_up.goal}\" · once at {when_text(follow_up.due_at, now)}"
+    line = f"#{follow_up.id} {follow_up.agent_id} · {goal_text(follow_up)} · once at {when_text(follow_up.due_at, now)}"
     if follow_up.claimed_at:
         return f"{line} · bringing it up now"
     if follow_up.next_check_at <= now:
@@ -78,7 +95,7 @@ def closed_line(follow_up: FollowUp) -> str:
     one-off's says when it was for, and its attempts only when it took more than one."""
     moment = local(follow_up.closed_at) if follow_up.closed_at else None
     day = f"{moment:%b} {moment.day}" if moment else "?"
-    parts = [f"#{follow_up.id} {follow_up.agent_id}", f"\"{follow_up.goal}\""]
+    parts = [f"#{follow_up.id} {follow_up.agent_id}", goal_text(follow_up)]
     if follow_up.is_once:
         due = local(follow_up.due_at)
         parts.append(f"once at {due:%b} {due.day} {due:%H:%M}")

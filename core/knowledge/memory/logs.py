@@ -16,10 +16,14 @@ from core.config.settings import Config
 from core.util.local_time import get_local_now
 
 
-def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
+def save_agent_memory_log(agent_id: str, log_content: str, person: Optional[str] = None) -> Optional[str]:
     """
     Appends intercepted memory log content to <pkm_dir>/agents/<agent_id>/memory_logs/YYYY-MM-DD.md
     using the filesystem tool.
+
+    With `person` (a household: core/permissions/access.py), each line's stamp
+    also names who the turn was for, "- [19:02:11 · player2] ...": context for
+    the dream, which keeps one memory whoever said it.
     """
     if not log_content or not log_content.strip() or not agent_id:
         return None
@@ -33,6 +37,7 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
         now = get_local_now()
         today_str = now.strftime("%Y-%m-%d")
         time_str = now.strftime("%H:%M:%S")
+        stamp = f"{time_str} · {person}" if person else time_str
         log_file = os.path.join(pkm_dir, "agents", agent_id, "memory_logs", f"{today_str}.md")
 
         formatted_lines = []
@@ -43,10 +48,11 @@ def save_agent_memory_log(agent_id: str, log_content: str) -> Optional[str]:
 
             # Strip leading list bullets/hyphens
             line_body = re.sub(r"^[-*•]\s*", "", line)
-            # Strip placeholder or prior timestamps e.g. [00:00:00], [HH:MM:SS], [12:34:56]
-            line_body = re.sub(r"^\[(?:\d{2}:\d{2}:\d{2}|HH:MM:SS|--:--:--)\]\s*", "", line_body, flags=re.IGNORECASE)
+            # Strip placeholder or prior timestamps e.g. [00:00:00], [HH:MM:SS], [12:34:56], [12:34:56 · player2]
+            line_body = re.sub(r"^\[(?:\d{2}:\d{2}:\d{2}|HH:MM:SS|--:--:--)(?: · [a-z][a-z0-9_-]*)?\]\s*", "",
+                               line_body, flags=re.IGNORECASE)
             
-            formatted_lines.append(f"- [{time_str}] {line_body}")
+            formatted_lines.append(f"- [{stamp}] {line_body}")
 
         if not formatted_lines:
             return None

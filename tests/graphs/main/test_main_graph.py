@@ -186,6 +186,25 @@ class TestMainGraphRouting(unittest.IsolatedAsyncioTestCase):
         self.assertIs(kwargs["routed"], True)  # the agent you're talking to: it keeps follow_up
         self.assertEqual(concierge.calls, 0)
 
+    async def test_decide_hears_whose_turn_it_is(self):
+        """A name hands the message off only to an agent its person may use (routing.decide)."""
+        from core.runtime.foundation import routing
+        seen = []
+
+        def spy(*args, **kwargs):
+            seen.append(kwargs.get("person"))
+            return routing.decide(*args, **kwargs)
+
+        with patch("graphs.main.graph.decide", side_effect=spy):
+            await self._run("scan this receipt", self._loader())  # a turn nobody started
+            wives = SessionManager.get_session(agent_id="main", source="discord", channel="receipts", person="player2")
+            token = current_execution_context.set(wives)
+            try:
+                await self._run("scan this receipt", self._loader())  # its session inherits player2
+            finally:
+                current_execution_context.reset(token)
+        self.assertEqual(seen, [None, "player2"])
+
     async def test_delegated_reply_is_attributed_in_history(self):
         """Unattributed, a later concierge turn would read the specialist's words
         as its own and defend them as its own reasoning."""

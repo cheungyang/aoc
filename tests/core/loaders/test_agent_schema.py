@@ -115,6 +115,25 @@ class TestSharedChannels(unittest.TestCase):
                 self.assertTrue(message.startswith("shared_channels must be a list of channel names"), message)
 
 
+class TestAccess(unittest.TestCase):
+    """Who may use the agent (core/permissions/access.py)."""
+
+    def test_a_list_of_people(self):
+        self.assertEqual(errors(access=["owner", "player2"]), [])
+        self.assertEqual(errors(access=["player2"]), [])
+
+    def test_anything_else_is_rejected(self):
+        """A mistyped name would silently let nobody in."""
+        self.assertIn("access: 'Player2' is not a person's name (lowercase letters, digits, '-' or '_')",
+                      errors(access=["owner", "Player2"]))
+        for bad in ({"owner": "manage"}, [], "owner"):
+            with self.subTest(access=bad):
+                self.assertEqual(len(errors(access=bad)), 1)
+
+    def test_access_is_optional(self):
+        self.assertEqual(errors(), [])
+
+
 class TestTopLevel(unittest.TestCase):
 
     def test_unknown_keys_are_rejected(self):

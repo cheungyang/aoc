@@ -29,7 +29,12 @@ Rules:
   its claim (already handled by prod) or older than `DEV_MAX_MESSAGE_AGE`
   (replayed by Discord after the laptop wakes from sleep);
 - with `CONTROL_THREAD_ID` unset there is no thread, so nobody can claim:
-  prod owns every agent and dev none, and the log says so once.
+  prod owns every agent and dev none, and the log says so once;
+- only a bot's own lines and the admin's (core/permissions/access.py: whoever
+  may use the Concierge) change anything (`counts`): anyone else's command changes
+  nothing, live or replayed. With nobody configured every account is the
+  owner, the admin, so every line counts, as before. Prod and dev must agree
+  on who is configured, as they agree on everything else in the thread.
 """
 import asyncio
 import datetime
@@ -38,6 +43,8 @@ import socket
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
+from core.loaders.agents_loader import AgentsLoader
+from core.permissions import access
 from core.runtime.commands.registry import CONTROL
 from core.config.settings import Config
 
@@ -78,6 +85,19 @@ def parse(content: str) -> Optional[Event]:
         command, args = found
         return Event(f"cmd_{command.name}", args or None)
     return None
+
+
+def counts(message) -> bool:
+    """Whether a control-thread line may change who holds what: a bot's own
+    claim or release line, or one the admin posted (whoever may use the
+    Concierge, core/permissions/access.py). The same rule as the control
+    commands' own (core/runtime/commands/base.py ADMIN), so a refused `!claim`
+    is refused here too, live and replayed."""
+    author = getattr(message, "author", None)
+    if author is None or getattr(author, "bot", False):
+        return True
+    person = access.person_for(getattr(author, "id", None))
+    return person is not None and access.can(person, AgentsLoader().get_agent_config(access.ADMIN_AGENT))
 
 
 def claim_text(agent: str, host: str) -> str:
@@ -192,7 +212,9 @@ class Ownership:
 
     def apply(self, message) -> Optional[Event]:
         """Applies one control-thread message. Idempotent per message id, so
-        every bot in this process may call it for the same message."""
+        every bot in this process may call it for the same message. One that
+        doesn't count (`counts`) changes nothing, but is still returned: the
+        runner answers it, with a refusal."""
         event = parse(getattr(message, "content", ""))
         if event is None:
             return None
@@ -201,6 +223,10 @@ class Ownership:
             if msg_id in self._seen:
                 return event
             self._seen.add(msg_id)
+        if not counts(message):
+            print(f"[Ownership:{self.label()}] Ignoring {getattr(message, 'content', '')!r} from "
+                  f"{getattr(message.author, 'name', '?')}: only the admin's commands count.")
+            return event
         if self._rebuilding:
             self._pending.append(message)
             return event
@@ -285,7 +311,8 @@ class Ownership:
             for m in messages + late:
                 event = parse(getattr(m, "content", ""))
                 if event is not None:
-                    self._reduce(holds, event, getattr(m, "created_at", None))
+                    if counts(m):  # a refused command stays refused when replayed
+                        self._reduce(holds, event, getattr(m, "created_at", None))
                     seen.add(getattr(m, "id", None))
             self._pending = []
             self.holds = holds

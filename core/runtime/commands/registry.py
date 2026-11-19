@@ -73,11 +73,21 @@ class CommandRegistry:
     async def answer(self, text: str, ctx: CommandContext) -> Optional[Command]:
         """Runs the first command that `text` gives, is answered here, and
         answers it. None if there's none: the text is a message for the agent.
-        The one that answers is logged for the learning loop."""
+        The one that answers is logged for the learning loop.
+
+        One the person may not give (`Command.refusal`) gets a line saying so
+        instead, from one bot (`says_refusal`), and counts as answered: it
+        never reaches the agent either, and isn't logged."""
         for command in self._commands:
             args = command.match(text)
             if args is None or not command.available(ctx):
                 continue
+            refusal = command.refusal(ctx)
+            if refusal is not None:
+                if command.says_refusal(ctx):
+                    print(f"[commands] Refused {ctx.person}: {refusal}")
+                    await ctx.reply(refusal)
+                return command
             # Read before it runs: "go back" or a switch moves the voice room.
             origin = events.command_origin(ctx) if events.observing() else None
             if await command.run(ctx, args) is not False:

@@ -6,6 +6,7 @@ flips that channel from its agent to the notice that it isn't set up, with no
 code change. If it fails, the question is whether the config change was
 intended -- not whether the test should be updated.
 """
+import copy
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from core.loaders import channel_hosts
 from core.loaders.channel_hosts import hosted_channels, listed_channels, shared_channels
+from core.permissions import access
 from core.runtime.foundation.routing import (
     CHANNEL_MESSAGE,
     CONCIERGE,
@@ -30,6 +32,7 @@ from core.runtime.foundation.routing import (
     home_channel,
     routing_enabled,
 )
+from tests.household import dormant, household
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 # The Concierge's shape: reachable everywhere, owning no channel, holding no
@@ -466,6 +469,54 @@ class TestHandoffs(unittest.TestCase):
         """The voice focus and the channel inbox ask about a channel, not a message."""
         self.assertEqual(answering_agent("main", "pkm-wiki", self.loader), "wiki-gardener")
         self.assertEqual(answering_agent("main", "general", self.loader), "main")
+
+
+class TestHandoffsForAPerson(unittest.TestCase):
+    """Given who wrote it, a message calls only agents that person may use
+    (core/permissions/access.py): Ted is the household's; Daisy, without a
+    block, is the owner's alone."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.configs = copy.deepcopy(_load_agent_configs())
+        for config in cls.configs.values():
+            config.pop("access", None)
+        cls.configs["topic-researcher"]["access"] = ["owner", "player2"]
+        cls.loader = _ConfigLoader(cls.configs)
+
+    def setUp(self):
+        patcher = household()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _decide(self, prompt, person, channel="general"):
+        return decide(prompt, "main", channel, self.configs["main"], self.loader, person=person)
+
+    def test_a_name_hands_off_only_to_an_agent_the_person_may_use(self):
+        daisy = "Daisy, I'm on a trip to Tahoe with my family"
+        self.assertEqual(self._decide(daisy, "player2").target, FIXED)  # a name that isn't player2's is just a word
+        self.assertEqual((self._decide(daisy, "owner").target, self._decide(daisy, "owner").agent_id),
+                         (HANDOFF, "day-planner"))
+        ted = self._decide("Ted, create a syllabus on this topic", "player2")
+        self.assertEqual((ted.target, ted.agent_id, ted.channel), (HANDOFF, "topic-researcher", "topic-research"))
+
+    def test_with_no_person_every_name_hands_off_as_before(self):
+        self.assertEqual(self._decide("Daisy, I'm on a trip to Tahoe with my family", None).agent_id, "day-planner")
+
+    def test_who_can_be_addressed(self):
+        everyone, theirs = addressable_agents(self.loader), addressable_agents(self.loader, person="player2")
+        self.assertIn("day-planner", everyone.values())
+        self.assertNotIn("day-planner", theirs.values())
+        self.assertIn("topic-researcher", theirs.values())
+        self.assertLess(set(theirs.values()), set(everyone.values()))
+        # The owner owns every agent without a block and manages Ted, so reaches them all.
+        self.assertEqual(addressable_agents(self.loader, person="owner"), everyone)
+
+    def test_with_nobody_configured_the_owner_reaches_every_agent_without_a_block(self):
+        with dormant():
+            owner = access.person_for("anyone")
+            self.assertEqual(self._decide("Daisy, I'm on a trip to Tahoe with my family", owner).agent_id,
+                             "day-planner")
 
 
 class TestHomeChannels(unittest.TestCase):

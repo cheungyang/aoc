@@ -425,6 +425,97 @@ Disconnecting you needs the **Move Members** permission for the voice-hosting bo
 
 ---
 
+## Household: More Than One Person
+
+The same server can be shared with your household. Each agent lists who may
+use it, and the agents know who is talking. A shared agent keeps one memory,
+one feedback file and one context for everyone who uses it. The model is
+`core/permissions/access.py`.
+
+> [!NOTE]
+> Nothing changes until you set a `DISCORD_USER_*` variable: with none, every
+> account is the owner and may use every agent, as before.
+
+### 1. Discord (no code)
+
+- **Roles:** one per person (e.g. `owner`, `player2`). You stay the server owner:
+  the owner sees every channel, which is fine — the bots still only act for
+  the people an agent lists.
+- **🏠 Household category:** both roles can view and send. Put the shared
+  agents' channels here (`#meal-planning`, `#receipts`, ...). Don't add a
+  chat channel no agent lists yet: the Concierge answers every channel, so
+  it would post "not set up" to you and 🔒 everyone else (see *Not yet*).
+- **Your own category:** hidden from the other roles.
+- Granting *View Channel* shows the channel's **whole history**: start shared
+  channels fresh, or skim them first, and `!new` a channel when it becomes
+  shared, so its old conversation (where "the user" meant only you) doesn't
+  carry over.
+
+### 2. Who is who (`.env`)
+
+```bash
+# Discord account ids (Developer Mode → right-click a user → Copy User ID).
+# Several accounts for one person: comma-separated.
+DISCORD_USER_OWNER=123456789012345678     # you: the agents without an "access" list, and admin
+DISCORD_USER_PLAYER2=234567890123456789
+```
+
+Once anyone is configured, an account nobody lists is ignored. With two or
+more people, each user message the agents see is stamped with its writer:
+`[Thu 19:02 · player2] We're out of eggs`. Startup prints `[access] ⚠️ ...` for
+a missing `DISCORD_USER_OWNER`, an `access` list naming nobody configured, or
+lists with no `DISCORD_USER_*` at all.
+
+Give prod and dev the same `DISCORD_USER_*`: the control thread only counts
+the admin's `!claim` / `!release`, and both hosts must agree on who that is.
+
+### 3. Who gets which agent (`agent.json`)
+
+Only the shared agents need a list; an agent without one stays yours alone.
+
+```json
+"access": ["owner", "player2"]
+```
+
+Whoever an agent lists may do everything with it: talk to it, vote in its
+polls, `!new` / `!compact` its channel. Anyone else gets nothing from it. Give
+the list to every shared agent (`meal-planner`, `receipt-processor`,
+`baby-caretaker`, `home-steward`, `excursion-planner`), and keep the rest out
+of the household's category.
+
+`!help`, `!new` and `!compact` are anyone's. Every other command is the
+admin's, whoever may use the Concierge (`main`), so you unless its agent.json
+lists someone else: `!restart`, `!python`, `!kill`, `!jobs`, `!signals`,
+`!followups`, `!inbox`, the voice commands and the control thread's `!claim`
+/ `!release` / `!status`. A refused command gets one line (``"`!restart` is
+admin-only."``). A message to an agent that doesn't list its writer gets a 🔒
+reaction instead of a reply, a poll vote too; naming such an agent hands
+nothing to it, and no agent can call it for them.
+
+An agent that lists more than one person is a **household** agent: two people
+writing in its channel are answered one at a time, and `!followups` says who
+asked for each follow-up.
+
+### 4. Memory, feedback and context
+
+Nothing to set up or migrate: an agent keeps one `MEMORY.md`, one
+`FEEDBACK.md` and one context (its `USER.md`, the Profile and the topics it
+follows), whoever talks to it, the same files as today. Who said what is
+optional context: in a household, user messages and memory log lines name the
+person (`[Thu 19:02 · player2] ...`), but memory isn't split by person.
+
+### 5. Not yet
+
+- A 🔊 Household voice room (a second voice-host bot): voice stays yours.
+- A `#household` chat channel for the two of you, with the household
+  `!inbox`: planned with the household room.
+- Read state per person in the channel inbox: anyone finishing a household
+  channel's post finishes it for both.
+- Agents of `player2`'s own: `"access": ["player2"]` works today, but they
+  read the same Profile and topics as yours.
+
+---
+
 ## Running with Docker Compose (Recommended)
 
 ### 1. Build and Start the Service

@@ -2,6 +2,7 @@
 from typing import Iterable, List, Optional
 
 from core.runtime.commands.base import (
+    ANYONE,
     CHANNEL,
     VOICE_ROOM,
     ChannelCommand,
@@ -32,6 +33,7 @@ class HelpCommand(ChannelCommand):
     name = "help"
     summary = "Lists every command, typed or spoken; `!help <command>` shows one."
     usage = "[command]"
+    needs = ANYONE
 
     def __init__(self, typed: Iterable[Command], spoken: Iterable[Command], control: Iterable[Command]):
         self.typed, self.spoken, self.control = typed, spoken, control

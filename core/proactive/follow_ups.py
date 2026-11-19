@@ -55,7 +55,8 @@ at its `due_at`, and claimed and run like any check, with these differences:
   - its turn always runs: no scan, no fingerprint, and never a last check, so
     it never offers to keep watching;
   - the turn (FollowUpOncePrompt) knows when you asked, for when, what to bring
-    up and the agent's notes, and says it's late when it runs more than LATE_S
+    up and the agent's notes (and in household mode who asked, `opened_by`),
+    and says it's late when it runs more than LATE_S
     after `due_at` (a host that was down). It brings the topic up in one short
     message and ends with one question, whether to get into it now, marked as
     the question its post waits on. It replies <silent/> only when its notes
@@ -86,6 +87,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from core.channel.discord.ownership import Ownership
 from core.config.settings import Config
 from core.loaders.agents_loader import AgentsLoader
+from core.permissions import access
 from core.prompts.proactive import FollowUpOncePrompt, FollowUpPrompt
 from core.proactive.board import on_board
 from core.proactive.cards import PeerCard, cards
@@ -194,7 +196,9 @@ def late_text(seconds: float) -> str:
 
 def render_once_prompt(follow_up: FollowUp, now: float) -> str:
     """A one-off's prompt (module docstring): when you asked, for when, what to bring up and
-    the agent's notes, and how late it runs when that's more than LATE_S."""
+    the agent's notes, and how late it runs when that's more than LATE_S. In household mode
+    (core/permissions/access.py) it names who asked (`opened_by`): the agents are shared,
+    so "the user" alone wouldn't say whom to bring it back to."""
     due, late = follow_up.due_at, now - follow_up.due_at
     return FollowUpOncePrompt(
         id=follow_up.id,
@@ -204,6 +208,7 @@ def render_once_prompt(follow_up: FollowUp, now: float) -> str:
         goal=follow_up.goal,
         notes=follow_up.notes,
         late=late_text(late) if late > LATE_S else "",
+        person=follow_up.opened_by if access.household_mode() else "",
     ).render()
 
 

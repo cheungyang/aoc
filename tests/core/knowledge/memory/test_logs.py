@@ -38,6 +38,21 @@ class TestSaveAgentMemoryLog(unittest.TestCase):
         self.assertIsNone(save_agent_memory_log("", "- [12:00:00] [MEMORY] Task"))
         self.assertIsNone(save_agent_memory_log(None, "- [12:00:00] [MEMORY] Task"))
 
+    def test_in_a_household_each_line_names_who_the_turn_was_for(self):
+        """The dream reads the name to file one person's preference as theirs."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch('core.config.settings.Config.pkm_dir', new=tmp_dir):
+                log_file = save_agent_memory_log(
+                    "topic-researcher",
+                    "- [HH:MM:SS] [FEEDBACK] Keep it short.\n- [12:00:00 · player2] [CONTEXT] Off dairy this month.",
+                    person="player2",
+                )
+                with open(log_file, "r") as f:
+                    lines = f.read().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r"^- \[\d{2}:\d{2}:\d{2} · player2\] \[FEEDBACK\] Keep it short\.$")
+        self.assertRegex(lines[1], r"^- \[\d{2}:\d{2}:\d{2} · player2\] \[CONTEXT\] Off dairy this month\.$")
+
     def test_save_agent_memory_log_tool_error(self):
         error_response = """<filesystem_response>
   <payload></payload>

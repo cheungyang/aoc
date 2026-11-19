@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from core.channel.response_parser import AgentResponse
 from core.knowledge.memory.logs import save_agent_memory_log
+from core.permissions import access
 from core.runtime.foundation.context import ExecutionContext, current_execution_context
 from core.runtime.foundation.jobs import JobManager
 from core.runtime.history.pruner import ContextPruner
@@ -186,13 +187,30 @@ class JobHook(TurnHook):
 
 
 class MemoryLogHook(TurnHook):
-    """Saves the reply's in-band memory log (core/knowledge/memory/logs.py)."""
+    """Saves the reply's in-band memory log (core/knowledge/memory/logs.py).
+
+    In a household (core/permissions/access.py `household_mode`) each line also
+    names the person the turn was for: context for the dream, which still
+    keeps one memory, whoever said it. With one person, every line is theirs
+    and is logged as it always was.
+    """
 
     async def after(self, turn: Turn) -> None:
         response = turn.response
         if response is None or not response.system_memory_log or not self._records_memory(turn):
             return
-        save_agent_memory_log(turn.agent_id, response.system_memory_log)
+        person = self._person(turn)
+        if person:
+            save_agent_memory_log(turn.agent_id, response.system_memory_log, person=person)
+        else:
+            save_agent_memory_log(turn.agent_id, response.system_memory_log)
+
+    @staticmethod
+    def _person(turn: Turn) -> Optional[str]:
+        """Who the turn was for, in a household; None for a turn nobody started."""
+        if turn.ctx is None or not access.household_mode():
+            return None
+        return turn.ctx.person
 
     @staticmethod
     def _records_memory(turn: Turn) -> bool:
